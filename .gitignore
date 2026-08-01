@@ -17,6 +17,8 @@ build/
 joern-platform/target/
 joern-platform/project/target/
 joern-platform/project/project/
+# Fixture Maven builds (IDE Java tooling compiles the sample repos)
+joern-platform/fixtures/**/target/
 .bsp/
 .metals/
 .bloop/
