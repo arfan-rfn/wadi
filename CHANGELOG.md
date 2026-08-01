@@ -3,7 +3,7 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
-## 0.1.0 — unreleased (Phase 1: backbone + vertical slice)
+## 0.1.0 — 2026-08-01 (Phase 1: backbone + vertical slice)
 
 ### Added
 - `wadi-contracts`: the Pydantic data contracts (System, Snapshot, ServiceBoundary,

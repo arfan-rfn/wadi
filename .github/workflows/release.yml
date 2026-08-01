@@ -1,0 +1,120 @@
+name: release
+
+# First-round release pipeline (§13): one `v*` tag publishes the whole
+# version-paired set — seven images to ghcr.io/wadi-sh/* and the `wadi-sh`
+# package to PyPI. The guard job enforces the §13 invariant: tag == VERSION
+# == CLI package version == every image tag baked into the embedded compose.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # PyPI trusted publishing
+
+jobs:
+  guard:
+    name: version pairing (§13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches VERSION, CLI version, and compose image pins
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE_VERSION=$(cat VERSION)
+          CLI_VERSION=$(grep -m1 '^version' cli/pyproject.toml | cut -d'"' -f2)
+          echo "tag=$TAG file=$FILE_VERSION cli=$CLI_VERSION"
+          [ "$TAG" = "$FILE_VERSION" ] || { echo "VERSION file mismatch"; exit 1; }
+          [ "$TAG" = "$CLI_VERSION" ] || { echo "cli/pyproject.toml mismatch"; exit 1; }
+          for image in joern orchestrator worker stitcher mcp frontend; do
+            grep -q "ghcr.io/wadi-sh/${image}:${TAG}" infra/docker-compose.yml \
+              || { echo "compose pin missing: ${image}:${TAG}"; exit 1; }
+          done
+          diff -q infra/docker-compose.yml cli/src/wadi_cli/resources/docker-compose.yml \
+            || { echo "CLI-embedded compose is stale (make sync-compose)"; exit 1; }
+
+  images:
+    name: publish ${{ matrix.name }} image
+    runs-on: ubuntu-latest
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: joern
+            context: joern-platform
+            file: joern-platform/Dockerfile
+          - name: orchestrator
+            context: .
+            file: services/Dockerfile.python
+            build-args: |
+              SERVICE=wadi-orchestrator
+              ENTRYPOINT=wadi-orchestrator
+          - name: worker
+            context: .
+            file: services/Dockerfile.python
+            build-args: |
+              SERVICE=wadi-extraction-worker
+              ENTRYPOINT=wadi-worker
+          - name: stitcher
+            context: .
+            file: services/Dockerfile.python
+            build-args: |
+              SERVICE=wadi-stitcher
+              ENTRYPOINT=wadi-stitcher
+          - name: mcp
+            context: .
+            file: services/Dockerfile.python
+            build-args: |
+              SERVICE=wadi-mcp-server
+              ENTRYPOINT=wadi-mcp
+          - name: frontend
+            context: frontend
+            file: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      # The repo lives under a personal account for now, but images publish to
+      # the org namespace (ghcr.io/wadi-sh) so the version-pinned paths baked
+      # into every released CLI never change when the repo moves to the org.
+      # GITHUB_TOKEN can't cross namespaces — this needs a classic PAT with
+      # write:packages from an org owner, stored as the GHCR_PAT repo secret.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_PAT }}
+      - name: Compute version (strip the v prefix — compose pins bare versions)
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Build and push (version tag only — no `latest`, §13 pinning)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.build-args }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/wadi-sh/${{ matrix.name }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  pypi:
+    name: publish wadi-sh to PyPI
+    runs-on: ubuntu-latest
+    # Depends only on the guard: the PyPI slug gets secured even if the GHCR
+    # half (org + PAT) isn't wired yet on a given release.
+    needs: guard
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build sdist + wheel
+        run: uv build --package wadi-sh --out-dir dist/
+      - name: Publish (trusted publishing — no token in repo)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
