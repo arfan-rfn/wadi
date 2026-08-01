@@ -14,6 +14,16 @@ The `Icfg` contract now carries `entry_node_id`; validation requires it to
 reference an entry node. *Rejected: topological inference — unsound; found by
 the mutual-recursion unit test.*
 
+**ICFG assembly is hand-rolled in Phase 1; NetworkX is retained for later
+phases.** architecture.md (§3, §4, §11.1) names NetworkX as the assembly
+mechanism, but the Phase 1 assembler builds the graph with plain
+dicts/dataclasses (`services/extraction-worker/.../assembler.py`): the walk is
+a single pass over the export with no graph algorithms on the critical path,
+and going through a digraph API added indirection without earning it. The
+`networkx` dependency stays declared in the worker on purpose — stitching,
+pattern matching, and reachability queries (Phase 2+) are where the algorithm
+library pays off, and that work should build on it rather than re-adding it.
+
 **One extract job per snapshot in Phase 1.** The orchestrator enqueues a single
 EXTRACT job covering fetch → boundary scan → per-service extraction, matching
 the §4 sequence diagram (the per-service loop runs inside the worker's claimed

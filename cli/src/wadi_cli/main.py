@@ -42,6 +42,27 @@ app.add_typer(mcp_app, name="mcp")
 JsonFlag = Annotated[bool, typer.Option("--output-json", "--json", help="Emit JSON")]
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"wadi {CLI_VERSION}")
+        raise typer.Exit()
+
+
+@app.callback()
+def app_options(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show the CLI version and exit.",
+        ),
+    ] = False,
+) -> None:
+    pass
+
+
 def _api_client() -> WadiApiClient:
     base_url = os.environ.get("WADI_API_URL", "http://127.0.0.1:9234")
     token = os.environ.get("WADI_API_TOKEN")

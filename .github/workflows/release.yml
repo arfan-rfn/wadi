@@ -1,7 +1,7 @@
 name: release
 
 # First-round release pipeline (§13): one `v*` tag publishes the whole
-# version-paired set — seven images to ghcr.io/wadi-sh/* and the `wadi-sh`
+# version-paired set — six images to ghcr.io/wadi-sh/* and the `wadi-sh`
 # package to PyPI. The guard job enforces the §13 invariant: tag == VERSION
 # == CLI package version == every image tag baked into the embedded compose.
 
@@ -32,6 +32,8 @@ jobs:
             V=$(grep -m1 '^version' "$f" | cut -d'"' -f2)
             [ "$TAG" = "$V" ] || { echo "$f is $V, not $TAG (make bump V=$TAG)"; exit 1; }
           done
+          SBT_VERSION=$(grep -m1 '^version :=' joern-platform/build.sbt | cut -d'"' -f2)
+          [ "$TAG" = "$SBT_VERSION" ] || { echo "joern-platform/build.sbt is $SBT_VERSION, not $TAG (make bump V=$TAG)"; exit 1; }
           # The CLI must pin contracts exactly (==) at the paired version — an
           # unpinned dep in the published wheel is how v0.1.0 shipped broken.
           grep -q "\"wadi-contracts==${TAG}\"" cli/pyproject.toml \

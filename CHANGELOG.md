@@ -3,6 +3,18 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.1.1 — 2026-08-01
+
+### Fixed
+- `wadi-sh` is now installable from PyPI: the wheel pins `wadi-contracts==`
+  exactly and the release pipeline publishes both packages as a pair
+  (0.1.0 shipped only `wadi-sh` with an unpinned contracts dependency).
+
+### Added
+- `make bump V=x.y.z` sets the release version everywhere the release guard
+  checks; the guard enforces the pairing on every `v*` tag.
+- Apache-2.0 license metadata on the published packages and images.
+
 ## 0.1.0 — 2026-08-01 (Phase 1: backbone + vertical slice)
 
 ### Added

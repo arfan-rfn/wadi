@@ -85,6 +85,11 @@ jobs:
           cd frontend && npm ci --no-audit --no-fund && npm run generate-types
       - name: Generated types are not stale (§7)
         run: git diff --exit-code frontend/lib/generated/
+      - name: Lint + format
+        working-directory: frontend
+        run: |
+          npm run lint
+          npm run format:check
       - name: Typecheck + build
         working-directory: frontend
         run: |

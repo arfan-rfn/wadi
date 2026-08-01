@@ -1,7 +1,7 @@
 # Wadi developer entrypoints (architecture.md §9).
 # Everything here must also be runnable as plain commands in CI.
 
-.PHONY: sync lint fmt typecheck test test-unit test-integration schema up down help bump
+.PHONY: sync lint fmt typecheck test test-unit test-integration schema up down help bump sync-compose joern-image e2e
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -51,6 +51,7 @@ bump: ## Set the release version everywhere the guard checks (make bump V=x.y.z)
 	@test -n "$(V)" || { echo "usage: make bump V=x.y.z"; exit 1; }
 	@printf '%s\n' "$(V)" > VERSION
 	perl -pi -e 's/^version = ".*"/version = "$(V)"/' cli/pyproject.toml libs/*/pyproject.toml services/*/pyproject.toml
+	perl -pi -e 's/^version := ".*"/version := "$(V)"/' joern-platform/build.sbt
 	perl -pi -e 's/wadi-contracts==\S+"/wadi-contracts==$(V)"/' cli/pyproject.toml
 	perl -pi -e 's|(ghcr\.io/wadi-sh/[a-z-]+):\S+|$$1:$(V)|g' infra/docker-compose.yml
 	$(MAKE) sync-compose
