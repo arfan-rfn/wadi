@@ -92,6 +92,20 @@ endpoints are exactly such cross-service duplicates; two services lose their
 entire inventory). Per-service endpoint inventory is wrong there by design of
 its contract-keyed index.
 
+## TTFV (§11.1 item 10 — tracked number)
+
+TrainTicket-aitest (22 services, 365 endpoints), Apple-silicon laptop,
+containerized stack: **~3 minutes** wall-clock per analysis run (cold mirror
+173s, warm mirror 178s) — well inside the "10-service system ≤15 min cold"
+target. Warm ≈ cold because per-service CPG construction dominates and Phase 1
+deletes each CPG after export (P5) rather than caching by content hash; the
+Tier-0 cache + path-delta rebuilds (§4) are the Phase 3 lever if this ever
+regresses.
+
+Local-path analysis (`wadi analyze .`) works against the containerized stack:
+compose mounts `${WADI_ANALYZE_MOUNT:-$HOME}` read-only into the orchestrator
+and worker so local repos can be mirrored (§13 "build in now" item — done).
+
 ## Phase 1 gaps (known, deliberate)
 
 - Endpoint `params[]` are not yet populated from `@PathVariable`/`@RequestParam`
@@ -105,3 +119,11 @@ its contract-keyed index.
   yet (Phase 3).
 - `wadi up` works against locally built images; publishing to ghcr.io and the
   PyPI release pipeline are release-engineering work, not code gaps.
+  **Scheduled:** the pipeline (GHCR images + PyPI `wadi-cli`, one version across
+  the set) is a prerequisite of Phase 2's shared-deployment deliverables
+  (remote contexts, GitHub Action — §11.2/§14) and lands with them; if Phase 2
+  is cut to its core (stitching + auth), it slides to Phase 3 with the rest of
+  the integration surface, per §11.2's cut line. Homebrew tap + curl installer
+  are wrappers that may trail. Namespace claims (`trywadi` GitHub org, PyPI
+  `wadi-cli` + `trywadi` stub, `trywadi.com`) should not wait — they are the
+  only part someone else can take.
