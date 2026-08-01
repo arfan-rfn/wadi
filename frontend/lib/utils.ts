@@ -7,15 +7,15 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function toAbsoluteUrl(url: string): string {
-  if (!url) return "";
+  if (!url) return ""
 
   if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
+    return url
   }
 
   if (url.startsWith("/")) {
-    return `${env.NEXT_PUBLIC_BASE_URL}${url}`;
+    return `${env.NEXT_PUBLIC_BASE_URL}${url}`
   }
 
-  return `${env.NEXT_PUBLIC_BASE_URL}/${url}`;
+  return `${env.NEXT_PUBLIC_BASE_URL}/${url}`
 }

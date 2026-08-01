@@ -1,5 +1,6 @@
-import { Skeleton } from "./skeleton"
 import { cn } from "@/lib/utils"
+
+import { Skeleton } from "./skeleton"
 
 export function ProfileSkeleton({ className }: { className?: string }) {
   return (
@@ -30,7 +31,7 @@ export function CardSkeleton({
   className,
   showHeader = true,
   contentRows = 3,
-  headerWidth = "w-64"
+  headerWidth = "w-64",
 }: {
   className?: string
   showHeader?: boolean
@@ -142,7 +143,7 @@ export function AccountInfoSkeleton({ className }: { className?: string }) {
 
 export function ListSkeleton({
   items = 5,
-  className
+  className,
 }: {
   items?: number
   className?: string
@@ -166,7 +167,7 @@ export function ListSkeleton({
 export function TableSkeleton({
   rows = 5,
   columns = 4,
-  className
+  className,
 }: {
   rows?: number
   columns?: number

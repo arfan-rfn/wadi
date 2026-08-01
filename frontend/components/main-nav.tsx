@@ -1,8 +1,8 @@
 import * as React from "react"
 import Link from "next/link"
 
-import { NavItem } from "@/lib/types/nav"
 import { siteConfig } from "@/config/site"
+import { NavItem } from "@/lib/types/nav"
 import { cn } from "@/lib/utils"
 import { Icons } from "@/components/icons"
 
@@ -35,7 +35,6 @@ export function MainNav({ items }: MainNavProps) {
             )
         )}
       </nav>
-
     </div>
   )
 }

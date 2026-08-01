@@ -1,16 +1,15 @@
 import "@/styles/globals.css"
+
 import { Metadata, Viewport } from "next"
 
 import { siteConfig } from "@/config/site"
 import { fontMono, fontSans } from "@/lib/fonts"
-import { cn } from "@/lib/utils"
-import { TailwindIndicator } from "@/components/tailwind-indicator"
 import { getSEOTags } from "@/lib/seo"
+import { cn } from "@/lib/utils"
 import { Toaster } from "@/components/ui/sonner"
-import Providers from "@/components/providers"
 import { JsonLd } from "@/components/json-ld"
-
-
+import Providers from "@/components/providers"
+import { TailwindIndicator } from "@/components/tailwind-indicator"
 
 export const viewport: Viewport = {
   width: "device-width",

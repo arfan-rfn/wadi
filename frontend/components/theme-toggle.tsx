@@ -4,8 +4,14 @@ import * as React from "react"
 import { useTheme } from "next-themes"
 
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu"
+
 import { Icons } from "./icons"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu"
 
 export function ThemeToggle() {
   const [mounted, setMounted] = React.useState(false)

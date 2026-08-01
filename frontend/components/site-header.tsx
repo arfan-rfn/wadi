@@ -2,8 +2,9 @@
 
 import { siteConfig } from "@/config/site"
 import { MainNav } from "@/components/main-nav"
-import { MobileNav } from "./mobile-nav"
 import { ThemeToggle } from "@/components/theme-toggle"
+
+import { MobileNav } from "./mobile-nav"
 
 export function SiteHeader() {
   return (

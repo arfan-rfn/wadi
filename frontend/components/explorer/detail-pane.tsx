@@ -2,14 +2,13 @@
 
 // Endpoint detail: identity header, then the ICFG at method granularity
 // (the useful view) with raw JSON one tab away.
-
 import { ArrowRight, Database, Globe, MailWarning } from "lucide-react"
 
+import type { Endpoint, Icfg } from "@/lib/wadi/api"
+import { rollupMethods, shortSignature } from "@/lib/wadi/rollup"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { Endpoint, Icfg } from "@/lib/wadi/api"
-import { rollupMethods, shortSignature } from "@/lib/wadi/rollup"
 
 import { MethodBadge } from "./method-badge"
 
@@ -35,10 +34,14 @@ export function DetailPane({
       <header className="shrink-0 space-y-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <MethodBadge method={endpoint.http_method} />
-          <span className="truncate font-mono text-sm font-medium">{endpoint.full_uri}</span>
+          <span className="truncate font-mono text-sm font-medium">
+            {endpoint.full_uri}
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span className="truncate font-mono">{shortSignature(endpoint.handler.signature)}</span>
+          <span className="truncate font-mono">
+            {shortSignature(endpoint.handler.signature)}
+          </span>
           <span>
             auth:{" "}
             <span className="font-medium">
@@ -67,7 +70,10 @@ export function DetailPane({
       ) : null}
 
       {icfg ? (
-        <Tabs defaultValue="methods" className="flex min-h-0 flex-1 flex-col gap-0">
+        <Tabs
+          defaultValue="methods"
+          className="flex min-h-0 flex-1 flex-col gap-0"
+        >
           <div className="shrink-0 border-b px-4 py-2">
             <TabsList className="h-8">
               <TabsTrigger value="methods" className="text-xs">
@@ -79,7 +85,10 @@ export function DetailPane({
             </TabsList>
           </div>
 
-          <TabsContent value="methods" className="min-h-0 flex-1 overflow-y-auto">
+          <TabsContent
+            value="methods"
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
             <ol className="divide-y divide-border/60">
               {methods.map((method, index) => (
                 <li key={method.id} className="px-4 py-3">
@@ -104,8 +113,8 @@ export function DetailPane({
                       ) : null}
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         <span className="font-mono text-[11px] text-muted-foreground">
-                          {method.statementCount} stmt · {method.branchCount} branch ·{" "}
-                          {method.callCount} call
+                          {method.statementCount} stmt · {method.branchCount}{" "}
+                          branch · {method.callCount} call
                         </span>
                         {method.sinks.map((sink) => {
                           const meta = SINK_META[sink]

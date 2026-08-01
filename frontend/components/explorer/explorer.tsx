@@ -3,12 +3,10 @@
 // The wadi workbench: scope switchers in the chrome (system / snapshot),
 // three fixed panes below — services, endpoints, endpoint detail. Panes never
 // collapse or squeeze; scope changes happen in dropdowns, not columns.
-
 import { useEffect, useMemo, useState } from "react"
 import { Search } from "lucide-react"
 
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
 import {
   useEndpoints,
   useIcfg,
@@ -16,7 +14,8 @@ import {
   useSnapshots,
   useSystems,
 } from "@/lib/wadi/hooks"
-import { cn } from "@/lib/utils"
+import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 
 import { DetailPane } from "./detail-pane"
 import { MethodBadge } from "./method-badge"
@@ -44,9 +43,15 @@ export function Explorer() {
   }, [systemId, systems.data])
 
   useEffect(() => {
-    if (systemId && snapshotId === null && snapshots.data && snapshots.data.length > 0) {
+    if (
+      systemId &&
+      snapshotId === null &&
+      snapshots.data &&
+      snapshots.data.length > 0
+    ) {
       const newest =
-        snapshots.data.find((s) => s.status === "succeeded") ?? snapshots.data[0]
+        snapshots.data.find((s) => s.status === "succeeded") ??
+        snapshots.data[0]
       setSnapshotId(newest.id)
     }
   }, [systemId, snapshotId, snapshots.data])
@@ -54,7 +59,9 @@ export function Explorer() {
   const filteredServices = useMemo(() => {
     const list = services.data ?? []
     const query = serviceFilter.trim().toLowerCase()
-    return query ? list.filter((s) => s.name.toLowerCase().includes(query)) : list
+    return query
+      ? list.filter((s) => s.name.toLowerCase().includes(query))
+      : list
   }, [services.data, serviceFilter])
 
   const filteredEndpoints = useMemo(() => {
@@ -76,7 +83,9 @@ export function Explorer() {
     0
   )
 
-  const anyError = [systems, snapshots, services, endpoints, icfg].find((q) => q.isError)
+  const anyError = [systems, snapshots, services, endpoints, icfg].find(
+    (q) => q.isError
+  )
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col">
@@ -97,7 +106,9 @@ export function Explorer() {
           setEndpointId(null)
         }}
         summary={
-          services.data ? `${services.data.length} services · ${totalEndpoints} endpoints` : undefined
+          services.data
+            ? `${services.data.length} services · ${totalEndpoints} endpoints`
+            : undefined
         }
       />
 
@@ -130,7 +141,8 @@ export function Explorer() {
                 }}
                 className={cn(
                   "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
-                  serviceId === service.service_id && "border-primary bg-muted/60"
+                  serviceId === service.service_id &&
+                    "border-primary bg-muted/60"
                 )}
               >
                 <div className="min-w-0 flex-1">
@@ -151,7 +163,9 @@ export function Explorer() {
                 </span>
               </button>
             ))}
-            {services.data && filteredServices.length === 0 && services.data.length > 0 ? (
+            {services.data &&
+            filteredServices.length === 0 &&
+            services.data.length > 0 ? (
               <PaneEmpty>No match for “{serviceFilter}”</PaneEmpty>
             ) : null}
           </div>
@@ -188,7 +202,9 @@ export function Explorer() {
                 </span>
               </button>
             ))}
-            {endpoints.data && filteredEndpoints.length === 0 && endpoints.data.length > 0 ? (
+            {endpoints.data &&
+            filteredEndpoints.length === 0 &&
+            endpoints.data.length > 0 ? (
               <PaneEmpty>No match for “{endpointFilter}”</PaneEmpty>
             ) : null}
           </div>
@@ -208,8 +224,8 @@ export function Explorer() {
                 wadi · ground truth
               </p>
               <p className="max-w-64 text-sm text-muted-foreground">
-                Pick an endpoint to inspect its flow down to every database and remote
-                call.
+                Pick an endpoint to inspect its flow down to every database and
+                remote call.
               </p>
             </div>
           )}

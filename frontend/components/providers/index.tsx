@@ -1,6 +1,7 @@
 "use client"
 
 import { ThemeProvider } from "@/components/theme-provider"
+
 import QueryProvider from "./query-provider"
 
 interface ProvidersProps {

@@ -53,8 +53,8 @@ import NextImage, { ImageProps } from "next/image"
  * Add new patterns here as needed.
  */
 const REDIRECT_URL_PATTERNS = [
-  /\/api\/v1\/files\//,           // Backend file API
-  /localhost:\d+\/api\/.*files/,  // Local dev file API
+  /\/api\/v1\/files\//, // Backend file API
+  /localhost:\d+\/api\/.*files/, // Local dev file API
 ] as const
 
 /**
@@ -93,13 +93,7 @@ export function CustomImage({
     unoptimized ||
     isRedirectUrl(typeof src === "string" ? src : undefined)
 
-  return (
-    <NextImage
-      src={src}
-      unoptimized={shouldSkipOptimization}
-      {...props}
-    />
-  )
+  return <NextImage src={src} unoptimized={shouldSkipOptimization} {...props} />
 }
 
 /**

@@ -18,7 +18,8 @@ export interface MethodRollup {
 
 export function rollupMethods(icfg: Icfg): MethodRollup[] {
   const byId = new Map<string, MethodRollup>()
-  const rootMethodId = icfg.nodes.find((n) => n.id === icfg.entry_node_id)?.method.id
+  const rootMethodId = icfg.nodes.find((n) => n.id === icfg.entry_node_id)
+    ?.method.id
 
   for (const node of icfg.nodes) {
     let entry = byId.get(node.method.id)

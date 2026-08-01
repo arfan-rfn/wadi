@@ -1,7 +1,6 @@
 "use client"
 
 // TanStack Query hooks over the wadi API (the template's data-fetching idiom).
-
 import { useQuery } from "@tanstack/react-query"
 
 import { QUERY_KEYS } from "@/config/query-keys"
@@ -27,7 +26,10 @@ export function useServices(snapshotId: string | null) {
   })
 }
 
-export function useEndpoints(snapshotId: string | null, serviceId: string | null) {
+export function useEndpoints(
+  snapshotId: string | null,
+  serviceId: string | null
+) {
   return useQuery({
     queryKey: QUERY_KEYS.endpoints(snapshotId ?? "", serviceId ?? ""),
     queryFn: () => wadiApi.endpoints(snapshotId as string, serviceId as string),

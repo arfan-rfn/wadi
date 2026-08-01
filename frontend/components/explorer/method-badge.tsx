@@ -10,7 +10,13 @@ const METHOD_STYLES: Record<string, string> = {
   DELETE: "bg-red-500/15 text-red-600 dark:text-red-400",
 }
 
-export function MethodBadge({ method, className }: { method: string; className?: string }) {
+export function MethodBadge({
+  method,
+  className,
+}: {
+  method: string
+  className?: string
+}) {
   return (
     <span
       className={cn(

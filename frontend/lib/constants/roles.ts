@@ -8,13 +8,13 @@
  * Add new roles here as your application grows
  */
 export const ROLES = {
-	USER: 'user',
-	MODERATOR: 'moderator',
-	ADMIN: 'admin',
-	// Future roles can be added here:
-	// SUPER_ADMIN: 'super-admin',
-	// SUPPORT: 'support',
-	// EDITOR: 'editor',
+  USER: "user",
+  MODERATOR: "moderator",
+  ADMIN: "admin",
+  // Future roles can be added here:
+  // SUPER_ADMIN: 'super-admin',
+  // SUPPORT: 'support',
+  // EDITOR: 'editor',
 } as const
 
 /**
@@ -22,22 +22,22 @@ export const ROLES = {
  * To add a new role to admin panel access, just add it to this array
  */
 export const ROLE_GROUPS = {
-	/**
-	 * Roles that can access the admin panel
-	 * Add new privileged roles here to grant admin panel access
-	 */
-	ADMIN_PANEL_ACCESS: [ROLES.ADMIN, ROLES.MODERATOR] as const,
+  /**
+   * Roles that can access the admin panel
+   * Add new privileged roles here to grant admin panel access
+   */
+  ADMIN_PANEL_ACCESS: [ROLES.ADMIN, ROLES.MODERATOR] as const,
 
-	// Future role groups:
-	// USER_MANAGEMENT: [ROLES.ADMIN, ROLES.SUPER_ADMIN] as const,
-	// CONTENT_MODERATION: [ROLES.ADMIN, ROLES.MODERATOR, ROLES.SUPPORT] as const,
+  // Future role groups:
+  // USER_MANAGEMENT: [ROLES.ADMIN, ROLES.SUPER_ADMIN] as const,
+  // CONTENT_MODERATION: [ROLES.ADMIN, ROLES.MODERATOR, ROLES.SUPPORT] as const,
 } as const
 
 /**
  * TypeScript types for type-safe role checking
  */
-export type Role = typeof ROLES[keyof typeof ROLES]
-export type AdminPanelRole = typeof ROLE_GROUPS.ADMIN_PANEL_ACCESS[number]
+export type Role = (typeof ROLES)[keyof typeof ROLES]
+export type AdminPanelRole = (typeof ROLE_GROUPS.ADMIN_PANEL_ACCESS)[number]
 
 /**
  * Role hierarchy for privilege comparison
@@ -53,9 +53,9 @@ export type AdminPanelRole = typeof ROLE_GROUPS.ADMIN_PANEL_ACCESS[number]
  * moderator CANNOT impersonate admin or moderator ❌
  */
 export const ROLE_HIERARCHY = {
-	admin: 1,
-	moderator: 2,
-	user: 3,
+  admin: 1,
+  moderator: 2,
+  user: 3,
 } as const
 
 /**
@@ -70,10 +70,10 @@ export const ROLE_HIERARCHY = {
  * hasRole(session.user.role, [ROLES.ADMIN])
  */
 export function hasRole(
-	userRole: string | null | undefined,
-	allowedRoles: readonly string[]
+  userRole: string | null | undefined,
+  allowedRoles: readonly string[]
 ): boolean {
-	return !!userRole && allowedRoles.includes(userRole)
+  return !!userRole && allowedRoles.includes(userRole)
 }
 
 /**
@@ -105,23 +105,23 @@ export function hasRole(
  * canPerformActionOnUser(null, null) // false (both treated as user role)
  */
 export function canPerformActionOnUser(
-	currentUserRole: string | null | undefined,
-	targetUserRole: string | null | undefined
+  currentUserRole: string | null | undefined,
+  targetUserRole: string | null | undefined
 ): boolean {
-	// Default to 'user' role if null/undefined (safest default - lowest privilege)
-	const current = currentUserRole || ROLES.USER
-	const target = targetUserRole || ROLES.USER
+  // Default to 'user' role if null/undefined (safest default - lowest privilege)
+  const current = currentUserRole || ROLES.USER
+  const target = targetUserRole || ROLES.USER
 
-	const currentLevel = ROLE_HIERARCHY[current as keyof typeof ROLE_HIERARCHY]
-	const targetLevel = ROLE_HIERARCHY[target as keyof typeof ROLE_HIERARCHY]
+  const currentLevel = ROLE_HIERARCHY[current as keyof typeof ROLE_HIERARCHY]
+  const targetLevel = ROLE_HIERARCHY[target as keyof typeof ROLE_HIERARCHY]
 
-	// Reject if either role is not in hierarchy (unknown role)
-	if (currentLevel === undefined || targetLevel === undefined) return false
+  // Reject if either role is not in hierarchy (unknown role)
+  if (currentLevel === undefined || targetLevel === undefined) return false
 
-	// Allow only if current user has higher privilege (lower number) than target
-	// admin (1) < moderator (2) ✅ (admin can act on moderator)
-	// moderator (2) < admin (1) ❌ (moderator cannot act on admin - privilege escalation)
-	// moderator (2) < moderator (2) ❌ (moderator cannot act on same level)
-	// null → user (3) < user (3) ❌ (users cannot act on each other)
-	return currentLevel < targetLevel
+  // Allow only if current user has higher privilege (lower number) than target
+  // admin (1) < moderator (2) ✅ (admin can act on moderator)
+  // moderator (2) < admin (1) ❌ (moderator cannot act on admin - privilege escalation)
+  // moderator (2) < moderator (2) ❌ (moderator cannot act on same level)
+  // null → user (3) < user (3) ❌ (users cannot act on each other)
+  return currentLevel < targetLevel
 }

@@ -24,11 +24,14 @@ async function get<T>(path: string): Promise<T> {
 
 export const wadiApi = {
   systems: () => get<System[]>("/api/v1/systems"),
-  snapshots: (systemId: string) => get<Snapshot[]>(`/api/v1/systems/${systemId}/snapshots`),
+  snapshots: (systemId: string) =>
+    get<Snapshot[]>(`/api/v1/systems/${systemId}/snapshots`),
   services: (snapshotId: string) =>
     get<ServiceSummary[]>(`/api/v1/snapshots/${snapshotId}/services`),
   endpoints: (snapshotId: string, serviceId: string) =>
-    get<Endpoint[]>(`/api/v1/snapshots/${snapshotId}/services/${serviceId}/endpoints`),
+    get<Endpoint[]>(
+      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/endpoints`
+    ),
   icfg: (snapshotId: string, endpointId: string) =>
     get<Icfg>(`/api/v1/snapshots/${snapshotId}/endpoints/${endpointId}/icfg`),
 }

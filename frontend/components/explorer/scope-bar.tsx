@@ -2,9 +2,14 @@
 
 // Scope switchers (the SaaS project-switcher pattern): system and snapshot
 // live in the chrome, not in the content flow — the panes get the canvas.
+import {
+  Check,
+  ChevronsUpDown,
+  Database,
+  GitCommitHorizontal,
+} from "lucide-react"
 
-import { Check, ChevronsUpDown, Database, GitCommitHorizontal } from "lucide-react"
-
+import type { Snapshot, System } from "@/lib/wadi/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,7 +20,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { Snapshot, System } from "@/lib/wadi/api"
 
 interface ScopeBarProps {
   systems: System[]
@@ -48,7 +52,8 @@ export function ScopeBar(props: ScopeBarProps) {
           <DropdownMenuSeparator />
           {props.systems.length === 0 ? (
             <DropdownMenuItem disabled>
-              No systems yet — run <code className="ml-1 font-mono">wadi analyze .</code>
+              No systems yet — run{" "}
+              <code className="ml-1 font-mono">wadi analyze .</code>
             </DropdownMenuItem>
           ) : null}
           {props.systems.map((s) => (
@@ -59,8 +64,12 @@ export function ScopeBar(props: ScopeBarProps) {
             >
               <span className="truncate">{s.name}</span>
               <span className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{s.repos.length} repo(s)</span>
-                {s.id === props.systemId ? <Check className="size-3.5" /> : null}
+                <span className="text-xs text-muted-foreground">
+                  {s.repos.length} repo(s)
+                </span>
+                {s.id === props.systemId ? (
+                  <Check className="size-3.5" />
+                ) : null}
               </span>
             </DropdownMenuItem>
           ))}
@@ -71,7 +80,11 @@ export function ScopeBar(props: ScopeBarProps) {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild disabled={!props.systemId}>
-          <Button variant="ghost" size="sm" className="gap-2 px-2 font-mono text-xs">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-2 px-2 font-mono text-xs"
+          >
             <GitCommitHorizontal className="size-3.5 text-muted-foreground" />
             {snapshot ? `${snapshot.id.slice(5, 17)}` : "snapshot"}
             {snapshot ? (
@@ -105,7 +118,9 @@ export function ScopeBar(props: ScopeBarProps) {
               <span className="truncate font-mono text-xs">{s.id}</span>
               <span className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-muted-foreground">
-                  {s.created_at ? new Date(s.created_at).toLocaleDateString() : ""}
+                  {s.created_at
+                    ? new Date(s.created_at).toLocaleDateString()
+                    : ""}
                 </span>
                 <Badge
                   variant={
@@ -119,7 +134,9 @@ export function ScopeBar(props: ScopeBarProps) {
                 >
                   {s.status ?? "pending"}
                 </Badge>
-                {s.id === props.snapshotId ? <Check className="size-3.5" /> : null}
+                {s.id === props.snapshotId ? (
+                  <Check className="size-3.5" />
+                ) : null}
               </span>
             </DropdownMenuItem>
           ))}
