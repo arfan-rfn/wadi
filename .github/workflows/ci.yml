@@ -101,11 +101,14 @@ jobs:
         with:
           enable-cache: true
       - uses: docker/setup-buildx-action@v3
+      - name: Read VERSION (the e2e image tag must match the compose pin)
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
       - name: Build the wadi-joern image (pinned Joern + wadi jar)
         uses: docker/build-push-action@v6
         with:
           context: joern-platform
-          tags: ghcr.io/wadi-sh/joern:0.1.0
+          tags: ghcr.io/wadi-sh/joern:${{ steps.version.outputs.version }}
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max

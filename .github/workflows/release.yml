@@ -20,14 +20,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Tag matches VERSION, CLI version, and compose image pins
+      - name: Tag matches VERSION, every workspace version, and compose image pins
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           FILE_VERSION=$(cat VERSION)
-          CLI_VERSION=$(grep -m1 '^version' cli/pyproject.toml | cut -d'"' -f2)
-          echo "tag=$TAG file=$FILE_VERSION cli=$CLI_VERSION"
-          [ "$TAG" = "$FILE_VERSION" ] || { echo "VERSION file mismatch"; exit 1; }
-          [ "$TAG" = "$CLI_VERSION" ] || { echo "cli/pyproject.toml mismatch"; exit 1; }
+          echo "tag=$TAG file=$FILE_VERSION"
+          [ "$TAG" = "$FILE_VERSION" ] || { echo "VERSION file mismatch (make bump V=$TAG)"; exit 1; }
+          # One version across the whole workspace: code derives runtime
+          # versions from package metadata, so drift here becomes user-visible.
+          for f in cli/pyproject.toml libs/*/pyproject.toml services/*/pyproject.toml; do
+            V=$(grep -m1 '^version' "$f" | cut -d'"' -f2)
+            [ "$TAG" = "$V" ] || { echo "$f is $V, not $TAG (make bump V=$TAG)"; exit 1; }
+          done
+          # The CLI must pin contracts exactly (==) at the paired version — an
+          # unpinned dep in the published wheel is how v0.1.0 shipped broken.
+          grep -q "\"wadi-contracts==${TAG}\"" cli/pyproject.toml \
+            || { echo "cli must depend on wadi-contracts==${TAG}"; exit 1; }
           for image in joern orchestrator worker stitcher mcp frontend; do
             grep -q "ghcr.io/wadi-sh/${image}:${TAG}" infra/docker-compose.yml \
               || { echo "compose pin missing: ${image}:${TAG}"; exit 1; }
@@ -82,6 +90,9 @@ jobs:
       # into every released CLI never change when the repo moves to the org.
       # GITHUB_TOKEN can't cross namespaces — this needs a classic PAT with
       # write:packages from an org owner, stored as the GHCR_PAT repo secret.
+      # A first-push package is created PRIVATE: flip it to public in the org's
+      # package settings (and keep "Package creation: Public" enabled org-wide),
+      # or anonymous `wadi up` pulls fail with 401.
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -99,11 +110,18 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/wadi-sh/${{ matrix.name }}:${{ steps.version.outputs.version }}
+          # Points package pages and `docker inspect` at the source repo. GitHub
+          # only auto-links same-namespace repos, so this is the durable pointer
+          # while the repo lives under a personal account.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.licenses=Apache-2.0
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   pypi:
-    name: publish wadi-sh to PyPI
+    name: publish wadi-sh + wadi-contracts to PyPI
     runs-on: ubuntu-latest
     # Depends only on the guard: the PyPI slug gets secured even if the GHCR
     # half (org + PAT) isn't wired yet on a given release.
@@ -112,8 +130,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Build sdist + wheel
-        run: uv build --package wadi-sh --out-dir dist/
+      # Both packages publish from the same tag: the CLI wheel pins
+      # wadi-contracts== exactly (guard-enforced), so an install resolvable
+      # from PyPI requires shipping the pair together. v0.1.0 published only
+      # wadi-sh and was uninstallable.
+      - name: Build sdist + wheel for the version-paired set
+        run: |
+          uv build --package wadi-contracts --out-dir dist/
+          uv build --package wadi-sh --out-dir dist/
       - name: Publish (trusted publishing — no token in repo)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

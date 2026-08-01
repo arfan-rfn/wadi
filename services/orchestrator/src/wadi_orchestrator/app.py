@@ -12,6 +12,7 @@ import contextlib
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from importlib.metadata import version as metadata_version
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -37,7 +38,9 @@ from wadi_repo import GitError, RefNotFoundError
 from wadi_storage import DuplicateSystemNameError, WadiDatabase, create_client
 
 API_PREFIX = "/api/v1"
-ORCHESTRATOR_VERSION = "0.1.0"
+# Single source: the installed package's own version (pyproject.toml, kept in
+# lockstep with the release tag) — surfaced via /healthz and the OpenAPI spec.
+ORCHESTRATOR_VERSION = metadata_version("wadi-orchestrator")
 
 
 # --- request/response bodies (thin wrappers over contract models) -----------------

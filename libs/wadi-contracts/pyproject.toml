@@ -1,7 +1,9 @@
 [project]
 name = "wadi-contracts"
-version = "0.1.0"
+version = "0.1.1"
 description = "Wadi data contracts: the Pydantic models that are the single source of truth (architecture.md §7)"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.10",

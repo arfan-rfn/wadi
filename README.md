@@ -111,3 +111,7 @@ fixtures) · `libs/` (contracts, storage, git intake, config, Joern client) ·
 `services/` (orchestrator, extraction worker, stitcher, MCP server) · `cli/` ·
 `frontend/` · `infra/` (compose). Services never import each other — all
 coupling goes through versioned contracts in `libs/wadi-contracts`.
+
+## License
+
+[Apache-2.0](LICENSE)

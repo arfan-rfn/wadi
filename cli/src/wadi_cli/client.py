@@ -5,6 +5,8 @@ The CLI's only data path: everything goes over ``/api/v1`` with
 API — if the CLI can do it over REST, third parties can too (§14).
 """
 
+from importlib.metadata import version
+
 import httpx
 
 from wadi_contracts import (
@@ -16,7 +18,10 @@ from wadi_contracts import (
     System,
 )
 
-CLI_VERSION = "0.1.0"
+# Single source: the installed package's own version (cli/pyproject.toml, which
+# the release guard pins to the git tag). This tags the MCP passthrough image
+# and names the embedded compose file — it must never drift from the release.
+CLI_VERSION = version("wadi-sh")
 
 
 class ApiUnreachableError(RuntimeError):

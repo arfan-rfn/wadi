@@ -1,15 +1,19 @@
 [project]
 name = "wadi-sh"
-version = "0.1.0"
+version = "0.1.1"
 description = "The wadi command: compose-wrapper + REST client, nothing more (architecture.md §15)"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 # Deliberately tiny dependency tree (§15): never wadi-storage, never DB drivers.
+# wadi-contracts is pinned exactly — it is version-paired with this package per
+# release (§13), and both publish to PyPI from the same tag.
 dependencies = [
     "typer>=0.15",
     "httpx>=0.28",
     "rich>=13.9",
     "pydantic>=2.10",
-    "wadi-contracts",
+    "wadi-contracts==0.1.1",
 ]
 
 [project.scripts]
