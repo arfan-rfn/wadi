@@ -58,7 +58,7 @@ services:
       retries: 24
 
   wadi-joern:
-    image: ghcr.io/trywadi/joern:0.1.0
+    image: ghcr.io/wadi-sh/joern:0.1.0
     build:
       context: ../joern-platform
     # Stateless and disposable (P5); heavy only while analyses run.
@@ -75,7 +75,7 @@ services:
       start_period: 60s
 
   orchestrator:
-    image: ghcr.io/trywadi/orchestrator:0.1.0
+    image: ghcr.io/wadi-sh/orchestrator:0.1.0
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -99,7 +99,7 @@ services:
       retries: 12
 
   extraction-worker:
-    image: ghcr.io/trywadi/worker:0.1.0
+    image: ghcr.io/wadi-sh/worker:0.1.0
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -117,7 +117,7 @@ services:
     logging: *default-logging
 
   stitcher:
-    image: ghcr.io/trywadi/stitcher:0.1.0
+    image: ghcr.io/wadi-sh/stitcher:0.1.0
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -132,7 +132,7 @@ services:
     logging: *default-logging
 
   mcp:
-    image: ghcr.io/trywadi/mcp:0.1.0
+    image: ghcr.io/wadi-sh/mcp:0.1.0
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -149,7 +149,7 @@ services:
     logging: *default-logging
 
   frontend:
-    image: ghcr.io/trywadi/frontend:0.1.0
+    image: ghcr.io/wadi-sh/frontend:0.1.0
     build:
       context: ../frontend
     environment:

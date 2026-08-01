@@ -11,7 +11,7 @@ export const siteConfig = {
     },
   ],
   links: {
-    github: "https://github.com/trywadi",
+    github: "https://github.com/wadi-sh",
   },
   seo: {
     twitterHandle: "",
@@ -21,7 +21,7 @@ export const siteConfig = {
   socials: [
     {
       name: "GitHub",
-      url: "https://github.com/trywadi",
+      url: "https://github.com/wadi-sh",
       icon: "GitHub",
     },
   ],

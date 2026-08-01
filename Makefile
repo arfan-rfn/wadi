@@ -48,7 +48,7 @@ sync-compose: ## Copy infra compose definitions into the CLI's embedded resource
 	cp infra/docker-compose.expose-db.yml cli/src/wadi_cli/resources/docker-compose.expose-db.yml
 
 joern-image: ## Build the wadi-joern image (pinned Joern + the wadi jar)
-	docker build -t ghcr.io/trywadi/joern:0.1.0 joern-platform/
+	docker build -t ghcr.io/wadi-sh/joern:0.1.0 joern-platform/
 
 e2e: ## Whole-stack conformance e2e (needs Docker + the wadi-joern image)
 	uv run pytest e2e -q

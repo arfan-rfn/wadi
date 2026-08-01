@@ -119,11 +119,11 @@ and worker so local repos can be mirrored (§13 "build in now" item — done).
   yet (Phase 3).
 - `wadi up` works against locally built images; publishing to ghcr.io and the
   PyPI release pipeline are release-engineering work, not code gaps.
-  **Scheduled:** the pipeline (GHCR images + PyPI `wadi-cli`, one version across
+  **Scheduled:** the pipeline (GHCR images + PyPI `wadi-sh`, one version across
   the set) is a prerequisite of Phase 2's shared-deployment deliverables
   (remote contexts, GitHub Action — §11.2/§14) and lands with them; if Phase 2
   is cut to its core (stitching + auth), it slides to Phase 3 with the rest of
   the integration surface, per §11.2's cut line. Homebrew tap + curl installer
-  are wrappers that may trail. Namespace claims (`trywadi` GitHub org, PyPI
-  `wadi-cli` + `trywadi` stub, `trywadi.com`) should not wait — they are the
+  are wrappers that may trail. Namespace claims (`wadi-sh` GitHub org, PyPI
+  `wadi-sh` + `wadi-cli` stub, `trywadi.com`) should not wait — they are the
   only part someone else can take.

@@ -6,8 +6,8 @@ stitcher skeleton runs → the snapshot succeeds → the public API serves
 endpoints (diffed against the fixture's expected JSON), the ICFG, and
 pinned-SHA source.
 
-Requirements: Docker + the ghcr.io/trywadi/joern image built
-(`docker build -t ghcr.io/trywadi/joern:0.1.0 joern-platform/`).
+Requirements: Docker + the ghcr.io/wadi-sh/joern image built
+(`docker build -t ghcr.io/wadi-sh/joern:0.1.0 joern-platform/`).
 Runs via `make e2e`; skipped automatically when prerequisites are missing.
 
 Everything except HTTP-serving runs in-process (orchestrator app via ASGI,
@@ -38,7 +38,7 @@ from wadi_stitcher.pipeline import StitchPipeline
 from wadi_storage import WadiDatabase
 from wadi_worker.pipeline import CpgqlJoernExtractor, ExtractionPipeline
 
-JOERN_IMAGE = "ghcr.io/trywadi/joern:0.1.0"
+JOERN_IMAGE = "ghcr.io/wadi-sh/joern:0.1.0"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "joern-platform" / "fixtures" / "spring-petstore-mini"
 EXPECTED_ENDPOINTS = FIXTURE / "expected" / "endpoints.json"

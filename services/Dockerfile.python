@@ -1,7 +1,7 @@
 # Shared multi-stage build for all wadi Python services (context = repo root).
 #
 #   docker build -f services/Dockerfile.python --build-arg SERVICE=wadi-orchestrator \
-#                --build-arg ENTRYPOINT=wadi-orchestrator -t ghcr.io/trywadi/orchestrator .
+#                --build-arg ENTRYPOINT=wadi-orchestrator -t ghcr.io/wadi-sh/orchestrator .
 #
 # One Dockerfile, parameterized: the services share the identical uv-workspace
 # build; only the installed package and entry command differ (DRY).

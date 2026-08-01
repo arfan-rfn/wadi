@@ -561,12 +561,12 @@ Python end-to-end through the *same* worker: FastAPI routes, `requests`/`httpx` 
 
 | Channel | Command | Role |
 |---|---|---|
-| PyPI (canonical) | `uv tool install wadi-cli` (or `pipx install wadi-cli`) — installs the **`wadi`** command | Isolated-venv CLI install on macOS / Linux / WSL2. Lead with uv: it fetches a managed Python 3.12+ if the system lacks one. |
-| Homebrew | `brew install trywadi/tap/wadi` | macOS convenience formula (own tap) wrapping the PyPI package — command stays `wadi`. |
-| curl one-liner | `curl -fsSL https://trywadi.com/install.sh \| sh` | ~30-line hosted script: bootstraps uv if missing, then `uv tool install wadi-cli` (uv handles PATH wiring). Gives the single-binary-style UX with zero binary-packaging pipeline. Script kept short, readable, and checksummed; docs always show the manual `uv tool install` alternative beside it. |
-| Docker image + GitHub Action | `ghcr.io/trywadi/cli` · `trywadi/analyze-action@v1` | The CI surface (§14). |
+| PyPI (canonical) | `uv tool install wadi-sh` (or `pipx install wadi-sh`) — installs the **`wadi`** command | Isolated-venv CLI install on macOS / Linux / WSL2. Lead with uv: it fetches a managed Python 3.12+ if the system lacks one. |
+| Homebrew | `brew install wadi-sh/tap/wadi` | macOS convenience formula (own tap) wrapping the PyPI package — command stays `wadi`. |
+| curl one-liner | `curl -fsSL https://trywadi.com/install.sh \| sh` | ~30-line hosted script: bootstraps uv if missing, then `uv tool install wadi-sh` (uv handles PATH wiring). Gives the single-binary-style UX with zero binary-packaging pipeline. Script kept short, readable, and checksummed; docs always show the manual `uv tool install` alternative beside it. |
+| Docker image + GitHub Action | `ghcr.io/wadi-sh/cli` · `wadi-sh/analyze-action@v1` | The CI surface (§14). |
 
-**Naming (checked 2026-07-31):** PyPI `wadi` is taken (KWR Water Research Institute's dormant hydrology library — file a PEP 541 transfer request opportunistically, never plan around it) and npm `wadi`, `github.com/wadi`, and `wadi.dev` are all occupied. The claimed namespace: **domain `trywadi.com`, GitHub org `trywadi`, PyPI `wadi-cli`** (+ register `trywadi` on PyPI as a stub to guard the brand). Package name ≠ command name: every channel installs the **`wadi`** command; the KWR package is a library with no CLI, so no PATH collision exists. Homebrew: own tap now (full control over release cadence, keeps the CLI↔image version pairing exact); submit to **homebrew-core** once its notability thresholds (stars/downloads) are met — formula name `wadi` verified free there, so plain `brew install wadi` becomes available at that milestone.
+**Naming (checked 2026-07-31, revised 2026-08-01):** PyPI `wadi` is taken (KWR Water Research Institute's dormant hydrology library — file a PEP 541 transfer request opportunistically, never plan around it) and npm `wadi`, `github.com/wadi`, and `wadi.dev` are all occupied. The claimed namespace: **domain `trywadi.com`, GitHub org `wadi-sh`, PyPI `wadi-sh`** (all verified free 2026-08-01) — one brand string across org, GHCR, tap, and package; install lines are copy-pasted from docs, so brand consistency beats a descriptive suffix (+ register `wadi-cli` on PyPI as a defensive stub: it's the natural guess for "the wadi CLI" and the typo-squat surface). Org and domain deliberately don't mirror (the Tailwind pattern — tailwindcss.com / `tailwindlabs`): `.com` keeps the canonical domain cheap and familiar. Known trade-off, accepted: the `-sh` org suffix conventionally implies owning `wadi.sh` (astral-sh/astral.sh) — so **register `wadi.sh` defensively** (unregistered as of 2026-08-01) and redirect it to trywadi.com; it must never become canonical. sbt `organization` is `com.trywadi` — reverse-domain of the owned domain, per JVM convention. Package name ≠ command name: every channel installs the **`wadi`** command; the KWR package is a library with no CLI, so no PATH collision exists. *Rejected: `wadi.sh` as canonical domain (preference for .com); `trywadi` as org (marketing verb frozen into permanent GHCR paths); `wadilabs`/`wadihq`/`wadi-byte` (no product connection); `wadi-cli` as org (hosts non-CLI services — `ghcr.io/wadi-cli/frontend` misleads); `wadish.com`/`wadi-sh.com` (read as one word / fail the say-it-aloud test).* Homebrew: own tap now (full control over release cadence, keeps the CLI↔image version pairing exact); submit to **homebrew-core** once its notability thresholds (stars/downloads) are met — formula name `wadi` verified free there, so plain `brew install wadi` becomes available at that milestone.
 
 *Deliberately deferred: true single-binary releases (PyInstaller/shiv + per-OS×arch build matrix + macOS notarization) — permanent packaging toil, justified only if evidence shows "installs Python tooling under the hood" is itself an adoption barrier. For a tool that requires a container runtime anyway, unlikely.*
 
@@ -583,11 +583,11 @@ Host requirement: a compose-compatible container runtime (Docker Desktop, Podman
 
 ### Release artifacts (per version, one tag across the set)
 
-1. Images on GHCR under `ghcr.io/trywadi/`: `joern`, `orchestrator`, `worker`, `stitcher`, `mcp`, `frontend`, `cli` (+ pinned stock `mongo`/`neo4j` references).
-2. The `wadi-cli` package (PyPI + Homebrew tap `trywadi/tap`), embedding the compose definition with those exact image tags — solving the version-compatibility matrix that "compose file + `latest`" would create (artifacts written by worker vX must be read by MCP/frontend vX-compatible code).
+1. Images on GHCR under `ghcr.io/wadi-sh/`: `joern`, `orchestrator`, `worker`, `stitcher`, `mcp`, `frontend`, `cli` (+ pinned stock `mongo`/`neo4j` references).
+2. The `wadi-sh` package (PyPI + Homebrew tap `wadi-sh/tap`), embedding the compose definition with those exact image tags — solving the version-compatibility matrix that "compose file + `latest`" would create (artifacts written by worker vX must be read by MCP/frontend vX-compatible code).
 3. The MCP config snippet as a documented one-liner.
 4. **Contract artifacts** (§14): the orchestrator's OpenAPI spec (`/api/v1`) and the JSON Schemas exported from `wadi-contracts` — the language-neutral integration contract for anything building on wadi.
-5. The `trywadi/analyze-action` GitHub Action (thin wrapper over the CLI image) and the hosted, checksummed `install.sh` at trywadi.com.
+5. The `wadi-sh/analyze-action` GitHub Action (thin wrapper over the CLI image) and the hosted, checksummed `install.sh` at trywadi.com.
 
 ### Why this shape
 
@@ -695,14 +695,14 @@ Same images, same API everywhere — modes differ only in *where the stack runs 
 **Recommended shape: client/server** (the SonarQube scanner→server model). A persistent wadi deployment keeps the bare-clone cache, the content-hash CPG cache, and prior snapshots — the only shape where per-commit analysis is viable, because a commit touching one service re-analyzes one service and copies the rest forward (§4). CI jobs run only the thin CLI:
 
 ```yaml
-- run: uv tool install wadi-cli==1.4.2
+- run: uv tool install wadi-sh==1.4.2
 - run: wadi analyze . --wait --output json
   # target selected by WADI_API_URL + WADI_API_TOKEN env vars — the ephemeral-context mechanism (§15)
 ```
 
 **Ephemeral mode** (stack spun up inside the job) works but is cold every run — full multi-minute Joern imports for every service. Acceptable for nightly audits; not for per-commit.
 
-The `trywadi/analyze-action` GitHub Action (and a GitLab template) wrap the same CLI. CI-critical CLI behavior — `--wait`, stable exit codes, `--output json` — is specified in §15. *Phase 5 (§11):* `--fail-on` policies (contract-break, new endpoint without auth, new cross-service cycle) — where CI integration becomes an architectural quality gate rather than just re-indexing.
+The `wadi-sh/analyze-action` GitHub Action (and a GitLab template) wrap the same CLI. CI-critical CLI behavior — `--wait`, stable exit codes, `--output json` — is specified in §15. *Phase 5 (§11):* `--fail-on` policies (contract-break, new endpoint without auth, new cross-service cycle) — where CI integration becomes an architectural quality gate rather than just re-indexing.
 
 ---
 
@@ -719,7 +719,7 @@ The `trywadi/analyze-action` GitHub Action (and a GitLab template) wrap the same
 
 ### Stack
 
-**Python, Typer + httpx + Rich**, as the `cli/` member of the uv workspace. Dependency tree kept deliberately tiny (`typer`, `httpx`, `rich`, `pydantic`, `wadi-contracts`) so `uv tool install wadi-cli` stays fast and clean. *Rejected: Go single-binary CLI — second toolchain, can't reuse the Pydantic contracts (drift on every schema change); if a no-Python install story ever matters, PyInstaller/shiv on this same codebase is the escape hatch, not a rewrite.*
+**Python, Typer + httpx + Rich**, as the `cli/` member of the uv workspace. Dependency tree kept deliberately tiny (`typer`, `httpx`, `rich`, `pydantic`, `wadi-contracts`) so `uv tool install wadi-sh` stays fast and clean. *Rejected: Go single-binary CLI — second toolchain, can't reuse the Pydantic contracts (drift on every schema change); if a no-Python install story ever matters, PyInstaller/shiv on this same codebase is the escape hatch, not a rewrite.*
 
 ### Contexts (local vs. remote)
 
@@ -737,7 +737,7 @@ wadi --context team analyze .    # explicit
 
 ### `wadi mcp`
 
-Container passthrough: `wadi mcp` execs `docker run -i --network wadi ghcr.io/trywadi/mcp:<pinned>` with stdio attached. Keeps the CLI thin (no pymongo/neo4j/FastMCP deps) and **guarantees the MCP server version matches the stack that wrote the artifacts** (§13's compatibility property). `wadi mcp install` writes the MCP config snippet for coding agents, pointing at `wadi mcp`. *Rejected: importing mcp-server in-process — drags the full DB-driver dependency tree into every CLI install.*
+Container passthrough: `wadi mcp` execs `docker run -i --network wadi ghcr.io/wadi-sh/mcp:<pinned>` with stdio attached. Keeps the CLI thin (no pymongo/neo4j/FastMCP deps) and **guarantees the MCP server version matches the stack that wrote the artifacts** (§13's compatibility property). `wadi mcp install` writes the MCP config snippet for coding agents, pointing at `wadi mcp`. *Rejected: importing mcp-server in-process — drags the full DB-driver dependency tree into every CLI install.*
 
 ### Scripting & CI surface
 

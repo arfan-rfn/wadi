@@ -8,7 +8,6 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "wadi-cli",
     "wadi-config",
     "wadi-contracts",
     "wadi-extraction-worker",
@@ -16,6 +15,7 @@ members = [
     "wadi-mcp-server",
     "wadi-orchestrator",
     "wadi-repo",
+    "wadi-sh",
     "wadi-stitcher",
     "wadi-storage",
     "wadi-testing",
@@ -1145,27 +1145,6 @@ wheels = [
 ]
 
 [[package]]
-name = "wadi-cli"
-version = "0.1.0"
-source = { editable = "cli" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "rich" },
-    { name = "typer" },
-    { name = "wadi-contracts" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "pydantic", specifier = ">=2.10" },
-    { name = "rich", specifier = ">=13.9" },
-    { name = "typer", specifier = ">=0.15" },
-    { name = "wadi-contracts", editable = "libs/wadi-contracts" },
-]
-
-[[package]]
 name = "wadi-config"
 version = "0.1.0"
 source = { editable = "libs/wadi-config" }
@@ -1299,6 +1278,27 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "wadi-contracts", editable = "libs/wadi-contracts" }]
+
+[[package]]
+name = "wadi-sh"
+version = "0.1.0"
+source = { editable = "cli" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "rich" },
+    { name = "typer" },
+    { name = "wadi-contracts" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "pydantic", specifier = ">=2.10" },
+    { name = "rich", specifier = ">=13.9" },
+    { name = "typer", specifier = ">=0.15" },
+    { name = "wadi-contracts", editable = "libs/wadi-contracts" },
+]
 
 [[package]]
 name = "wadi-stitcher"

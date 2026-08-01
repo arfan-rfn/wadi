@@ -26,7 +26,7 @@ from wadi_contracts import RepoSource, Snapshot, SnapshotStatus
 EXIT_ANALYSIS_FAILED = 1
 EXIT_UNREACHABLE = 3
 
-MCP_IMAGE = f"ghcr.io/trywadi/mcp:{CLI_VERSION}"
+MCP_IMAGE = f"ghcr.io/wadi-sh/mcp:{CLI_VERSION}"
 
 app = typer.Typer(
     name="wadi",

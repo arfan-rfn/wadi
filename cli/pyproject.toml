@@ -1,5 +1,5 @@
 [project]
-name = "wadi-cli"
+name = "wadi-sh"
 version = "0.1.0"
 description = "The wadi command: compose-wrapper + REST client, nothing more (architecture.md §15)"
 requires-python = ">=3.12"
