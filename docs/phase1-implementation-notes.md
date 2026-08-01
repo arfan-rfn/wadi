@@ -74,6 +74,24 @@ artifacts would not round-trip storage with exact equality.
 its first annotation line (e.g. `@GetMapping`), not the signature line. UI and
 consumers should treat the anchor window as declaration-inclusive.
 
+## First accuracy validation (TrainTicket, 2026-08-01)
+
+Against `train-ticket-aitest@a84716f1` (22 services), manually verified ground
+truth is **365 endpoints**. Wadi initially reported 366 — the one false
+positive was a `@GetMapping` on a `@FeignClient` *interface* (an outbound-call
+declaration, not a served endpoint). Fixed: `SpringEndpointPass` now requires
+the owning type to be `@RestController`/`@Controller`; the petstore fixture
+gained a Feign-trap file and a conformance assertion. Re-run: **365/365 exact**.
+Commented-out controllers and Feign interfaces are correctly excluded.
+
+Reference point: CIMET (the JavaParser predecessor) reports 262 on the same
+commit — it deduplicates endpoints globally by API contract (method + URI),
+so when this fork's inconsistency-injected duplicate controllers define the
+same route in two services, only one service keeps it (103 of its 104 missing
+endpoints are exactly such cross-service duplicates; two services lose their
+entire inventory). Per-service endpoint inventory is wrong there by design of
+its contract-keyed index.
+
 ## Phase 1 gaps (known, deliberate)
 
 - Endpoint `params[]` are not yet populated from `@PathVariable`/`@RequestParam`

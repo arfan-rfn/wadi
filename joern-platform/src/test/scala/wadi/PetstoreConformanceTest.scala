@@ -35,6 +35,13 @@ class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAf
     endpoints should contain allOf ("GET /pets/{id}", "POST /pets", "GET /owners")
   }
 
+  test("Feign client interfaces are NOT counted as endpoints") {
+    // InventoryClient carries @GetMapping but declares an outbound call
+    // (found the hard way against TrainTicket ground truth).
+    endpoints should have size 3
+    endpoints.exists(_.contains("/api/v1/inventory/stock")) shouldBe false
+  }
+
   test("DI resolution pulls the ServiceImpl into the endpoint closure") {
     // Without SpringDIPass the closure stops at the PetService interface.
     methodByFullName("PetServiceImpl.findPet") should be(defined)

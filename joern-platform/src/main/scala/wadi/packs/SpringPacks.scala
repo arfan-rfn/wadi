@@ -45,35 +45,51 @@ object SpringPacks {
   }
 }
 
-/** Tags controller methods: `endpoint=GET /pets/{id}` (class-level prefix respected). */
+/** Tags controller methods: `endpoint=GET /pets/{id}` (class-level prefix respected).
+  *
+  * Only types annotated `@RestController`/`@Controller` count: `@FeignClient`
+  * interfaces also carry `@GetMapping` etc., but there they declare OUTBOUND
+  * calls, not served endpoints (found against TrainTicket ground truth —
+  * counting them is a false positive an endpoint inventory must not make).
+  */
 class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
   import SpringPacks.*
 
-  override def run(builder: DiffGraphBuilder): Unit =
-    cpg.typeDecl.filterNot(_.isExternal).l.foreach { controller =>
-      val classPrefix = controller.ast.isAnnotation
-        .filter(a => a.name == "RequestMapping")
-        .filter(_.astParent == controller)
-        .headOption
-        .flatMap(a => pathFromAnnotationCode(a.code))
-        .getOrElse("")
+  private val ControllerAnnotations = Set("RestController", "Controller")
 
-      controller.method.l.foreach { method =>
-        method.ast.isAnnotation.filter(_.astParent == method).l.foreach { annotation =>
-          MappingAnnotations.get(annotation.name).foreach { httpMethod =>
-            val path = pathFromAnnotationCode(annotation.code).getOrElse("/")
-            val uri  = joinPaths(classPrefix, path)
-            Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
-          }
-          if (annotation.name == "RequestMapping" && MappingAnnotations.values.exists(v => annotation.code.contains(v))) {
-            MappingAnnotations.values.filter(v => annotation.code.contains(v)).foreach { httpMethod =>
+  override def run(builder: DiffGraphBuilder): Unit =
+    cpg.typeDecl
+      .filterNot(_.isExternal)
+      .filter { td =>
+        td.ast.isAnnotation
+          .filter(_.astParent == td)
+          .exists(a => ControllerAnnotations.contains(a.name))
+      }
+      .l
+      .foreach { controller =>
+        val classPrefix = controller.ast.isAnnotation
+          .filter(a => a.name == "RequestMapping")
+          .filter(_.astParent == controller)
+          .headOption
+          .flatMap(a => pathFromAnnotationCode(a.code))
+          .getOrElse("")
+
+        controller.method.l.foreach { method =>
+          method.ast.isAnnotation.filter(_.astParent == method).l.foreach { annotation =>
+            MappingAnnotations.get(annotation.name).foreach { httpMethod =>
               val path = pathFromAnnotationCode(annotation.code).getOrElse("/")
-              Iterator(method).newTagNodePair("endpoint", s"$httpMethod ${joinPaths(classPrefix, path)}").store()(using builder)
+              val uri  = joinPaths(classPrefix, path)
+              Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
+            }
+            if (annotation.name == "RequestMapping" && MappingAnnotations.values.exists(v => annotation.code.contains(v))) {
+              MappingAnnotations.values.filter(v => annotation.code.contains(v)).foreach { httpMethod =>
+                val path = pathFromAnnotationCode(annotation.code).getOrElse("/")
+                Iterator(method).newTagNodePair("endpoint", s"$httpMethod ${joinPaths(classPrefix, path)}").store()(using builder)
+              }
             }
           }
         }
       }
-    }
 }
 
 /** Tags RestTemplate/WebClient call sites: `sink=http-client`. */
