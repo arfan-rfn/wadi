@@ -35,7 +35,9 @@ def method_rollup(icfg: Icfg) -> dict[str, Any]:
             if node.method_info is not None:
                 record["badges"] = node.method_info.badges
                 record["doc_comment"] = node.method_info.doc_comment
-                record["signature"] = node.method_info.signature
+                # NOTE: method_info.signature is Joern's bare type signature
+                # (return + params, no name) — method.signature stays the
+                # display identity. Same trap as the frontend roll-up.
         elif node.kind is IcfgNodeKind.CALL and node.callee is not None:
             call: dict[str, Any] = {
                 "callee_id": node.callee.id,
