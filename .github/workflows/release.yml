@@ -118,3 +118,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          # Re-tagging the same version (e.g. to fix an image job) must not
+          # fail on the already-published package.
+          skip-existing: true

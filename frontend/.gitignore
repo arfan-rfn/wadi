@@ -5,9 +5,9 @@ node_modules
 .pnp
 .pnp.js
 
-# lock files (pnpm only)
-package-lock.json
+# lock files: npm's package-lock.json IS tracked (npm ci + reproducible images)
 yarn.lock
+pnpm-lock.yaml
 
 # testing
 coverage
