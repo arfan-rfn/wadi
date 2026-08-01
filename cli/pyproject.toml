@@ -1,0 +1,26 @@
+[project]
+name = "wadi-cli"
+version = "0.1.0"
+description = "The wadi command: compose-wrapper + REST client, nothing more (architecture.md §15)"
+requires-python = ">=3.12"
+# Deliberately tiny dependency tree (§15): never wadi-storage, never DB drivers.
+dependencies = [
+    "typer>=0.15",
+    "httpx>=0.28",
+    "rich>=13.9",
+    "pydantic>=2.10",
+    "wadi-contracts",
+]
+
+[project.scripts]
+wadi = "wadi_cli.main:app"
+
+[tool.uv.sources]
+wadi-contracts = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wadi_cli"]

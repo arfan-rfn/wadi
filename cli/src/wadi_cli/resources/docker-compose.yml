@@ -1,0 +1,167 @@
+# Wadi local stack (architecture.md §13).
+#
+# Source of truth for the stack definition — the CLI embeds this rendered file
+# at release build (cli/src/wadi_cli/resources/docker-compose.yml; `make sync-compose`
+# keeps the copy current, CI diffs it).
+#
+# Invariants:
+# - No database ports are published to the host (debug: --profile expose-db, loopback only).
+# - Only the orchestrator API (9234) and frontend (9235) are published, loopback-bound.
+# - Images are version-pinned at release; `build:` contexts serve local development.
+# - Logs are size-rotated so a long-running stack never grows unbounded.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-wadi-env: &wadi-env
+  WADI_MONGO_URI: mongodb://mongo:27017
+  WADI_MONGO_DATABASE: wadi
+  WADI_NEO4J_URI: neo4j://neo4j:7687
+  WADI_NEO4J_USER: neo4j
+  WADI_NEO4J_PASSWORD: wadi-local
+  WADI_JOERN_URL: http://wadi-joern:8080
+  WADI_WORKSPACE_DIR: /workspace
+  WADI_CPG_CACHE_DIR: /cpg-cache
+  WADI_REPO_CACHE_DIR: /repo-cache
+
+services:
+  mongo:
+    image: mongo:8.0
+    # Internal only: reachable as 'mongo' on the compose network (§13).
+    volumes:
+      - mongo-data:/data/db
+    mem_limit: 512m
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping: 1}).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/wadi-local
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    volumes:
+      - neo4j-data:/data
+    mem_limit: 1g
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  wadi-joern:
+    image: ghcr.io/trywadi/joern:0.1.0
+    build:
+      context: ../joern-platform
+    # Stateless and disposable (P5); heavy only while analyses run.
+    volumes:
+      - workspace:/workspace
+      - cpg-cache:/cpg-cache
+    mem_limit: 6g
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -X POST http://localhost:8080/query -H 'Content-Type: application/json' -d '{\"query\":\"1\"}' > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  orchestrator:
+    image: ghcr.io/trywadi/orchestrator:0.1.0
+    build:
+      context: ..
+      dockerfile: services/Dockerfile.python
+      args: { SERVICE: wadi-orchestrator, ENTRYPOINT: wadi-orchestrator }
+    environment:
+      <<: *wadi-env
+    ports:
+      - "127.0.0.1:${WADI_API_PORT:-9234}:9234"
+    volumes:
+      - repo-cache:/repo-cache
+    depends_on:
+      mongo:
+        condition: service_healthy
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9234/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  extraction-worker:
+    image: ghcr.io/trywadi/worker:0.1.0
+    build:
+      context: ..
+      dockerfile: services/Dockerfile.python
+      args: { SERVICE: wadi-extraction-worker, ENTRYPOINT: wadi-worker }
+    environment:
+      <<: *wadi-env
+    volumes:
+      - workspace:/workspace
+      - cpg-cache:/cpg-cache
+      - repo-cache:/repo-cache
+    depends_on:
+      mongo:
+        condition: service_healthy
+    logging: *default-logging
+
+  stitcher:
+    image: ghcr.io/trywadi/stitcher:0.1.0
+    build:
+      context: ..
+      dockerfile: services/Dockerfile.python
+      args: { SERVICE: wadi-stitcher, ENTRYPOINT: wadi-stitcher }
+    environment:
+      <<: *wadi-env
+    depends_on:
+      mongo:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    logging: *default-logging
+
+  mcp:
+    image: ghcr.io/trywadi/mcp:0.1.0
+    build:
+      context: ..
+      dockerfile: services/Dockerfile.python
+      args: { SERVICE: wadi-mcp-server, ENTRYPOINT: wadi-mcp }
+    command: ["wadi-mcp", "--http"]
+    environment:
+      <<: *wadi-env
+    ports:
+      - "127.0.0.1:${WADI_MCP_PORT:-9236}:9236"
+    profiles: ["mcp-http"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    logging: *default-logging
+
+  frontend:
+    image: ghcr.io/trywadi/frontend:0.1.0
+    build:
+      context: ../frontend
+    environment:
+      WADI_API_URL: http://orchestrator:9234
+    ports:
+      - "127.0.0.1:${WADI_UI_PORT:-9235}:3000"
+    profiles: ["frontend"]
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    logging: *default-logging
+
+volumes:
+  mongo-data:
+  neo4j-data:
+  workspace:
+  cpg-cache:
+  repo-cache:

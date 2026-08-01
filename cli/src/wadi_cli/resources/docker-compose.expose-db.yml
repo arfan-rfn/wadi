@@ -1,0 +1,13 @@
+# Debug overlay (§13): `wadi up --expose-db` layers this over docker-compose.yml,
+# publishing the databases on loopback at the WADI keypad debug ports —
+# offset from stock defaults so debug mode can't collide with natively
+# installed databases.
+
+services:
+  mongo:
+    ports:
+      - "127.0.0.1:${WADI_MONGO_DEBUG_PORT:-9240}:27017"
+  neo4j:
+    ports:
+      - "127.0.0.1:${WADI_NEO4J_HTTP_DEBUG_PORT:-9241}:7474"
+      - "127.0.0.1:${WADI_NEO4J_BOLT_DEBUG_PORT:-9242}:7687"

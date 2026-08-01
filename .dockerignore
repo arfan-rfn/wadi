@@ -1,0 +1,12 @@
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+frontend/.next
+frontend/out
+joern-platform/target
+joern-platform/project/target
+schemas
+docs
+.wadi-data

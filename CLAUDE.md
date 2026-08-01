@@ -4,7 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**Design phase — no code exists yet.** The repo contains only `docs/`. Wadi is a polyglot microservice static-analysis platform built on Joern: it analyzes an entire microservice system (one repo or many), extracts per-endpoint interprocedural control-flow graphs, detects cross-service communication, stitches flows across services, and exposes the result via a REST API, MCP server, and web frontend.
+**Phase 1 (backbone + vertical slice) is implemented.** Wadi is a polyglot microservice static-analysis platform built on Joern: it analyzes an entire microservice system (one repo or many), extracts per-endpoint interprocedural control-flow graphs, detects cross-service communication, stitches flows across services, and exposes the result via a REST API, MCP server, and web frontend. Implementation decisions made during Phase 1 (and known gaps) are recorded in `docs/phase1-implementation-notes.md` — read it alongside the architecture doc.
+
+## Commands
+
+- `make sync` — install the uv workspace. `make test` — full Python suite (Mongo integration tests spin up a Docker container; they skip without Docker). `make test-unit` — no infrastructure.
+- `make lint` / `make fmt` / `make typecheck` — ruff + pyright strict, workspace-wide, zero-tolerance in CI.
+- `make schema` — regenerate `schemas/` + frontend TS types after ANY `wadi-contracts` change; CI fails on staleness. Same for `make sync-compose` after editing `infra/docker-compose.yml` (the CLI embeds a copy).
+- `cd joern-platform && sbt test` — Scala conformance tests (build real CPGs from `fixtures/`); also writes `target/petstore-export/export.json`, which the Python cross-language golden test consumes (`pytest services/extraction-worker/tests/test_real_export.py`).
+- `make joern-image` then `make e2e` — the whole-stack conformance e2e (real Joern container).
+- Run a single Python test: `uv run pytest path/to/test_file.py::TestClass::test_name`.
 
 ## The Documents
 

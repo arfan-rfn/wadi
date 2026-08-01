@@ -1,0 +1,397 @@
+package wadi.`export`
+
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.{AstNode, Call, ControlStructure, Method}
+import io.shiftleft.semanticcpg.language.*
+
+import java.nio.file.{Files, Path, Paths, StandardOpenOption}
+import scala.collection.mutable
+
+/** Bulk subgraph export (§5.1): the endpoint-reachable closure as JSON.
+  *
+  * Writes `export.json` (the Scala↔Python contract; see
+  * `wadi_joern_client/export.py`, version below must track its major) to the
+  * shared workspace volume. The CPGQL channel never carries bulk data.
+  *
+  * Statement coarsening: statements are the AST nodes whose parent is a
+  * BLOCK (assignments and standalone calls are CALL nodes, control structures
+  * and returns their own kinds); the expression-level CFG is projected onto
+  * them (an edge between statements exists iff some expression-level CFG edge
+  * crosses them). IF-statement edges are relabeled true/false from the AST.
+  */
+object WadiExport {
+
+  // Follow existing CALL edges only (which include the DI pass's added edges).
+  private given ICallResolver = NoResolve
+
+  val ExportSchemaVersion = "1.0.0"
+
+  /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
+    * stay far below 2^53, so double precision is exact. */
+  private def num(id: Long): ujson.Num = ujson.Num(id.toDouble)
+
+  /** lineNumber is `Option[Int | Integer]` in flatgraph — normalize via string. */
+  private def lineOf(value: Option[Int | Integer]): Int =
+    value.map(_.toString.toInt).getOrElse(0)
+
+  private val StatementLabels = Set("CALL", "CONTROL_STRUCTURE", "RETURN")
+  private val OperatorPrefix  = "<operator"
+
+  def run(cpg: Cpg, outDir: String): String = {
+    val endpointMethods = cpg.method.where(_.tag.nameExact("endpoint")).l
+    val closure         = reachableClosure(endpointMethods)
+    val methodIds       = closure.map(_.id).toSet
+
+    val sinkRows = mutable.ListBuffer.empty[ujson.Obj]
+
+    val methodObjs = closure.map(methodJson)
+    val cfgObjs = closure.flatMap { method =>
+      val statements = statementsOf(method)
+      if (statements.isEmpty && method.cfgNode.isEmpty) None
+      else Some(cfgJson(method, statements, methodIds, sinkRows))
+    }
+    val endpointObjs = endpointMethods.flatMap { method =>
+      method.tag.nameExact("endpoint").value.l.flatMap { value =>
+        value.split(" ", 2) match {
+          case Array(httpMethod, uri) =>
+            Some(ujson.Obj("method_id" -> num(method.id), "http_method" -> httpMethod, "uri" -> uri))
+          case _ => None
+        }
+      }
+    }
+    val modelObjs = cpg.typeDecl.where(_.tag.nameExact("model")).l.map { typeDecl =>
+      ujson.Obj(
+        "entity" -> typeDecl.name,
+        "fields" -> typeDecl.member.l.map(m =>
+          ujson.Obj("name" -> m.name, "type_name" -> m.typeFullName)
+        ),
+        "persistence_framework" -> "spring-data",
+        "storage_name"          -> ujson.Null
+      )
+    }
+
+    val document = ujson.Obj(
+      "export_schema_version" -> ExportSchemaVersion,
+      "language"              -> "java",
+      "methods"               -> methodObjs,
+      "cfgs"                  -> cfgObjs,
+      "endpoints"             -> endpointObjs,
+      "sinks"                 -> sinkRows.toList,
+      "data_models"           -> modelObjs
+    )
+
+    val target: Path = Paths.get(outDir)
+    Files.createDirectories(target)
+    Files.write(
+      target.resolve("export.json"),
+      ujson.write(document, indent = 2).getBytes("UTF-8"),
+      StandardOpenOption.CREATE,
+      StandardOpenOption.TRUNCATE_EXISTING
+    )
+    s"wadi export: ${closure.size} methods, ${endpointObjs.size} endpoints, ${sinkRows.size} sinks -> $outDir/export.json"
+  }
+
+  /** BFS over resolved calls (incl. DI-added edges), internal methods only. */
+  private def reachableClosure(roots: List[Method]): List[Method] = {
+    val ordered = mutable.LinkedHashMap.empty[Long, Method]
+    val queue   = mutable.Queue.from(roots)
+    while (queue.nonEmpty) {
+      val current = queue.dequeue()
+      if (!ordered.contains(current.id)) {
+        ordered.put(current.id, current)
+        current.call.callee.filterNot(_.isExternal).filterNot(_.name.startsWith("<")).l.foreach { callee =>
+          if (!ordered.contains(callee.id)) queue.enqueue(callee)
+        }
+      }
+    }
+    ordered.values.toList
+  }
+
+  private def methodJson(method: Method): ujson.Obj =
+    ujson.Obj(
+      "id"          -> num(method.id),
+      "full_name"   -> method.fullName,
+      "signature"   -> method.signature,
+      "filename"    -> method.filename,
+      "line"        -> lineOf(method.lineNumber),
+      "line_end"    -> lineOf(method.lineNumberEnd),
+      "code"        -> firstLine(method.code),
+      "doc_comment" -> ujson.Null,
+      "return_type" -> method.methodReturn.typeFullName,
+      "params" -> method.parameter.indexGt(0).l.map(p =>
+        ujson.Obj("name" -> p.name, "type_name" -> p.typeFullName)
+      ),
+      "tags" -> method.tag.l.map(t => s"${t.name}=${t.value}")
+    )
+
+  /** Container control structures may legitimately hold nested statements;
+    * everything else (calls, returns, throws) is a leaf — frontend lowering
+    * artifacts inside them (e.g. `throw new X()` desugaring) are not statements.
+    */
+  private val ContainerStructureTypes = Set("IF", "FOR", "WHILE", "DO", "SWITCH", "TRY", "ELSE")
+
+  private def isLeafStatement(node: AstNode): Boolean = node match {
+    case cs: ControlStructure => !ContainerStructureTypes.contains(cs.controlStructureType)
+    case _                    => true
+  }
+
+  /** Statement nodes of a method: AST children of blocks, in line order,
+    * excluding lowering artifacts nested inside leaf statements.
+    */
+  private def statementsOf(method: Method): List[AstNode] = {
+    val candidates = method.ast
+      .filter(node => StatementLabels.contains(node.label))
+      .filter(node => node.astParent.isBlock)
+      .filterNot {
+        case call: Call => call.name == "<operator>.fieldAccess" // bare field reads aren't statements
+        case _          => false
+      }
+      .l
+    val candidateIds = candidates.map(_.id).toSet
+    candidates
+      .filterNot(node => hasLeafStatementAncestor(node, candidateIds, candidates))
+      .sortBy(n => (lineOf(n.lineNumber), n.id))
+  }
+
+  private def hasLeafStatementAncestor(
+    node: AstNode,
+    candidateIds: Set[Long],
+    candidates: List[AstNode]
+  ): Boolean = {
+    val leafIds = candidates.filter(isLeafStatement).map(_.id).toSet
+    var current = node.astParent
+    while (current != null && !current.isInstanceOf[Method]) {
+      if (leafIds.contains(current.id) && candidateIds.contains(current.id)) return true
+      current = current.astParent
+    }
+    false
+  }
+
+  /** Nearest enclosing statement for every node in the method (walk up the AST). */
+  private def nearestEnclosingStatement(
+    method: Method,
+    statementIds: Set[Long]
+  ): mutable.Map[Long, Long] = {
+    val enclosing = mutable.Map.empty[Long, Long]
+    method.ast.l.foreach { node =>
+      var current: AstNode = node
+      var done             = false
+      var steps            = 0
+      while (!done && steps < 10_000) {
+        if (statementIds.contains(current.id)) {
+          enclosing(node.id) = current.id
+          done = true
+        } else if (current.isInstanceOf[Method]) {
+          done = true // reached the method root: node sits outside any statement
+        } else {
+          current = current.astParent
+        }
+        steps += 1
+      }
+    }
+    enclosing
+  }
+
+  private def cfgJson(
+    method: Method,
+    statements: List[AstNode],
+    exportedMethodIds: Set[Long],
+    sinkRows: mutable.ListBuffer[ujson.Obj]
+  ): ujson.Obj = {
+    val statementIds = statements.map(_.id).toSet
+
+    // Nearest-enclosing mapping: a node inside an if-body maps to its own
+    // statement, not to the outer if (a first-claimant map would mislabel
+    // branch targets as self-loops).
+    val enclosing = nearestEnclosingStatement(method, statementIds)
+
+    val nodeObjs = statements.map { statement =>
+      val (kind, callInfo) = classify(statement, exportedMethodIds)
+      callInfo.flatMap(_.sinkTag).foreach { case (sinkKind, sinkCall) =>
+        sinkRows += sinkJson(statement.id, method.id, sinkKind, sinkCall)
+      }
+      val obj = ujson.Obj(
+        "id"       -> num(statement.id),
+        "kind"     -> kind,
+        "code"     -> firstLine(statement.code),
+        "line"     -> lineOf(statement.lineNumber),
+        "line_end" -> lineOf(statement.lineNumber)
+      )
+      callInfo.foreach { info =>
+        obj("call") = ujson.Obj(
+          "callee_full_name" -> info.calleeFullName,
+          "callee_id"        -> info.calleeId.map(id => ujson.Num(id.toDouble)).getOrElse(ujson.Null),
+          "resolved"         -> info.resolved,
+          "via_di"           -> info.viaDi
+        )
+      }
+      statement match {
+        case cs: ControlStructure =>
+          cs.condition.headOption.foreach(condition => obj("condition_code") = condition.code)
+        case _ => ()
+      }
+      obj
+    }
+
+    // Project the expression-level CFG onto statements.
+    val projected = mutable.LinkedHashSet.empty[(Long, Long)]
+    method.cfgNode.l.foreach { cfgNode =>
+      enclosing.get(cfgNode.id).foreach { sourceStatement =>
+        cfgNode._cfgOut.foreach { successor =>
+          enclosing.get(successor.id).foreach { targetStatement =>
+            if (sourceStatement != targetStatement)
+              projected.add((sourceStatement, targetStatement))
+          }
+        }
+      }
+    }
+
+    // Relabel IF edges as true/false from the AST.
+    val labels = mutable.Map.empty[(Long, Long), String]
+    statements.collect { case cs: ControlStructure if cs.controlStructureType == "IF" => cs }.foreach { ifStatement =>
+      firstStatementIn(ifStatement.whenTrue.l, statementIds, enclosing, ifStatement.id).foreach {
+        target => labels((ifStatement.id, target)) = "true"
+      }
+      firstStatementIn(ifStatement.whenFalse.l, statementIds, enclosing, ifStatement.id).foreach {
+        target => labels((ifStatement.id, target)) = "false"
+      }
+    }
+
+    ujson.Obj(
+      "method_id" -> num(method.id),
+      "nodes"     -> nodeObjs,
+      "edges" -> projected.toList.map { case (source, target) =>
+        ujson.Obj(
+          "source" -> num(source),
+          "target" -> num(target),
+          "label"  -> labels.getOrElse((source, target), "flow")
+        )
+      }
+    )
+  }
+
+  /** The first statement inside a branch arm's subtree (for true/false labels).
+    *
+    * The arm's Block itself maps up to the surrounding IF — exclude it, or a
+    * branch label would degenerate to a self-loop.
+    */
+  private def firstStatementIn(
+    roots: List[AstNode],
+    statementIds: Set[Long],
+    enclosing: mutable.Map[Long, Long],
+    excludeStatementId: Long
+  ): Option[Long] =
+    roots.iterator
+      .flatMap(_.ast.l)
+      .flatMap(node => enclosing.get(node.id))
+      .find(id => statementIds.contains(id) && id != excludeStatementId)
+
+  private case class CallInfo(
+    calleeFullName: String,
+    calleeId: Option[Long],
+    resolved: Boolean,
+    viaDi: Boolean,
+    sinkTag: Option[(String, Call)]
+  )
+
+  private def classify(statement: AstNode, exportedMethodIds: Set[Long]): (String, Option[CallInfo]) =
+    statement match {
+      case cs: ControlStructure =>
+        cs.controlStructureType match {
+          case "IF"                        => ("branch", None)
+          case "FOR" | "WHILE" | "DO"      => ("loop", None)
+          case _                           => ("statement", None)
+        }
+      case _ if statement.label == "RETURN" =>
+        ("return", primaryCallOf(statement, exportedMethodIds))
+      case _ =>
+        primaryCallOf(statement, exportedMethodIds) match {
+          case some @ Some(_) => ("call", some)
+          case None           => ("statement", None)
+        }
+    }
+
+  /** The most interesting real (non-operator) call inside a statement subtree. */
+  private def primaryCallOf(statement: AstNode, exportedMethodIds: Set[Long]): Option[CallInfo] = {
+    val realCalls = statement.ast.isCall
+      .filterNot(_.name.startsWith(OperatorPrefix))
+      .l
+      .sortBy(_.id)
+    // Prefer a tagged sink call, then one that resolves into the export, then the first.
+    val chosen = realCalls
+      .find(c => c.tag.nameExact("sink").nonEmpty)
+      .orElse(realCalls.find(c => c.callee.filterNot(_.isExternal).nonEmpty))
+      .orElse(realCalls.headOption)
+    chosen.map { call =>
+      val internalCallees = call.callee.filterNot(_.isExternal).l
+      // An interface method and its DI-resolved implementation can both be
+      // internal; prefer the one with a body — that is where the flow goes.
+      val concrete = internalCallees
+        .find(_.body.astChildren.nonEmpty)
+        .orElse(internalCallees.headOption)
+      val viaDi = call.tag.nameExact("wadi-di").nonEmpty
+      val sink  = call.tag.nameExact("sink").value.headOption.map(kind => (kind, call))
+      CallInfo(
+        calleeFullName = concrete.map(_.fullName).getOrElse(call.methodFullName),
+        calleeId = concrete.map(_.id).filter(exportedMethodIds.contains),
+        resolved = internalCallees.nonEmpty,
+        viaDi = viaDi,
+        sinkTag = sink
+      )
+    }
+  }
+
+  private def sinkJson(statementId: Long, methodId: Long, kind: String, call: Call): ujson.Obj = {
+    val (value, confidence, verb) =
+      if (kind == "http-client") recoverUrl(call) else (None, "none", None)
+    ujson.Obj(
+      "node_id"          -> num(statementId),
+      "method_id"        -> num(methodId),
+      "kind"             -> kind,
+      "value"            -> value.map(ujson.Str(_)).getOrElse(ujson.Null),
+      "value_confidence" -> (if (value.isDefined) confidence else "none"),
+      "http_verb"        -> verb.map(ujson.Str(_)).getOrElse(ujson.Null),
+      "mechanism"        -> (if (kind == "http-client") "resttemplate" else ujson.Null)
+    )
+  }
+
+  /** Literal/concat URL recovery (§5.2 step 4, Phase 1 scope: no full slicing yet).
+    *
+    * A pure literal argument is EXACT; a concatenation with literal parts is
+    * HEURISTIC (non-literal segments become `{?}`); anything else is an honest
+    * undetermined target (P10).
+    */
+  private def recoverUrl(call: Call): (Option[String], String, Option[String]) = {
+    val verb = call.name.toLowerCase match {
+      case n if n.startsWith("get")    => Some("GET")
+      case n if n.startsWith("post")   => Some("POST")
+      case n if n.startsWith("put")    => Some("PUT")
+      case n if n.startsWith("delete") => Some("DELETE")
+      case n if n.startsWith("patch")  => Some("PATCH")
+      case n if n.startsWith("exchange") => None
+      case _                           => None
+    }
+    call.argument.argumentIndex(1).headOption match {
+      case Some(argument) if argument.label == "LITERAL" =>
+        (Some(stripQuotes(argument.code)), "exact", verb)
+      case Some(argument) if argument.label == "CALL" && argument.code.contains("\"") =>
+        (Some(concatToTemplate(argument.code)), "heuristic", verb)
+      case _ =>
+        (None, "none", verb)
+    }
+  }
+
+  /** `invUrl + "/stock/" + id` -> `{?}/stock/{?}`. */
+  private def concatToTemplate(code: String): String = {
+    val parts = code.split('+').map(_.trim)
+    parts.map { part =>
+      if (part.startsWith("\"") && part.endsWith("\"")) stripQuotes(part) else "{?}"
+    }.mkString
+  }
+
+  private def stripQuotes(literal: String): String =
+    literal.stripPrefix("\"").stripSuffix("\"")
+
+  private def firstLine(code: String): String =
+    code.linesIterator.nextOption().getOrElse("").take(500)
+}

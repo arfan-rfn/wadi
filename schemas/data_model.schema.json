@@ -1,0 +1,155 @@
+{
+  "$defs": {
+    "DataModelField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "nullable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None = not statically determinable (P10)",
+          "title": "Nullable"
+        },
+        "type_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Name"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "DataModelField",
+      "type": "object"
+    },
+    "DataModelRelation": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field"
+        },
+        "kind": {
+          "description": "e.g. 'one-to-many', 'embedded', 'reference'",
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "target_entity": {
+          "minLength": 1,
+          "title": "Target Entity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "target_entity"
+      ],
+      "title": "DataModelRelation",
+      "type": "object"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.0.0/data_model.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One persisted entity of one service.",
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "entity": {
+      "description": "Entity/class name, e.g. 'Order'",
+      "minLength": 1,
+      "title": "Entity",
+      "type": "string"
+    },
+    "fields": {
+      "items": {
+        "$ref": "#/$defs/DataModelField"
+      },
+      "title": "Fields",
+      "type": "array"
+    },
+    "id": {
+      "pattern": "^dm_[0-9a-f]{16}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "persistence_framework": {
+      "description": "e.g. 'spring-data-mongodb'",
+      "minLength": 1,
+      "title": "Persistence Framework",
+      "type": "string"
+    },
+    "relations": {
+      "items": {
+        "$ref": "#/$defs/DataModelRelation"
+      },
+      "title": "Relations",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "storage_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Collection/table name where recoverable",
+      "title": "Storage Name"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "service_id",
+    "id",
+    "entity",
+    "persistence_framework"
+  ],
+  "title": "DataModel",
+  "type": "object"
+}

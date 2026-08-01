@@ -1,0 +1,313 @@
+{
+  "$defs": {
+    "AuthEvidence": {
+      "additionalProperties": false,
+      "description": "One piece of evidence behind an auth claim \u2014 every claim carries its source (\u00a75.2).",
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detail": {
+          "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/AuthEvidenceKind"
+        }
+      },
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "title": "AuthEvidence",
+      "type": "object"
+    },
+    "AuthEvidenceKind": {
+      "enum": [
+        "annotation",
+        "security-dsl",
+        "config"
+      ],
+      "title": "AuthEvidenceKind",
+      "type": "string"
+    },
+    "EndpointAuth": {
+      "additionalProperties": false,
+      "description": "Structured authorization state of an endpoint.\n\n``authenticated`` is tri-state (P10): True/False are *claims backed by\nevidence*; None means honestly unknown \u2014 never defaulted to False.",
+      "properties": {
+        "authenticated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Authenticated"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/AuthEvidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "mechanism": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "e.g. 'spring-security'; None when no framework was detected",
+          "title": "Mechanism"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "title": "EndpointAuth",
+      "type": "object"
+    },
+    "EndpointParam": {
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/ParamLocation"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "type_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Name"
+        }
+      },
+      "required": [
+        "name",
+        "location"
+      ],
+      "title": "EndpointParam",
+      "type": "object"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
+      ],
+      "title": "HttpMethod",
+      "type": "string"
+    },
+    "MethodRef": {
+      "additionalProperties": false,
+      "description": "Reference to a method: stable content-derived id + human-readable signature.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^m_[0-9a-f]{16}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Fully-qualified method signature",
+          "minLength": 1,
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "signature"
+      ],
+      "title": "MethodRef",
+      "type": "object"
+    },
+    "ParamLocation": {
+      "enum": [
+        "path",
+        "query",
+        "body",
+        "header"
+      ],
+      "title": "ParamLocation",
+      "type": "string"
+    },
+    "SourceAnchor": {
+      "additionalProperties": false,
+      "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "file": {
+          "description": "Path relative to the service build root",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "variant": {
+          "$ref": "#/$defs/SourceVariant",
+          "default": "original"
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "title": "SourceAnchor",
+      "type": "object"
+    },
+    "SourceVariant": {
+      "description": "Whether an anchor refers to original repo text or a generated variant (\u00a75.3).\n\n``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) \u2014 the text\nthat was actually analyzed, served by source-on-demand with a badge.",
+      "enum": [
+        "original",
+        "generated"
+      ],
+      "title": "SourceVariant",
+      "type": "string"
+    },
+    "TriggerKind": {
+      "description": "v1: http. Reserved (\u00a77): queue, stream, schedule.",
+      "enum": [
+        "http",
+        "queue",
+        "stream",
+        "schedule"
+      ],
+      "title": "TriggerKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.0.0/endpoint.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One REST endpoint of one service within a snapshot.",
+  "properties": {
+    "auth": {
+      "$ref": "#/$defs/EndpointAuth"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "full_uri": {
+      "description": "Route as written, e.g. /orders/{orderId}",
+      "minLength": 1,
+      "title": "Full Uri",
+      "type": "string"
+    },
+    "handler": {
+      "$ref": "#/$defs/MethodRef"
+    },
+    "http_method": {
+      "$ref": "#/$defs/HttpMethod"
+    },
+    "id": {
+      "pattern": "^ep_[0-9a-f]{16}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "params": {
+      "items": {
+        "$ref": "#/$defs/EndpointParam"
+      },
+      "title": "Params",
+      "type": "array"
+    },
+    "response_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Response Type"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    },
+    "simplified_uri": {
+      "description": "Identity form, e.g. /orders/{?}",
+      "minLength": 1,
+      "title": "Simplified Uri",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "trigger": {
+      "$ref": "#/$defs/TriggerKind",
+      "default": "http"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "service_id",
+    "id",
+    "http_method",
+    "full_uri",
+    "simplified_uri",
+    "handler"
+  ],
+  "title": "Endpoint",
+  "type": "object"
+}

@@ -1,0 +1,142 @@
+"""Per-endpoint interprocedural control-flow graph artifact (§7).
+
+Design invariants enforced here (not left to writers):
+
+- node ids unique; every edge references existing nodes;
+- exactly one entry node (the endpoint handler's entry);
+- kind-specific payloads (condition / callee / method_info) appear only on the
+  node kinds they belong to;
+- every node carries a source anchor, its one-line source text, and its
+  owning-method ref — the roll-up key for progressive disclosure.
+
+Full source bodies are never duplicated into artifacts — served on demand
+(§5.3).
+"""
+
+from enum import StrEnum
+from typing import Self
+
+from pydantic import Field, model_validator
+
+from wadi_contracts.base import ArtifactEnvelope, WadiModel
+from wadi_contracts.enums import IcfgEdgeKind, IcfgNodeKind, SinkKind
+from wadi_contracts.source import MethodRef, SourceAnchor
+
+
+class OperandOrigin(StrEnum):
+    PAYLOAD = "payload"
+    LOCAL = "local"
+    FIELD = "field"
+    CONFIG = "config"
+    UNKNOWN = "unknown"
+
+
+class OperandRef(WadiModel):
+    """A structured reference to one operand of a branch condition."""
+
+    name: str = Field(min_length=1)
+    origin: OperandOrigin = OperandOrigin.UNKNOWN
+
+
+class BranchCondition(WadiModel):
+    """Branch/loop condition: expression text + operand refs where recoverable (§7)."""
+
+    expression: str = Field(min_length=1)
+    operands: list[OperandRef] = Field(default_factory=list[OperandRef])
+
+
+class MethodParam(WadiModel):
+    name: str
+    type_name: str | None = None
+
+
+class MethodInfo(WadiModel):
+    """Carried by method entry nodes: signature, typing, docs, behavior badges (§7)."""
+
+    signature: str = Field(min_length=1)
+    params: list[MethodParam] = Field(default_factory=list[MethodParam])
+    return_type: str | None = None
+    doc_comment: str | None = None
+    badges: list[str] = Field(
+        default_factory=list[str],
+        description="Derived behavior badges from tags, e.g. 'touches-db', 'calls-http'",
+    )
+
+
+class IcfgNode(WadiModel):
+    id: str = Field(min_length=1)
+    kind: IcfgNodeKind
+    anchor: SourceAnchor
+    source_text: str = Field(
+        description="The node's one-line source text (graph labels are real code)"
+    )
+    method: MethodRef = Field(description="Owning method — the roll-up key (§7)")
+    condition: BranchCondition | None = None
+    callee: MethodRef | None = None
+    sink: SinkKind | None = None
+    remote_call_id: str | None = Field(default=None, pattern=r"^rc_[0-9a-f]{16}$")
+    mq_interaction_id: str | None = Field(default=None, pattern=r"^mq_[0-9a-f]{16}$")
+    method_info: MethodInfo | None = None
+
+    @model_validator(mode="after")
+    def _kind_specific_payloads(self) -> Self:
+        if self.condition is not None and self.kind not in (
+            IcfgNodeKind.BRANCH,
+            IcfgNodeKind.LOOP,
+        ):
+            raise ValueError(f"condition is only valid on branch/loop nodes, not {self.kind}")
+        if self.callee is not None and self.kind is not IcfgNodeKind.CALL:
+            raise ValueError(f"callee is only valid on call nodes, not {self.kind}")
+        if self.method_info is not None and self.kind is not IcfgNodeKind.ENTRY:
+            raise ValueError(f"method_info is only valid on entry nodes, not {self.kind}")
+        if (self.remote_call_id or self.mq_interaction_id) and self.kind is not IcfgNodeKind.CALL:
+            raise ValueError("remote-call / MQ markers are only valid on call nodes")
+        return self
+
+
+class IcfgEdge(WadiModel):
+    source: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    kind: IcfgEdgeKind
+
+
+class Icfg(ArtifactEnvelope):
+    """The assembled ICFG of one endpoint (statement-granularity, coarsened).
+
+    The root is *explicit* (``entry_node_id``), never inferred from topology:
+    a recursive flow back into the handler would give the root incoming
+    edges, so "the entry with no incoming edges" is not a sound definition.
+    """
+
+    endpoint_id: str = Field(pattern=r"^ep_[0-9a-f]{16}$")
+    entry_node_id: str = Field(
+        min_length=1, description="The endpoint handler's entry node (explicit root)"
+    )
+    nodes: list[IcfgNode] = Field(min_length=1)
+    edges: list[IcfgEdge] = Field(default_factory=list[IcfgEdge])
+
+    @model_validator(mode="after")
+    def _graph_integrity(self) -> Self:
+        node_ids: set[str] = set()
+        entry_nodes: dict[str, IcfgNode] = {}
+        for node in self.nodes:
+            if node.id in node_ids:
+                raise ValueError(f"duplicate node id: {node.id!r}")
+            node_ids.add(node.id)
+            if node.kind is IcfgNodeKind.ENTRY:
+                entry_nodes[node.id] = node
+        root = entry_nodes.get(self.entry_node_id)
+        if root is None:
+            raise ValueError(
+                f"entry_node_id {self.entry_node_id!r} must reference an entry node in the graph"
+            )
+        for edge in self.edges:
+            if edge.source not in node_ids:
+                raise ValueError(f"edge source references unknown node: {edge.source!r}")
+            if edge.target not in node_ids:
+                raise ValueError(f"edge target references unknown node: {edge.target!r}")
+        return self
+
+    def root_entry(self) -> IcfgNode:
+        """The endpoint handler's entry node."""
+        return next(node for node in self.nodes if node.id == self.entry_node_id)

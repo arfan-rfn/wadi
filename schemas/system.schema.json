@@ -1,0 +1,90 @@
+{
+  "$defs": {
+    "RepoSource": {
+      "additionalProperties": false,
+      "description": "One repository of a system: a git URL or a local path (first-class, \u00a77).",
+      "properties": {
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Branch to track; None = the remote default branch",
+          "title": "Branch"
+        },
+        "cred_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opaque reference to stored credentials (never the secret)",
+          "title": "Cred Ref"
+        },
+        "source": {
+          "description": "git URL (https/ssh/scp) or local path",
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "RepoSource",
+      "type": "object"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.0.0/system.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A registered analysis target \u2014 the only place repo topology exists (P3).",
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "id": {
+      "minLength": 1,
+      "pattern": "^sys_[0-9a-f]{16,32}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "repos": {
+      "items": {
+        "$ref": "#/$defs/RepoSource"
+      },
+      "minItems": 1,
+      "title": "Repos",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "repos"
+  ],
+  "title": "System",
+  "type": "object"
+}

@@ -1,0 +1,499 @@
+"""Per-endpoint ICFG assembly (§5.2 step 3) and artifact materialization.
+
+Takes one :class:`ServiceExport` (the Scala side's bulk export) and produces
+contract artifacts: endpoints, per-endpoint ICFGs (interprocedural, statement
+granularity), remote calls, MQ interactions, and data models.
+
+Interprocedural structure: the walk starts at the endpoint handler and
+follows *resolved* call edges to methods present in the export (the
+endpoint-reachable closure). Cycles are fine — the ICFG is a graph, calls
+into an already-included method just add edges (§5.4 note applies one level
+down). Unresolved callees stay as honest call nodes with no interior (P10).
+"""
+
+import logging
+from dataclasses import dataclass, field
+
+from wadi_contracts import (
+    BranchCondition,
+    Confidence,
+    DataModel,
+    DataModelField,
+    Endpoint,
+    EndpointAuth,
+    HttpMethod,
+    Icfg,
+    IcfgEdge,
+    IcfgEdgeKind,
+    IcfgNode,
+    IcfgNodeKind,
+    MethodInfo,
+    MethodParam,
+    MethodRef,
+    MqDirection,
+    MqInteraction,
+    RemoteCall,
+    SinkKind,
+    SourceAnchor,
+    method_id,
+    mq_interaction_id,
+    remote_call_id,
+)
+from wadi_joern_client.export import (
+    CfgNodeKind,
+    ExportCfg,
+    ExportCfgEdgeLabel,
+    ExportMethod,
+    ExportSink,
+    ServiceExport,
+    SinkValueConfidence,
+)
+
+logger = logging.getLogger(__name__)
+
+_CFG_KIND_TO_ICFG = {
+    CfgNodeKind.STATEMENT: IcfgNodeKind.STATEMENT,
+    CfgNodeKind.BRANCH: IcfgNodeKind.BRANCH,
+    CfgNodeKind.LOOP: IcfgNodeKind.LOOP,
+    CfgNodeKind.CALL: IcfgNodeKind.CALL,
+    CfgNodeKind.RETURN: IcfgNodeKind.RETURN,
+}
+
+_EDGE_LABEL_TO_KIND = {
+    ExportCfgEdgeLabel.FLOW: IcfgEdgeKind.FLOW,
+    ExportCfgEdgeLabel.TRUE: IcfgEdgeKind.TRUE_BRANCH,
+    ExportCfgEdgeLabel.FALSE: IcfgEdgeKind.FALSE_BRANCH,
+}
+
+_CONFIDENCE_MAP = {
+    SinkValueConfidence.EXACT: Confidence.EXACT,
+    SinkValueConfidence.HEURISTIC: Confidence.HEURISTIC,
+    SinkValueConfidence.NONE: Confidence.NONE,
+}
+
+
+@dataclass
+class AssembledArtifacts:
+    endpoints: list[Endpoint] = field(default_factory=list[Endpoint])
+    icfgs: list[Icfg] = field(default_factory=list[Icfg])
+    remote_calls: list[RemoteCall] = field(default_factory=list[RemoteCall])
+    mq_interactions: list[MqInteraction] = field(default_factory=list[MqInteraction])
+    data_models: list[DataModel] = field(default_factory=list[DataModel])
+
+
+class ExportIncompatibleError(RuntimeError):
+    """The export's schema major version doesn't match this reader."""
+
+
+class Assembler:
+    def __init__(self, *, snapshot_id: str, service_id: str) -> None:
+        self._snapshot_id = snapshot_id
+        self._service_id = service_id
+
+    def assemble(self, export: ServiceExport) -> AssembledArtifacts:
+        if not export.compatible_with_reader():
+            raise ExportIncompatibleError(
+                f"export schema {export.export_schema_version} is incompatible with this worker"
+            )
+        methods = {m.id: m for m in export.methods}
+        cfgs = {c.method_id: c for c in export.cfgs}
+        sinks_by_node = {s.node_id: s for s in export.sinks}
+
+        artifacts = AssembledArtifacts()
+        artifacts.remote_calls = self._build_remote_calls(export, methods)
+        artifacts.mq_interactions = self._build_mq_interactions(export, methods)
+        artifacts.data_models = self._build_data_models(export)
+
+        for export_endpoint in export.endpoints:
+            handler = methods.get(export_endpoint.method_id)
+            if handler is None:
+                logger.warning(
+                    "endpoint %s %s references method id %d missing from export — skipped",
+                    export_endpoint.http_method,
+                    export_endpoint.uri,
+                    export_endpoint.method_id,
+                )
+                continue
+            endpoint = Endpoint.create(
+                snapshot_id=self._snapshot_id,
+                service_id=self._service_id,
+                http_method=HttpMethod(export_endpoint.http_method.upper()),
+                full_uri=export_endpoint.uri,
+                handler=self._method_ref(handler),
+                response_type=handler.return_type,
+                auth=EndpointAuth(),  # honest unknown until the security pack lands (Phase 2)
+            )
+            artifacts.endpoints.append(endpoint)
+            artifacts.icfgs.append(
+                self._assemble_icfg(endpoint, handler, methods, cfgs, sinks_by_node)
+            )
+        return artifacts
+
+    # --- ICFG construction -----------------------------------------------------
+
+    def _assemble_icfg(
+        self,
+        endpoint: Endpoint,
+        handler: ExportMethod,
+        methods: dict[int, ExportMethod],
+        cfgs: dict[int, ExportCfg],
+        sinks_by_node: dict[int, ExportSink],
+    ) -> Icfg:
+        closure = self._reachable_closure(handler.id, methods, cfgs)
+        nodes: list[IcfgNode] = []
+        edges: list[IcfgEdge] = []
+
+        for included_id in closure:
+            method = methods[included_id]
+            cfg = cfgs.get(included_id)
+            self._emit_method_subgraph(method, cfg, sinks_by_node, methods, closure, nodes, edges)
+
+        return Icfg(
+            snapshot_id=self._snapshot_id,
+            service_id=self._service_id,
+            endpoint_id=endpoint.id,
+            entry_node_id=f"m{handler.id}:entry",
+            nodes=nodes,
+            edges=edges,
+        )
+
+    def _reachable_closure(
+        self,
+        handler_id: int,
+        methods: dict[int, ExportMethod],
+        cfgs: dict[int, ExportCfg],
+    ) -> list[int]:
+        """Methods reachable from the handler via resolved in-export calls (BFS order)."""
+        visited: list[int] = []
+        seen: set[int] = set()
+        queue = [handler_id]
+        while queue:
+            current = queue.pop(0)
+            if current in seen:
+                continue
+            seen.add(current)
+            visited.append(current)
+            cfg = cfgs.get(current)
+            if cfg is None:
+                continue
+            for node in cfg.nodes:
+                if (
+                    node.call is not None
+                    and node.call.resolved
+                    and node.call.callee_id is not None
+                    and node.call.callee_id in methods
+                    and node.call.callee_id not in seen
+                ):
+                    queue.append(node.call.callee_id)
+        return visited
+
+    def _emit_method_subgraph(
+        self,
+        method: ExportMethod,
+        cfg: ExportCfg | None,
+        sinks_by_node: dict[int, ExportSink],
+        methods: dict[int, ExportMethod],
+        closure: list[int],
+        nodes: list[IcfgNode],
+        edges: list[IcfgEdge],
+    ) -> None:
+        method_ref = self._method_ref(method)
+        entry_id = f"m{method.id}:entry"
+        exit_id = f"m{method.id}:exit"
+        nodes.append(
+            IcfgNode(
+                id=entry_id,
+                kind=IcfgNodeKind.ENTRY,
+                anchor=self._anchor(method.filename, method.line, method.line),
+                source_text=method.code,
+                method=method_ref,
+                method_info=MethodInfo(
+                    signature=method.signature,
+                    params=[MethodParam(name=p.name, type_name=p.type_name) for p in method.params],
+                    return_type=method.return_type,
+                    doc_comment=method.doc_comment,
+                    badges=self._badges(method, cfg, sinks_by_node),
+                ),
+            )
+        )
+
+        cfg_nodes = cfg.nodes if cfg is not None else []
+        cfg_edges = cfg.edges if cfg is not None else []
+        closure_set = set(closure)
+
+        for cfg_node in cfg_nodes:
+            node_id = f"m{method.id}:n{cfg_node.id}"
+            sink = sinks_by_node.get(cfg_node.id)
+            kind = _CFG_KIND_TO_ICFG[cfg_node.kind]
+            callee_ref: MethodRef | None = None
+            remote_id: str | None = None
+            mq_id: str | None = None
+            sink_kind: SinkKind | None = None
+            if cfg_node.kind is CfgNodeKind.CALL and cfg_node.call is not None:
+                callee_ref = self._callee_ref(
+                    cfg_node.call.callee_id, cfg_node.call.callee_full_name, methods
+                )
+            if sink is not None and kind is IcfgNodeKind.CALL:
+                sink_kind = self._sink_kind(sink.kind)
+                if sink_kind is SinkKind.HTTP_CLIENT:
+                    remote_id = remote_call_id(
+                        self._service_id,
+                        method.filename,
+                        cfg_node.line,
+                        sink.value or "<undetermined>",
+                    )
+                elif sink_kind is SinkKind.MQ:
+                    mq_id = mq_interaction_id(
+                        self._service_id,
+                        method.filename,
+                        cfg_node.line,
+                        MqDirection.PUBLISH.value,
+                        sink.value or "<undetermined>",
+                    )
+            nodes.append(
+                IcfgNode(
+                    id=node_id,
+                    kind=kind,
+                    anchor=self._anchor(method.filename, cfg_node.line, cfg_node.line_end),
+                    source_text=cfg_node.code,
+                    method=method_ref,
+                    condition=(
+                        BranchCondition(expression=cfg_node.condition_code)
+                        if cfg_node.condition_code
+                        and kind in (IcfgNodeKind.BRANCH, IcfgNodeKind.LOOP)
+                        else None
+                    ),
+                    callee=callee_ref,
+                    sink=sink_kind,
+                    remote_call_id=remote_id,
+                    mq_interaction_id=mq_id,
+                )
+            )
+
+        nodes.append(
+            IcfgNode(
+                id=exit_id,
+                kind=IcfgNodeKind.EXIT,
+                anchor=self._anchor(
+                    method.filename, method.line_end or method.line, method.line_end or method.line
+                ),
+                source_text="<exit>",
+                method=method_ref,
+            )
+        )
+
+        # Intra-method flow edges.
+        local = {c.id for c in cfg_nodes}
+        has_incoming = {e.target for e in cfg_edges if e.source in local}
+        has_outgoing = {e.source for e in cfg_edges if e.target in local}
+        for edge in cfg_edges:
+            if edge.source in local and edge.target in local:
+                edges.append(
+                    IcfgEdge(
+                        source=f"m{method.id}:n{edge.source}",
+                        target=f"m{method.id}:n{edge.target}",
+                        kind=_EDGE_LABEL_TO_KIND[edge.label],
+                    )
+                )
+        if cfg_nodes:
+            for cfg_node in cfg_nodes:
+                if cfg_node.id not in has_incoming:
+                    edges.append(
+                        IcfgEdge(
+                            source=entry_id,
+                            target=f"m{method.id}:n{cfg_node.id}",
+                            kind=IcfgEdgeKind.FLOW,
+                        )
+                    )
+                if cfg_node.id not in has_outgoing or cfg_node.kind is CfgNodeKind.RETURN:
+                    edges.append(
+                        IcfgEdge(
+                            source=f"m{method.id}:n{cfg_node.id}",
+                            target=exit_id,
+                            kind=IcfgEdgeKind.FLOW,
+                        )
+                    )
+        else:
+            edges.append(IcfgEdge(source=entry_id, target=exit_id, kind=IcfgEdgeKind.FLOW))
+
+        # Interprocedural call/return edges into inlined callees.
+        for cfg_node in cfg_nodes:
+            call = cfg_node.call
+            if (
+                call is not None
+                and call.resolved
+                and call.callee_id is not None
+                and call.callee_id in closure_set
+            ):
+                node_id = f"m{method.id}:n{cfg_node.id}"
+                edges.append(
+                    IcfgEdge(
+                        source=node_id,
+                        target=f"m{call.callee_id}:entry",
+                        kind=IcfgEdgeKind.CALL,
+                    )
+                )
+                edges.append(
+                    IcfgEdge(
+                        source=f"m{call.callee_id}:exit",
+                        target=node_id,
+                        kind=IcfgEdgeKind.RETURN,
+                    )
+                )
+
+    # --- artifact builders --------------------------------------------------------
+
+    def _build_remote_calls(
+        self, export: ServiceExport, methods: dict[int, ExportMethod]
+    ) -> list[RemoteCall]:
+        calls: list[RemoteCall] = []
+        seen: set[str] = set()
+        for sink in export.sinks:
+            if self._sink_kind(sink.kind) is not SinkKind.HTTP_CLIENT:
+                continue
+            method = methods.get(sink.method_id)
+            if method is None:
+                continue
+            line = self._sink_line(sink, export)
+            call_id = remote_call_id(
+                self._service_id, method.filename, line, sink.value or "<undetermined>"
+            )
+            if call_id in seen:
+                continue
+            seen.add(call_id)
+            calls.append(
+                RemoteCall(
+                    snapshot_id=self._snapshot_id,
+                    service_id=self._service_id,
+                    id=call_id,
+                    site=self._anchor(method.filename, line, line),
+                    method=self._method_ref(method),
+                    mechanism=sink.mechanism or "http-client",
+                    http_verb=HttpMethod(sink.http_verb.upper()) if sink.http_verb else None,
+                    url=sink.value,
+                    url_confidence=_CONFIDENCE_MAP[sink.value_confidence]
+                    if sink.value is not None
+                    else Confidence.NONE,
+                )
+            )
+        return calls
+
+    def _build_mq_interactions(
+        self, export: ServiceExport, methods: dict[int, ExportMethod]
+    ) -> list[MqInteraction]:
+        interactions: list[MqInteraction] = []
+        seen: set[str] = set()
+        for sink in export.sinks:
+            if not sink.kind.startswith("mq:"):
+                continue
+            method = methods.get(sink.method_id)
+            if method is None:
+                continue
+            line = self._sink_line(sink, export)
+            interaction_id = mq_interaction_id(
+                self._service_id,
+                method.filename,
+                line,
+                MqDirection.PUBLISH.value,
+                sink.value or "<undetermined>",
+            )
+            if interaction_id in seen:
+                continue
+            seen.add(interaction_id)
+            interactions.append(
+                MqInteraction(
+                    snapshot_id=self._snapshot_id,
+                    service_id=self._service_id,
+                    id=interaction_id,
+                    direction=MqDirection.PUBLISH,
+                    broker=sink.kind.removeprefix("mq:"),
+                    topic=sink.value,
+                    topic_confidence=_CONFIDENCE_MAP[sink.value_confidence]
+                    if sink.value is not None
+                    else Confidence.NONE,
+                    site=self._anchor(method.filename, line, line),
+                    method=self._method_ref(method),
+                )
+            )
+        return interactions
+
+    def _build_data_models(self, export: ServiceExport) -> list[DataModel]:
+        from wadi_contracts import data_model_id
+
+        return [
+            DataModel(
+                snapshot_id=self._snapshot_id,
+                service_id=self._service_id,
+                id=data_model_id(self._service_id, model.entity),
+                entity=model.entity,
+                fields=[DataModelField(name=f.name, type_name=f.type_name) for f in model.fields],
+                persistence_framework=model.persistence_framework,
+                storage_name=model.storage_name,
+            )
+            for model in export.data_models
+        ]
+
+    # --- small helpers ---------------------------------------------------------------
+
+    def _method_ref(self, method: ExportMethod) -> MethodRef:
+        return MethodRef(
+            id=method_id(self._service_id, method.full_name), signature=method.full_name
+        )
+
+    def _callee_ref(
+        self, callee_id: int | None, callee_full_name: str, methods: dict[int, ExportMethod]
+    ) -> MethodRef:
+        if callee_id is not None and callee_id in methods:
+            return self._method_ref(methods[callee_id])
+        return MethodRef(
+            id=method_id(self._service_id, callee_full_name), signature=callee_full_name
+        )
+
+    def _anchor(self, filename: str, line: int, line_end: int) -> SourceAnchor:
+        start = max(line, 1)
+        return SourceAnchor(file=filename, start_line=start, end_line=max(line_end, start))
+
+    def _badges(
+        self,
+        method: ExportMethod,
+        cfg: ExportCfg | None,
+        sinks_by_node: dict[int, ExportSink],
+    ) -> list[str]:
+        badges: set[str] = set()
+        if any(tag.startswith("endpoint=") for tag in method.tags):
+            badges.add("endpoint")
+        for cfg_node in cfg.nodes if cfg is not None else []:
+            sink = sinks_by_node.get(cfg_node.id)
+            if sink is None:
+                continue
+            if sink.kind == "db":
+                badges.add("touches-db")
+            elif sink.kind == "http-client":
+                badges.add("calls-http")
+            elif sink.kind.startswith("mq:"):
+                badges.add("publishes-mq")
+        return sorted(badges)
+
+    def _sink_kind(self, kind: str) -> SinkKind:
+        """Map a registered ``sink=`` tag value to the contract enum.
+
+        Unregistered values are vocabulary drift between the packs and this
+        reader — they fail the job loudly rather than being silently absorbed
+        (§7 tag-registry rule).
+        """
+        from wadi_contracts.tags import validate_tag
+
+        validate_tag("sink", kind)
+        if kind == "db":
+            return SinkKind.DB
+        if kind == "http-client":
+            return SinkKind.HTTP_CLIENT
+        return SinkKind.MQ
+
+    def _sink_line(self, sink: ExportSink, export: ServiceExport) -> int:
+        for cfg in export.cfgs:
+            if cfg.method_id == sink.method_id:
+                for node in cfg.nodes:
+                    if node.id == sink.node_id:
+                        return max(node.line, 1)
+        return 1

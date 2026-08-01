@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# uv
+# (uv.lock IS committed — reproducible workspace)
+
+# Scala / sbt
+joern-platform/target/
+joern-platform/project/target/
+joern-platform/project/project/
+.bsp/
+.metals/
+.bloop/
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.local
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Wadi runtime data (local dev)
+.wadi-data/
+workspace/
+cpg-cache/
+.gstack/

@@ -1,0 +1,16 @@
+[project]
+name = "wadi-config"
+version = "0.1.0"
+description = "Wadi settings: the ONLY way services receive config (architecture.md §13)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.10",
+    "pydantic-settings>=2.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wadi_config"]

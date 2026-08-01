@@ -1,0 +1,34 @@
+[project]
+name = "wadi-extraction-worker"
+version = "0.1.0"
+description = "Wadi extraction worker: the pipeline owner (architecture.md §5.2)"
+requires-python = ">=3.12"
+dependencies = [
+    "networkx>=3.4",
+    "pyyaml>=6.0",
+    "wadi-contracts",
+    "wadi-storage",
+    "wadi-config",
+    "wadi-repo",
+    "wadi-joern-client",
+]
+
+[project.scripts]
+wadi-worker = "wadi_worker.main:main"
+
+[tool.uv.sources]
+wadi-contracts = { workspace = true }
+wadi-storage = { workspace = true }
+wadi-config = { workspace = true }
+wadi-repo = { workspace = true }
+wadi-joern-client = { workspace = true }
+
+[dependency-groups]
+dev = ["types-PyYAML"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wadi_worker"]

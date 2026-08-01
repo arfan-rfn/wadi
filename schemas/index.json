@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0.0",
+  "schemas": {
+    "data_model": "data_model.schema.json",
+    "endpoint": "endpoint.schema.json",
+    "extraction_job": "extraction_job.schema.json",
+    "icfg": "icfg.schema.json",
+    "mq_interaction": "mq_interaction.schema.json",
+    "remote_call": "remote_call.schema.json",
+    "service_boundary": "service_boundary.schema.json",
+    "service_summary": "service_summary.schema.json",
+    "snapshot": "snapshot.schema.json",
+    "system": "system.schema.json"
+  },
+  "tag_registry_version": "1.0.0"
+}

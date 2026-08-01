@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:mobile="http://www.google.com/schemas/sitemap-mobile/1.0" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1" xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
+<url><loc>http://localhost:3000/admin</loc><lastmod>2026-01-30T22:07:38.790Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/auth/account-deleted</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/auth/magic-link/verify</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/auth/sign-in</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/auth/sign-up</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/blog</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/blog/stack</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/dashboard/(.)edit</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/dashboard/(.)welcome</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/dashboard/edit</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/dashboard</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/dashboard/welcome</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/legal/privacy</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/legal/terms</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/settings/account</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/settings/appearance</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+<url><loc>http://localhost:3000/settings</loc><lastmod>2026-01-30T22:07:38.791Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url>
+</urlset>

@@ -1,0 +1,89 @@
+# Phase 1 Implementation Notes
+
+**Status:** Living record of decisions made while building Phase 1 (§11.1),
+in the same decision + rationale + rejected-alternatives format as
+[`architecture.md`](./architecture.md). Everything here refines that document;
+nothing contradicts it without saying so.
+
+## Decisions made during implementation
+
+**ICFG root is explicit (`entry_node_id`), not inferred.** The original model
+implied the root entry is "the entry node with no incoming edges" — recursion
+back into the handler falsifies that (the root gains an incoming CALL edge).
+The `Icfg` contract now carries `entry_node_id`; validation requires it to
+reference an entry node. *Rejected: topological inference — unsound; found by
+the mutual-recursion unit test.*
+
+**One extract job per snapshot in Phase 1.** The orchestrator enqueues a single
+EXTRACT job covering fetch → boundary scan → per-service extraction, matching
+the §4 sequence diagram (the per-service loop runs inside the worker's claimed
+job). Per-service job fan-out arrives with incremental rebuilds (Phase 3);
+`ExtractionJob.service_id` already supports it. P4 intact: only the
+orchestrator creates jobs — including the stitch job, via its snapshot monitor.
+
+**Delombok runs in `types-only` mode, not `run-delombok`.** javasrc2cpg bundles
+delombok; in its default mode it analyzes the *rewritten* source, so anchors
+land in delombok'ed coordinates while source-on-demand (Phase 1: git-backed)
+serves the original — every line misaligned. `types-only` takes type
+information from delombok but analyzes the ORIGINAL text: anchors align with
+the pinned-SHA source by construction, and every anchor is
+`variant: "original"`. Cost: the *interiors* of Lombok-generated methods are
+not analyzed — acceptable because they are accessor/constructor plumbing, and
+DI resolution (validated by `lombok-mini`) matches on interface types, not on
+generated constructor bodies. *Rejected: run-delombok + persisting rewritten
+files + `variant: "generated"` serving — the §5.3 mechanism remains the design
+for when generated-code interiors matter; revisit if dataflow through Lombok
+accessors becomes load-bearing (URL slicing, Phase 2+).*
+
+**Joern pinning is by release zip, not container tag.** Upstream publishes only
+rolling image tags (`nightly`, `master`) — unusable for the §13 exact-pin
+requirement. The wadi-joern image installs the versioned release zip
+(`v4.0.593`, matching `joernVersion` in build.sbt) onto a Temurin 21 base.
+
+**Worker↔Joern protocol (verified against the live server).** Three control
+queries per service — console `importCode.java(..., args=List("--delombok-mode",
+"types-only"))` (frontend runs as a subprocess; default overlays applied),
+`wadi.WadiPipeline.run(cpg, exportDir)`, `delete(project)` — plus the bulk
+export on the shared volume. REPL semantics: the server reports `success` for
+any *evaluated* query, including ones that raised; the client therefore
+validates content (the `wadi export:` summary marker / `Cpg[` echo), and
+treats `{"success": false, "err": "No result (yet?)..."}` as still-running.
+*Rejected: a self-contained `runFromSource` inside our jar — javasrc2cpg is
+not on the console classpath (frontends ship as separate subprocess
+distributions).*
+
+**The Scala↔Python bulk-export contract** lives in
+`wadi_joern_client/export.py` (Pydantic, `EXPORT_SCHEMA_VERSION`) and
+`WadiExport.scala` (writer). Major versions must match; the worker refuses
+mismatches. The cross-language golden test
+(`services/extraction-worker/tests/test_real_export.py`) feeds the *real*
+sbt-produced export through the Python assembler in CI.
+
+**Statement coarsening** (Scala side): statements = AST children of blocks
+(calls, control structures, returns), minus lowering artifacts nested inside
+leaf statements (e.g. `throw new X()` desugaring); the expression-level CFG is
+projected onto them; IF edges are relabeled true/false from the AST
+(`whenTrue`/`whenFalse`); each node maps to its *nearest* enclosing statement
+(first-claimant mapping mislabels branch targets as self-loops).
+
+**Timestamps are millisecond precision** (`wadi-contracts` time policy):
+BSON datetimes are ms-precision; without truncation at the contract layer,
+artifacts would not round-trip storage with exact equality.
+
+**Method anchors include annotations.** Joern anchors a method declaration at
+its first annotation line (e.g. `@GetMapping`), not the signature line. UI and
+consumers should treat the anchor window as declaration-inclusive.
+
+## Phase 1 gaps (known, deliberate)
+
+- Endpoint `params[]` are not yet populated from `@PathVariable`/`@RequestParam`
+  annotations (additive worker/pack enrichment).
+- URL recovery is literal/concatenation-based (EXACT/HEURISTIC/NONE); real
+  backward slicing through fields and config keys is the Phase 2 item (§5.2.4).
+- The stitcher is the §5.4 skeleton: it reads all snapshot artifacts and
+  reports counts; matching, Neo4j population, and the coverage report are
+  Phase 2.
+- MQ interactions are modeled and assembled but no Kafka/Rabbit packs exist
+  yet (Phase 3).
+- `wadi up` works against locally built images; publishing to ghcr.io and the
+  PyPI release pipeline are release-engineering work, not code gaps.

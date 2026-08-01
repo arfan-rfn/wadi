@@ -1,0 +1,126 @@
+{
+  "$defs": {
+    "NetworkIdentity": {
+      "additionalProperties": false,
+      "description": "How this service is addressed at runtime, as far as statics can see.",
+      "properties": {
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Network-relevant environment (e.g. compose service env) \u2014 values, not secrets",
+          "title": "Env",
+          "type": "object"
+        },
+        "hostnames": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Hostnames",
+          "type": "array"
+        },
+        "ports": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Ports",
+          "type": "array"
+        }
+      },
+      "title": "NetworkIdentity",
+      "type": "object"
+    },
+    "ServiceKind": {
+      "description": "v1: service. Reserved for Phase 9 (\u00a77): function, edge-worker, firmware.",
+      "enum": [
+        "service",
+        "function",
+        "edge-worker",
+        "firmware"
+      ],
+      "title": "ServiceKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.0.0/service_summary.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A service boundary plus counts aggregated at read time.",
+  "properties": {
+    "build_root": {
+      "description": "Path of the build root relative to the repo root ('.' = root)",
+      "minLength": 1,
+      "title": "Build Root",
+      "type": "string"
+    },
+    "build_system": {
+      "description": "e.g. 'maven', 'gradle'",
+      "minLength": 1,
+      "title": "Build System",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "endpoint_count": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Endpoint Count",
+      "type": "integer"
+    },
+    "kind": {
+      "$ref": "#/$defs/ServiceKind",
+      "default": "service"
+    },
+    "languages": {
+      "description": "e.g. ['java']",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Languages",
+      "type": "array"
+    },
+    "name": {
+      "description": "Display name (e.g. compose/module name)",
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "network": {
+      "$ref": "#/$defs/NetworkIdentity"
+    },
+    "repo": {
+      "description": "Normalized repo source this service lives in",
+      "minLength": 1,
+      "title": "Repo",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "service_id",
+    "name",
+    "repo",
+    "build_root",
+    "languages",
+    "build_system"
+  ],
+  "title": "ServiceSummary",
+  "type": "object"
+}

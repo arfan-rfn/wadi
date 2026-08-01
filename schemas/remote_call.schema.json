@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "Confidence tiers for recovered facts (\u00a75.4). Ordered EXACT > HIGH > HEURISTIC > NONE.",
+      "enum": [
+        "exact",
+        "high",
+        "heuristic",
+        "none"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
+      ],
+      "title": "HttpMethod",
+      "type": "string"
+    },
+    "MethodRef": {
+      "additionalProperties": false,
+      "description": "Reference to a method: stable content-derived id + human-readable signature.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^m_[0-9a-f]{16}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Fully-qualified method signature",
+          "minLength": 1,
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "signature"
+      ],
+      "title": "MethodRef",
+      "type": "object"
+    },
+    "SourceAnchor": {
+      "additionalProperties": false,
+      "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "file": {
+          "description": "Path relative to the service build root",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "variant": {
+          "$ref": "#/$defs/SourceVariant",
+          "default": "original"
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "title": "SourceAnchor",
+      "type": "object"
+    },
+    "SourceVariant": {
+      "description": "Whether an anchor refers to original repo text or a generated variant (\u00a75.3).\n\n``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) \u2014 the text\nthat was actually analyzed, served by source-on-demand with a badge.",
+      "enum": [
+        "original",
+        "generated"
+      ],
+      "title": "SourceVariant",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.0.0/remote_call.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One candidate outbound HTTP call from one call site.",
+  "properties": {
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "evidence": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Raw slice evidence behind the recovered URL",
+      "title": "Evidence"
+    },
+    "http_verb": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HttpMethod"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "id": {
+      "pattern": "^rc_[0-9a-f]{16}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "mechanism": {
+      "description": "Client library, e.g. 'resttemplate'",
+      "minLength": 1,
+      "title": "Mechanism",
+      "type": "string"
+    },
+    "method": {
+      "$ref": "#/$defs/MethodRef",
+      "description": "Method containing the call site"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    },
+    "site": {
+      "$ref": "#/$defs/SourceAnchor"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Sliced candidate URL/template; None = target undetermined (P10)",
+      "title": "Url"
+    },
+    "url_confidence": {
+      "$ref": "#/$defs/Confidence"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "service_id",
+    "id",
+    "site",
+    "method",
+    "mechanism",
+    "url_confidence"
+  ],
+  "title": "RemoteCall",
+  "type": "object"
+}

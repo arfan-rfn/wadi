@@ -1,0 +1,89 @@
+package wadi
+
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
+
+import java.nio.file.{Files, Paths}
+
+/** Conformance test (P8): the whole in-graph pipeline against spring-petstore-mini.
+  *
+  * Proves the week-one validation targets (§11): DI resolution crosses the
+  * interface boundary, endpoints/sinks/models are tagged with registry
+  * vocabulary, and the bulk export lands on disk in the contract shape.
+  */
+class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+
+  private val fixtureDir = Paths.get("fixtures", "spring-petstore-mini").toAbsolutePath
+  // Fixed output path (gitignored): the Python side's cross-language test reads
+  // this exact file to prove the export parses and assembles end to end.
+  private val exportDir = Paths.get("target", "petstore-export").toAbsolutePath
+
+  private lazy val exportJson: ujson.Value = {
+    val summary = WadiPipeline.runFromSource(fixtureDir.toString, exportDir.toString)
+    info(summary)
+    ujson.read(Files.readString(exportDir.resolve("export.json")))
+  }
+
+  private def endpoints: Set[String] =
+    exportJson("endpoints").arr.map(e => s"${e("http_method").str} ${e("uri").str}").toSet
+
+  private def methodByFullName(fragment: String): Option[ujson.Value] =
+    exportJson("methods").arr.find(_("full_name").str.contains(fragment))
+
+  test("all three fixture endpoints are found with correct URIs") {
+    endpoints should contain allOf ("GET /pets/{id}", "POST /pets", "GET /owners")
+  }
+
+  test("DI resolution pulls the ServiceImpl into the endpoint closure") {
+    // Without SpringDIPass the closure stops at the PetService interface.
+    methodByFullName("PetServiceImpl.findPet") should be(defined)
+    methodByFullName("PetServiceImpl.createPet") should be(defined)
+  }
+
+  test("db sink is tagged on the repository call") {
+    val sinks = exportJson("sinks").arr
+    val dbSinks = sinks.filter(_("kind").str == "db")
+    dbSinks should not be empty
+  }
+
+  test("http-client sink recovers a concatenated URL heuristically") {
+    val httpSinks = exportJson("sinks").arr.filter(_("kind").str == "http-client")
+    httpSinks should not be empty
+    val sink = httpSinks.head
+    sink("value").str should include("/stock/")
+    sink("value").str should include("{?}")
+    sink("value_confidence").str shouldBe "heuristic"
+    sink("http_verb").str shouldBe "GET"
+  }
+
+  test("persisted model is exported with its fields") {
+    val models = exportJson("data_models").arr
+    models.map(_("entity").str) should contain("Pet")
+    val pet = models.find(_("entity").str == "Pet").get
+    pet("fields").arr.map(_("name").str) should contain allOf ("id", "name", "stockCount")
+  }
+
+  test("handler methods have coarsened CFGs with branch nodes and conditions") {
+    val findPetMethod = methodByFullName("PetServiceImpl.findPet").get
+    val methodId      = findPetMethod("id").num.toLong
+    val cfg = exportJson("cfgs").arr.find(_("method_id").num.toLong == methodId).get
+    val kinds = cfg("nodes").arr.map(_("kind").str).toSet
+    kinds should contain("branch")
+    kinds should contain("call")
+    kinds should contain("return")
+    val branch = cfg("nodes").arr.find(_("kind").str == "branch").get
+    branch.obj.get("condition_code").map(_.str).getOrElse("") should not be empty
+    // true/false labels present on branch edges
+    cfg("edges").arr.map(_("label").str).toSet should contain("true")
+  }
+
+  test("export document declares the contract version") {
+    exportJson("export_schema_version").str shouldBe "1.0.0"
+  }
+
+  override def afterAll(): Unit = {
+    // temp dirs cleaned by the OS; nothing persistent to remove
+    super.afterAll()
+  }
+}

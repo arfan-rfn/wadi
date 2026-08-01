@@ -1,0 +1,29 @@
+# Shared multi-stage build for all wadi Python services (context = repo root).
+#
+#   docker build -f services/Dockerfile.python --build-arg SERVICE=wadi-orchestrator \
+#                --build-arg ENTRYPOINT=wadi-orchestrator -t ghcr.io/trywadi/orchestrator .
+#
+# One Dockerfile, parameterized: the services share the identical uv-workspace
+# build; only the installed package and entry command differ (DRY).
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
+ARG SERVICE
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY libs ./libs
+COPY services ./services
+COPY cli ./cli
+RUN uv sync --frozen --no-dev --package "$SERVICE"
+
+FROM python:3.12-slim-bookworm
+ARG ENTRYPOINT
+# git: the orchestrator and worker drive wadi-repo (mirrors, checkouts, git show).
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app /app
+ENV PATH="/app/.venv/bin:$PATH"
+ENV WADI_ENTRYPOINT=${ENTRYPOINT}
+# Exec-form with env indirection: the entry command is one of the console
+# scripts installed by the package (wadi-orchestrator / wadi-worker / ...).
+CMD ["sh", "-c", "exec \"$WADI_ENTRYPOINT\""]
