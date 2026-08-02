@@ -21,6 +21,7 @@ from wadi_contracts import (
     DataModelField,
     Endpoint,
     EndpointAuth,
+    EndpointParam,
     HttpMethod,
     Icfg,
     IcfgEdge,
@@ -32,6 +33,7 @@ from wadi_contracts import (
     MethodRef,
     MqDirection,
     MqInteraction,
+    ParamLocation,
     RemoteCall,
     SinkKind,
     SourceAnchor,
@@ -125,8 +127,17 @@ class Assembler:
                 http_method=HttpMethod(export_endpoint.http_method.upper()),
                 full_uri=export_endpoint.uri,
                 handler=self._method_ref(handler),
+                params=[
+                    EndpointParam(
+                        name=param.name,
+                        location=ParamLocation(param.location),
+                        type_name=param.type_name,
+                        required=param.required,
+                    )
+                    for param in export_endpoint.params
+                ],
                 response_type=handler.return_type,
-                auth=EndpointAuth(),  # honest unknown until the security pack lands (Phase 2)
+                auth=EndpointAuth(),  # honest unknown until the security pack lands (M5)
             )
             artifacts.endpoints.append(endpoint)
             artifacts.icfgs.append(

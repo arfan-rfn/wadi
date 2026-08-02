@@ -15,6 +15,8 @@ from xml.etree import ElementTree
 
 import yaml
 
+from wadi_worker.appconfig import AppConfigFacts, parse_app_config
+
 logger = logging.getLogger(__name__)
 
 _SKIP_DIRS = {"target", "build", "node_modules", ".git", ".idea", "src"}
@@ -28,6 +30,7 @@ class DiscoveredService:
     languages: list[str]
     hostnames: list[str] = field(default_factory=list[str])
     ports: list[int] = field(default_factory=list[int])
+    config: AppConfigFacts = field(default_factory=AppConfigFacts)
 
 
 def discover_services(repo_root: Path) -> list[DiscoveredService]:
@@ -49,6 +52,7 @@ def discover_services(repo_root: Path) -> list[DiscoveredService]:
                 languages=["java"],
                 hostnames=identity.hostnames if identity else [],
                 ports=identity.ports if identity else [],
+                config=parse_app_config(pom_path.parent),
             )
         )
     services.sort(key=lambda s: s.build_root)

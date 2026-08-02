@@ -20,6 +20,7 @@ from typing import Protocol
 from wadi_config import WadiSettings
 from wadi_contracts import (
     ExtractionJob,
+    GatewayRoute,
     NetworkIdentity,
     ServiceBoundary,
     normalize_repo_source,
@@ -119,7 +120,22 @@ class ExtractionPipeline:
                     build_root=service.build_root,
                     languages=service.languages,
                     build_system=service.build_system,
-                    network=NetworkIdentity(hostnames=service.hostnames, ports=service.ports),
+                    network=NetworkIdentity(
+                        hostnames=service.hostnames,
+                        ports=service.ports,
+                        env=service.config.env,
+                        application_name=service.config.application_name,
+                        server_port=service.config.server_port,
+                        gateway_routes=[
+                            GatewayRoute(
+                                route_id=route.route_id,
+                                path_prefix=route.path_prefix,
+                                target_uri=route.target_uri,
+                                strip_prefix=route.strip_prefix,
+                            )
+                            for route in service.config.gateway_routes
+                        ],
+                    ),
                 )
                 await self._artifacts.write_service_boundaries([boundary])
 

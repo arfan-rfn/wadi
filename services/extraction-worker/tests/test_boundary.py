@@ -124,3 +124,21 @@ services:
         (tmp_path / "docker-compose.yml").write_text("services: [not: {valid")
         services = discover_services(tmp_path)
         assert services[0].hostnames == []
+
+
+class TestAppConfigWiring:
+    def test_config_facts_attach_to_discovered_services(self, tmp_path: Path) -> None:
+        write_pom(tmp_path / "orders", "orders")
+        resources = tmp_path / "orders" / "src" / "main" / "resources"
+        resources.mkdir(parents=True)
+        (resources / "application.yml").write_text(
+            "spring:\n  application:\n    name: orders\nserver:\n  port: 8085\n"
+        )
+        write_pom(tmp_path / "billing", "billing")  # no config file
+
+        services = discover_services(tmp_path)
+        by_name = {s.name: s for s in services}
+        assert by_name["orders"].config.application_name == "orders"
+        assert by_name["orders"].config.server_port == 8085
+        assert by_name["billing"].config.application_name is None
+        assert by_name["billing"].config.env == {}

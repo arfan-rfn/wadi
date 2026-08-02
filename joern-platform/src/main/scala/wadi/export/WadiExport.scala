@@ -66,7 +66,7 @@ object WadiExport {
                 "http_method" -> httpMethod,
                 "uri"         -> uri,
                 "auth_tags"   -> method.tag.nameExact("auth").value.l.map(v => s"auth=$v"),
-                "params"      -> ujson.Arr() // filled by the params pass (M4)
+                "params"      -> endpointParamObjs(method)
               )
             )
           case _ => None
@@ -121,6 +121,38 @@ object WadiExport {
       }
     }
     ordered.values.toList
+  }
+
+  /** Declared endpoint params from parameter annotations (§7 `Endpoint.params`).
+    *
+    * Unannotated parameters are omitted — injected framework arguments
+    * (HttpServletRequest, Principal, …) are not API surface, and guessing
+    * would violate P10.
+    */
+  private val ParamAnnotationLocations = Map(
+    "PathVariable"  -> "path",
+    "RequestParam"  -> "query",
+    "RequestBody"   -> "body",
+    "RequestHeader" -> "header"
+  )
+
+  private def endpointParamObjs(method: Method): ujson.Arr = {
+    val rows = method.parameter.indexGt(0).sortBy(_.index).flatMap { parameter =>
+      parameter.ast.isAnnotation.flatMap { annotation =>
+        ParamAnnotationLocations.get(annotation.name).map { location =>
+          val explicitName = "\"([^\"]*)\"".r.findFirstMatchIn(annotation.code).map(_.group(1))
+          val required     = !annotation.code.contains("required = false") &&
+            !annotation.code.contains("required=false")
+          ujson.Obj(
+            "name"      -> explicitName.filter(_.nonEmpty).getOrElse(parameter.name),
+            "location"  -> location,
+            "type_name" -> parameter.typeFullName,
+            "required"  -> required
+          )
+        }
+      }.headOption
+    }
+    ujson.Arr(rows.toSeq*)
   }
 
   private def methodJson(method: Method): ujson.Obj =

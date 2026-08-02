@@ -81,6 +81,24 @@ class TestPetstoreModule:
         assert "PetServiceImpl.java" in petstore.config_refs[0].anchor.file
 
 
+class TestEndpointParams:
+    def test_params_assemble_into_the_contract(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        by_uri = {e.simplified_uri: e for e in result.endpoints}
+        [path_param] = by_uri["/pets/{?}"].params
+        assert (path_param.name, path_param.location.value, path_param.required) == (
+            "id",
+            "path",
+            True,
+        )
+        [query_param] = by_uri["/pets"].params
+        assert (query_param.name, query_param.location.value, query_param.required) == (
+            "owner",
+            "query",
+            False,
+        )
+
+
 class TestInventoryModule:
     def test_endpoints_assemble(self, inventory: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "b" * 16).assemble(inventory)

@@ -55,6 +55,21 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     )
   }
 
+  test("endpoint params come from mapping annotations (§7 Endpoint.params)") {
+    val byUri = petstore("endpoints").arr.map(e => e("uri").str -> e).toMap
+    val pathParams = byUri("/pets/{id}")("params").arr
+    pathParams.map(p => (p("name").str, p("location").str, p("required").bool)) shouldBe
+      Seq(("id", "path", true))
+    val queryParams = byUri("/pets")("params").arr
+    queryParams.map(p => (p("name").str, p("location").str, p("required").bool)) shouldBe
+      Seq(("owner", "query", false))
+    val bodyParams = inventory("endpoints").arr
+      .find(_("uri").str == "/admin/restock")
+      .get("params")
+      .arr
+    bodyParams.map(p => (p("name").str, p("location").str)) shouldBe Seq(("payload", "body"))
+  }
+
   // --- URL slicing scenarios -------------------------------------------------------
 
   test("config-key URL slices to a ${key} template at HIGH confidence") {
