@@ -258,6 +258,26 @@ class TestTargetKinds:
         outcome = match_call(call, _context(snapshot, [caller], []), MATCHERS)
         assert outcome.unresolved[0].reason_code == "url-unparseable"
 
+    def test_base_undetermined_marker_names_the_cause(self) -> None:
+        # T2 (rootUri/baseUrl split): the slicer said WHY the URL is holed.
+        snapshot, caller = self._base()
+        call = make_remote_call(snapshot, caller, url="{?}/mystery/{?}").model_copy(
+            update={
+                "evidence": ("slice: …\n  relative URL, base not recoverable [base-undetermined]")
+            }
+        )
+        outcome = match_call(call, _context(snapshot, [caller], []), MATCHERS)
+        assert outcome.unresolved[0].reason_code == "base-undetermined"
+
+    def test_unsupported_idiom_marker_becomes_the_reason_code(self) -> None:
+        # T2: a NAMED unmodelled construct is countable per idiom.
+        snapshot, caller = self._base()
+        call = make_remote_call(snapshot, caller, url=None).model_copy(
+            update={"evidence": "slice: …\n  System.getenv(…) -> opaque [unsupported-idiom:getenv]"}
+        )
+        outcome = match_call(call, _context(snapshot, [caller], []), MATCHERS)
+        assert outcome.unresolved[0].reason_code == "unsupported-idiom:getenv"
+
     def test_template_hole_in_authority_unparseable(self) -> None:
         snapshot, caller = self._base()
         call = make_remote_call(

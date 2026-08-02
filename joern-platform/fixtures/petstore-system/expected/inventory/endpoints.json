@@ -18,5 +18,15 @@
     "http_method": "PUT",
     "full_uri": "/stock/reserve/{id}/{count}",
     "simplified_uri": "/stock/reserve/{?}/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/api/v1/inventory/reserved/{id}",
+    "simplified_uri": "/api/v1/inventory/reserved/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/api/v1/inventory/audit/{id}",
+    "simplified_uri": "/api/v1/inventory/audit/{?}"
   }
 ]

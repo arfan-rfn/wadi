@@ -33,8 +33,10 @@ from wadi_contracts import (
     placeholder_service_id,
 )
 from wadi_stitcher.matching.base import (
+    BASE_UNDETERMINED_MARKER,
     BUDGET_TRUNCATED_MARKER,
     LOMBOK_BLOCKED_MARKER,
+    UNSUPPORTED_IDIOM_MARKER_PREFIX,
     MatchContext,
     MatchOutcome,
     confidence_min,
@@ -47,6 +49,20 @@ from wadi_stitcher.matching.paths import (
     parse_url,
 )
 from wadi_stitcher.phonebook import HostResolution, ResolutionKind, ResolvedTarget
+
+
+def _idiom_marker(evidence: str | None) -> str | None:
+    """Extract `[unsupported-idiom:<name>]` from slice evidence, as the
+    reason code (the whole bracketed token minus brackets)."""
+    if not evidence:
+        return None
+    start = evidence.find(f"[{UNSUPPORTED_IDIOM_MARKER_PREFIX}")
+    if start < 0:
+        return None
+    end = evidence.find("]", start)
+    if end < 0:
+        return None
+    return evidence[start + 1 : end]
 
 
 def _is_ip(host: str) -> bool:
@@ -78,6 +94,8 @@ class HttpMatcher:
                 reason_code = "lombok-generated-interior"
             elif call.evidence and BUDGET_TRUNCATED_MARKER in call.evidence:
                 reason_code = "slice-budget-truncated"
+            elif (idiom := _idiom_marker(call.evidence)) is not None:
+                reason_code = idiom
             else:
                 reason_code = "url-undetermined"
             return self._undetermined(
@@ -87,6 +105,16 @@ class HttpMatcher:
         expanded, keys_resolved = expand_config_keys(call.url, ctx.caller_env(call.service_id))
         parsed = parse_url(expanded)
         if parsed is None:
+            # Named causes beat the generic parse failure (T2): the slicer's
+            # markers say WHY the URL is holed.
+            if call.evidence and BASE_UNDETERMINED_MARKER in call.evidence:
+                return self._undetermined(
+                    call,
+                    "base-undetermined",
+                    f"relative URL, client base not statically recoverable: {expanded!r}",
+                )
+            if (idiom := _idiom_marker(call.evidence)) is not None:
+                return self._undetermined(call, idiom, f"unmodelled idiom holed: {expanded!r}")
             detail = (
                 "authority still carries unresolved config keys"
                 if not keys_resolved

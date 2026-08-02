@@ -37,6 +37,18 @@ public class InventoryController {
     }
 
     /** Serves the long-concat exchange() path (T1 §5.2.5 fixture case). */
+    /** Target of the inherited-contract feign probe (T2). */
+    @GetMapping("/api/v1/inventory/reserved/{id}")
+    public Integer reserved(@PathVariable String id) {
+        return stockRepository.countFor(id);
+    }
+
+    /** Target of the constant-named feign probe (T2). */
+    @GetMapping("/api/v1/inventory/audit/{id}")
+    public Integer audit(@PathVariable String id) {
+        return stockRepository.countFor(id);
+    }
+
     @PutMapping("/stock/reserve/{id}/{count}")
     public Integer reserve(@PathVariable String id, @PathVariable String count) {
         return stockRepository.countFor(id);

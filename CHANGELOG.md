@@ -19,6 +19,27 @@ All notable changes to wadi. One version spans the whole release set
   will be measured as a before/after on this number.
 - `wadi coverage` human output also lists unmodelled client libraries
   (the §5.4.2 census was previously JSON-only).
+- **T2 client APIs + URL idioms, tranche 2 (§5.4.2, Phase 2.5 M3 — closes the milestone):**
+  - **Feign completeness:** transitive interface inheritance (the shared-
+    contract idiom previously produced NO sink), `@RequestMapping(method=…)`
+    verbs, constant `name` attributes resolved in-CPG (unresolvable ones
+    degrade to an honest `{?}` authority, never an interface-name guess),
+    `contextId` ignored, and `url="${key}"` surfaced as a config reference.
+  - **`@HttpExchange` declarative interfaces** (mechanism `http-interface`,
+    now modelled in the census).
+  - **Client base-URL split:** `RestClient.create`/`baseUrl`/`rootUri` bases
+    recovered from owner-scoped initializers; unrecoverable bases emit the
+    new `base-undetermined` reason code — never a fabricated absolute.
+  - **Slicer idioms:** ternary branches (both arms are candidates; covers
+    getenv-with-default), parameter-level `@Value`, statement-form
+    StringBuilder, `String.concat`/`join`/`formatted`, `MessageFormat`,
+    member-held `Map.of` constant maps, varargs array-initializer lowering.
+  - **`unsupported-idiom:<name>` reason-code family:** named unmodelled
+    constructs (getenv, builder-in-local UCB, unmodelled operators) are now
+    countable per idiom instead of anonymous opaque holes.
+  - Lower-priority clients (JDK HttpClient, OkHttp, …) reclassified as
+    census-triggered on-demand: the `unmodelled_mechanisms` coverage signal
+    is the scheduler, per repo, by measured demand.
 - **T2 client APIs + URL idioms, tranche 1 (§5.4.2, Phase 2.5 M3):**
   - **RestClient (Spring 6.1+/Boot 3.2+)** modelled as a first-class sink —
     the same fluent shape as WebClient (`.uri(...)` is the sink, the chain

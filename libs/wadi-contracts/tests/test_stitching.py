@@ -302,3 +302,37 @@ class TestAnalysisCoverage:
         entry = ServiceCoverageEntry(service_id="svc_x", name="x")
         assert entry.production_methods is None
         assert entry.coverage_percent is None
+
+
+class TestReasonCodeFamily:
+    """1.5.0: base-undetermined + the unsupported-idiom:<name> prefix family."""
+
+    def test_base_undetermined_registered(self) -> None:
+        entry = UnresolvedCallEntry(
+            remote_call_id="rc_" + "a" * 16,
+            service_id="svc_" + "a" * 16,
+            site=SourceAnchor(file="src/A.java", start_line=1, end_line=1),
+            reason_code="base-undetermined",
+            reason="relative URL, base not recoverable",
+        )
+        assert entry.reason_code == "base-undetermined"
+
+    def test_idiom_family_accepts_named_slugs(self) -> None:
+        entry = UnresolvedCallEntry(
+            remote_call_id="rc_" + "a" * 16,
+            service_id="svc_" + "a" * 16,
+            site=SourceAnchor(file="src/A.java", start_line=1, end_line=1),
+            reason_code="unsupported-idiom:getenv",
+            reason="named unmodelled construct",
+        )
+        assert entry.reason_code == "unsupported-idiom:getenv"
+
+    def test_idiom_family_rejects_empty_slug(self) -> None:
+        with pytest.raises(ValidationError, match="unregistered"):
+            UnresolvedCallEntry(
+                remote_call_id="rc_" + "a" * 16,
+                service_id="svc_" + "a" * 16,
+                site=SourceAnchor(file="src/A.java", start_line=1, end_line=1),
+                reason_code="unsupported-idiom:",
+                reason="empty slug is not a name",
+            )

@@ -217,6 +217,7 @@ UNRESOLVED_REASON_CODES: frozenset[str] = frozenset(
         "lombok-generated-interior",
         "slice-budget-truncated",
         "unresolved-receiver-type",
+        "base-undetermined",
     }
 )
 """Versioned reason-code vocabulary (§5.4.2) — the queryable-gap registry.
@@ -224,7 +225,13 @@ UNRESOLVED_REASON_CODES: frozenset[str] = frozenset(
 Additive changes bump ``SCHEMA_VERSION`` minor. ``host-unresolvable`` was
 removed in 1.2.0: documented since Phase 2 but never emitted — unresolved
 hosts classify as external/placeholder nodes instead (recorded correction).
-"""
+1.5.0 adds ``base-undetermined`` (a relative URL whose client base is not
+statically recoverable — the rootUri/baseUrl split, T2) and the
+``unsupported-idiom:<name>`` prefix family (a *named* unmodelled construct;
+the slicer marks the idiom, the matcher lifts it into the code)."""
+
+UNSUPPORTED_IDIOM_PREFIX = "unsupported-idiom:"
+"""Prefix family of reason codes: dynamic slugs name the unmodelled idiom."""
 
 
 class UnresolvedCallEntry(WadiModel):
@@ -247,10 +254,14 @@ class UnresolvedCallEntry(WadiModel):
     @field_validator("reason_code")
     @classmethod
     def _registered_reason_code(cls, value: str) -> str:
-        if value not in UNRESOLVED_REASON_CODES:
+        is_idiom = value.startswith(UNSUPPORTED_IDIOM_PREFIX) and len(value) > len(
+            UNSUPPORTED_IDIOM_PREFIX
+        )
+        if value not in UNRESOLVED_REASON_CODES and not is_idiom:
             raise ValueError(
                 f"unregistered reason_code {value!r}; the vocabulary is "
-                f"UNRESOLVED_REASON_CODES (schema {SCHEMA_VERSION})"
+                f"UNRESOLVED_REASON_CODES plus the {UNSUPPORTED_IDIOM_PREFIX}<name> "
+                f"family (schema {SCHEMA_VERSION})"
             )
         return value
 

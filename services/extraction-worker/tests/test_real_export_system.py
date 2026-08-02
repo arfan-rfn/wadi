@@ -51,15 +51,19 @@ class TestPetstoreModule:
         """§5.4.3: the counts pinned in PetstoreSystemConformanceTest arrive
         intact across the language boundary."""
         assert petstore.analysis_coverage is not None
-        assert petstore.analysis_coverage.production_methods == 27
-        assert petstore.analysis_coverage.reachable_production_methods == 22
+        assert petstore.analysis_coverage.production_methods == 35
+        assert petstore.analysis_coverage.reachable_production_methods == 30
         assert inventory.analysis_coverage is not None
-        assert inventory.analysis_coverage.production_methods == 7
-        assert inventory.analysis_coverage.reachable_production_methods == 6
+        assert inventory.analysis_coverage.production_methods == 9
+        assert inventory.analysis_coverage.reachable_production_methods == 8
 
     def test_config_key_candidate_assembles(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
-        config_calls = [c for c in result.remote_calls if c.url and "${inventory.url}" in c.url]
+        config_calls = [
+            c
+            for c in result.remote_calls
+            if c.url and "${inventory.url}" in c.url and c.mechanism == "resttemplate"
+        ]
         assert len(config_calls) == 1
         call = config_calls[0]
         assert call.url == "${inventory.url}/stock/{?}"
@@ -90,8 +94,9 @@ class TestPetstoreModule:
 
     def test_config_refs_arrive(self, petstore: ServiceExport) -> None:
         keys = sorted(ref.key for ref in petstore.config_refs)
-        # Three T2 probe classes each @Value the api key; PetServiceImpl the base key.
-        assert keys == ["inventory.api.url"] * 3 + ["inventory.url"]
+        # Five T2 probe classes @Value the api key; PetServiceImpl @Values the
+        # base key and the feign url=${key} attribute references it too.
+        assert keys == ["inventory.api.url"] * 5 + ["inventory.url"] * 2
         by_key = {ref.key: ref for ref in petstore.config_refs}
         assert "PetServiceImpl.java" in by_key["inventory.url"].anchor.file
 
@@ -114,10 +119,12 @@ class TestPetstoreModule:
     def test_webclient_chain_assembles_with_mechanism(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
         webclient = [c for c in result.remote_calls if c.mechanism == "webclient"]
-        assert len(webclient) == 1
-        call = webclient[0]
-        assert call.url == "http://inventory:8081/admin/restock"
+        # The T1 absolute chain + the T2 base-undetermined probe.
+        assert len(webclient) == 2
+        call = next(c for c in webclient if c.url == "http://inventory:8081/admin/restock")
         assert call.http_verb is HttpMethod.POST
+        mystery = next(c for c in webclient if c.url == "{?}/mystery/{?}")
+        assert mystery.url_confidence is Confidence.HEURISTIC
 
     def test_suspected_sink_is_a_countable_maybe(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
@@ -165,9 +172,11 @@ class TestFeign:
     def test_feign_call_becomes_a_high_confidence_fact(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
         feign_calls = [c for c in result.remote_calls if c.mechanism == "feign"]
-        assert len(feign_calls) == 1
-        call = feign_calls[0]
-        assert call.url == "http://inventory/api/v1/inventory/stock/{id}"
+        # T2 feign completeness: base + inherited + method= + constant-name + url=${key}.
+        assert len(feign_calls) == 5
+        call = next(
+            c for c in feign_calls if c.url == "http://inventory/api/v1/inventory/stock/{id}"
+        )
         assert call.url_confidence is Confidence.HIGH
         assert call.auth_propagation == "feign-interceptor"
 
@@ -179,6 +188,8 @@ class TestInventoryModule:
         assert uris == {
             ("GET", "/stock/{?}"),
             ("GET", "/api/v1/inventory/stock/{?}"),
+            ("GET", "/api/v1/inventory/reserved/{?}"),
+            ("GET", "/api/v1/inventory/audit/{?}"),
             ("POST", "/admin/restock"),
             ("PUT", "/stock/reserve/{?}/{?}"),
         }

@@ -25,6 +25,9 @@ public class PetServiceImpl implements PetService {
     private final LegacyBillingBridge legacyBillingBridge;
     private final StatsService statsService;
     private final StockHistoryClient stockHistoryClient;
+    private final InventoryNamedClient inventoryNamedClient;
+    private final InventoryReadClient inventoryReadClient;
+    private final AuditFeedClient auditFeedClient;
     private final boolean preferAudit;
 
     public PetServiceImpl(
@@ -37,6 +40,9 @@ public class PetServiceImpl implements PetService {
             LegacyBillingBridge legacyBillingBridge,
             StatsService statsService,
             StockHistoryClient stockHistoryClient,
+            InventoryNamedClient inventoryNamedClient,
+            InventoryReadClient inventoryReadClient,
+            AuditFeedClient auditFeedClient,
             boolean preferAudit) {
         this.restTemplate = restTemplate;
         this.webClient = webClient;
@@ -47,6 +53,9 @@ public class PetServiceImpl implements PetService {
         this.legacyBillingBridge = legacyBillingBridge;
         this.statsService = statsService;
         this.stockHistoryClient = stockHistoryClient;
+        this.inventoryNamedClient = inventoryNamedClient;
+        this.inventoryReadClient = inventoryReadClient;
+        this.auditFeedClient = auditFeedClient;
         this.preferAudit = preferAudit;
     }
 
@@ -62,6 +71,14 @@ public class PetServiceImpl implements PetService {
                 serviceUrlResolver.getServiceUrl("inventory-api") + "/stock/" + id, Integer.class);
         // RestClient fluent chain (T2, the yas idiom).
         Integer history = stockHistoryClient.history(id);
+        // T2 feign completeness: inherited contract, RequestMapping(method=),
+        // constant name + contextId, url=${key}; plus the declarative
+        // @HttpExchange interface.
+        Integer reserved = inventoryClient.reserved(id);
+        Integer viaRequestMapping = inventoryClient.stockViaRequestMapping(id);
+        Integer audited = inventoryNamedClient.audit(id);
+        Integer read = inventoryReadClient.readStock(id);
+        String feed = auditFeedClient.feed(id);
         return "pet-" + id + ":" + stock + "/" + viaFeign + "/" + viaResolver + "/" + history;
     }
 

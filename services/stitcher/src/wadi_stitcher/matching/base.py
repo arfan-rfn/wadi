@@ -34,6 +34,12 @@ LOMBOK_BLOCKED_MARKER = "lombok-generated interior"
 # it must be countable separately or budget bugs hide inside honest unknowns.
 BUDGET_TRUNCATED_MARKER = "slice-budget-truncated"
 
+# T2 markers: a relative URL whose client base (create/baseUrl/rootUri) is not
+# statically recoverable, and the named-unmodelled-idiom family — the slicer
+# marks, the matcher lifts them into reason codes.
+BASE_UNDETERMINED_MARKER = "base-undetermined"
+UNSUPPORTED_IDIOM_MARKER_PREFIX = "unsupported-idiom:"
+
 _CONFIDENCE_ORDER = (Confidence.EXACT, Confidence.HIGH, Confidence.HEURISTIC, Confidence.NONE)
 
 

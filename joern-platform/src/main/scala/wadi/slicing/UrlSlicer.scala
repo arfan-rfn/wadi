@@ -53,6 +53,18 @@ object UrlSlicer {
     */
   val BudgetTruncatedMarker = "slice-budget-truncated"
 
+  /** Marker for a relative URL whose client base could not be recovered
+    * (T2 rootUri/baseUrl split): the path is real, the authority is honestly
+    * unknown — never a fabricated absolute.
+    */
+  val BaseUndeterminedMarker = "base-undetermined"
+
+  /** Trace-marker prefix for known-but-unmodelled idioms (T2): the stitcher
+    * lifts `[unsupported-idiom:<name>]` into a reason code — a named gap is
+    * countable, an anonymous hole is not.
+    */
+  val UnsupportedIdiomPrefix = "unsupported-idiom:"
+
   // Follow existing CALL edges only (incl. the DI pass's added edges).
   private given ICallResolver = NoResolve
 
@@ -131,6 +143,9 @@ object UrlSlicer {
           val frame = Frame(hops = budget.maxInterprocHops)
           val resolved = tracker.capCandidates(
             resolve(cpg, argument, budget.maxDepth, tracker, frame)
+              .flatMap(candidate =>
+                absolutize(cpg, call, candidate, budget.maxDepth, tracker, frame)
+              )
           )
           val rendered = resolved.map(render(call, _))
           if (rendered.isEmpty) List(noneCandidate(call, "no value could be recovered"))
@@ -177,7 +192,28 @@ object UrlSlicer {
             right <- resolvedOperand
           } yield left ++ right)
         }
-      case call: Call if call.name == "format" && call.methodFullName.startsWith("java.lang.String") =>
+      case call: Call if call.name == Operators.conditional =>
+        // Ternary (T2): both branches are candidates — over-approximation is
+        // the correct answer for an architecture map (§5.2). Also covers the
+        // getenv-with-default idiom (the default branch resolves to a literal).
+        val branches = call.argument.l.sortBy(_.argumentIndex).drop(1).take(2)
+        val resolved = branches.zipWithIndex.flatMap { case (branch, index) =>
+          val arm = if (index == 0) "true" else "false"
+          resolve(cpg, branch, depth - 1, tracker, frame).map(c =>
+            c.copy(
+              trace = s"ternary $arm-branch: ${firstLine(branch.code)}" :: c.trace,
+              viaMultiAssignment = true // cannot prove which branch executes
+            )
+          )
+        }
+        if (resolved.isEmpty)
+          List(Candidate(List(Hole), List(s"${firstLine(call.code)} -> empty ternary")))
+        else tracker.capCandidates(resolved)
+      case call: Call
+          if call.name == "format" &&
+            (call.methodFullName.startsWith("java.lang.String") ||
+              call.methodFullName.contains("MessageFormat") ||
+              call.code.replaceAll("\\s", "").startsWith("MessageFormat.format(")) =>
         resolveStringFormat(cpg, call, depth, tracker, frame)
       case call: Call if call.name == Operators.fieldAccess =>
         resolveMember(cpg, call.method.typeDecl.headOption, fieldNameOf(call), depth, tracker, frame)
@@ -206,16 +242,26 @@ object UrlSlicer {
     tracker: Budget,
     frame: Frame
   ): List[Candidate] = {
-    val arguments = call.argument.l.sortBy(_.argumentIndex)
+    // String.format uses %s/%d slots; MessageFormat.format uses {0}/{1} (T2).
+    val isMessageFormat = call.methodFullName.contains("MessageFormat") ||
+      call.code.replaceAll("\\s", "").startsWith("MessageFormat.format(")
+    val slotPattern = if (isMessageFormat) "\\{\\d+\\}" else "%[sd]"
+    // Static calls may still carry an index-0 receiver node (MessageFormat
+    // does; String.format does not) — the template is the first REAL argument.
+    val arguments = call.argument.l.sortBy(_.argumentIndex).dropWhile(_.argumentIndex <= 0)
     arguments.headOption match {
       case Some(fmt: Literal) =>
         val template = stripQuotes(fmt.code)
-        val slots    = "%[sd]".r.findAllIn(template).length
-        val varargs  = arguments.drop(1)
+        val slots    = slotPattern.r.findAllIn(template).length
+        val varargs = arguments.drop(1).flatMap {
+          case array: Call if array.name == Operators.arrayInitializer =>
+            array.argument.l.sortBy(_.argumentIndex)
+          case argument => List(argument)
+        }
         if (slots != varargs.length)
-          List(Candidate(List(Hole), List(s"String.format arity mismatch @ line ${lineOf(call)}")))
+          List(Candidate(List(Hole), List(s"${call.name} arity mismatch @ line ${lineOf(call)}")))
         else {
-          val segments = template.split("%[sd]", -1).toList
+          val segments = template.split(slotPattern, -1).toList
           varargs.foldLeft(List(Candidate(List(Lit(segments.head)), Nil)) -> segments.tail) {
             case ((acc, remaining), vararg) =>
               val resolvedArg = resolve(cpg, vararg, depth - 1, tracker, frame)
@@ -230,7 +276,7 @@ object UrlSlicer {
         List(
           Candidate(
             List(Hole),
-            List(s"String.format with non-literal template @ line ${lineOf(call)}")
+            List(s"${call.name} with non-literal template @ line ${lineOf(call)}")
           )
         )
     }
@@ -251,12 +297,129 @@ object UrlSlicer {
       .orElse(resolveUriBuilderChain(cpg, call, depth, tracker, frame))
       .orElse(resolveRequestEntityChain(cpg, call, depth, tracker, frame))
       .orElse(resolveConfigPropertiesAccessor(cpg, call))
+      .orElse(resolveStringHelpers(cpg, call, depth, tracker, frame))
+      .orElse(resolveStringBuilderJoin(cpg, call, depth, tracker, frame))
       .orElse(resolveConstantMapGet(cpg, call, depth, tracker, frame))
       .orElse(resolveInterprocReturn(cpg, call, depth, tracker, frame))
       .orElse(resolveGetterBridge(cpg, call, depth, tracker, frame))
-      .getOrElse(
-        List(Candidate(List(Hole), List(s"${firstLine(call.code)} -> opaque call result")))
-      )
+      .getOrElse(opaqueResult(call))
+
+  /** The honest terminal for an unresolvable call. Known-but-unmodelled
+    * idioms carry a machine-readable `[unsupported-idiom:<name>]` marker the
+    * stitcher turns into a reason code (T2 — a named gap, never an anonymous
+    * hole).
+    */
+  private def opaqueResult(call: Call): List[Candidate] = {
+    val idiom = call.name match {
+      case "getenv"                                     => Some("getenv")
+      case n if n.startsWith("<operator>")              => Some(n.stripPrefix("<operator>."))
+      case "append" | "toString" | "insert"             => Some("stringbuilder")
+      case _                                            => None
+    }
+    val marker = idiom.map(name => s" [$UnsupportedIdiomPrefix$name]").getOrElse("")
+    List(Candidate(List(Hole), List(s"${firstLine(call.code)} -> opaque call result$marker")))
+  }
+
+  /** `a.concat(b)`, `String.join(delim, parts…)`, `"tpl".formatted(args…)` (T2). */
+  private def resolveStringHelpers(
+    cpg: Cpg,
+    call: Call,
+    depth: Int,
+    tracker: Budget,
+    frame: Frame
+  ): Option[List[Candidate]] = call.name match {
+    case "concat" =>
+      for {
+        receiver <- call.argument.argumentIndexLte(0).headOption
+        argument <- call.argument.argumentIndexGt(0).headOption
+      } yield tracker.capCandidates(for {
+        left  <- resolve(cpg, receiver, depth - 1, tracker, frame)
+        right <- resolve(cpg, argument, depth - 1, tracker, frame)
+      } yield (left ++ right).copy(trace = "String.concat join" :: (left ++ right).trace))
+    case "join" if call.methodFullName.startsWith("java.lang.String") =>
+      val arguments = call.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex)
+      arguments match {
+        case (delim: Literal) :: rest if rest.nonEmpty =>
+          val d = stripQuotes(delim.code)
+          // javasrc2cpg lowers the varargs into one <operator>.arrayInitializer —
+          // its children are the real parts.
+          val parts = rest.flatMap {
+            case array: Call if array.name == Operators.arrayInitializer =>
+              array.argument.l.sortBy(_.argumentIndex)
+            case part => List(part)
+          }
+          Some(parts.zipWithIndex.foldLeft(List(Candidate(Nil, List("String.join")))) {
+            case (acc, (part, index)) =>
+              val resolved = resolve(cpg, part, depth - 1, tracker, frame)
+              tracker.capCandidates(for {
+                left  <- acc
+                right <- resolved
+              } yield
+                if (index == 0) left ++ right
+                else left ++ Candidate(List(Lit(d)), Nil) ++ right)
+          })
+        case _ => None
+      }
+    case "formatted" =>
+      call.argument.argumentIndexLte(0).headOption.collect { case template: Literal =>
+        val text  = stripQuotes(template.code)
+        val slots = "%[sd]".r.findAllIn(text).length
+        val args  = call.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex)
+        if (slots != args.length)
+          List(Candidate(List(Hole), List(s"formatted arity mismatch @ line ${lineOf(call)}")))
+        else {
+          val segments = text.split("%[sd]", -1).toList
+          args.foldLeft(List(Candidate(List(Lit(segments.head)), List("String.formatted"))) -> segments.tail) {
+            case ((acc, remaining), arg) =>
+              val resolved = resolve(cpg, arg, depth - 1, tracker, frame)
+              val combined = tracker.capCandidates(for {
+                left  <- acc
+                right <- resolved
+              } yield left ++ right ++ Candidate(List(Lit(remaining.head)), Nil))
+              combined -> remaining.tail
+          }._1
+        }
+      }
+    case _ => None
+  }
+
+  /** `sb.toString()` where `sb` collects `<init>`/`append` calls in the
+    * method (T2) — javasrc2cpg lowers both the statement form and inline
+    * chains into this shape via temp locals. Statement order is the join
+    * order (control-flow-insensitive over-approximation, trace-noted).
+    */
+  private def resolveStringBuilderJoin(
+    cpg: Cpg,
+    call: Call,
+    depth: Int,
+    tracker: Budget,
+    frame: Frame
+  ): Option[List[Candidate]] = {
+    if (call.name != "toString") return None
+    val receiverName = call.argument.argumentIndexLte(0).headOption.collect {
+      case identifier: Identifier => identifier.name
+    }
+    receiverName.flatMap { name =>
+      val feeds = call.method.ast.isCall
+        .filter(c => c.name == "<init>" || c.name == "append")
+        .filter(_.argument.argumentIndexLte(0).headOption.collect { case i: Identifier =>
+          i.name
+        }.contains(name))
+        .l
+        .sortBy(c => (lineOf(c), c.id))
+      val partArgs = feeds.flatMap(f => f.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex).headOption)
+      Option.when(partArgs.nonEmpty) {
+        partArgs.foldLeft(List(Candidate(Nil, List(s"StringBuilder join (${partArgs.length} parts, statement order)")))) {
+          (acc, part) =>
+            val resolved = resolve(cpg, part, depth - 1, tracker, frame)
+            tracker.capCandidates(for {
+              left  <- acc
+              right <- resolved
+            } yield left ++ right)
+        }
+      }
+    }
+  }
 
   /** `serviceUrlConfig.customer()` on a `@ConfigurationProperties(prefix=…)`
     * type resolves to the bound config key `<prefix>.<accessor>` (T2 — the
@@ -358,6 +521,97 @@ object UrlSlicer {
     call.methodFullName.contains("RequestEntity") ||
       call.code.replaceAll("\\s", "").contains("RequestEntity.")
 
+  // --- client base-URL recovery (T2: rootUri/baseUrl split) --------------------------
+
+  /** Factory steps that bind a base URL onto a client:
+    * `RestClient.create(base)` / `.baseUrl(base)` (RestClient/WebClient
+    * builders) / `RestTemplateBuilder.rootUri(base)`.
+    */
+  private val ClientBaseFactories = Set("create", "baseUrl", "rootUri")
+
+  /** A relative candidate (`/stock/{id}`) implies a base bound on the client.
+    * Recover it from the client field/local's owner-scoped initializer when
+    * it is in-CPG; otherwise prepend an honest hole carrying the
+    * `[base-undetermined]` marker — never a fabricated absolute (T2).
+    */
+  private def absolutize(
+    cpg: Cpg,
+    sinkCall: Call,
+    candidate: Candidate,
+    depth: Int,
+    tracker: Budget,
+    frame: Frame
+  ): List[Candidate] = {
+    if (!partsText(candidate).startsWith("/")) return List(candidate)
+    resolveClientBase(cpg, sinkCall, depth, tracker, frame) match {
+      case Some(bases) if bases.nonEmpty =>
+        tracker.capCandidates(bases.map(base => base ++ candidate))
+      case _ =>
+        List(
+          candidate.copy(
+            parts = Hole :: candidate.parts,
+            trace = candidate.trace :+ s"relative URL, client base not recoverable [$BaseUndeterminedMarker]"
+          )
+        )
+    }
+  }
+
+  private def resolveClientBase(
+    cpg: Cpg,
+    sinkCall: Call,
+    depth: Int,
+    tracker: Budget,
+    frame: Frame
+  ): Option[List[Candidate]] = {
+    val clientExpr: Option[Expression] =
+      if (sinkCall.name == "uri")
+        // fluent chain: .uri's receiver is the verb root; ITS receiver is the client.
+        sinkCall.argument.argumentIndexLte(0).headOption
+          .collect { case root: Call => root }
+          .flatMap(_.argument.argumentIndexLte(0).headOption)
+      else sinkCall.argument.argumentIndexLte(0).headOption
+    val fieldName = clientExpr.flatMap {
+      case identifier: Identifier                             => Some(identifier.name)
+      case access: Call if access.name == Operators.fieldAccess => Some(fieldNameOf(access))
+      case _                                                  => None
+    }
+    fieldName.flatMap { name =>
+      val ownerNames: Set[String] = sinkCall.method.typeDecl.headOption
+        .map(o => Set(o.fullName, shortTypeName(o.fullName)))
+        .getOrElse(Set.empty)
+      val factoryArg = cpg.assignment
+        .filter(a =>
+          a.target.ast.collectFirst {
+            case fi: FieldIdentifier if fi.canonicalName == name => fi
+          }.nonEmpty || (a.target match { case i: Identifier => i.name == name; case _ => false })
+        )
+        .filter(a =>
+          ownerNames.isEmpty ||
+            a.method.typeDecl.headOption.exists(td =>
+              ownerNames.contains(td.fullName) || ownerNames.contains(shortTypeName(td.fullName))
+            )
+        )
+        .flatMap(_.source.ast.isCall.filter(c => ClientBaseFactories.contains(c.name)).headOption)
+        .flatMap(_.argument.argumentIndexGt(0).headOption)
+        .headOption
+      factoryArg.map { arg =>
+        resolve(cpg, arg, depth - 1, tracker, frame).map(c =>
+          c.copy(
+            trace = s"client base <- $name's ${ClientBaseFactories.mkString("/")} factory" :: c.trace,
+            viaField = true
+          )
+        )
+      }
+    }
+  }
+
+  private def partsText(candidate: Candidate): String =
+    candidate.parts.map {
+      case Lit(t)         => t
+      case ConfigKey(key) => s"$${$key}"
+      case Hole           => "{?}"
+    }.mkString
+
   // --- UriComponentsBuilder chains (T2, §5.4.2) -------------------------------------
 
   /** Terminal steps that render the built URI as the sliced value. */
@@ -404,6 +658,21 @@ object UrlSlicer {
           bailed = true // chain rooted in a local/field-held builder — not modelled (v1)
       }
     }
+    // A builder held in a local/field (mutated across statements) is a named
+    // v1 limit — marked, never silently opaque (T2).
+    val ucbSteps = Set("path", "pathSegment", "queryParam", "buildAndExpand", "build", "encode")
+    if (root.isEmpty && bailed && steps.exists(s => ucbSteps.contains(s.name)))
+      return Some(
+        List(
+          Candidate(
+            List(Hole),
+            List(
+              s"${firstLine(call.code)} -> builder-in-local chain " +
+                s"[${UnsupportedIdiomPrefix}uricomponentsbuilder-local]"
+            )
+          )
+        )
+      )
     root.map { factory =>
       val header = s"UriComponentsBuilder chain (${steps.length + 1} steps)"
       val base: List[Candidate] = factory.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex) match {
@@ -463,28 +732,55 @@ object UrlSlicer {
     if (call.name != "get") return None
     val valueArguments = call.argument.argumentIndexGt(0).l
     if (valueArguments.sizeIs != 1) return None
-    val receiverName = call.argument.argumentIndexLte(0).headOption.collect {
-      case identifier: Identifier if identifier.refsTo.headOption.exists(_.isInstanceOf[Local]) =>
-        identifier.name
+    // Local maps are identifiers; member/static maps render as identifiers OR
+    // fieldAccess calls (`HOSTS.get(...)` on a static member).
+    val receiver: Option[(String, Boolean)] = call.argument.argumentIndexLte(0).headOption.collect {
+      case identifier: Identifier =>
+        identifier.name -> identifier.refsTo.headOption.exists(_.isInstanceOf[Local])
+      case access: Call if access.name == Operators.fieldAccess =>
+        fieldNameOf(access) -> false
     }
-    receiverName.flatMap { name =>
-      val puts = call.method.ast.isCall
-        .nameExact("put")
-        .filter(_.argument.argumentIndexLte(0).headOption.collect { case i: Identifier =>
-          i.name
-        }.contains(name))
-        .l
-      val entries = puts.flatMap { put =>
-        val args = put.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex)
-        args match {
-          case (k: Literal) :: (v: Literal) :: Nil =>
-            Some(stripQuotes(k.code) -> stripQuotes(v.code))
-          case _ => None
+    receiver.flatMap { case (name, isLocal) =>
+      if (isLocal) {
+        val puts = call.method.ast.isCall
+          .nameExact("put")
+          .filter(_.argument.argumentIndexLte(0).headOption.collect { case i: Identifier =>
+            i.name
+          }.contains(name))
+          .l
+        val entries = puts.flatMap { put =>
+          val args = put.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex)
+          args match {
+            case (k: Literal) :: (v: Literal) :: Nil =>
+              Some(stripQuotes(k.code) -> stripQuotes(v.code))
+            case _ => None
+          }
+        }
+        // Any non-constant put poisons the map; no puts means it is not ours.
+        if (puts.isEmpty || entries.sizeIs != puts.size) None
+        else lookupConstantMap(cpg, call, name, entries.toMap, depth, tracker, frame)
+      } else {
+        // Member-held constant map (T2): `static final Map<…> M = Map.of(k, v, …)`
+        // — entries from the owner-scoped initializer's literal pairs.
+        val owner = call.method.typeDecl.headOption
+        val initializer = cpg.assignment
+          .filter(a =>
+            a.target.ast.collectFirst {
+              case fi: FieldIdentifier if fi.canonicalName == name => fi
+            }.nonEmpty || (a.target match { case i: Identifier => i.name == name; case _ => false })
+          )
+          .filter(a => owner.forall(o => a.method.typeDecl.headOption.contains(o)))
+          .flatMap(_.source.ast.isCall.nameExact("of").headOption)
+          .headOption
+        initializer.flatMap { ofCall =>
+          val args = ofCall.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex)
+          val literals = args.collect { case l: Literal => stripQuotes(l.code) }
+          Option.when(literals.sizeIs == args.size && literals.size % 2 == 0 && literals.nonEmpty) {
+            val entries = literals.grouped(2).collect { case List(k, v) => k -> v }.toMap
+            lookupConstantMap(cpg, call, name, entries, depth, tracker, frame)
+          }.flatten
         }
       }
-      // Any non-constant put poisons the map; no puts means it is not ours.
-      if (puts.isEmpty || entries.sizeIs != puts.size) None
-      else lookupConstantMap(cpg, call, name, entries.toMap, depth, tracker, frame)
     }
   }
 
@@ -630,13 +926,34 @@ object UrlSlicer {
               c.copy(trace = s"${identifier.name} <- call-site argument" :: c.trace)
             )
           case None =>
-            // Unbound parameters typically carry path variables — a benign hole.
-            List(
-              Candidate(
-                List(Hole),
-                List(s"${identifier.name} <- parameter of ${parameter.method.name}(…) -> {?}")
-              )
-            )
+            // @Value on constructor/setter parameters (T2): the config key
+            // lives on the parameter, not a member.
+            val paramConfigKey = parameter.ast.isAnnotation
+              .filter(_.name == "Value")
+              .headOption
+              .flatMap { annotation =>
+                "\\$\\{([^}:]+)(?::[^}]*)?\\}".r
+                  .findFirstMatchIn(annotation.code)
+                  .map(_.group(1).trim)
+              }
+            paramConfigKey match {
+              case Some(key) =>
+                List(
+                  Candidate(
+                    List(ConfigKey(key)),
+                    List(s"${identifier.name} <- @Value(\"$${$key}\") parameter"),
+                    viaConfigKey = true
+                  )
+                )
+              case None =>
+                // Unbound parameters typically carry path variables — a benign hole.
+                List(
+                  Candidate(
+                    List(Hole),
+                    List(s"${identifier.name} <- parameter of ${parameter.method.name}(…) -> {?}")
+                  )
+                )
+            }
         }
       case Some(_: Member) =>
         resolveMember(
@@ -796,11 +1113,7 @@ object UrlSlicer {
   // --- rendering + confidence -----------------------------------------------------
 
   private def render(call: Call, candidate: Candidate): UrlCandidate = {
-    val text = candidate.parts.map {
-      case Lit(t)         => t
-      case ConfigKey(key) => s"$${$key}"
-      case Hole           => "{?}"
-    }.mkString
+    val text = partsText(candidate)
     val hasLiteral = candidate.parts.exists { case Lit(t) => t.nonEmpty; case _ => false }
     val holes      = candidate.parts.count(_ == Hole)
     val confidence =

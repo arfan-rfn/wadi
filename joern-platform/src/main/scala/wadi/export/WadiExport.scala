@@ -444,8 +444,11 @@ object WadiExport {
     call: Call
   ): List[ujson.Obj] = {
     val feignEncoded = call.tag.nameExact("wadi-feign").value.headOption
+    // Declared-contract sinks beyond feign (T2): `verb|url|mechanism`.
+    val declaredEncoded = call.tag.nameExact("wadi-declared").value.headOption.map(_.split('|'))
     val verb = feignEncoded
       .map(_.split('|').head)
+      .orElse(declaredEncoded.map(_.head))
       // WebClient chains carry the verb on the chain root; the sink pass
       // stores it as a tag on the tagged .uri(...) call (§5.2.5).
       .orElse(call.tag.nameExact("wadi-verb").value.headOption)
@@ -454,11 +457,12 @@ object WadiExport {
     val isHttpKind = kind == "http-client" || kind == "http-client-suspected"
     val mechanism =
       if (feignEncoded.isDefined) Some("feign")
+      else if (declaredEncoded.isDefined) Some(declaredEncoded.get.last)
       else if (kind == "http-client-suspected") Some("unknown")
       else if (kind == "http-client") Some(clientTag.getOrElse("resttemplate"))
       else None
-    val candidates: List[(Option[String], String, Option[String])] = feignEncoded match {
-      case Some(encoded) =>
+    val candidates: List[(Option[String], String, Option[String])] = (feignEncoded, declaredEncoded) match {
+      case (Some(encoded), _) =>
         val url = encoded.split('|').last
         List(
           (
@@ -467,8 +471,20 @@ object WadiExport {
             Some(s"feign client: declared mapping composes $url (discovery-name authority)")
           )
         )
-      case None if !isHttpKind => List((None, "none", None))
-      case None =>
+      case (None, Some(parts)) =>
+        val url = parts(1)
+        // A {?} authority is honest: the proxy factory holds the base — the
+        // path is declared truth, the base is not (§5.4.2 recorded limit).
+        val confidence = if (url.startsWith("{?}")) "heuristic" else "high"
+        List(
+          (
+            Some(url),
+            confidence,
+            Some(s"declared ${parts.last} contract composes $url")
+          )
+        )
+      case (None, None) if !isHttpKind => List((None, "none", None))
+      case _ =>
         val sliced = UrlSlicer.slice(cpg, call)
         val usable = sliced.filter(_.url.isDefined)
         if (usable.nonEmpty) usable.map(c => (c.url, c.confidence, Some(c.evidence)))
@@ -607,10 +623,13 @@ object WadiExport {
     }.mkString
   }
 
-  /** Every `@Value("${key}")` reference on a field, CPG-wide (§5.2.4). */
+  /** Every `${key}` config reference in code, CPG-wide (§5.2.4): `@Value`
+    * fields and `@FeignClient(url = "${key}")` attributes (T2 — the latter
+    * resolved by template expansion all along but was invisible to coverage).
+    */
   private def configRefObjs(cpg: Cpg): List[ujson.Obj] = {
     val keyPattern = "\\$\\{([^}:]+)(?::([^}]*))?\\}".r
-    cpg.member.l.flatMap { member =>
+    val memberRefs = cpg.member.l.flatMap { member =>
       member.ast.isAnnotation.filter(_.name == "Value").headOption.flatMap { annotation =>
         keyPattern.findFirstMatchIn(annotation.code).map { matched =>
           ujson.Obj(
@@ -624,7 +643,27 @@ object WadiExport {
           )
         }
       }
-    }.sortBy(obj => (obj("key").str, obj("anchor")("file").str))
+    }
+    val feignRefs = cpg.typeDecl.filterNot(_.isExternal).l.flatMap { td =>
+      td.ast.isAnnotation
+        .filter(_.astParent == td)
+        .filter(_.name == "FeignClient")
+        .headOption
+        .flatMap { annotation =>
+          keyPattern.findFirstMatchIn(annotation.code).map { matched =>
+            ujson.Obj(
+              "key"     -> matched.group(1).trim,
+              "default" -> Option(matched.group(2)).map(ujson.Str(_)).getOrElse(ujson.Null),
+              "anchor" -> ujson.Obj(
+                "file" -> td.file.name.headOption.getOrElse("<unknown>"),
+                "line" -> lineOf(td.lineNumber)
+              ),
+              "context" -> firstLine(annotation.code)
+            )
+          }
+        }
+    }
+    (memberRefs ++ feignRefs).sortBy(obj => (obj("key").str, obj("anchor")("file").str))
   }
 
   private def stripQuotes(literal: String): String =

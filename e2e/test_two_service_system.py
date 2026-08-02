@@ -157,24 +157,28 @@ class TestTwoServiceSystem:
         # 4. Coverage FIRST (P10): the report states exactly what is unknown.
         coverage = (await http.get(f"/api/v1/snapshots/{snapshot_id}/coverage")).json()
         totals = coverage["totals"]
-        # ${inventory.url} + Feign + service-registry + long-concat exchange +
-        # WebClient + shared-DTO stockSummary (§5.2.6 union) + RestClient +
-        # UriComponentsBuilder + RequestEntity exchange (T2)
-        assert totals["analyzed"] == 9
+        # T1 set + the full T2 idiom set: RestClient (x2 incl. base-bound),
+        # UriComponentsBuilder, RequestEntity, feign inherited/method=/
+        # constant-name/url=${key}, ternary, StringBuilder, join, MessageFormat,
+        # member map, ctor @Value
+        assert totals["analyzed"] == 20
         # audit.example.com: branch candidate + the hierarchy-chain report sink
-        assert totals["external"] == 2
-        assert totals["undetermined"] == 2  # events-primary no-endpoint-match + DB-row URL
-        assert totals["placeholder"] == 1  # billing (bare hostname, owner-scoped field URL)
+        assert totals["external"] == 3  # audit branch + hierarchy sink + @HttpExchange feed
+        assert totals["undetermined"] == 3  # no-endpoint-match + getenv idiom + base-undetermined
+        assert totals["placeholder"] == 2  # billing + backup-inventory (ternary branch)
         # T1 honesty inventory (§5.2.5): excluded from the map, counted here.
         assert totals["unreachable_call_sites"] == 1  # OrphanedAuditNotifier
         assert totals["suspected_call_sites"] == 1  # LegacyBillingBridge (unresolved receiver)
         assert [e["host"] for e in coverage["external_apis"]] == ["audit.example.com"]
-        assert coverage["external_apis"][0]["call_count"] == 2
-        assert [(p["name"], p["resolved_via"]) for p in coverage["placeholders"]] == [
-            ("billing", "bare-hostname")
-        ]
+        assert coverage["external_apis"][0]["call_count"] == 3
+        assert {(p["name"], p["resolved_via"]) for p in coverage["placeholders"]} == {
+            ("billing", "bare-hostname"),
+            ("backup-inventory", "bare-hostname"),
+        }
         reasons = sorted(entry["reason_code"] for entry in coverage["unresolved"])
-        assert reasons == ["no-endpoint-match", "url-undetermined"]
+        # T2: named causes — the DB-row trap now says getenv, the injected
+        # WebClient's relative path says base-undetermined.
+        assert reasons == ["base-undetermined", "no-endpoint-match", "unsupported-idiom:getenv"]
         # §5.4.2 census: the fixture's JDK-HttpClient probe is an unmodelled
         # mechanism — present and SAID to be present, never a silent zero.
         unmodelled = [
@@ -189,13 +193,13 @@ class TestTwoServiceSystem:
         section = coverage["analysis_coverage"]
         per_service = {e["name"]: e for e in section["services"]}
         assert set(per_service) == {"petstore", "inventory"}
-        assert per_service["petstore"]["production_methods"] == 27
-        assert per_service["petstore"]["reachable_methods"] == 22
-        assert per_service["inventory"]["production_methods"] == 7
-        assert per_service["inventory"]["reachable_methods"] == 6
-        assert section["production_methods"] == 34
-        assert section["reachable_methods"] == 28
-        assert section["coverage_percent"] == 82.4
+        assert per_service["petstore"]["production_methods"] == 35
+        assert per_service["petstore"]["reachable_methods"] == 30
+        assert per_service["inventory"]["production_methods"] == 9
+        assert per_service["inventory"]["reachable_methods"] == 8
+        assert section["production_methods"] == 44
+        assert section["reachable_methods"] == 38
+        assert section["coverage_percent"] == 86.4
 
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
@@ -204,7 +208,7 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         analyzed_edges = [e for e in outbound if e["target_kind"] == "analyzed"]
-        assert len(analyzed_edges) == 9
+        assert len(analyzed_edges) == 20
         # §5.2.6: the shared-module DTO resolved through the staged union — the
         # DI signature matched exactly and the call stitched to the inventory.
         summary_edge = next(
@@ -252,11 +256,28 @@ class TestTwoServiceSystem:
         assert entity_edge["target_simplified_uri"] == "/stock/reserve/{?}/{?}"
         assert entity_edge["http_verb"] == "PUT"
         assert entity_edge["confidence"] == "high"
+        # T2 feign completeness: inherited contract + constant-name clients.
+        inherited_edge = by_url["http://inventory/api/v1/inventory/reserved/{id}"]
+        assert inherited_edge["mechanism"] == "feign"
+        assert inherited_edge["target_simplified_uri"] == "/api/v1/inventory/reserved/{?}"
+        named_edge = by_url["http://inventory/api/v1/inventory/audit/{id}"]
+        assert named_edge["target_simplified_uri"] == "/api/v1/inventory/audit/{?}"
+        # T2 base recovery: RestClient.create(base) + relative uri stitches HIGH.
+        bound_edge = next(
+            e
+            for e in analyzed_edges
+            if e["mechanism"] == "restclient" and e["url"] == "${inventory.api.url}/stock/{?}"
+        )
+        assert bound_edge["confidence"] == "high"
+        # T2 declarative @HttpExchange: an external edge with its own mechanism.
+        feed_edge = next(e for e in outbound if e["mechanism"] == "http-interface")
+        assert feed_edge["target_kind"] == "external"
+        assert feed_edge["external_host"] == "audit.example.com"
 
         inbound = (
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{inventory_id}/remote-edges")
         ).json()["inbound"]
-        assert len(inbound) == 9  # inventory is called nine ways, by one service
+        assert len(inbound) == 20  # every analyzed idiom lands on inventory
 
         # 6. Structured auth arrived on the wire (goal 9).
         inventory_endpoints = (
@@ -310,8 +331,8 @@ class TestTwoServiceSystem:
         assert manifest.artifact_counts == dict(sorted(received.items()))
         # The bundle mirrors the API's own answers.
         assert received["service_boundary"] == 3  # petstore + inventory + the library
-        assert received["endpoint"] == 12
-        assert received["icfg"] == 12
+        assert received["endpoint"] == 14
+        assert received["icfg"] == 14
         assert received["stitched_edge"] == coverage["totals"]["edges"]
         assert received["coverage_report"] == 1
 

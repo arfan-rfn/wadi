@@ -60,10 +60,12 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     endpoints(petstore).exists(_.contains("/api/v1/inventory")) shouldBe false
   }
 
-  test("inventory serves its four endpoints incl. the role-protected one") {
+  test("inventory serves its six endpoints incl. the role-protected one") {
     endpoints(inventory) shouldBe Set(
       "GET /stock/{id}",
       "GET /api/v1/inventory/stock/{id}",
+      "GET /api/v1/inventory/reserved/{id}",
+      "GET /api/v1/inventory/audit/{id}",
       "POST /admin/restock",
       "PUT /stock/reserve/{id}/{count}"
     )
@@ -91,16 +93,16 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     // LegacyPingProbe.ping (unwired classes), AuthForwardingInterceptor.apply
     // and CurrentRequest.bearerToken (framework-invoked, a recorded T4 root
     // class). Bodiless interface stubs count on neither side.
-    petstoreCoverage("production_methods").num.toInt shouldBe 27
-    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 22
+    petstoreCoverage("production_methods").num.toInt shouldBe 35
+    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 30
 
     val inventoryCoverage = inventory("analysis_coverage")
     // Inventory's one unreached method is SecurityConfig.filterChain — a @Bean
     // framework-invoked at startup (a recorded T4 root class). The empty-bodied
     // StockRepository.restock still counts on both sides: empty concrete
     // methods are production code, only abstract stubs are excluded.
-    inventoryCoverage("production_methods").num.toInt shouldBe 7
-    inventoryCoverage("reachable_production_methods").num.toInt shouldBe 6
+    inventoryCoverage("production_methods").num.toInt shouldBe 9
+    inventoryCoverage("reachable_production_methods").num.toInt shouldBe 8
   }
 
   // --- URL slicing scenarios -------------------------------------------------------
@@ -111,24 +113,97 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     val restClientSinks = httpSinks(petstore).filter(s =>
       s.obj.get("mechanism").exists(_.strOpt.contains("restclient"))
     )
-    restClientSinks should have size 1
-    val sink = restClientSinks.head
-    sink("value").str shouldBe "${inventory.api.url}/api/v1/inventory/stock/{?}"
+    restClientSinks should have size 2 // absolute-template probe + base-bound probe
+    val sink = restClientSinks
+      .find(_("value").strOpt.contains("${inventory.api.url}/api/v1/inventory/stock/{?}"))
+      .get
     sink("value_confidence").str shouldBe "high"
     sink("http_verb").str shouldBe "GET"
+  }
+
+  test("fluent-client base recovery: RestClient.create(base) + relative .uri (T2)") {
+    val sink = httpSinks(petstore)
+      .find(s => s("evidence").strOpt.exists(_.contains("client base <-")))
+      .get
+    sink("value").str shouldBe "${inventory.api.url}/stock/{?}"
+    sink("value_confidence").str shouldBe "high"
+    sink("mechanism").str shouldBe "restclient"
+  }
+
+  test("unrecoverable client base reports base-undetermined, never a fabricated absolute (T2)") {
+    val sink = httpSinks(petstore)
+      .find(s => s("value").strOpt.exists(_.startsWith("{?}/mystery")))
+      .get
+    sink("value").str shouldBe "{?}/mystery/{?}"
+    sink("value_confidence").str shouldBe "heuristic"
+    sink("evidence").str should include("[base-undetermined]")
+  }
+
+  test("declarative @HttpExchange interface is a sink with its declared URL (T2)") {
+    val sink = httpSinks(petstore)
+      .find(_.obj.get("mechanism").exists(_.strOpt.contains("http-interface")))
+      .get
+    sink("value").str shouldBe "https://audit.example.com/feed/{id}"
+    sink("http_verb").str shouldBe "GET"
+    sink("value_confidence").str shouldBe "high"
+  }
+
+  test("ternary branches both become candidates (T2, §5.2 over-approximation)") {
+    val rows = httpSinks(petstore).filter(s =>
+      s("evidence").strOpt.exists(_.contains("ternary "))
+    )
+    rows.map(_("value").str).toSet shouldBe Set(
+      "http://backup-inventory:9091/api/v1/inventory/reserved/{?}",
+      "${inventory.api.url}/api/v1/inventory/reserved/{?}"
+    )
+    rows.foreach(_("value_confidence").str shouldBe "heuristic") // unprovable branch
+  }
+
+  test("statement-form StringBuilder joins in statement order (T2)") {
+    val sink = httpSinks(petstore)
+      .find(s => s("evidence").strOpt.exists(_.contains("StringBuilder join")))
+      .get
+    sink("value").str shouldBe "${inventory.api.url}/api/v1/inventory/reserved/{?}"
+    sink("value_confidence").str shouldBe "high"
+  }
+
+  test("String.join and MessageFormat resolve through varargs lowering (T2)") {
+    val joined = httpSinks(petstore)
+      .find(s => s("evidence").strOpt.exists(_.contains("String.join")))
+      .get
+    joined("value").str shouldBe "${inventory.api.url}/api/v1/inventory/audit/{?}"
+    val formatted = httpSinks(petstore)
+      .find(s => s("evidence").strOpt.exists(_.contains("MessageFormat.format")))
+      .get
+    formatted("value").str shouldBe "${inventory.api.url}/api/v1/inventory/audit/{?}"
+  }
+
+  test("member-held Map.of constant map resolves (T2)") {
+    val sink = httpSinks(petstore)
+      .find(s => s("evidence").strOpt.exists(_.contains("HOSTS.get")))
+      .get
+    sink("value").str shouldBe "http://inventory:8081/api/v1/inventory/stock/{?}"
+  }
+
+  test("@Value on a constructor parameter carries its config key (T2)") {
+    val sink = httpSinks(petstore)
+      .find(s => s("evidence").strOpt.exists(_.contains("@Value(\"${inventory.api.url}\") parameter")))
+      .get
+    sink("value").str shouldBe "${inventory.api.url}/stock/{?}"
+    sink("value_confidence").str shouldBe "high"
   }
 
   test("UriComponentsBuilder chain slices base + path steps (T2)") {
     // The top real-world URL idiom after `+` (predecessor-study regression).
     // queryParam is identity-neutral: skipped with a trace note, never a hole.
     val candidates = httpSinks(petstore).filter(s =>
-      s("value").strOpt.contains("${inventory.api.url}/stock/{?}")
+      s("evidence").strOpt.exists(_.contains("UriComponentsBuilder chain"))
     )
     candidates should have size 1
     val sink = candidates.head
+    sink("value").str shouldBe "${inventory.api.url}/stock/{?}"
     sink("value_confidence").str shouldBe "high"
     sink("http_verb").str shouldBe "GET"
-    sink("evidence").str should include("UriComponentsBuilder chain")
     sink("evidence").str should include("queryParam")
   }
 
@@ -148,7 +223,8 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   test("config-key URL slices to a ${key} template at HIGH confidence") {
     val candidates = httpSinks(petstore).filter(s =>
-      s("value").strOpt.exists(_.startsWith("${inventory.url}"))
+      s("value").strOpt.contains("${inventory.url}/stock/{?}") &&
+        s("mechanism").strOpt.contains("resttemplate")
     )
     candidates should have size 1
     val sink = candidates.head
@@ -158,15 +234,17 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     sink("evidence").str should include("@Value")
   }
 
-  test("feign call becomes an http-client sink with the discovery-name URL") {
+  test("feign completeness: base, inherited, RequestMapping(method=), constant-name, url=${key} (T2)") {
     val feignSinks = httpSinks(petstore).filter(_("mechanism").strOpt.contains("feign"))
-    feignSinks should have size 1
-    val sink = feignSinks.head
-    sink("value").str shouldBe "http://inventory/api/v1/inventory/stock/{id}"
-    sink("value_confidence").str shouldBe "high"
-    sink("http_verb").str shouldBe "GET"
-    // The RequestInterceptor in the module marks the call as token-forwarding.
-    sink("auth_propagation").str shouldBe "feign-interceptor"
+    feignSinks.map(s => (s("value").str, s("http_verb").str)).toSet shouldBe Set(
+      ("http://inventory/api/v1/inventory/stock/{id}", "GET"),      // base case
+      ("http://inventory/api/v1/inventory/reserved/{id}", "GET"),   // inherited contract
+      ("http://inventory/stock/{id}", "GET"),                       // RequestMapping(method=)
+      ("http://inventory/api/v1/inventory/audit/{id}", "GET"),      // constant name + contextId
+      ("${inventory.url}/stock/{id}", "GET")                        // url=${key}
+    )
+    // The RequestInterceptor in the module marks every feign call token-forwarding.
+    feignSinks.foreach(_("auth_propagation").str shouldBe "feign-interceptor")
   }
 
   test("inventory auth evidence arrives: annotation tags + filter-chain rules") {
@@ -215,12 +293,15 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     undetermined.head("value_confidence").str shouldBe "none"
   }
 
-  test("config_refs section carries the @Value keys with their anchors") {
+  test("config_refs carries @Value keys AND the feign url=${key} attribute (T2)") {
     val refs = petstore("config_refs").arr
     refs.map(_("key").str).toSet shouldBe Set("inventory.url", "inventory.api.url")
-    val byKey = refs.map(r => r("key").str -> r).toMap
-    byKey("inventory.url")("anchor")("file").str should include("PetServiceImpl.java")
-    byKey("inventory.api.url")("anchor")("file").str should include("StockHistoryClient.java")
+    // The feign url attribute is a visible config reference now, anchored at
+    // the interface (previously resolved by accident, invisible to coverage).
+    refs.exists(r =>
+      r("key").str == "inventory.url" &&
+        r("anchor")("file").str.contains("InventoryReadClient.java")
+    ) shouldBe true
   }
 
   test("inventory module has no outbound http sinks") {
@@ -246,12 +327,16 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
   }
 
   test("WebClient fluent chain: .uri() is the sink, verb from the chain root (T1)") {
-    val webclient = httpSinks(petstore).filter(_("mechanism").strOpt.contains("webclient"))
-    webclient should have size 1
-    val sink = webclient.head
-    sink("value").str shouldBe "http://inventory:8081/admin/restock"
+    val sink = httpSinks(petstore)
+      .find(s =>
+        s("mechanism").strOpt.contains("webclient") &&
+          s("value").strOpt.contains("http://inventory:8081/admin/restock")
+      )
+      .get
+    sink("value_confidence").str shouldBe "exact"
     sink("http_verb").str shouldBe "POST"
   }
+
 
   test("same-named field in another class does not bleed into the slice (T1)") {
     val billing = httpSinks(petstore).filter(s =>

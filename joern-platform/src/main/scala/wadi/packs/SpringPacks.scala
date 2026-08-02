@@ -20,6 +20,7 @@ object SpringPacks {
     new SpringEndpointPass(cpg).createAndApply()
     new SpringHttpClientSinkPass(cpg).createAndApply()
     new SpringSecurityPack.SpringFeignSinkPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringHttpInterfaceSinkPass(cpg).createAndApply()
     new SpringDataSinkPass(cpg).createAndApply()
     new SpringModelPass(cpg).createAndApply()
     new SpringSecurityPack.SpringSecurityAnnotationPass(cpg).createAndApply()

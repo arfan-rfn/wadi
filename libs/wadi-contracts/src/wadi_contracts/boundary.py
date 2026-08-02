@@ -28,7 +28,7 @@ The worker detects these by deterministic import scan; presence is a fact,
 call counts are not claimed (an import is not a call — P10)."""
 
 MODELLED_CLIENT_LIBRARIES: frozenset[str] = frozenset(
-    {"resttemplate", "webclient", "feign", "restclient"}
+    {"resttemplate", "webclient", "feign", "restclient", "http-interface"}
 )
 """The subset wadi's sink passes currently model. A census hit outside this
 set becomes an ``unmodelled_mechanisms`` coverage entry — a zero-edge system
