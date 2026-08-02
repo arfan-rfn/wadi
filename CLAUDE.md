@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**Phase 1 (backbone + vertical slice) is implemented.** Wadi is a polyglot microservice static-analysis platform built on Joern: it analyzes an entire microservice system (one repo or many), extracts per-endpoint interprocedural control-flow graphs, detects cross-service communication, stitches flows across services, and exposes the result via a REST API, MCP server, and web frontend. Implementation decisions made during Phase 1 (and known gaps) are recorded in `docs/phase1-implementation-notes.md` — read it alongside the architecture doc.
+**Phases 1–2 are shipped (0.2.0); the current phase is 2.5 — Accuracy & visibility (architecture.md §11).** Wadi is a polyglot microservice static-analysis platform built on Joern: it analyzes an entire microservice system (one repo or many), extracts per-endpoint interprocedural control-flow graphs, detects cross-service communication, stitches flows across services (with confidence tiers, Neo4j graph, and a coverage report), and exposes the result via a REST API, MCP server, and web frontend. The roadmap was reprioritized 2026-08-02 (§11 "Reprioritization" decision): single-team accuracy + visibility first (Phase 2.5: export, tranches T2–T4, provider-side endpoint contracts, coverage/endpoint UI), integration surfaces (CI/CD, Phase 6) and the team/federation layer (Phase 11) deliberately later. Phase-1 implementation decisions (with per-gap status updates) are in `docs/phase1-implementation-notes.md` — read it alongside the architecture doc.
 
 ## Commands
 

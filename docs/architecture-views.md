@@ -154,7 +154,7 @@ flowchart LR
 | 13 | MCP server → Mongo + Neo4j | driver / Bolt | reads only — no orchestrator hop (§8) |
 | — | *(future)* MCP → Orchestrator | REST | write-ish tools like `analyze_system` (P4) |
 
-*(Phase 6 adds `llm-resolver`: reads Tier 1 + coverage report, writes its own `llm_proposals` collection — same pattern as rows 4/5/11; omitted from the map to keep it readable.)*
+*(Phase 7 adds `llm-resolver`: reads Tier 1 + coverage report, writes its own `llm_proposals` collection — same pattern as rows 4/5/11; omitted from the map to keep it readable.)*
 
 ### What the map proves
 
@@ -419,7 +419,7 @@ sequenceDiagram
 1. Extraction merges each endpoint's **structured auth** from three evidence sources (§5.2): security-annotation tags + security-DSL rule tags (in-graph) + config-analyzer keys — every claim carries its evidence ref.
 2. The stitched graph holds auth on every endpoint plus **token-propagation evidence** on call sites (does this site forward the `Authorization` header? — §5.1).
 3. The auth-consistency walk (Phase 3) compares upstream vs. downstream requirements along `INVOKES_REMOTE` edges, distinguishing **"downstream unprotected"** from **"downstream trusts the gateway"** via the propagation evidence.
-4. Findings land in the analysis service's own collection (§10 single-writer pattern), surface via MCP/frontend, and later feed the CI gate `--fail-on new-unauthenticated-endpoint` (Phase 5).
+4. Findings land in the analysis service's own collection (§10 single-writer pattern), surface via MCP/frontend, and later feed the CI gate `--fail-on new-unauthenticated-endpoint` (Phase 6).
 
 **Degradation:** idioms wadi can't yet prove (e.g., dynamic Express middleware order, §12) are over-approximated with confidence markers — *wrong* security facts are worse than absent ones, so uncertainty is always labeled.
 
@@ -441,7 +441,7 @@ sequenceDiagram
     O->>P: extract changed service only
     P->>P: copy unchanged artifacts forward, re-stitch
     O-->>CI: result + coverage report
-    Note over CI: exit 0/1 gates the pipeline<br/>Phase 5 — --fail-on contract-break etc.
+    Note over CI: exit 0/1 gates the pipeline<br/>Phase 6 — --fail-on contract-break etc.
 ```
 
 **Why client/server is the recommended CI shape (§14):** the persistent deployment keeps the bare-clone cache, the content-hash CPG cache, and prior snapshots — so a commit touching one service re-analyzes one service. The runner needs **no container runtime**, just the CLI. Ephemeral mode (stack inside the job) works but is cold every run — fine nightly, not per-commit.
@@ -505,7 +505,7 @@ sequenceDiagram
 2. Config resolution surfaces service names with no analyzed service behind them → **placeholder nodes** stating why they're empty; calls to `api.stripe.com` become **external API** nodes (§5.4).
 3. The coverage report lists placeholders prominently — it *is* the "grant access to these repos" to-do list.
 4. The team registers `inventory-service` → next snapshot upgrades the placeholder to a full service, **no rework**: matching keys on config-resolved identity, not node kind.
-5. At org scale (Phase 10), the same upgrade happens via **federated boundary-only bundles** — another team publishes endpoints + outbound calls without sharing source; the node carries `federated` provenance with per-bundle staleness surfaced.
+5. At org scale (Phase 11), the same upgrade happens via **federated boundary-only bundles** — another team publishes endpoints + outbound calls without sharing source; the node carries `federated` provenance with per-bundle staleness surfaced.
 
 This is why P10 is a principle rather than a feature: partial coverage is the *normal* state of a real deployment, and the architecture makes it honest instead of silently wrong.
 
@@ -540,7 +540,7 @@ Every component of the [connectivity map](#2-service-connectivity-map), exercise
 | **UC7** placeholders | ○ | ● | ● | ● | | ● | ○ | ● | ● | |
 | **UC8** add a pack | | | | ● | ● | | | | | ● |
 
-● primary path · ○ alternative surface for the same flow *(UC6 additionally exercises `llm-resolver`, Phase 6)*
+● primary path · ○ alternative surface for the same flow *(UC6 additionally exercises `llm-resolver`, Phase 7)*
 
 Two observations the matrix makes visible:
 

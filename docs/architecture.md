@@ -306,13 +306,21 @@ The frontier of what stitching handles is recorded here — every scenario is *h
 
 *Client-library census & unmodelled mechanisms (recorded 2026-08-02, binding).* The yas benchmark exposed the coverage model's blind spot: a system whose outbound calls all use a client wadi doesn't model (yas: Spring 6 RestClient, 34 sites) produced `call_sites: 0, undetermined: 0` — a clean bill of health indistinguishable from a correct zero-edge answer. The suspected-sink net cannot catch this (such calls are cleanly resolved calls of an unmodelled type, not unresolved receivers). Decision: the worker performs a **client-library census** at discovery — a deterministic import scan of each service's production sources against a versioned vocabulary in `wadi-contracts` (`resttemplate`, `webclient`, `feign`, `restclient`, `http-interface`, `jdk-httpclient`, `okhttp`, `retrofit`, `apache-httpclient`, `unirest`), recorded as `ServiceBoundary.client_libraries`. The stitcher compares the census against the `MODELLED_CLIENT_LIBRARIES` subset and emits an `unmodelled_mechanisms` listing in the coverage report — the yas report now truthfully reads "RestClient present in N services, unmodelled" instead of silence. The census claims presence, never call counts (an import is not a call — P10); a modelled-but-sinkless client is NOT flagged (imports without calls are normal). *Rejected: inferring mechanism coverage from sink counts — absence of sinks is exactly the signal that cannot self-report.*
 
-*Analysis-unit construction (§5.2.6, recorded 2026-08-02)* — handled: in-repo sibling/transitive/service→service library modules (staged source union), library/noise module classification, DI + hierarchy + slicer resilience against unresolved types, test-source and shadow-tree exclusion, per-service failure isolation, Lombok (delombok) and MapStruct (interface-side call sites) generated code. Planned (tracked issues): coursier→`--inference-jar-paths` external-dependency types, Gradle declarative module graphs, shared libraries in a different repo of one system. Rejected permanently: `--fetch-dependencies` (executes build tooling). Honestly undecidable: annotation-processor output referenced by handwritten code (protobuf carve-out via pinned `protoc` recorded as a future option); non-JVM services remain Phase 7.
+*Analysis-unit construction (§5.2.6, recorded 2026-08-02)* — handled: in-repo sibling/transitive/service→service library modules (staged source union), library/noise module classification, DI + hierarchy + slicer resilience against unresolved types, test-source and shadow-tree exclusion, per-service failure isolation, Lombok (delombok) and MapStruct (interface-side call sites) generated code. Planned (tracked issues): coursier→`--inference-jar-paths` external-dependency types, Gradle declarative module graphs, shared libraries in a different repo of one system. Rejected permanently: `--fetch-dependencies` (executes build tooling). Honestly undecidable: annotation-processor output referenced by handwritten code (protobuf carve-out via pinned `protoc` recorded as a future option); non-JVM services remain Phase 8.
+
+**§5.4.3 Analysis-coverage metric (recorded 2026-08-02, binding; lands Phase 2.5).**
+
+The coverage report (§5.4) answers "of the calls we found, how many resolved" — nothing answers **"of the source code, how much did analysis actually walk."** The unreachable-sink inventory counts only HTTP-shaped calls in dead code; a whole `@Scheduled` job that never touches HTTP is invisible to every current honesty surface. Decision: the coverage report gains an **analysis-coverage** section — per service and rolled up per snapshot: the count of production methods in the CPG (post test/shadow exclusion) as denominator, the count of methods appearing in ≥1 endpoint's reachable closure as numerator, reported as counts + percentage. Method-level granularity first; statement-level only if method-level proves too coarse (revisit with data).
+
+- **P10 framing:** low coverage is a *finding*, not an error — it is some mix of genuinely dead code and reachability gaps (T4's scope: `@Scheduled`, listeners, lambdas, constructors). The metric cannot distinguish the two by itself; it *sizes* the question, and the unreachable-sink inventory + T4 are the reconciliation path.
+- **Sequencing (the reason it lands early in 2.5, before T4):** T4 changes the reachable set and therefore this number; landing the metric first turns T4 into a measured before/after on the benchmarks instead of an anecdote — instrumentation before the change it measures. It also joins the Phase 3 accuracy dashboard as a tracked per-release number.
+- *Rejected: statement/line-level coverage first (expensive, and method-level already localizes the gap to a named, clickable method); deriving coverage from ICFG node counts (measures graph size, not source reach); reporting a single system-wide percentage only (hides the one service whose closure collapsed — per-service is the actionable unit).*
 
 ### 5.5 MCP server & frontend
 
 Sibling thin read layers over storage — detailed in §8 and consuming the generated types of §7 respectively. The frontend talks REST to the orchestrator only; the MCP server reads storage directly.
 
-### 5.6 LLM enrichment layer (`llm-resolver`, Phase 6 — design fixed now)
+### 5.6 LLM enrichment layer (`llm-resolver`, Phase 7 — design fixed now)
 
 Static-first is absolute (P7): everything provable is proven symbolically; the LLM only fills labeled gaps. The machinery:
 
@@ -366,9 +374,9 @@ The contracts are the spine of the modularity story (P1): they are the *only* co
 |---|---|
 | `System` | name, repos[{source: url \| local path, branch?, credRef?}] — local `path:` sources are first-class (required for `wadi analyze .`, §13) |
 | `Snapshot` | system_id, {repo → sha}, status, timestamps |
-| `ServiceBoundary` | name, repo, build_root, languages[], network identity (hostnames/ports/env), build system, **`kind`** (v1: `service`; reserved: `function`, `edge-worker`, `firmware` — activated Phase 9, §11) |
+| `ServiceBoundary` | name, repo, build_root, languages[], network identity (hostnames/ports/env), build system, **`kind`** (v1: `service`; reserved: `function`, `edge-worker`, `firmware` — activated Phase 10, §11) |
 | `Endpoint` | id, service, http_method, full_uri, simplified_uri (`{?}` placeholders), path/query/body params, response type, **structured auth** (`authenticated`, `roles[]`, `mechanism`, evidence refs — merged from annotations + security DSL + config, §5.2 step 5), handler ref, **`trigger`** (v1: `http`; reserved: `queue`, `stream`, `schedule`) |
-| `ICFG` | endpoint_id, nodes[] (kind: entry/exit/statement/branch/loop/call/return), edges[] (incl. true/false branch labels), sink + remote-call markers, exception flow. **Branch nodes carry their condition** (expression text + structured operand refs where recoverable, esp. payload-derived operands) — nearly free at extraction time; enables payload simulation (Phase 8, §11). **Every node carries a source anchor** (file, start/end line) **+ its one-line source text** (graph labels are real code) **+ its owning-method ref** — the roll-up key for progressive disclosure (statement ↔ method ↔ service views from one artifact). **Method entry nodes carry** signature, params/return type, doc-comment (Javadoc/docstring), and derived behavior badges from tags (touches-DB / calls-service-X / publishes-topic / throws). Full source bodies are **never duplicated into artifacts** — served on demand (§5.3) |
+| `ICFG` | endpoint_id, nodes[] (kind: entry/exit/statement/branch/loop/call/return), edges[] (incl. true/false branch labels), sink + remote-call markers, exception flow. **Branch nodes carry their condition** (expression text + structured operand refs where recoverable, esp. payload-derived operands) — nearly free at extraction time; enables payload simulation (Phase 9, §11). **Every node carries a source anchor** (file, start/end line) **+ its one-line source text** (graph labels are real code) **+ its owning-method ref** — the roll-up key for progressive disclosure (statement ↔ method ↔ service views from one artifact). **Method entry nodes carry** signature, params/return type, doc-comment (Javadoc/docstring), and derived behavior badges from tags (touches-DB / calls-service-X / publishes-topic / throws). Full source bodies are **never duplicated into artifacts** — served on demand (§5.3) |
 | `RemoteCall` | site ref, mechanism (http client), verb, url (sliced) + confidence, raw evidence, auth-propagation marker (§5.1 token-propagation evidence) |
 | `MQInteraction` | direction (publish/consume), broker type, topic (sliced) + confidence, site ref |
 | `DataModel` | entity name, fields, relations, persistence framework |
@@ -507,9 +515,18 @@ How each anticipated kind of growth lands in this structure — the test of the 
 
 ## 11. Roadmap
 
-**Phasing strategy — depth before breadth.** One language (Java/Spring) is taken to *research-grade* depth first — stitching, security analysis, realistic scale (TrainTicket), the knowledge layer, contract checking — before any second language lands. Rationale: the deep capabilities are the research drivers and the differentiators, while language breadth is guaranteed-additive by construction (§10 playbook, language-blind tag vocabulary) — deferring breadth carries zero structural risk; deferring depth would delay everything that makes wadi novel. Phases 8–10 schedule the former "later pool"; the detailed capability designs live in the design-notes list at the end of this section.
+**Phasing strategy — depth before breadth.** One language (Java/Spring) is taken to *research-grade* depth first — stitching, security analysis, realistic scale (TrainTicket), the knowledge layer, contract checking — before any second language lands. Rationale: the deep capabilities are the research drivers and the differentiators, while language breadth is guaranteed-additive by construction (§10 playbook, language-blind tag vocabulary) — deferring breadth carries zero structural risk; deferring depth would delay everything that makes wadi novel. Phases 9–11 schedule the former "later pool"; the detailed capability designs live in the design-notes list at the end of this section.
 
-### Phase 1 — Backbone + vertical slice (first build)
+**Reprioritization (recorded 2026-08-02, binding).** After Phase 2 shipped (0.2.0), the roadmap was restructured around one principle: **make a single team's system fully accurate and visible before building any org- or pipeline-facing surface.** Decisions:
+
+1. A new **Phase 2.5** collects the accuracy tranches and the visibility work (export, provider-side endpoint contracts, the coverage/endpoint UI, the analysis-coverage metric). Its boundary is semantic, not just scoping: 2.5 refines and surfaces *what already exists* — no new analysis semantics or artifact kinds — while Phase 3 is where new semantics (MQ edges, findings) appear.
+2. **Provider-side schema recovery moves up** from contract checking into Phase 2.5 — it is a self-contained additive worker enrichment and half the value of the endpoint detail page. **Consumer-side `sends[]`/`reads[]` stays with the contract checker** (Phase 5): it exists only for breaking-change attribution and has no standalone display value.
+3. The **integration surface becomes its own Phase 6** (CLI contexts, bearer-as-norm, GitHub Action, release-pipeline completion, the `--fail-on` gates), ordered **after** contract checking — a hard constraint, because the gates enforce Phase 5's compatibility reports; shipping them earlier gates nothing.
+4. **Org scale-out becomes Phase 11**, explicitly independent with recorded prerequisites (`wadi export` from 2.5; the shared-deployment auth base from Phase 6). No other phase depends on it; it can start whenever wanted.
+
+*Rejected: shipping the old Phase-2 integration tail before the accuracy work (integration polish on an unmeasured map); pulling consumer-side recovery forward together with provider-side (drags half the contract checker into 2.5 for no standalone value); UI-first without T2/T3 (a good-looking view over wrong data — yas renders zero call edges until RestClient support lands).*
+
+### Phase 1 — Backbone + vertical slice (first build) — ✅ shipped 0.1.0/0.1.1
 
 Skeleton of everything in §9, plus one **working end-to-end path** proving the architecture:
 
@@ -524,51 +541,72 @@ Skeleton of everything in §9, plus one **working end-to-end path** proving the 
 9. Thin `wadi` CLI from day one (`up`, `down`, `status`, `analyze <path> --wait`, `mcp`) per the §15 design — compose-wrapper + REST client only, `--output json`, stable exit codes. `System` accepts local `path:` sources.
 10. **Week-one validation:** the bulk-export transport (§5.1) proven on the fixture before anything builds on it; the `lombok-mini` fixture passing (§12). **Time-to-first-value target set and measured:** 10-service medium system ≤15 min cold / ≤3 min warm-cache on a laptop — a miss triggers parallel Joern containers earlier than planned. TTFV is a tracked number from Phase 1 onward, because adoption behavior changes completely if first value takes 40 minutes.
 
-### Phase 2 — Cross-service stitching
+### Phase 2 — Cross-service stitching — ✅ shipped 0.2.0
 
-Config resolution (compose/app.yml/discovery/gateways), remote-call ↔ endpoint matching with confidence tiers, Neo4j graph population, `remote_edges` + cross-service `endpoint_icfg` MCP tools. The **spring-security pack + auth-evidence merge** land here (goal 9, §5.1/§5.2) — per-endpoint structured auth ships with the first stitched graphs. Fixture grows to two services calling each other (one with role-protected endpoints). **Cut line if the phase sprawls:** stitching + auth are the soul and stay; export, contexts, and the GitHub Action move to Phase 3+ safely. Integration surface work lands here too (§14): `wadi export`, bearer-token auth enforcement on the API, contexts/remote mode in the CLI, and the GitHub Action — the first shared-deployment story.
+Config resolution (compose/app.yml/discovery/gateways), remote-call ↔ endpoint matching with confidence tiers, Neo4j graph population, `remote_edges` + cross-service `endpoint_icfg` MCP tools. The **spring-security pack + auth-evidence merge** land here (goal 9, §5.1/§5.2) — per-endpoint structured auth ships with the first stitched graphs. Fixture grows to two services calling each other (one with role-protected endpoints). **Cut line if the phase sprawls:** stitching + auth are the soul and stay; export, contexts, and the GitHub Action move to Phase 3+ safely.
 
-### Phase 3 — Real-world depth on Java: async + security analysis
+*Outcome:* the soul shipped in full (stitching, auth, Neo4j, coverage report, MCP tools, `petstore-system` fixture, benchmark validation on TrainTicket ×2 + yas). The cut line was exercised: `wadi export` moved to Phase 2.5; contexts, bearer-as-norm, and the GitHub Action to Phase 6 (the reprioritization decision above).
 
-The research-showcase phase — one language, taken further than existing tools go:
+### Phase 2.5 — Accuracy & visibility (single system) — ← current
+
+Refine and surface what exists; no new analysis semantics. In order:
+
+1. **Analysis-coverage metric** (§5.4.3) — per service and snapshot: production methods in the CPG vs. methods in ≥1 endpoint's reachable closure, in the coverage report + UI. Lands **early, before T4**, so T4's reachable-set change is a measured before/after on the benchmarks, not an anecdote.
+2. **`wadi export <snapshot> --dir`** (§14/§15) — orchestrator route + CLI command dumping schema-valid JSON artifacts; its e2e (`analyze → export → diff`) doubles as the whole-stack conformance test through the public surface.
+3. **T2 — client APIs + URL idioms** (§5.4.2, issue #1): RestClient first (measured demand: 34 invisible sites on yas), then `UriComponentsBuilder`, `@HttpExchange`, Feign inheritance, `RequestEntity`-form exchange, remainder by reason-code counts.
+4. **T3 — deployment-model resolution** (§5.4.2, issue #2): K8s DNS, profile-file merge, Eureka/Consul registration names, gateway/Zuul depth, `context-path` in matching — ordered by reason-code counts.
+5. **Provider-side endpoint contract extraction** (pulled from old Phase 5): field-level request/response schemas — unwrap `ResponseEntity`/generics, walk return and `@RequestBody` types, Jackson-aware. Consumer-side stays in Phase 5.
+6. **Frontend: coverage-report page + endpoint end-to-end detail page** — per endpoint: remote calls, targets, per-call resolution status with reason codes, auth (roles + evidence), request/response contract — plus the **on-demand source panel** over the existing §5.3 source-on-demand API (served from the pinned-SHA store, never a live branch — anchors and text must match the analyzed revision, including delombok'ed variants).
+7. **Issues #4–#6** (coursier `--inference-jar-paths`, Gradle module graphs, cross-repo libraries): pulled in only when a target repo demands them — measured need, not speculation.
+8. **T4 — reachability roots** (§5.4.2, issue #3): **last, lands alone** — it changes the reachable set and therefore every published count; item 1 is its measurement instrument.
+
+### Phase 3 — New analysis depth on Java: async + security analysis
+
+The research-showcase phase — one language, taken further than existing tools go. This is where new analysis semantics appear (async edges, findings); accuracy/visibility refinement belongs in 2.5.
 
 1. **MQ/async stitching (Java):** Kafka/Rabbit packs, producer/consumer pairing on sliced topic names, Topic nodes in Neo4j (async edge semantics, §5.4), `mq_topology` tool.
 2. **Auth-consistency analysis** (design notes below): the upstream-vs-downstream enforcement walk over stitched edges with token-propagation evidence; findings collection + MCP surface.
-3. **Minimal boundary override** (`services:` on `System`, API-only — §4): the escape hatch must exist *before* the first realistic-scale repo, where discovery heuristics will first misfire.
-4. **TrainTicket as the flagship benchmark fixture** (~40 services, Fudan): endpoints, auth, sync + async stitching validated at realistic scale against ground truth reused from the team's prior project — also the research baseline (the EMSE benchmark numbers are the ones to beat).
-5. **Incremental-rebuild hardening:** path-delta rebuilds proven at TrainTicket scale.
-6. **Accuracy dashboard** (per-release, CI-published): endpoint F1 vs. the Code2DFD 0.86 baseline, URL-resolution rate by confidence tier, stitch match rate — measured against TrainTicket ground truth. Conformance fixtures prove *not broken*; this proves *how good*, over time — the credibility artifact for a product whose entire pitch is ground truth.
-7. **Coverage-matrix tranches (§5.4.2):** T2 (client APIs + URL idioms) and T3 (deployment-model resolution: K8s DNS, profiles, config-server, gateway filters, context-path) land in this phase, ordered by measured reason-code counts from the benchmark set — the matrix's gaps are prioritized by data, not guesses. T4 (reachability roots) may slip to Phase 4; it changes the reachable set and therefore every published count, so it lands alone.
+3. **Minimal boundary override** (`services:` on `System`, API-only — §4): the escape hatch for realistic-scale repos where discovery heuristics misfire.
+4. **Incremental-rebuild hardening:** path-delta rebuilds proven at TrainTicket scale.
+5. **Accuracy dashboard** (per-release, CI-published): endpoint F1 vs. the Code2DFD 0.86 baseline, URL-resolution rate by confidence tier, stitch match rate, analysis-coverage percentage (§5.4.3) — measured against TrainTicket ground truth. Conformance fixtures prove *not broken*; this proves *how good*, over time — the credibility artifact for a product whose entire pitch is ground truth.
+
+*Note:* the former "TrainTicket as flagship benchmark" item was substantially banked ahead of schedule in 0.2.0 (upstream 262/262 endpoints, 161 verb-carrying edges, 0 undetermined, CIMET cross-validated at identical commits); what remains here is validating the *async* half at that scale once item 1 lands. The former item 7 (coverage-matrix tranches) moved to Phase 2.5.
 
 ### Phase 4 — Human knowledge layer, history & frontend maturity
 
 1. **Stitching hints** (design notes below): all four hint kinds, repo-committed `.wadi/hints.yml` + server-side store, stale flagging, sharing paths — plus the full **boundary-override** mechanism (`.wadi/services.yml`, §4 — the minimal API-only `services:` override shipped in Phase 3), the same teachability applied one layer earlier. The flywheel starts here — TrainTicket-scale coverage reports supply the first real gap lists to teach against.
 2. **History & snapshot diff:** frontend snapshot timeline; `compare_snapshots(a, b)` API/MCP tool (stable IDs make it a join).
-3. **Frontend maturity:** system registration + analyze/progress UI (requires the credential-storage decision, design notes), coverage-first views, hint-review screens, and basic rendered flow/system diagrams (pulled forward — needed to *see* extraction quality, not just read it).
+3. **Frontend maturity:** system registration + analyze/progress UI (requires the credential-storage decision, design notes), hint-review screens, and basic rendered flow/system diagrams (needed to *see* extraction quality, not just read it). The coverage-report and endpoint-detail views shipped earlier (Phase 2.5) and deepen here.
 
 ### Phase 5 — Contract checking & breaking-change detection
 
-Provider-side schema recovery + consumer-side `sends[]`/`reads[]` worker enrichments; the **contract-checker analysis service**; compatibility API/MCP/CLI surfaces; **CI gates go live**: `--fail-on contract-break` and `--fail-on new-unauthenticated-endpoint` (goal 9). New fixture pattern: version pairs (before/after + expected break report). Full design in the notes below.
+Consumer-side `sends[]`/`reads[]` worker enrichments (provider-side schema recovery ships in Phase 2.5); the **contract-checker analysis service**; compatibility API/MCP/CLI surfaces — fully usable locally ("what does v-next break, for whom, at file:line") with **no CI coupling**: the `--fail-on` gates belong to Phase 6, which enforces this phase's reports. New fixture pattern: version pairs (before/after + expected break report). Full design in the notes below.
 
-### Phase 6 — LLM enrichment & pattern inference
+### Phase 6 — CI/CD & shared deployment
+
+The integration surface, collected from the old Phase-2 tail (§14, §15) and ordered **after Phase 5 by hard constraint** (the gates enforce its reports): named CLI contexts (`wadi context add/use/list`, `~/.config/wadi/config.toml`), bearer-token auth as the norm for shared deployments, the `wadi-sh/analyze-action` GitHub Action + GitLab template, release-pipeline completion (Homebrew/curl wrappers as they trail), and the CI gates going live: `--fail-on contract-break` and `--fail-on new-unauthenticated-endpoint` (goal 9). Until this phase, wadi is deliberately a local/single-team tool; the forward-guards are already paid for (`/api/v1` versioning, designed-in bearer auth), so nothing here is a breaking change.
+
+### Phase 7 — LLM enrichment & pattern inference
 
 The **`llm-resolver` service** (§5.6): coverage-report-driven gap resolution with evidence packets, constrained candidate selection, `llm-guessed` provenance, and the proposal→hint promotion/rejection loop — **the Phase 4 hints infrastructure is the prerequisite**. Plus: Cypher pattern/anti-pattern queries with `detect_patterns` + `find_flows` tools; LLM method summaries; LLM-drafted packs validated by the conformance suite.
 
-### Phase 7 — Language expansion
+### Phase 8 — Language expansion
 
 Python end-to-end through the *same* worker: FastAPI routes, `requests`/`httpx` sinks, SQLAlchemy/pymongo models, and the FastAPI auth pack (`Depends`/`Security` → the same structured auth shape, proving goal 9 is framework-neutral, not Spring-shaped). **Gate first** (companion doc §11): if `pysrc2cpg` dataflow quality disappoints, evaluate Fraunhofer CPG before further investment. Then Django; then Express/Node (auth needs its own design pass — middleware-order dependence, §12 risks); further languages by demand.
 
-### Phase 8 — Deep consumption
+### Phase 9 — Deep consumption
 
 **Payload walk-through simulation** (tiers 1–2, design notes below) + the `simulate_payload` MCP tool; **progressive drill-down UI** (service → method → statement with source panels); additional export formats (SARIF, GraphML).
 
-### Phase 9 — Architecture breadth
+### Phase 10 — Architecture breadth
 
 **Serverless / edge / IoT** (design notes below): the config analyzer's IaC layer (serverless.yml/SAM/Terraform; CDK/Pulumi via synthesized output), `kind`/`trigger` contract fields activated. Snapshot **retention policy** knob (§6).
 
-### Phase 10 — Org scale-out
+### Phase 11 — Team layer: federation, org hub & multi-tenancy
 
 **Federation** (artifact-bundle source kind, boundary-only bundles, `federated` provenance) → **org hub** (composite snapshots + staleness surfacing, ingestion API, ownership metadata) → **multi-tenancy** (teams/permissions on the §14 auth base). Designs in the notes below.
+
+**Independent by construction** — the per-team-agents-plus-hub story deliberately depends on nothing after its two recorded prerequisites: `wadi export` (Phase 2.5 — bundles *are* exported artifacts; the stitcher consuming only artifacts makes the published JSON Schemas the federation protocol) and the shared-deployment auth base (Phase 6 — multi-tenancy sits on it). No other phase depends on this one; it can be picked up whenever the org need materializes.
 
 **Unscheduled / speculative:** lite mode (embedded stores, §13); SMT-backed symbolic execution (simulation tier 3); non-wadi evidence ingestion (`observed-at-runtime` provenance); webhooks.
 
@@ -584,8 +622,8 @@ Python end-to-end through the *same* worker: FastAPI routes, `requests`/`httpx` 
   Applied by the stitcher as the top tier but labeled `human-asserted` (provenance never blends); hints whose anchor no longer matches are flagged stale for review, never silently misapplied. Entered via API/frontend/MCP; owned by the orchestrator (P4); backed up with Tier 1 and included in `wadi export` (they are accumulated user investment — the "gets smarter with use" asset).
   **Sharing:** (a) a shared team deployment shares hints automatically (they're per-system server state); (b) export/import carries them between deployments; (c) the developer-native mechanism — a **repo-committed `.wadi/hints.yml`**, merged with server-side hints at snapshot intake: fixes travel by git, arrive via pull request (reviewed like code), and are automatically present for every teammate's local run and CI.
 - **Retention policy** for old snapshots (§6).
-- **Auth-consistency analysis (security stitching):** with structured auth on every endpoint (goal 9) and token-propagation tags on call sites (§5.1), a walk over `INVOKES_REMOTE` edges detects auth gaps — *endpoint requiring `ADMIN` calls a downstream endpoint requiring nothing*, distinguishing "downstream unprotected" from "downstream trusts the gateway" via the propagation evidence. Lands in Phase 3 as Cypher queries or a dedicated §10 analysis service writing its own findings collection; feeds the Phase 5 CI `--fail-on` policy ("new unauthenticated endpoint") and agent queries over MCP. **Benchmark fixture: TrainTicket** (Fudan) — the standard ~40-service academic corpus, with ground-truth endpoint/auth expectations reusable from the team's prior project — the first realistic-scale conformance fixture for endpoints + auth + stitching together.
-- **Service-to-service contract recovery & breaking-change detection:** extend provider-side schema recovery (§10's response-schema enrichment) with **consumer-side dependency recovery** — at each tagged call site, dataflow slices record what the caller sends and *which response fields it actually reads* (the load-bearing subset, with code locations). Cross-snapshot diffing on stable IDs (§7) then yields attributable breaks: *"service A v-next breaks consumer B: endpoint X no longer provides field Y, read at file:line."* Effectively consumer-driven contract testing (Pact-style) **inferred from code instead of hand-written**. Lands as: worker enrichments (provider schemas + consumer field-usage on `RemoteCall`) + a **contract-checker analysis service** (textbook §10 pattern — reads Tier 1 across snapshots, writes compatibility-report artifacts). Feeds the CI `--fail-on contract-break` gate (§14) and, at the org hub, cross-team pre-deploy warnings along ownership lines. P10 applies: dynamic-language schema recovery is partial and confidence-marked; unprovable field-reads are reported as unknown, never assumed safe.
+- **Auth-consistency analysis (security stitching):** with structured auth on every endpoint (goal 9) and token-propagation tags on call sites (§5.1), a walk over `INVOKES_REMOTE` edges detects auth gaps — *endpoint requiring `ADMIN` calls a downstream endpoint requiring nothing*, distinguishing "downstream unprotected" from "downstream trusts the gateway" via the propagation evidence. Lands in Phase 3 as Cypher queries or a dedicated §10 analysis service writing its own findings collection; feeds the Phase 6 CI `--fail-on` policy ("new unauthenticated endpoint") and agent queries over MCP. **Benchmark fixture: TrainTicket** (Fudan) — the standard ~40-service academic corpus, with ground-truth endpoint/auth expectations reusable from the team's prior project — the first realistic-scale conformance fixture for endpoints + auth + stitching together.
+- **Service-to-service contract recovery & breaking-change detection:** extend provider-side schema recovery (§10's response-schema enrichment — pulled forward to Phase 2.5 by the reprioritization decision; it feeds the endpoint detail UI on its own) with **consumer-side dependency recovery** — at each tagged call site, dataflow slices record what the caller sends and *which response fields it actually reads* (the load-bearing subset, with code locations). Cross-snapshot diffing on stable IDs (§7) then yields attributable breaks: *"service A v-next breaks consumer B: endpoint X no longer provides field Y, read at file:line."* Effectively consumer-driven contract testing (Pact-style) **inferred from code instead of hand-written**. Lands as: worker enrichments (provider schemas + consumer field-usage on `RemoteCall`) + a **contract-checker analysis service** (textbook §10 pattern — reads Tier 1 across snapshots, writes compatibility-report artifacts). Feeds the CI `--fail-on contract-break` gate (§14) and, at the org hub, cross-team pre-deploy warnings along ownership lines. P10 applies: dynamic-language schema recovery is partial and confidence-marked; unprovable field-reads are reported as unknown, never assumed safe.
 - **Frontend progressive drill-down:** service-to-service view → method-to-method roll-up → full statement/branch/loop detail with source panels — pure UI work over data that already supports it (Neo4j graph / owning-method roll-up / ICFG nodes + source-on-demand, §7 + §5.3). Deliberately additive: no extraction or contract changes required when built.
 - **LLM method summaries:** natural-language "what this function does" for methods lacking doc-comments — marked machine-generated (P7, never blended with symbolic facts), cached by method content hash so unchanged code never re-summarizes.
 - **Payload walk-through simulation:** given an endpoint and a concrete payload, traverse its ICFG evaluating branch conditions that reference payload-derived data; conditions depending on external state (DB, other services, time) **fork the walk and are reported as unknowns** (P10) — yielding a pruned, highlighted set of feasible paths, continued cross-service via stitched edges with the forwarded payload projection (consumer `sends[]`). Tier 1 (cheap): payload vs. recovered request schema + validation rules → "breaks at the door" with code location. Tier 2: the guided walk (requires branch conditions in ICFG artifacts, §7). Tier 3 (unpromised research direction): SMT-backed symbolic execution for path feasibility proofs and reverse queries ("what payload reaches this sink?"). Lands as a §10 analysis service ("flow simulator" — reads materialized ICFGs + schemas, never touches Joern) + one MCP tool `simulate_payload(endpoint, payload)`. Killer consumer: agent test generation — predicting which path each candidate input exercises turns test-writing into coverage planning (product goal 6).
@@ -601,7 +639,7 @@ Python end-to-end through the *same* worker: FastAPI routes, `requests`/`httpx` 
 | Risk | Mitigation |
 |---|---|
 | CPG import cost (minutes, JVM heap) hurts interactive UX | Async job model from day one; CPG cache keyed by content hash; path-delta rebuilds only changed services |
-| Joern frontend maturity varies by language (Python/JS dataflow < Java) | Per-language spike gate before product investment (language expansion, Phase 7); Fraunhofer CPG as fallback; upstream PRs |
+| Joern frontend maturity varies by language (Python/JS dataflow < Java) | Per-language spike gate before product investment (language expansion, Phase 8); Fraunhofer CPG as fallback; upstream PRs |
 | Framework catalog is permanent DIY work | Small declarative packs + tags; seeded from Privado/Code2DFD; LLM-drafted + conformance-tested (P8) |
 | Cross-service URL resolution imperfect (runtime config, gateways) | Dataflow slices + config analyzer + confidence tiers; fuzzy matching as fallback, not load-bearing; LLM gap-resolution marked low-confidence |
 | DB "shape" from code = ORM shape, not true DDL | Accepted for v1; migration-file parser (Flyway/Liquibase/Alembic) as a future worker enrichment |
@@ -739,7 +777,7 @@ Wadi is a **headless engine with published contracts**; the CLI, frontend, and M
 1. **API versioning from the first endpoint:** everything under `/api/v1`. Retrofitting versioning onto a public API is miserable; the prefix is free on day one.
 2. **Publish the OpenAPI spec per release** (FastAPI generates it) — clients in any language can be code-generated from it.
 3. **Publish the JSON Schemas per release** — already generated for the frontend's TS types (§7); shipping them makes the contract set language-neutral.
-4. **`wadi export` lands early** (Phase 2): the cheapest integration surface — a tool that can read files can build on wadi with zero coupling to our infrastructure.
+4. **`wadi export` lands early** (Phase 2.5): the cheapest integration surface — a tool that can read files can build on wadi with zero coupling to our infrastructure.
 5. **The API assumes bearer-token auth from day one** (design, headers, 401 semantics), enforced when the first shared deployment lands — so auth is never a breaking change.
 6. **Deep integrations** (tools that persist their own analysis results) follow the §10 pattern: a new `services/*`-style member reading Tier 1/2 via `wadi-storage` and becoming single writer of its own artifact collection. This is the supported shape for products built *on* wadi, stated here as a commitment.
 
@@ -767,7 +805,7 @@ Same images, same API everywhere — modes differ only in *where the stack runs 
 
 **Ephemeral mode** (stack spun up inside the job) works but is cold every run — full multi-minute Joern imports for every service. Acceptable for nightly audits; not for per-commit.
 
-The `wadi-sh/analyze-action` GitHub Action (and a GitLab template) wrap the same CLI. CI-critical CLI behavior — `--wait`, stable exit codes, `--output json` — is specified in §15. *Phase 5 (§11):* `--fail-on` policies (contract-break, new endpoint without auth, new cross-service cycle) — where CI integration becomes an architectural quality gate rather than just re-indexing.
+The `wadi-sh/analyze-action` GitHub Action (and a GitLab template) wrap the same CLI. CI-critical CLI behavior — `--wait`, stable exit codes, `--output json` — is specified in §15. *Phase 6 (§11):* `--fail-on` policies (contract-break, new endpoint without auth, new cross-service cycle) — where CI integration becomes an architectural quality gate rather than just re-indexing.
 
 ---
 
@@ -824,9 +862,9 @@ wadi analyze <path|--repo URL>... [--wait] [--output json]
 wadi systems / snapshots / services / endpoints   # reads, table or JSON
 wadi coverage <snapshot-id>                       # Phase 2 — the coverage report (§5.4), first thing to check
 wadi restitch <snapshot-id> [--wait]              # Phase 2 — re-run stitching over stored artifacts (§5.4 recovery; no re-extraction)
-wadi export <snapshot-id> --dir ./out             # Phase 2
+wadi export <snapshot-id> --dir ./out             # Phase 2.5
 wadi mcp / wadi mcp install
-wadi context list / add / use                     # Phase 2 — lands with remote mode (§11)
+wadi context list / add / use                     # Phase 6 — lands with remote mode (§11)
 ```
 
 ### Testing

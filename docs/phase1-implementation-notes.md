@@ -116,24 +116,26 @@ Local-path analysis (`wadi analyze .`) works against the containerized stack:
 compose mounts `${WADI_ANALYZE_MOUNT:-$HOME}` read-only into the orchestrator
 and worker so local repos can be mirrored (§13 "build in now" item — done).
 
-## Phase 1 gaps (known, deliberate)
+## Phase 1 gaps (known, deliberate — status updated 2026-08-02 after 0.2.0)
 
-- Endpoint `params[]` are not yet populated from `@PathVariable`/`@RequestParam`
-  annotations (additive worker/pack enrichment).
-- URL recovery is literal/concatenation-based (EXACT/HEURISTIC/NONE); real
-  backward slicing through fields and config keys is the Phase 2 item (§5.2.4).
-- The stitcher is the §5.4 skeleton: it reads all snapshot artifacts and
-  reports counts; matching, Neo4j population, and the coverage report are
-  Phase 2.
+- ~~Endpoint `params[]` are not yet populated~~ **Closed:** params are
+  extracted from `@PathVariable`/`@RequestParam`/`@RequestBody`/`@RequestHeader`
+  annotations (name, location, type, required) via `WadiExport.endpointParamObjs`
+  → assembler.
+- ~~URL recovery is literal/concatenation-based~~ **Closed:** the §5.2.4/§5.2.5
+  backward slicer shipped in Phase 2 and was budget-corrected in Tranche 1
+  (0.2.0). Remaining idioms are tracked in the §5.4.2 matrix (T2, issue #1).
+- ~~The stitcher is the §5.4 skeleton~~ **Closed:** matching with confidence
+  tiers, Neo4j population, and the coverage report all shipped in Phase 2
+  (0.2.0), benchmark-validated.
 - MQ interactions are modeled and assembled but no Kafka/Rabbit packs exist
-  yet (Phase 3).
-- `wadi up` works against locally built images; publishing to ghcr.io and the
-  PyPI release pipeline are release-engineering work, not code gaps.
-  **Scheduled:** the pipeline (GHCR images + PyPI `wadi-sh`, one version across
-  the set) is a prerequisite of Phase 2's shared-deployment deliverables
-  (remote contexts, GitHub Action — §11.2/§14) and lands with them; if Phase 2
-  is cut to its core (stitching + auth), it slides to Phase 3 with the rest of
-  the integration surface, per §11.2's cut line. Homebrew tap + curl installer
-  are wrappers that may trail. Namespace claims (`wadi-sh` GitHub org, PyPI
-  `wadi-sh` + `wadi-cli` stub, `trywadi.com`) should not wait — they are the
-  only part someone else can take.
+  yet (Phase 3 — still accurate).
+- Release engineering: PyPI publishing shipped in 0.1.1 (`wadi-sh` +
+  `wadi-contracts` as a pinned pair). The remaining shared-deployment
+  deliverables (remote contexts, GitHub Action, bearer-as-norm) now live in
+  **Phase 6 — CI/CD & shared deployment** per the 2026-08-02 reprioritization
+  (§11); the roadmap between here and there (Phase 2.5 accuracy/visibility,
+  Phase 3 async/security) is deliberately local-first. Homebrew tap + curl
+  installer are wrappers that may trail. Namespace claims (`wadi-sh` GitHub
+  org, PyPI `wadi-sh` + `wadi-cli` stub, `trywadi.com`) should not wait — they
+  are the only part someone else can take.
