@@ -6,6 +6,30 @@
  */
 
 /**
+ * None when no service has known counts
+ */
+export type CoveragePercent = number | null
+/**
+ * Sum over services with known counts
+ */
+export type ProductionMethods = number
+export type ReachableMethods = number
+/**
+ * reachable/production * 100, 1dp; None when unknown or 0 methods
+ */
+export type CoveragePercent1 = number | null
+/**
+ * Service display name, denormalized for reads
+ */
+export type Name = string
+export type ProductionMethods1 = number | null
+export type ReachableMethods1 = number | null
+export type ServiceId = string
+/**
+ * One entry per analyzed service (libraries excluded, §5.2.6), sorted by name
+ */
+export type Services = ServiceCoverageEntry[]
+/**
  * Reserved — stitching hints land in Phase 4
  */
 export type AppliedHintIds = string[]
@@ -36,7 +60,7 @@ export type CallerServiceIds1 = [string, ...string[]]
 /**
  * The config-resolved logical name
  */
-export type Name = string
+export type Name1 = string
 export type PlaceholderId = string
 /**
  * 'compose-service' | 'discovery-name' | 'gateway-route' | 'bare-hostname'
@@ -89,7 +113,7 @@ export type Reason = string
  */
 export type ReasonCode = string
 export type RemoteCallId = string
-export type ServiceId = string
+export type ServiceId1 = string
 export type EndLine = number
 /**
  * Path relative to the service build root
@@ -106,13 +130,17 @@ export type SourceVariant = "original" | "generated"
 export type Unresolved = UnresolvedCallEntry[]
 
 /**
- * What the map knows it doesn't know (§5.4.4) — surfaced FIRST everywhere.
+ * What the map knows it doesn't know (§5.4) — surfaced FIRST everywhere.
  *
  * Snapshot-level; the stitcher is this collection's single writer (P4).
  * Hint fields are reserved now so the schema is hint-ready; hints themselves
  * ship in Phase 4 (§11).
  */
 export interface CoverageReport {
+  /**
+   * How much of the source the analysis walked (§5.4.3, schema 1.5.0). None only on reports written before the metric existed
+   */
+  analysis_coverage?: AnalysisCoverageSection | null
   applied_hint_ids?: AppliedHintIds
   created_at?: CreatedAt
   external_apis?: ExternalApis
@@ -125,6 +153,33 @@ export interface CoverageReport {
   totals: CoverageTotals
   unmodelled_mechanisms?: UnmodelledMechanisms
   unresolved?: Unresolved
+}
+/**
+ * Snapshot rollup of per-service analysis coverage (§5.4.3).
+ *
+ * Rollup sums cover only services whose counts are known; the per-service
+ * listing is where unknowns stay visible. Low coverage is a *finding*
+ * (dead code and/or unreached roots — T4's scope), not an error.
+ */
+export interface AnalysisCoverageSection {
+  coverage_percent?: CoveragePercent
+  production_methods: ProductionMethods
+  reachable_methods: ReachableMethods
+  services?: Services
+}
+/**
+ * Analysis coverage of one service (§5.4.3).
+ *
+ * ``None`` counts mean the fact is unavailable for this service (extraction
+ * failed, or the snapshot predates the metric) — unknown is reported as
+ * unknown, never as zero (P10).
+ */
+export interface ServiceCoverageEntry {
+  coverage_percent?: CoveragePercent1
+  name: Name
+  production_methods?: ProductionMethods1
+  reachable_methods?: ReachableMethods1
+  service_id: ServiceId
 }
 /**
  * A real dependency on an address outside the analyzed system.
@@ -141,7 +196,7 @@ export interface ExternalApiEntry {
 export interface PlaceholderEntry {
   call_count: CallCount1
   caller_service_ids: CallerServiceIds1
-  name: Name
+  name: Name1
   placeholder_id: PlaceholderId
   resolved_via: ResolvedVia
 }
@@ -188,7 +243,7 @@ export interface UnresolvedCallEntry {
   reason: Reason
   reason_code: ReasonCode
   remote_call_id: RemoteCallId
-  service_id: ServiceId
+  service_id: ServiceId1
   site: SourceAnchor
 }
 /**

@@ -127,6 +127,11 @@ class TestVerticalSlice:
         coverage = (await http.get(f"/api/v1/snapshots/{snapshot_id}/coverage")).json()
         assert coverage["totals"]["placeholder"] == 1
         assert [p["name"] for p in coverage["placeholders"]] == ["inventory"]
+        # §5.4.3: the 3 unreached of 9 are Pet's serialization-only getters.
+        section = coverage["analysis_coverage"]
+        assert section["production_methods"] == 9
+        assert section["reachable_methods"] == 6
+        assert section["coverage_percent"] == 66.7
 
         # 4. Conformance diff: endpoints through the public API vs expected JSON.
         services = (await http.get(f"/api/v1/snapshots/{snapshot_id}/services")).json()

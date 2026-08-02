@@ -84,6 +84,25 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     bodyParams.map(p => (p("name").str, p("location").str)) shouldBe Seq(("payload", "body"))
   }
 
+  test("analysis coverage counts production vs reachable methods (§5.4.3)") {
+    val petstoreCoverage = petstore("analysis_coverage")
+    // The 5 unreached petstore methods are exactly the T1 unreachable-inventory
+    // fixture surface: AuditNotifier.target, OrphanedAuditNotifier.notifyAudit,
+    // LegacyPingProbe.ping (unwired classes), AuthForwardingInterceptor.apply
+    // and CurrentRequest.bearerToken (framework-invoked, a recorded T4 root
+    // class). Bodiless interface stubs count on neither side.
+    petstoreCoverage("production_methods").num.toInt shouldBe 24
+    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 19
+
+    val inventoryCoverage = inventory("analysis_coverage")
+    // Inventory's one unreached method is SecurityConfig.filterChain — a @Bean
+    // framework-invoked at startup (a recorded T4 root class). The empty-bodied
+    // StockRepository.restock still counts on both sides: empty concrete
+    // methods are production code, only abstract stubs are excluded.
+    inventoryCoverage("production_methods").num.toInt shouldBe 7
+    inventoryCoverage("reachable_production_methods").num.toInt shouldBe 6
+  }
+
   // --- URL slicing scenarios -------------------------------------------------------
 
   test("config-key URL slices to a ${key} template at HIGH confidence") {

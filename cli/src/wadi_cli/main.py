@@ -79,6 +79,11 @@ def _fail_api(exc: ApiError) -> "typer.Exit":
     return typer.Exit(EXIT_ANALYSIS_FAILED)
 
 
+def _percent_label(percent: float | None) -> str:
+    # None = no ratio exists (0 production methods), distinct from 0% (P10).
+    return f"{percent}%" if percent is not None else "n/a"
+
+
 # --- lifecycle -----------------------------------------------------------------
 
 
@@ -376,6 +381,29 @@ def coverage(snapshot_id: str, output_json: JsonFlag = False) -> None:
         f"placeholder: {totals.placeholder}   undetermined: {totals.undetermined}\n"
         f"  by confidence: {totals.by_confidence}"
     )
+    if report.analysis_coverage is not None:
+        section = report.analysis_coverage
+        console.print(
+            "\n[bold]Analysis coverage[/bold] (reachable/production methods — low is a "
+            "finding, not an error):\n"
+            f"  snapshot: {section.reachable_methods}/{section.production_methods} "
+            f"({_percent_label(section.coverage_percent)})"
+        )
+        for service in section.services:
+            if service.production_methods is None:
+                console.print(f"  - {service.name}: unknown (no coverage fact)")
+            else:
+                console.print(
+                    f"  - {service.name}: {service.reachable_methods}/"
+                    f"{service.production_methods} ({_percent_label(service.coverage_percent)})"
+                )
+    if report.unmodelled_mechanisms:
+        console.print(
+            "\n[bold yellow]Unmodelled client libraries[/bold yellow] "
+            "(present in code, no sink pass models them):"
+        )
+        for mechanism in report.unmodelled_mechanisms:
+            console.print(f"  - {mechanism.mechanism} in {len(mechanism.service_ids)} service(s)")
     if report.placeholders:
         console.print("\n[bold]Placeholder services[/bold] (grant access to analyze them):")
         for placeholder in report.placeholders:

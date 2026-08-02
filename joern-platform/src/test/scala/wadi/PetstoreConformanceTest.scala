@@ -90,7 +90,19 @@ class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAf
   }
 
   test("export document declares the contract version") {
-    exportJson("export_schema_version").str shouldBe "2.1.0"
+    exportJson("export_schema_version").str shouldBe "2.2.0"
+  }
+
+  test("analysis coverage counts production vs reachable methods (§5.4.3)") {
+    val coverage = exportJson("analysis_coverage")
+    // Denominator 9 = PetController(2) + OwnerController(1) + PetServiceImpl(2)
+    // + Pet accessors(4). The 3 unreached are Pet's serialization-only getters
+    // (getId/getName/getStockCount) — never called in code, exactly the honest
+    // signal the metric exists to expose. Abstract interface methods
+    // (PetService, PetRepository, InventoryClient) count on neither side, even
+    // though PetService's stubs sit in the exported closure.
+    coverage("production_methods").num.toInt shouldBe 9
+    coverage("reachable_production_methods").num.toInt shouldBe 6
   }
 
   override def afterAll(): Unit = {

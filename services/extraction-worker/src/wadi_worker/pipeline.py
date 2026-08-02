@@ -20,6 +20,7 @@ from typing import Protocol
 
 from wadi_config import WadiSettings
 from wadi_contracts import (
+    AnalysisCoverage,
     ExtractionJob,
     GatewayRoute,
     NetworkIdentity,
@@ -170,6 +171,20 @@ class ExtractionPipeline:
                     await self._artifacts.write_service_boundaries([failed])
                     continue
 
+                # Coverage counts ride the boundary (§5.4.3): the export is the
+                # only place the denominator exists, and the boundary is the
+                # worker-owned per-service fact the stitcher already reads.
+                if export.analysis_coverage is not None:
+                    boundary = boundary.model_copy(
+                        update={
+                            "analysis_coverage": AnalysisCoverage(
+                                production_methods=export.analysis_coverage.production_methods,
+                                reachable_methods=(
+                                    export.analysis_coverage.reachable_production_methods
+                                ),
+                            )
+                        }
+                    )
                 await self._artifacts.write_service_boundaries([boundary])
                 assembled = Assembler(
                     snapshot_id=snapshot.id,

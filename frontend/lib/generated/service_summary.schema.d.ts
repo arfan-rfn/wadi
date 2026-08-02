@@ -6,6 +6,14 @@
  */
 
 /**
+ * Denominator: the service's own methods
+ */
+export type ProductionMethods = number
+/**
+ * Numerator: methods in >=1 endpoint's reachable closure
+ */
+export type ReachableMethods = number
+/**
  * Path of the build root relative to the repo root ('.' = root)
  */
 export type BuildRoot = string
@@ -113,6 +121,10 @@ export type SnapshotId = string
  * A service boundary plus counts aggregated at read time.
  */
 export interface ServiceSummary {
+  /**
+   * Analysis-coverage counts (§5.4.3). None = fact unavailable (library, extraction failed, or pre-1.5 snapshot) — never zero
+   */
+  analysis_coverage?: AnalysisCoverage | null
   build_root: BuildRoot
   build_system: BuildSystem
   client_libraries?: ClientLibraries
@@ -128,6 +140,21 @@ export interface ServiceSummary {
   schema_version?: SchemaVersion
   service_id: ServiceId
   snapshot_id: SnapshotId
+}
+/**
+ * Per-service analysis-coverage counts (§5.4.3, schema 1.5.0).
+ *
+ * How much of this service's own production code the endpoint-reachable
+ * closure walks. The denominator mirrors the closure's method filters
+ * (internal, non-synthetic, concrete, service-own sources — staged
+ * library code excluded); the numerator is the closure intersected with the
+ * same set. Computed in-CPG at export time; absence of this fact on a
+ * boundary means "unknown" (extraction failed / pre-metric snapshot), which
+ * is never conflated with zero (P10).
+ */
+export interface AnalysisCoverage {
+  production_methods: ProductionMethods
+  reachable_methods: ReachableMethods
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.

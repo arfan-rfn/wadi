@@ -4,6 +4,7 @@ from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
 from wadi_contracts.boundary import (
     KNOWN_CLIENT_LIBRARIES,
     MODELLED_CLIENT_LIBRARIES,
+    AnalysisCoverage,
     GatewayRoute,
     NetworkIdentity,
     ServiceBoundary,
@@ -60,10 +61,12 @@ from wadi_contracts.jobs import ExtractionJob, JobClaim
 from wadi_contracts.registry import CONTRACT_MODELS
 from wadi_contracts.source import MethodRef, SourceAnchor
 from wadi_contracts.stitching import (
+    AnalysisCoverageSection,
     CoverageReport,
     CoverageTotals,
     ExternalApiEntry,
     PlaceholderEntry,
+    ServiceCoverageEntry,
     StitchedEdge,
     UnmodelledMechanismEntry,
     UnresolvedCallEntry,
@@ -88,6 +91,8 @@ __all__ = [
     "MODELLED_CLIENT_LIBRARIES",
     "SCHEMA_VERSION",
     "TAG_REGISTRY_VERSION",
+    "AnalysisCoverage",
+    "AnalysisCoverageSection",
     "ArtifactEnvelope",
     "AuthEvidence",
     "AuthEvidenceKind",
@@ -129,6 +134,7 @@ __all__ = [
     "RemoteEdgesView",
     "RepoSource",
     "ServiceBoundary",
+    "ServiceCoverageEntry",
     "ServiceKind",
     "ServiceSummary",
     "SinkKind",

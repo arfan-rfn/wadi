@@ -134,6 +134,10 @@ class TestExtractionPipeline:
         boundary = boundaries[0]
         assert boundary.name == "petstore-mini"
         assert boundary.build_root == "."
+        # Coverage counts ride the boundary (§5.4.3), straight from the export.
+        assert boundary.analysis_coverage is not None
+        assert boundary.analysis_coverage.production_methods == 3
+        assert boundary.analysis_coverage.reachable_methods == 2
 
         endpoints = await artifacts.list_endpoints(snapshot.id, boundary.service_id)
         assert [e.simplified_uri for e in endpoints] == ["/pets/{?}"]
@@ -172,6 +176,35 @@ class TestExtractionPipeline:
         assert len(boundaries) == 1
         endpoints = await artifacts.list_endpoints(snapshot.id, boundaries[0].service_id)
         assert len(endpoints) == 1
+
+    async def test_pre_metric_export_leaves_coverage_unknown(
+        self, database: WadiDatabase, repo_with_service: Path, tmp_path: Path
+    ) -> None:
+        """A 2.1-era export has no analysis_coverage — the boundary must carry
+        None (unknown), never fabricated zeros (P10)."""
+
+        class LegacyExtractor(FakeExtractor):
+            def extract(
+                self, source_path: Path, export_dir: Path, project_name: str
+            ) -> ServiceExport:
+                export = super().extract(source_path, export_dir, project_name)
+                return export.model_copy(update={"analysis_coverage": None})
+
+        settings, _, snapshot, job = await _seed(database, repo_with_service, tmp_path)
+        artifacts = ArtifactRepository(database)
+        pipeline = ExtractionPipeline(
+            settings=settings,
+            systems=SystemRepository(database),
+            snapshots=SnapshotRepository(database),
+            artifacts=artifacts,
+            repo_cache=RepoCache(settings.repo_cache_dir),
+            extractor=LegacyExtractor(),
+        )
+        await pipeline.run(job)
+
+        boundaries = await artifacts.list_service_boundaries(snapshot.id)
+        assert len(boundaries) == 1
+        assert boundaries[0].analysis_coverage is None
 
     async def test_missing_snapshot_fails_loudly(
         self, database: WadiDatabase, tmp_path: Path

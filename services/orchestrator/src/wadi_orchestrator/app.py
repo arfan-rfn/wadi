@@ -254,7 +254,7 @@ def create_app(
         dependencies=[Depends(_require_auth)],
     )
     async def get_coverage(snapshot_id: str, state: StateDep) -> CoverageReport:
-        """What the map knows it doesn't know (§5.4.4) — check this first."""
+        """What the map knows it doesn't know (§5.4) — check this first."""
         if await state.snapshots.get(snapshot_id) is None:
             raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
         report = await state.stitch.get_coverage_report(snapshot_id)

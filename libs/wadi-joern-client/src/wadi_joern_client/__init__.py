@@ -4,6 +4,7 @@ from wadi_joern_client.client import JoernClient, JoernError, JoernUnreachableEr
 from wadi_joern_client.export import (
     EXPORT_SCHEMA_VERSION,
     CfgNodeKind,
+    ExportAnalysisCoverage,
     ExportAnchor,
     ExportCall,
     ExportCfg,
@@ -25,6 +26,7 @@ from wadi_joern_client.export import (
 __all__ = [
     "EXPORT_SCHEMA_VERSION",
     "CfgNodeKind",
+    "ExportAnalysisCoverage",
     "ExportAnchor",
     "ExportCall",
     "ExportCfg",

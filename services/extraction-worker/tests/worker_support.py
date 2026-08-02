@@ -7,6 +7,7 @@ RestTemplate call with a recovered URL.
 
 from wadi_joern_client.export import (
     CfgNodeKind,
+    ExportAnalysisCoverage,
     ExportCall,
     ExportCfg,
     ExportCfgEdge,
@@ -187,4 +188,9 @@ def petstore_like_export() -> ServiceExport:
         endpoints=endpoints,
         sinks=sinks,
         data_models=data_models,
+        # 2 closure methods of 3 production: one unreached method exists so
+        # tests can distinguish the counts from the closure size (§5.4.3).
+        analysis_coverage=ExportAnalysisCoverage(
+            production_methods=3, reachable_production_methods=2
+        ),
     )

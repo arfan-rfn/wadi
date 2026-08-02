@@ -25,7 +25,7 @@ REMOTE_CALLS = "remote_calls"  # writer: extraction worker
 MQ_INTERACTIONS = "mq_interactions"  # writer: extraction worker
 DATA_MODELS = "data_models"  # writer: extraction worker
 STITCHED_EDGES = "stitched_edges"  # writer: stitcher (§5.4, Tier-1 truth; Neo4j is derived)
-COVERAGE_REPORTS = "coverage_reports"  # writer: stitcher (§5.4.4, snapshot-level)
+COVERAGE_REPORTS = "coverage_reports"  # writer: stitcher (§5.4, snapshot-level)
 
 
 def create_client(mongo_uri: str) -> AsyncMongoClient[MongoDocument]:

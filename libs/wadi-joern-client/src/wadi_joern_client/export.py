@@ -11,7 +11,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EXPORT_SCHEMA_VERSION = "2.1.0"
+EXPORT_SCHEMA_VERSION = "2.2.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -22,7 +22,11 @@ sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
 (http-client sinks outside the endpoint closure, with inline anchors — their
 methods are not in the export); sink ``kind`` may be
 ``http-client-suspected`` (unresolved receiver type); ``mechanism`` may be
-``webclient`` / ``unknown``."""
+``webclient`` / ``unknown``.
+
+2.2.0 (additive, §5.4.3): new top-level ``analysis_coverage`` counts —
+production methods in the CPG vs. the endpoint-reachable subset; ``None``
+when the export predates the metric (never conflated with zero, P10)."""
 
 
 class ExportModelBase(BaseModel):
@@ -207,6 +211,15 @@ class ExportDataModel(ExportModelBase):
     storage_name: str | None = None
 
 
+class ExportAnalysisCoverage(ExportModelBase):
+    """Analysis-coverage counts (§5.4.3): production methods vs. the
+    endpoint-reachable subset, computed in-CPG under identical filters
+    (internal, non-synthetic, concrete, service-own sources)."""
+
+    production_methods: int = Field(ge=0)
+    reachable_production_methods: int = Field(ge=0)
+
+
 class ServiceExport(ExportModelBase):
     """The complete per-(service x language) export document."""
 
@@ -222,6 +235,9 @@ class ServiceExport(ExportModelBase):
     data_models: list[ExportDataModel] = Field(default_factory=list[ExportDataModel])
     security_rules: list[ExportSecurityRule] = Field(default_factory=list[ExportSecurityRule])
     config_refs: list[ExportConfigRef] = Field(default_factory=list[ExportConfigRef])
+    analysis_coverage: ExportAnalysisCoverage | None = Field(
+        default=None, description="None = exporter predates 2.2.0 (unknown, not zero — P10)"
+    )
 
     def compatible_with_reader(self) -> bool:
         """Major versions must match between exporter and reader."""

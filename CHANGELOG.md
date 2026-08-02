@@ -3,6 +3,23 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## Unreleased
+
+### Added
+- **Analysis-coverage metric (§5.4.3, Phase 2.5 M1):** the coverage report
+  now answers "of the source code, how much did analysis actually walk" —
+  per service and per snapshot, production methods (internal, non-synthetic,
+  concrete, service-own sources) vs. methods in ≥1 endpoint's reachable
+  closure, as counts + percentage. Computed in-CPG (export schema 2.2.0),
+  carried on `ServiceBoundary.analysis_coverage` (contracts 1.5.0, additive),
+  aggregated by the stitcher, surfaced via the coverage API/MCP tool and
+  `wadi coverage`. Unknown is structurally distinct from zero everywhere
+  (P10): a service without the fact reports null counts, and 0/0 has no
+  percentage. Landed before T4 by design — the reachability-roots tranche
+  will be measured as a before/after on this number.
+- `wadi coverage` human output also lists unmodelled client libraries
+  (the §5.4.2 census was previously JSON-only).
+
 ## 0.2.0 — 2026-08-02 (the benchmark-accuracy release)
 
 Three verified tranches driven by cross-tool benchmarking on FudanSELab

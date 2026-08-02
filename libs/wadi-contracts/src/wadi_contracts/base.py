@@ -21,7 +21,7 @@ class SnapshotEnvelope(WadiModel):
 
     ``schema_version`` + snapshot key + tz-aware UTC creation time. Most
     artifacts belong to one service and use :class:`ArtifactEnvelope`; a few
-    (e.g. the coverage report, §5.4.4) describe the whole snapshot.
+    (e.g. the coverage report, §5.4) describe the whole snapshot.
     """
 
     schema_version: str = SCHEMA_VERSION

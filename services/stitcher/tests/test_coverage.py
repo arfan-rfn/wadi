@@ -1,15 +1,17 @@
 """Coverage-report builder tests: totals arithmetic and honest listings."""
 
 from wadi_contracts import (
+    AnalysisCoverage,
     Confidence,
     Provenance,
+    ServiceKind,
     SourceAnchor,
     StitchedEdge,
     TargetKind,
     UnresolvedCallEntry,
     placeholder_service_id,
 )
-from wadi_stitcher.coverage import build_coverage_report
+from wadi_stitcher.coverage import build_analysis_coverage, build_coverage_report
 from wadi_testing.builders import (
     make_analyzed_edge,
     make_endpoint,
@@ -181,3 +183,104 @@ def test_unmodelled_mechanisms_surface_in_coverage() -> None:
         unmodelled_mechanisms=entries,
     )
     assert [e.mechanism for e in report.unmodelled_mechanisms] == ["okhttp", "restclient"]
+
+
+# --- analysis coverage (§5.4.3) ----------------------------------------------------
+
+
+def test_analysis_coverage_rollup_and_percentages() -> None:
+    snapshot = make_snapshot(make_system())
+    petstore = make_service(snapshot, "services/petstore").model_copy(
+        update={"analysis_coverage": AnalysisCoverage(production_methods=24, reachable_methods=19)}
+    )
+    inventory = make_service(snapshot, "services/inventory").model_copy(
+        update={"analysis_coverage": AnalysisCoverage(production_methods=7, reachable_methods=6)}
+    )
+
+    section = build_analysis_coverage([petstore, inventory])
+    # Sorted by name: inventory before petstore.
+    rows = [
+        (e.name, e.production_methods, e.reachable_methods, e.coverage_percent)
+        for e in section.services
+    ]
+    assert rows == [("inventory", 7, 6, 85.7), ("petstore", 24, 19, 79.2)]
+    assert section.production_methods == 31
+    assert section.reachable_methods == 25
+    assert section.coverage_percent == 80.6
+
+
+def test_analysis_coverage_unknown_stays_visible_not_zero() -> None:
+    """A service without the fact (extraction failed / pre-metric snapshot)
+    appears with None counts — unknown is never rendered as 0% (P10)."""
+    snapshot = make_snapshot(make_system())
+    healthy = make_service(snapshot, "services/healthy").model_copy(
+        update={"analysis_coverage": AnalysisCoverage(production_methods=10, reachable_methods=5)}
+    )
+    failed = make_service(snapshot, "services/failed").model_copy(
+        update={"extraction_error": "RuntimeError: parse failed"}
+    )
+
+    section = build_analysis_coverage([healthy, failed])
+    failed_entry = next(e for e in section.services if e.name == "failed")
+    assert failed_entry.production_methods is None
+    assert failed_entry.reachable_methods is None
+    assert failed_entry.coverage_percent is None
+    # Rollup sums only known counts; the unknown stays in the listing.
+    assert section.production_methods == 10
+    assert section.reachable_methods == 5
+    assert section.coverage_percent == 50.0
+
+
+def test_analysis_coverage_zero_production_has_no_percent() -> None:
+    """0/0 is not 0% — a service with no production methods has no ratio."""
+    snapshot = make_snapshot(make_system())
+    empty = make_service(snapshot, "services/empty").model_copy(
+        update={"analysis_coverage": AnalysisCoverage(production_methods=0, reachable_methods=0)}
+    )
+
+    section = build_analysis_coverage([empty])
+    assert section.services[0].coverage_percent is None
+    # Counts are known (zeros), so the rollup includes them; the percent stays None.
+    assert section.production_methods == 0
+    assert section.coverage_percent is None
+
+
+def test_analysis_coverage_excludes_libraries() -> None:
+    """Libraries are not analysis units (§5.2.6) — no entry, no rollup share."""
+    snapshot = make_snapshot(make_system())
+    service = make_service(snapshot, "services/app").model_copy(
+        update={"analysis_coverage": AnalysisCoverage(production_methods=4, reachable_methods=4)}
+    )
+    library = make_service(snapshot, "libs/common").model_copy(update={"kind": ServiceKind.LIBRARY})
+
+    section = build_analysis_coverage([service, library])
+    assert [e.name for e in section.services] == ["app"]
+    assert section.production_methods == 4
+    assert section.coverage_percent == 100.0
+
+
+def test_analysis_coverage_empty_snapshot() -> None:
+    section = build_analysis_coverage([])
+    assert section.services == []
+    assert section.production_methods == 0
+    assert section.reachable_methods == 0
+    assert section.coverage_percent is None
+
+
+def test_analysis_coverage_travels_on_the_report() -> None:
+    snapshot = make_snapshot(make_system())
+    service = make_service(snapshot, "services/app").model_copy(
+        update={"analysis_coverage": AnalysisCoverage(production_methods=3, reachable_methods=2)}
+    )
+    section = build_analysis_coverage([service])
+    report = build_coverage_report(
+        snapshot.id,
+        remote_calls=[],
+        edges=[],
+        unresolved=[],
+        phonebook_conflicts=[],
+        placeholder_names={},
+        analysis_coverage=section,
+    )
+    assert report.analysis_coverage is not None
+    assert report.analysis_coverage.coverage_percent == 66.7

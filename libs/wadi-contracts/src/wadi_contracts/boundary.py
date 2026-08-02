@@ -1,6 +1,8 @@
 """ServiceBoundary — the discovered unit of analysis (§4, §7)."""
 
-from pydantic import Field, field_validator
+from typing import Self
+
+from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.enums import ServiceKind
@@ -102,6 +104,34 @@ class NetworkIdentity(WadiModel):
     )
 
 
+class AnalysisCoverage(WadiModel):
+    """Per-service analysis-coverage counts (§5.4.3, schema 1.5.0).
+
+    How much of this service's own production code the endpoint-reachable
+    closure walks. The denominator mirrors the closure's method filters
+    (internal, non-synthetic, concrete, service-own sources — staged
+    library code excluded); the numerator is the closure intersected with the
+    same set. Computed in-CPG at export time; absence of this fact on a
+    boundary means "unknown" (extraction failed / pre-metric snapshot), which
+    is never conflated with zero (P10).
+    """
+
+    production_methods: int = Field(ge=0, description="Denominator: the service's own methods")
+    reachable_methods: int = Field(
+        ge=0, description="Numerator: methods in >=1 endpoint's reachable closure"
+    )
+
+    @model_validator(mode="after")
+    def _reachable_within_production(self) -> Self:
+        if self.reachable_methods > self.production_methods:
+            raise ValueError(
+                f"reachable_methods {self.reachable_methods} exceeds "
+                f"production_methods {self.production_methods} — the numerator "
+                "is defined as a subset of the denominator (§5.4.3)"
+            )
+        return self
+
+
 class ServiceBoundary(ArtifactEnvelope):
     """One discovered service within a snapshot.
 
@@ -141,6 +171,13 @@ class ServiceBoundary(ArtifactEnvelope):
             "HTTP client libraries detected by import scan (§5.4.2 census, "
             "KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an "
             "import is not a call (P10)"
+        ),
+    )
+    analysis_coverage: AnalysisCoverage | None = Field(
+        default=None,
+        description=(
+            "Analysis-coverage counts (§5.4.3). None = fact unavailable "
+            "(library, extraction failed, or pre-1.5 snapshot) — never zero"
         ),
     )
 

@@ -24,6 +24,16 @@ class LombokConformanceTest extends AnyFunSuite with Matchers {
     ujson.read(Files.readString(exportDir.resolve("export.json")))
   }
 
+  test("analysis coverage is total on the fully-wired fixture (§5.4.3)") {
+    val coverage = exportJson("analysis_coverage")
+    // Every body-carrying method is endpoint-reachable here (controller + impl).
+    // Lombok accessors are not materialized as source (delombok is types-only,
+    // §12) — the slicer's getter bridge covers them, so they count on neither
+    // side of the ratio.
+    coverage("production_methods").num.toInt shouldBe 2
+    coverage("reachable_production_methods").num.toInt shouldBe 2
+  }
+
   test("endpoint on the lombok controller is found") {
     val endpoints =
       exportJson("endpoints").arr.map(e => s"${e("http_method").str} ${e("uri").str}").toSet

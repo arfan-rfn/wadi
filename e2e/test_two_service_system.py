@@ -180,6 +180,21 @@ class TestTwoServiceSystem:
             (m["mechanism"], len(m["service_ids"])) for m in coverage["unmodelled_mechanisms"]
         ]
         assert unmodelled == [("jdk-httpclient", 1)]
+        # §5.4.3 analysis coverage: production-vs-reachable methods per service.
+        # Petstore's 5 unreached = the T1 unreachable-inventory classes +
+        # framework-invoked roots; inventory's 1 = SecurityConfig.filterChain.
+        # Staged common-library sources (wadi-libs/) count in NO denominator,
+        # and the library itself never gets an entry (§5.2.6).
+        section = coverage["analysis_coverage"]
+        per_service = {e["name"]: e for e in section["services"]}
+        assert set(per_service) == {"petstore", "inventory"}
+        assert per_service["petstore"]["production_methods"] == 24
+        assert per_service["petstore"]["reachable_methods"] == 19
+        assert per_service["inventory"]["production_methods"] == 7
+        assert per_service["inventory"]["reachable_methods"] == 6
+        assert section["production_methods"] == 31
+        assert section["reachable_methods"] == 25
+        assert section["coverage_percent"] == 80.6
 
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]

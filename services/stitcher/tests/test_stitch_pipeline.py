@@ -4,6 +4,7 @@ view over a seeded two-service snapshot (§5.4)."""
 import pytest
 
 from wadi_contracts import (
+    AnalysisCoverage,
     Confidence,
     NetworkIdentity,
     Provenance,
@@ -39,7 +40,11 @@ async def _seed_two_service_snapshot(
     """petstore calls inventory (resolvable), stripe (external), billing
     (bare hostname), and one runtime-only target (undetermined)."""
     snapshot = make_snapshot(make_system())
-    petstore = make_service(snapshot, "services/petstore")
+    petstore = make_service(snapshot, "services/petstore").model_copy(
+        update={"analysis_coverage": AnalysisCoverage(production_methods=24, reachable_methods=19)}
+    )
+    # Inventory deliberately carries no coverage fact — the report must show
+    # it as unknown, not zero (§5.4.3, P10).
     inventory = _with_network(
         make_service(snapshot, "services/inventory"),
         hostnames=["inventory"],
@@ -105,6 +110,17 @@ class TestStitchPipeline:
         assert placeholder.name == "billing"
         [entry] = report.unresolved
         assert entry.reason_code == "url-undetermined"
+
+        # Analysis coverage (§5.4.3): known counts roll up; the service
+        # without the fact stays visible as unknown.
+        assert report.analysis_coverage is not None
+        assert report.analysis_coverage.production_methods == 24
+        assert report.analysis_coverage.reachable_methods == 19
+        assert report.analysis_coverage.coverage_percent == 79.2
+        by_name = {e.name: e for e in report.analysis_coverage.services}
+        assert by_name["petstore"].coverage_percent == 79.2
+        assert by_name["inventory"].production_methods is None
+        assert by_name["inventory"].coverage_percent is None
 
         # Tier-2 derived view in Neo4j mirrors the truth.
         view = await graph_repository.remote_edges(snapshot.id, analyzed.service_id)

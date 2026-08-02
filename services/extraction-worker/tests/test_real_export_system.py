@@ -42,8 +42,20 @@ def inventory() -> ServiceExport:
 
 class TestPetstoreModule:
     def test_parses_under_schema_2(self, petstore: ServiceExport) -> None:
-        assert petstore.export_schema_version == "2.1.0"
+        assert petstore.export_schema_version == "2.2.0"
         assert petstore.compatible_with_reader()
+
+    def test_analysis_coverage_matches_pinned_conformance(
+        self, petstore: ServiceExport, inventory: ServiceExport
+    ) -> None:
+        """§5.4.3: the counts pinned in PetstoreSystemConformanceTest arrive
+        intact across the language boundary."""
+        assert petstore.analysis_coverage is not None
+        assert petstore.analysis_coverage.production_methods == 24
+        assert petstore.analysis_coverage.reachable_production_methods == 19
+        assert inventory.analysis_coverage is not None
+        assert inventory.analysis_coverage.production_methods == 7
+        assert inventory.analysis_coverage.reachable_production_methods == 6
 
     def test_config_key_candidate_assembles(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)

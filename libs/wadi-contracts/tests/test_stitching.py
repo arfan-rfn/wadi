@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from wadi_contracts.boundary import AnalysisCoverage
 from wadi_contracts.enums import Confidence, Provenance, TargetKind
 from wadi_contracts.ids import (
     endpoint_id,
@@ -16,6 +17,7 @@ from wadi_contracts.stitching import (
     CoverageReport,
     CoverageTotals,
     PlaceholderEntry,
+    ServiceCoverageEntry,
     StitchedEdge,
     UnresolvedCallEntry,
     edge_target_key,
@@ -278,3 +280,25 @@ class TestRegistryExports:
         assert CONTRACT_MODELS["stitched_edge"] is StitchedEdge
         assert CONTRACT_MODELS["coverage_report"] is CoverageReport
         assert "remote_edges_view" in CONTRACT_MODELS
+
+
+class TestAnalysisCoverage:
+    """§5.4.3 invariants: the numerator is a subset of the denominator, and
+    unknown is structurally distinct from zero."""
+
+    def test_reachable_cannot_exceed_production(self) -> None:
+        with pytest.raises(ValidationError, match="exceeds"):
+            AnalysisCoverage(production_methods=3, reachable_methods=4)
+
+    def test_entry_counts_travel_together(self) -> None:
+        with pytest.raises(ValidationError, match="both be set or unset"):
+            ServiceCoverageEntry(service_id="svc_x", name="x", production_methods=3)
+
+    def test_entry_percent_requires_counts(self) -> None:
+        with pytest.raises(ValidationError, match="unknown is never a percentage"):
+            ServiceCoverageEntry(service_id="svc_x", name="x", coverage_percent=50.0)
+
+    def test_unknown_entry_is_valid(self) -> None:
+        entry = ServiceCoverageEntry(service_id="svc_x", name="x")
+        assert entry.production_methods is None
+        assert entry.coverage_percent is None

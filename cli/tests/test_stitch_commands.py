@@ -11,9 +11,11 @@ import wadi_cli.main as cli_main
 from wadi_cli.client import WadiApiClient
 from wadi_cli.main import app
 from wadi_contracts import (
+    AnalysisCoverageSection,
     CoverageReport,
     CoverageTotals,
     PlaceholderEntry,
+    ServiceCoverageEntry,
     SnapshotStatus,
     placeholder_service_id,
 )
@@ -48,6 +50,22 @@ def _report(snapshot_id: str) -> CoverageReport:
                 caller_service_ids=["svc_" + "a" * 16],
             )
         ],
+        analysis_coverage=AnalysisCoverageSection(
+            production_methods=24,
+            reachable_methods=19,
+            coverage_percent=79.2,
+            services=[
+                ServiceCoverageEntry(
+                    service_id="svc_" + "a" * 16,
+                    name="petstore",
+                    production_methods=24,
+                    reachable_methods=19,
+                    coverage_percent=79.2,
+                ),
+                # No coverage fact: must render as unknown, never 0% (P10).
+                ServiceCoverageEntry(service_id="svc_" + "b" * 16, name="legacy"),
+            ],
+        ),
     )
 
 
@@ -66,6 +84,10 @@ class TestCoverageCommand:
         assert result.exit_code == 0, result.output
         assert "Placeholder services" in result.output
         assert "billing" in result.output
+        # Analysis coverage (§5.4.3): rollup + per-service, unknown never zero.
+        assert "Analysis coverage" in result.output
+        assert "19/24 (79.2%)" in result.output
+        assert "legacy: unknown (no coverage fact)" in result.output
 
     def test_json_output(self, mock_api: Callable[[httpx.MockTransport], None]) -> None:
         snapshot = make_snapshot(make_system())

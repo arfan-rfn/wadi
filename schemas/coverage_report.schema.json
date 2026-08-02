@@ -1,5 +1,51 @@
 {
   "$defs": {
+    "AnalysisCoverageSection": {
+      "additionalProperties": false,
+      "description": "Snapshot rollup of per-service analysis coverage (\u00a75.4.3).\n\nRollup sums cover only services whose counts are known; the per-service\nlisting is where unknowns stay visible. Low coverage is a *finding*\n(dead code and/or unreached roots \u2014 T4's scope), not an error.",
+      "properties": {
+        "coverage_percent": {
+          "anyOf": [
+            {
+              "maximum": 100.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None when no service has known counts",
+          "title": "Coverage Percent"
+        },
+        "production_methods": {
+          "description": "Sum over services with known counts",
+          "minimum": 0,
+          "title": "Production Methods",
+          "type": "integer"
+        },
+        "reachable_methods": {
+          "minimum": 0,
+          "title": "Reachable Methods",
+          "type": "integer"
+        },
+        "services": {
+          "description": "One entry per analyzed service (libraries excluded, \u00a75.2.6), sorted by name",
+          "items": {
+            "$ref": "#/$defs/ServiceCoverageEntry"
+          },
+          "title": "Services",
+          "type": "array"
+        }
+      },
+      "required": [
+        "production_methods",
+        "reachable_methods"
+      ],
+      "title": "AnalysisCoverageSection",
+      "type": "object"
+    },
     "CoverageTotals": {
       "additionalProperties": false,
       "description": "Aggregate counts for a snapshot's stitched graph.",
@@ -146,6 +192,70 @@
       "title": "PlaceholderEntry",
       "type": "object"
     },
+    "ServiceCoverageEntry": {
+      "additionalProperties": false,
+      "description": "Analysis coverage of one service (\u00a75.4.3).\n\n``None`` counts mean the fact is unavailable for this service (extraction\nfailed, or the snapshot predates the metric) \u2014 unknown is reported as\nunknown, never as zero (P10).",
+      "properties": {
+        "coverage_percent": {
+          "anyOf": [
+            {
+              "maximum": 100.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "reachable/production * 100, 1dp; None when unknown or 0 methods",
+          "title": "Coverage Percent"
+        },
+        "name": {
+          "description": "Service display name, denormalized for reads",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "production_methods": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Production Methods"
+        },
+        "reachable_methods": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reachable Methods"
+        },
+        "service_id": {
+          "minLength": 1,
+          "title": "Service Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service_id",
+        "name"
+      ],
+      "title": "ServiceCoverageEntry",
+      "type": "object"
+    },
     "SourceAnchor": {
       "additionalProperties": false,
       "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
@@ -255,11 +365,23 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.4.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.5.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "What the map knows it doesn't know (\u00a75.4.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
+  "description": "What the map knows it doesn't know (\u00a75.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
   "properties": {
+    "analysis_coverage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AnalysisCoverageSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "How much of the source the analysis walked (\u00a75.4.3, schema 1.5.0). None only on reports written before the metric existed"
+    },
     "applied_hint_ids": {
       "description": "Reserved \u2014 stitching hints land in Phase 4",
       "items": {
@@ -304,7 +426,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.4.0",
+      "default": "1.5.0",
       "title": "Schema Version",
       "type": "string"
     },

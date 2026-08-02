@@ -41,6 +41,14 @@ class TestRealExportContract:
         assert real_export.compatible_with_reader()
         assert len(real_export.endpoints) == 3
 
+    def test_analysis_coverage_crosses_the_language_boundary(
+        self, real_export: ServiceExport
+    ) -> None:
+        """§5.4.3: the counts pinned in PetstoreConformanceTest arrive intact."""
+        assert real_export.analysis_coverage is not None
+        assert real_export.analysis_coverage.production_methods == 9
+        assert real_export.analysis_coverage.reachable_production_methods == 6
+
     def test_assembles_into_valid_artifacts(self, real_export: ServiceExport) -> None:
         assembler = Assembler(snapshot_id="snap_real", service_id="svc_" + "c" * 16)
         result = assembler.assemble(real_export)

@@ -10,7 +10,7 @@ blended (P7).
 
 The :class:`CoverageReport` is snapshot-level and is surfaced *first* by every
 consumer — the user always sees what the map knows it doesn't know before
-trusting what it claims (§5.4.4).
+trusting what it claims (§5.4).
 """
 
 from typing import Self
@@ -302,8 +302,55 @@ class UnmodelledMechanismEntry(WadiModel):
     service_ids: list[str] = Field(min_length=1, description="Services whose census detected it")
 
 
+class ServiceCoverageEntry(WadiModel):
+    """Analysis coverage of one service (§5.4.3).
+
+    ``None`` counts mean the fact is unavailable for this service (extraction
+    failed, or the snapshot predates the metric) — unknown is reported as
+    unknown, never as zero (P10).
+    """
+
+    service_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, description="Service display name, denormalized for reads")
+    production_methods: int | None = Field(default=None, ge=0)
+    reachable_methods: int | None = Field(default=None, ge=0)
+    coverage_percent: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description="reachable/production * 100, 1dp; None when unknown or 0 methods",
+    )
+
+    @model_validator(mode="after")
+    def _counts_travel_together(self) -> Self:
+        if (self.production_methods is None) != (self.reachable_methods is None):
+            raise ValueError("production_methods and reachable_methods must both be set or unset")
+        if self.production_methods is None and self.coverage_percent is not None:
+            raise ValueError("coverage_percent requires counts (unknown is never a percentage)")
+        return self
+
+
+class AnalysisCoverageSection(WadiModel):
+    """Snapshot rollup of per-service analysis coverage (§5.4.3).
+
+    Rollup sums cover only services whose counts are known; the per-service
+    listing is where unknowns stay visible. Low coverage is a *finding*
+    (dead code and/or unreached roots — T4's scope), not an error.
+    """
+
+    production_methods: int = Field(ge=0, description="Sum over services with known counts")
+    reachable_methods: int = Field(ge=0)
+    coverage_percent: float | None = Field(
+        default=None, ge=0.0, le=100.0, description="None when no service has known counts"
+    )
+    services: list[ServiceCoverageEntry] = Field(
+        default_factory=list[ServiceCoverageEntry],
+        description="One entry per analyzed service (libraries excluded, §5.2.6), sorted by name",
+    )
+
+
 class CoverageReport(SnapshotEnvelope):
-    """What the map knows it doesn't know (§5.4.4) — surfaced FIRST everywhere.
+    """What the map knows it doesn't know (§5.4) — surfaced FIRST everywhere.
 
     Snapshot-level; the stitcher is this collection's single writer (P4).
     Hint fields are reserved now so the schema is hint-ready; hints themselves
@@ -327,6 +374,13 @@ class CoverageReport(SnapshotEnvelope):
             "Client libraries present but not modelled by any sink pass "
             "(§5.4.2 census) — a zero-edge system is distinguishable from a "
             "correct zero-edge answer"
+        ),
+    )
+    analysis_coverage: AnalysisCoverageSection | None = Field(
+        default=None,
+        description=(
+            "How much of the source the analysis walked (§5.4.3, schema "
+            "1.5.0). None only on reports written before the metric existed"
         ),
     )
     applied_hint_ids: list[str] = Field(

@@ -33,8 +33,10 @@ object WadiExport {
     * (http-client sinks outside the endpoint closure, with inline anchors);
     * sinks may carry kind `http-client-suspected` (unresolved receiver) and
     * mechanism `webclient`.
+    * 2.2.0 (additive, §5.4.3): new top-level `analysis_coverage` counts —
+    * production methods in the CPG vs. the endpoint-reachable subset.
     */
-  val ExportSchemaVersion = "2.1.0"
+  val ExportSchemaVersion = "2.2.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -89,6 +91,7 @@ object WadiExport {
     }
 
     val unreachableObjs = unreachableSinkObjs(cpg, methodIds)
+    val coverageObj     = analysisCoverageObj(cpg, methodIds)
 
     val document = ujson.Obj(
       "export_schema_version" -> ExportSchemaVersion,
@@ -100,7 +103,8 @@ object WadiExport {
       "unreachable_sinks"     -> unreachableObjs,
       "data_models"           -> modelObjs,
       "security_rules"        -> securityRuleObjs(cpg),
-      "config_refs"           -> configRefObjs(cpg)
+      "config_refs"           -> configRefObjs(cpg),
+      "analysis_coverage"     -> coverageObj
     )
 
     val target: Path = Paths.get(outDir)
@@ -112,7 +116,34 @@ object WadiExport {
       StandardOpenOption.TRUNCATE_EXISTING
     )
     s"wadi export: ${closure.size} methods, ${endpointObjs.size} endpoints, " +
-      s"${sinkRows.size} sinks, ${unreachableObjs.size} unreachable sinks -> $outDir/export.json"
+      s"${sinkRows.size} sinks, ${unreachableObjs.size} unreachable sinks, " +
+      s"coverage ${coverageObj("reachable_production_methods").num.toInt}/" +
+      s"${coverageObj("production_methods").num.toInt} -> $outDir/export.json"
+  }
+
+  /** Analysis-coverage counts (§5.4.3): how much of the service's own
+    * production code the endpoint-reachable closure walks.
+    *
+    * Denominator filters mirror the closure BFS (internal, name not starting
+    * with `<`) plus concrete (an abstract/interface stub has nothing to walk —
+    * its implementation counts separately; an *empty* concrete method is still
+    * production code) and the service's own sources (`wadi-libs/` staged
+    * library code would duplicate into every dependent's denominator, §5.2.6).
+    * The numerator intersects the closure with the same set, so T4's
+    * root/lambda widening moves both counts together.
+    */
+  private def analysisCoverageObj(cpg: Cpg, reachableMethodIds: Set[Long]): ujson.Obj = {
+    val productionIds = cpg.method
+      .filterNot(_.isExternal)
+      .filterNot(_.name.startsWith("<"))
+      .filterNot(_.modifier.modifierType.l.contains("ABSTRACT"))
+      .filterNot(_.filename.startsWith("wadi-libs/"))
+      .id
+      .toSet
+    ujson.Obj(
+      "production_methods"           -> productionIds.size,
+      "reachable_production_methods" -> productionIds.count(reachableMethodIds.contains)
+    )
   }
 
   /** BFS over resolved calls (incl. DI-added edges), internal methods only. */
