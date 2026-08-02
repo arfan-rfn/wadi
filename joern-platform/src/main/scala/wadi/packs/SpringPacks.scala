@@ -77,7 +77,9 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
         controller.method.l.foreach { method =>
           method.ast.isAnnotation.filter(_.astParent == method).l.foreach { annotation =>
             MappingAnnotations.get(annotation.name).foreach { httpMethod =>
-              val path = pathFromAnnotationCode(annotation.code).getOrElse("/")
+              // A path-less mapping serves the class prefix itself — an empty
+              // path must not append a trailing slash (identity form, §7).
+              val path = pathFromAnnotationCode(annotation.code).getOrElse("")
               val uri  = joinPaths(classPrefix, path)
               Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
             }

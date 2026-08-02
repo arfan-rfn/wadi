@@ -54,14 +54,18 @@ class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAf
     dbSinks should not be empty
   }
 
-  test("http-client sink recovers a concatenated URL heuristically") {
+  test("http-client sink slices the field-held host into a HIGH-confidence URL") {
+    // Phase 1 recovered only `{?}/stock/{?}` (the host lived in a field);
+    // the §5.2.4 slicer resolves the single-assignment field and keeps the
+    // path parameter as a benign `{?}` hole.
     val httpSinks = exportJson("sinks").arr.filter(_("kind").str == "http-client")
     httpSinks should not be empty
     val sink = httpSinks.head
-    sink("value").str should include("/stock/")
-    sink("value").str should include("{?}")
-    sink("value_confidence").str shouldBe "heuristic"
+    sink("value").str shouldBe "http://inventory:8080/stock/{?}"
+    sink("value_confidence").str shouldBe "high"
     sink("http_verb").str shouldBe "GET"
+    sink("call_id").numOpt should not be empty
+    sink("evidence").str should include("single assignment")
   }
 
   test("persisted model is exported with its fields") {

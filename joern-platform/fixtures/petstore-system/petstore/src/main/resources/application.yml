@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: petstore
+server:
+  port: 8080
+inventory:
+  url: http://inventory:8081

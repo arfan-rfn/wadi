@@ -29,6 +29,12 @@ jobs:
           name: petstore-export
           path: joern-platform/target/petstore-export/export.json
           if-no-files-found: error
+      - name: Upload two-service exports (petstore-system golden test)
+        uses: actions/upload-artifact@v4
+        with:
+          name: petstore-system-export
+          path: joern-platform/target/petstore-system-export
+          if-no-files-found: error
 
   python:
     name: workspace (python)
@@ -44,6 +50,11 @@ jobs:
         with:
           name: petstore-export
           path: joern-platform/target/petstore-export
+      - name: Download two-service exports (golden test input)
+        uses: actions/download-artifact@v4
+        with:
+          name: petstore-system-export
+          path: joern-platform/target/petstore-system-export
       - run: uv sync --all-packages
       - name: Lint
         run: |

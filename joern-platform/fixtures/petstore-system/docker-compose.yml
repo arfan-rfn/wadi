@@ -1,0 +1,11 @@
+# Deployment identity for the conformance system (the stitcher's phone book
+# reads these service names — they match the caller URLs and application.yml).
+services:
+  petstore:
+    build: ./petstore
+    ports:
+      - "8080:8080"
+  inventory:
+    build: ./inventory
+    ports:
+      - "8081:8081"

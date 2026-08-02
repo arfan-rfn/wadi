@@ -67,9 +67,11 @@ class TestRealExportContract:
         result = assembler.assemble(real_export)
         assert len(result.remote_calls) == 1
         call = result.remote_calls[0]
-        assert call.url is not None
-        assert "/stock/" in call.url
-        assert call.url_confidence is Confidence.HEURISTIC
+        # The §5.2.4 slicer resolves the field-held host that Phase 1 lost.
+        assert call.url == "http://inventory:8080/stock/{?}"
+        assert call.url_confidence is Confidence.HIGH
+        assert call.evidence is not None
+        assert "single assignment" in call.evidence
 
         get_pet = next(e for e in result.endpoints if e.simplified_uri == "/pets/{?}")
         icfg = next(g for g in result.icfgs if g.endpoint_id == get_pet.id)

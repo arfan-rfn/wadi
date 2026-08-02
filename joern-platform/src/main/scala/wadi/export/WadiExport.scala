@@ -7,6 +7,8 @@ import io.shiftleft.semanticcpg.language.*
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import scala.collection.mutable
 
+import wadi.slicing.UrlSlicer
+
 /** Bulk subgraph export (§5.1): the endpoint-reachable closure as JSON.
   *
   * Writes `export.json` (the Scala↔Python contract; see
@@ -52,7 +54,7 @@ object WadiExport {
     val cfgObjs = closure.flatMap { method =>
       val statements = statementsOf(method)
       if (statements.isEmpty && method.cfgNode.isEmpty) None
-      else Some(cfgJson(method, statements, methodIds, sinkRows))
+      else Some(cfgJson(cpg, method, statements, methodIds, sinkRows))
     }
     val endpointObjs = endpointMethods.flatMap { method =>
       method.tag.nameExact("endpoint").value.l.flatMap { value =>
@@ -91,7 +93,7 @@ object WadiExport {
       "sinks"                 -> sinkRows.toList,
       "data_models"           -> modelObjs,
       "security_rules"        -> ujson.Arr(), // filled by the security pack (M5)
-      "config_refs"           -> ujson.Arr()  // filled by the URL slicer (M3)
+      "config_refs"           -> configRefObjs(cpg)
     )
 
     val target: Path = Paths.get(outDir)
@@ -207,6 +209,7 @@ object WadiExport {
   }
 
   private def cfgJson(
+    cpg: Cpg,
     method: Method,
     statements: List[AstNode],
     exportedMethodIds: Set[Long],
@@ -222,7 +225,7 @@ object WadiExport {
     val nodeObjs = statements.map { statement =>
       val (kind, callInfo) = classify(statement, exportedMethodIds)
       callInfo.flatMap(_.sinkTag).foreach { case (sinkKind, sinkCall) =>
-        sinkRows += sinkJson(statement.id, method.id, sinkKind, sinkCall)
+        sinkRows ++= sinkRowsFor(cpg, statement.id, method.id, sinkKind, sinkCall)
       }
       val obj = ujson.Obj(
         "id"       -> num(statement.id),
@@ -355,48 +358,72 @@ object WadiExport {
     }
   }
 
-  private def sinkJson(statementId: Long, methodId: Long, kind: String, call: Call): ujson.Obj = {
-    val (value, confidence, verb) =
-      if (kind == "http-client") recoverUrl(call) else (None, "none", None)
-    ujson.Obj(
-      "node_id"          -> num(statementId),
-      "call_id"          -> num(call.id),
-      "method_id"        -> num(methodId),
-      "kind"             -> kind,
-      "value"            -> value.map(ujson.Str(_)).getOrElse(ujson.Null),
-      "value_confidence" -> (if (value.isDefined) confidence else "none"),
-      "http_verb"        -> verb.map(ujson.Str(_)).getOrElse(ujson.Null),
-      "mechanism"        -> (if (kind == "http-client") "resttemplate" else ujson.Null),
-      "evidence"         -> ujson.Null, // filled by the URL slicer (M3)
-      "auth_propagation" -> ujson.Null  // filled by the token-propagation pass (M5)
-    )
+  /** One sink row PER CANDIDATE value (export 2.0.0, §5.2 over-approximation).
+    *
+    * http-client sinks go through the backward slicer; the legacy
+    * literal/concat recovery stays as the floor — if slicing recovers nothing
+    * but the old syntactic template does, the template wins (results are
+    * never worse than Phase 1).
+    */
+  private def sinkRowsFor(
+    cpg: Cpg,
+    statementId: Long,
+    methodId: Long,
+    kind: String,
+    call: Call
+  ): List[ujson.Obj] = {
+    val verb = httpVerbOf(call)
+    val candidates: List[(Option[String], String, Option[String])] =
+      if (kind != "http-client") List((None, "none", None))
+      else {
+        val sliced = UrlSlicer.slice(cpg, call)
+        val usable = sliced.filter(_.url.isDefined)
+        if (usable.nonEmpty) usable.map(c => (c.url, c.confidence, Some(c.evidence)))
+        else {
+          val (legacyValue, legacyConfidence) = legacyRecoverUrl(call)
+          if (legacyValue.isDefined)
+            List((legacyValue, legacyConfidence, Some("legacy literal/concat recovery (slice floor)")))
+          else
+            sliced.take(1).map(c => (None, "none", Some(c.evidence)))
+        }
+      }
+    candidates.map { case (value, confidence, evidence) =>
+      ujson.Obj(
+        "node_id"          -> num(statementId),
+        "call_id"          -> num(call.id),
+        "method_id"        -> num(methodId),
+        "kind"             -> kind,
+        "value"            -> value.map(ujson.Str(_)).getOrElse(ujson.Null),
+        "value_confidence" -> (if (value.isDefined) confidence else "none"),
+        "http_verb"        -> verb.map(ujson.Str(_)).getOrElse(ujson.Null),
+        "mechanism"        -> (if (kind == "http-client") "resttemplate" else ujson.Null),
+        "evidence"         -> evidence.map(ujson.Str(_)).getOrElse(ujson.Null),
+        "auth_propagation" -> ujson.Null // filled by the token-propagation pass (M5)
+      )
+    }
   }
 
-  /** Literal/concat URL recovery (§5.2 step 4, Phase 1 scope: no full slicing yet).
-    *
-    * A pure literal argument is EXACT; a concatenation with literal parts is
-    * HEURISTIC (non-literal segments become `{?}`); anything else is an honest
-    * undetermined target (P10).
-    */
-  private def recoverUrl(call: Call): (Option[String], String, Option[String]) = {
-    val verb = call.name.toLowerCase match {
-      case n if n.startsWith("get")    => Some("GET")
-      case n if n.startsWith("post")   => Some("POST")
-      case n if n.startsWith("put")    => Some("PUT")
-      case n if n.startsWith("delete") => Some("DELETE")
-      case n if n.startsWith("patch")  => Some("PATCH")
+  private def httpVerbOf(call: Call): Option[String] =
+    call.name.toLowerCase match {
+      case n if n.startsWith("get")      => Some("GET")
+      case n if n.startsWith("post")     => Some("POST")
+      case n if n.startsWith("put")      => Some("PUT")
+      case n if n.startsWith("delete")   => Some("DELETE")
+      case n if n.startsWith("patch")    => Some("PATCH")
       case n if n.startsWith("exchange") => None
-      case _                           => None
+      case _                             => None
     }
+
+  /** Phase-1 literal/concat recovery, kept as the slice floor. */
+  private def legacyRecoverUrl(call: Call): (Option[String], String) =
     call.argument.argumentIndex(1).headOption match {
       case Some(argument) if argument.label == "LITERAL" =>
-        (Some(stripQuotes(argument.code)), "exact", verb)
+        (Some(stripQuotes(argument.code)), "exact")
       case Some(argument) if argument.label == "CALL" && argument.code.contains("\"") =>
-        (Some(concatToTemplate(argument.code)), "heuristic", verb)
+        (Some(concatToTemplate(argument.code)), "heuristic")
       case _ =>
-        (None, "none", verb)
+        (None, "none")
     }
-  }
 
   /** `invUrl + "/stock/" + id` -> `{?}/stock/{?}`. */
   private def concatToTemplate(code: String): String = {
@@ -404,6 +431,26 @@ object WadiExport {
     parts.map { part =>
       if (part.startsWith("\"") && part.endsWith("\"")) stripQuotes(part) else "{?}"
     }.mkString
+  }
+
+  /** Every `@Value("${key}")` reference on a field, CPG-wide (§5.2.4). */
+  private def configRefObjs(cpg: Cpg): List[ujson.Obj] = {
+    val keyPattern = "\\$\\{([^}:]+)(?::([^}]*))?\\}".r
+    cpg.member.l.flatMap { member =>
+      member.ast.isAnnotation.filter(_.name == "Value").headOption.flatMap { annotation =>
+        keyPattern.findFirstMatchIn(annotation.code).map { matched =>
+          ujson.Obj(
+            "key"     -> matched.group(1).trim,
+            "default" -> Option(matched.group(2)).map(ujson.Str(_)).getOrElse(ujson.Null),
+            "anchor" -> ujson.Obj(
+              "file" -> member.file.name.headOption.getOrElse("<unknown>"),
+              "line" -> lineOf(member.lineNumber)
+            ),
+            "context" -> firstLine(annotation.code)
+          )
+        }
+      }
+    }.sortBy(obj => (obj("key").str, obj("anchor")("file").str))
   }
 
   private def stripQuotes(literal: String): String =

@@ -15,7 +15,8 @@ import java.nio.file.{Files, Paths}
 class LombokConformanceTest extends AnyFunSuite with Matchers {
 
   private val fixtureDir = Paths.get("fixtures", "lombok-mini").toAbsolutePath
-  private val exportDir  = Files.createTempDirectory("wadi-lombok-export")
+  // Fixed output path (gitignored) so slicing behavior is inspectable locally.
+  private val exportDir = Paths.get("target", "lombok-export").toAbsolutePath
 
   private lazy val exportJson: ujson.Value = {
     val summary = WadiPipeline.runFromSource(fixtureDir.toString, exportDir.toString)
@@ -32,6 +33,18 @@ class LombokConformanceTest extends AnyFunSuite with Matchers {
   test("DI resolution crosses into the impl despite the lombok constructor") {
     val methodNames = exportJson("methods").arr.map(_("full_name").str)
     methodNames.exists(_.contains("GreetingServiceImpl.greet")) shouldBe true
+  }
+
+  test("URL through a lombok getter resolves via the backing-field bridge") {
+    // getBaseUrl() has no source body (Lombok generates it); the slicer must
+    // bridge to the field initializer instead of dead-ending (recorded
+    // decision: exact anchors + getter bridge over run-delombok).
+    val httpSinks = exportJson("sinks").arr.filter(_("kind").str == "http-client")
+    httpSinks should not be empty
+    val sink = httpSinks.head
+    sink("value").str shouldBe "http://upstream:9000/greet/{?}"
+    sink("value_confidence").str shouldBe "high"
+    sink("evidence").str should include("lombok getter bridged")
   }
 
   test("anchors point at real source lines (not delombok misalignment)") {
