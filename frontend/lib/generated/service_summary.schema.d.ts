@@ -13,6 +13,10 @@ export type BuildRoot = string
  * e.g. 'maven', 'gradle'
  */
 export type BuildSystem = string
+/**
+ * HTTP client libraries detected by import scan (§5.4.2 census, KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an import is not a call (P10)
+ */
+export type ClientLibraries = string[]
 export type CreatedAt = string
 export type EndpointCount = number
 /**
@@ -111,6 +115,7 @@ export type SnapshotId = string
 export interface ServiceSummary {
   build_root: BuildRoot
   build_system: BuildSystem
+  client_libraries?: ClientLibraries
   created_at?: CreatedAt
   endpoint_count?: EndpointCount
   extraction_error?: ExtractionError

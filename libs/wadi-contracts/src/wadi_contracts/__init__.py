@@ -1,7 +1,13 @@
 """Wadi data contracts — the single source of truth (architecture.md §7)."""
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
-from wadi_contracts.boundary import GatewayRoute, NetworkIdentity, ServiceBoundary
+from wadi_contracts.boundary import (
+    KNOWN_CLIENT_LIBRARIES,
+    MODELLED_CLIENT_LIBRARIES,
+    GatewayRoute,
+    NetworkIdentity,
+    ServiceBoundary,
+)
 from wadi_contracts.comms import MqInteraction, RemoteCall
 from wadi_contracts.datamodel import DataModel, DataModelField, DataModelRelation
 from wadi_contracts.endpoint import (
@@ -59,6 +65,7 @@ from wadi_contracts.stitching import (
     ExternalApiEntry,
     PlaceholderEntry,
     StitchedEdge,
+    UnmodelledMechanismEntry,
     UnresolvedCallEntry,
     edge_target_key,
 )
@@ -77,6 +84,8 @@ from wadi_contracts.views import RemoteEdgeItem, RemoteEdgesView, ServiceSummary
 
 __all__ = [
     "CONTRACT_MODELS",
+    "KNOWN_CLIENT_LIBRARIES",
+    "MODELLED_CLIENT_LIBRARIES",
     "SCHEMA_VERSION",
     "TAG_REGISTRY_VERSION",
     "ArtifactEnvelope",
@@ -134,6 +143,7 @@ __all__ = [
     "TagValidationError",
     "TargetKind",
     "TriggerKind",
+    "UnmodelledMechanismEntry",
     "UnresolvedCallEntry",
     "UtcDatetime",
     "WadiModel",

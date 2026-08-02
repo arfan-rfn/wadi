@@ -67,6 +67,20 @@ export type Undetermined = number
  */
 export type UnreachableCallSites = number
 /**
+ * KNOWN_CLIENT_LIBRARIES value outside the modelled set
+ */
+export type Mechanism = string
+/**
+ * Services whose census detected it
+ *
+ * @minItems 1
+ */
+export type ServiceIds = [string, ...string[]]
+/**
+ * Client libraries present but not modelled by any sink pass (§5.4.2 census) — a zero-edge system is distinguishable from a correct zero-edge answer
+ */
+export type UnmodelledMechanisms = UnmodelledMechanismEntry[]
+/**
  * Human-readable explanation
  */
 export type Reason = string
@@ -109,6 +123,7 @@ export interface CoverageReport {
   snapshot_id: SnapshotId
   stale_hint_ids?: StaleHintIds
   totals: CoverageTotals
+  unmodelled_mechanisms?: UnmodelledMechanisms
   unresolved?: Unresolved
 }
 /**
@@ -149,6 +164,18 @@ export interface CoverageTotals {
  */
 export interface ByConfidence {
   [k: string]: number
+}
+/**
+ * A client library the census detected but no sink pass models (§5.4.2).
+ *
+ * The yas lesson: a system whose calls all use an unmodelled client produced
+ * a clean-looking zero-edge coverage report. This entry is the truthful
+ * sentence — "present, unmodelled" — never a call count (imports are not
+ * calls, P10).
+ */
+export interface UnmodelledMechanismEntry {
+  mechanism: Mechanism
+  service_ids: ServiceIds
 }
 /**
  * One call site the stitcher could not resolve, with the reason stated.

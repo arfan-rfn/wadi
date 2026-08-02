@@ -1,10 +1,35 @@
 """ServiceBoundary — the discovered unit of analysis (§4, §7)."""
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.enums import ServiceKind
 from wadi_contracts.source import SourceAnchor
+
+KNOWN_CLIENT_LIBRARIES: frozenset[str] = frozenset(
+    {
+        "resttemplate",
+        "webclient",
+        "feign",
+        "restclient",
+        "http-interface",
+        "jdk-httpclient",
+        "okhttp",
+        "retrofit",
+        "apache-httpclient",
+        "unirest",
+    }
+)
+"""Client-library census vocabulary (§5.4.2) — versioned like the tag registry.
+
+The worker detects these by deterministic import scan; presence is a fact,
+call counts are not claimed (an import is not a call — P10)."""
+
+MODELLED_CLIENT_LIBRARIES: frozenset[str] = frozenset({"resttemplate", "webclient", "feign"})
+"""The subset wadi's sink passes currently model. A census hit outside this
+set becomes an ``unmodelled_mechanisms`` coverage entry — a zero-edge system
+must be distinguishable from a correct zero-edge answer (§5.4.2, the yas
+RestClient lesson)."""
 
 
 class GatewayRoute(WadiModel):
@@ -110,3 +135,22 @@ class ServiceBoundary(ArtifactEnvelope):
             "never silence"
         ),
     )
+    client_libraries: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "HTTP client libraries detected by import scan (§5.4.2 census, "
+            "KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an "
+            "import is not a call (P10)"
+        ),
+    )
+
+    @field_validator("client_libraries")
+    @classmethod
+    def _registered_client_libraries(cls, value: list[str]) -> list[str]:
+        unknown = [v for v in value if v not in KNOWN_CLIENT_LIBRARIES]
+        if unknown:
+            raise ValueError(
+                f"unregistered client libraries {unknown!r}; the vocabulary is "
+                "KNOWN_CLIENT_LIBRARIES"
+            )
+        return value

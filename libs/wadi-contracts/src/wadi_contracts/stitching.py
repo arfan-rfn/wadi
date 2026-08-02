@@ -287,6 +287,21 @@ class CoverageTotals(WadiModel):
     )
 
 
+class UnmodelledMechanismEntry(WadiModel):
+    """A client library the census detected but no sink pass models (§5.4.2).
+
+    The yas lesson: a system whose calls all use an unmodelled client produced
+    a clean-looking zero-edge coverage report. This entry is the truthful
+    sentence — "present, unmodelled" — never a call count (imports are not
+    calls, P10).
+    """
+
+    mechanism: str = Field(
+        min_length=1, description="KNOWN_CLIENT_LIBRARIES value outside the modelled set"
+    )
+    service_ids: list[str] = Field(min_length=1, description="Services whose census detected it")
+
+
 class CoverageReport(SnapshotEnvelope):
     """What the map knows it doesn't know (§5.4.4) — surfaced FIRST everywhere.
 
@@ -305,6 +320,14 @@ class CoverageReport(SnapshotEnvelope):
     phonebook_conflicts: list[str] = Field(
         default_factory=list[str],
         description="Config identities claimed by more than one source (never silently picked)",
+    )
+    unmodelled_mechanisms: list[UnmodelledMechanismEntry] = Field(
+        default_factory=list[UnmodelledMechanismEntry],
+        description=(
+            "Client libraries present but not modelled by any sink pass "
+            "(§5.4.2 census) — a zero-edge system is distinguishable from a "
+            "correct zero-edge answer"
+        ),
     )
     applied_hint_ids: list[str] = Field(
         default_factory=list[str], description="Reserved — stitching hints land in Phase 4"

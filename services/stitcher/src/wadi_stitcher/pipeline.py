@@ -23,7 +23,7 @@ import logging
 from dataclasses import dataclass
 
 from wadi_contracts import Endpoint, StitchedEdge, UnresolvedCallEntry
-from wadi_stitcher.coverage import build_coverage_report
+from wadi_stitcher.coverage import build_coverage_report, build_unmodelled_mechanisms
 from wadi_stitcher.matching import HintProvider, MatchContext, NullHintProvider, match_call
 from wadi_stitcher.matching.base import MechanismMatcher
 from wadi_stitcher.matching.http import HttpMatcher
@@ -110,6 +110,7 @@ class StitchPipeline:
             unresolved=unresolved,
             phonebook_conflicts=phonebook.conflicts,
             placeholder_names=placeholder_names,
+            unmodelled_mechanisms=build_unmodelled_mechanisms(boundaries),
         )
         await self._stitch.write_coverage_report(report)
 

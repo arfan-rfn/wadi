@@ -188,6 +188,33 @@
       "title": "SourceVariant",
       "type": "string"
     },
+    "UnmodelledMechanismEntry": {
+      "additionalProperties": false,
+      "description": "A client library the census detected but no sink pass models (\u00a75.4.2).\n\nThe yas lesson: a system whose calls all use an unmodelled client produced\na clean-looking zero-edge coverage report. This entry is the truthful\nsentence \u2014 \"present, unmodelled\" \u2014 never a call count (imports are not\ncalls, P10).",
+      "properties": {
+        "mechanism": {
+          "description": "KNOWN_CLIENT_LIBRARIES value outside the modelled set",
+          "minLength": 1,
+          "title": "Mechanism",
+          "type": "string"
+        },
+        "service_ids": {
+          "description": "Services whose census detected it",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Service Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mechanism",
+        "service_ids"
+      ],
+      "title": "UnmodelledMechanismEntry",
+      "type": "object"
+    },
     "UnresolvedCallEntry": {
       "additionalProperties": false,
       "description": "One call site the stitcher could not resolve, with the reason stated.\n\n``reason_code`` is machine-readable so limitations are queryable, not just\nprose \u2014 e.g. counting how often Lombok-generated interiors block URL\nrecovery is a coverage query, not an investigation.",
@@ -228,7 +255,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.3.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.4.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What the map knows it doesn't know (\u00a75.4.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
@@ -277,7 +304,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.3.0",
+      "default": "1.4.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -295,6 +322,14 @@
     },
     "totals": {
       "$ref": "#/$defs/CoverageTotals"
+    },
+    "unmodelled_mechanisms": {
+      "description": "Client libraries present but not modelled by any sink pass (\u00a75.4.2 census) \u2014 a zero-edge system is distinguishable from a correct zero-edge answer",
+      "items": {
+        "$ref": "#/$defs/UnmodelledMechanismEntry"
+      },
+      "title": "Unmodelled Mechanisms",
+      "type": "array"
     },
     "unresolved": {
       "items": {

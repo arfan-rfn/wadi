@@ -256,3 +256,36 @@ class TestServiceMarkerBoundaries:
             java_source='@Controller class Web { @GetMapping("/x") void x() {} }',
         )
         assert {s.build_root: s.kind for s in discover_services(tmp_path)}["shared"] == "service"
+
+
+class TestClientLibraryCensus:
+    """§5.4.2: presence facts from import scan — the yas RestClient lesson."""
+
+    def test_census_detects_unmodelled_clients(self, tmp_path: Path) -> None:
+        write_pom(
+            tmp_path,
+            "svc",
+            java_source=(
+                "import org.springframework.web.client.RestClient;\n"
+                "import java.net.http.HttpClient;\n"
+                "@RestController class App {}"
+            ),
+        )
+        assert discover_services(tmp_path)[0].client_libraries == [
+            "jdk-httpclient",
+            "restclient",
+        ]
+
+    def test_census_detects_modelled_clients_too(self, tmp_path: Path) -> None:
+        write_pom(
+            tmp_path,
+            "svc",
+            java_source=(
+                "import org.springframework.web.client.RestTemplate;\n@RestController class App {}"
+            ),
+        )
+        assert discover_services(tmp_path)[0].client_libraries == ["resttemplate"]
+
+    def test_no_clients_no_census(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "svc")
+        assert discover_services(tmp_path)[0].client_libraries == []

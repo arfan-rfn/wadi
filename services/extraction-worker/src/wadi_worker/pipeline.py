@@ -124,6 +124,7 @@ class ExtractionPipeline:
                     build_system=service.build_system,
                     kind=ServiceKind.LIBRARY if service.kind == "library" else ServiceKind.SERVICE,
                     library_roots=service.library_roots,
+                    client_libraries=service.client_libraries,
                     network=NetworkIdentity(
                         hostnames=service.hostnames,
                         ports=service.ports,

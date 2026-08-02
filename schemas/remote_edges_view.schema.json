@@ -210,7 +210,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.3.0/remote_edges_view.schema.json",
+  "$id": "https://trywadi.com/schemas/1.4.0/remote_edges_view.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Who a service calls and who calls it (\u00a78 ``remote_edges``).",

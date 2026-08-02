@@ -13,6 +13,10 @@ export type BuildRoot = string
  * e.g. 'maven', 'gradle'
  */
 export type BuildSystem = string
+/**
+ * HTTP client libraries detected by import scan (§5.4.2 census, KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an import is not a call (P10)
+ */
+export type ClientLibraries = string[]
 export type CreatedAt = string
 /**
  * Set when this service's CPG extraction failed (§5.2.6 per-service isolation): the error, recorded as a queryable fact (P10). The service then has no endpoints/calls — absence with a stated cause, never silence
@@ -113,6 +117,7 @@ export type SnapshotId = string
 export interface ServiceBoundary {
   build_root: BuildRoot
   build_system: BuildSystem
+  client_libraries?: ClientLibraries
   created_at?: CreatedAt
   extraction_error?: ExtractionError
   kind?: ServiceKind

@@ -7,16 +7,37 @@ sorted inputs in, sorted listings out.
 from collections.abc import Sequence
 
 from wadi_contracts import (
+    MODELLED_CLIENT_LIBRARIES,
     Confidence,
     CoverageReport,
     CoverageTotals,
     ExternalApiEntry,
     PlaceholderEntry,
     RemoteCall,
+    ServiceBoundary,
     StitchedEdge,
     TargetKind,
+    UnmodelledMechanismEntry,
     UnresolvedCallEntry,
 )
+
+
+def build_unmodelled_mechanisms(
+    boundaries: Sequence[ServiceBoundary],
+) -> list[UnmodelledMechanismEntry]:
+    """§5.4.2 census: client libraries present but outside the modelled set —
+    the yas lesson (a zero-edge system must be distinguishable from a correct
+    zero-edge answer).
+    """
+    by_mechanism: dict[str, list[str]] = {}
+    for boundary in boundaries:
+        for library in boundary.client_libraries:
+            if library not in MODELLED_CLIENT_LIBRARIES:
+                by_mechanism.setdefault(library, []).append(boundary.service_id)
+    return [
+        UnmodelledMechanismEntry(mechanism=mechanism, service_ids=sorted(service_ids))
+        for mechanism, service_ids in sorted(by_mechanism.items())
+    ]
 
 
 def build_coverage_report(
@@ -27,6 +48,7 @@ def build_coverage_report(
     unresolved: Sequence[UnresolvedCallEntry],
     phonebook_conflicts: Sequence[str],
     placeholder_names: dict[str, tuple[str, str]],
+    unmodelled_mechanisms: Sequence[UnmodelledMechanismEntry] = (),
 ) -> CoverageReport:
     by_kind: dict[TargetKind, list[StitchedEdge]] = {kind: [] for kind in TargetKind}
     by_confidence: dict[str, int] = {}
@@ -96,4 +118,5 @@ def build_coverage_report(
         unresolved=sorted(unresolved, key=lambda u: (u.service_id, u.remote_call_id)),
         low_confidence_edge_ids=low_confidence,
         phonebook_conflicts=list(phonebook_conflicts),
+        unmodelled_mechanisms=list(unmodelled_mechanisms),
     )

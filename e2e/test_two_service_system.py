@@ -174,6 +174,11 @@ class TestTwoServiceSystem:
         ]
         reasons = sorted(entry["reason_code"] for entry in coverage["unresolved"])
         assert reasons == ["no-endpoint-match", "url-undetermined"]
+        # §5.4.2 census: the fixture's JDK-HttpClient probe is an unmodelled
+        # mechanism — present and SAID to be present, never a silent zero.
+        assert [(m["mechanism"], len(m["service_ids"])) for m in coverage["unmodelled_mechanisms"]] == [
+            ("jdk-httpclient", 1)
+        ]
 
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
