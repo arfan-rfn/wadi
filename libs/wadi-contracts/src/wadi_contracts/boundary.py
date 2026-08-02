@@ -27,11 +27,13 @@ KNOWN_CLIENT_LIBRARIES: frozenset[str] = frozenset(
 The worker detects these by deterministic import scan; presence is a fact,
 call counts are not claimed (an import is not a call — P10)."""
 
-MODELLED_CLIENT_LIBRARIES: frozenset[str] = frozenset({"resttemplate", "webclient", "feign"})
+MODELLED_CLIENT_LIBRARIES: frozenset[str] = frozenset(
+    {"resttemplate", "webclient", "feign", "restclient"}
+)
 """The subset wadi's sink passes currently model. A census hit outside this
 set becomes an ``unmodelled_mechanisms`` coverage entry — a zero-edge system
 must be distinguishable from a correct zero-edge answer (§5.4.2, the yas
-RestClient lesson)."""
+RestClient lesson — closed by T2's RestClient support, schema 1.5)."""
 
 
 class GatewayRoute(WadiModel):

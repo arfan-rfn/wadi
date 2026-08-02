@@ -91,8 +91,8 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     // LegacyPingProbe.ping (unwired classes), AuthForwardingInterceptor.apply
     // and CurrentRequest.bearerToken (framework-invoked, a recorded T4 root
     // class). Bodiless interface stubs count on neither side.
-    petstoreCoverage("production_methods").num.toInt shouldBe 24
-    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 19
+    petstoreCoverage("production_methods").num.toInt shouldBe 27
+    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 22
 
     val inventoryCoverage = inventory("analysis_coverage")
     // Inventory's one unreached method is SecurityConfig.filterChain — a @Bean
@@ -104,6 +104,47 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
   }
 
   // --- URL slicing scenarios -------------------------------------------------------
+
+  test("RestClient fluent chain is a sink: verb from the root, URL from .uri (T2)") {
+    // The yas idiom (§5.4.2): 34 real call sites used to export as a clean
+    // zero because no pass modelled the type. Same shape as WebClient.
+    val restClientSinks = httpSinks(petstore).filter(s =>
+      s.obj.get("mechanism").exists(_.strOpt.contains("restclient"))
+    )
+    restClientSinks should have size 1
+    val sink = restClientSinks.head
+    sink("value").str shouldBe "${inventory.api.url}/api/v1/inventory/stock/{?}"
+    sink("value_confidence").str shouldBe "high"
+    sink("http_verb").str shouldBe "GET"
+  }
+
+  test("UriComponentsBuilder chain slices base + path steps (T2)") {
+    // The top real-world URL idiom after `+` (predecessor-study regression).
+    // queryParam is identity-neutral: skipped with a trace note, never a hole.
+    val candidates = httpSinks(petstore).filter(s =>
+      s("value").strOpt.contains("${inventory.api.url}/stock/{?}")
+    )
+    candidates should have size 1
+    val sink = candidates.head
+    sink("value_confidence").str shouldBe "high"
+    sink("http_verb").str shouldBe "GET"
+    sink("evidence").str should include("UriComponentsBuilder chain")
+    sink("evidence").str should include("queryParam")
+  }
+
+  test("RequestEntity-form exchange recovers verb and URI.create URL (T2)") {
+    // Verb + URL live on the entity's builder chain, off the call site; the
+    // trailing "/1" literal is a concrete segment the endpoint template absorbs.
+    val candidates = httpSinks(petstore).filter(s =>
+      s("value").strOpt.contains("${inventory.api.url}/stock/reserve/{?}/1")
+    )
+    candidates should have size 1
+    val sink = candidates.head
+    sink("value_confidence").str shouldBe "high"
+    sink("http_verb").str shouldBe "PUT"
+    sink("evidence").str should include("RequestEntity.put")
+    sink("evidence").str should include("URI.create")
+  }
 
   test("config-key URL slices to a ${key} template at HIGH confidence") {
     val candidates = httpSinks(petstore).filter(s =>
@@ -174,12 +215,12 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     undetermined.head("value_confidence").str shouldBe "none"
   }
 
-  test("config_refs section carries the @Value key with its anchor") {
+  test("config_refs section carries the @Value keys with their anchors") {
     val refs = petstore("config_refs").arr
-    refs.map(_("key").str).toSet shouldBe Set("inventory.url")
-    val ref = refs.head
-    ref("anchor")("file").str should include("PetServiceImpl.java")
-    ref("context").str should include("inventory.url")
+    refs.map(_("key").str).toSet shouldBe Set("inventory.url", "inventory.api.url")
+    val byKey = refs.map(r => r("key").str -> r).toMap
+    byKey("inventory.url")("anchor")("file").str should include("PetServiceImpl.java")
+    byKey("inventory.api.url")("anchor")("file").str should include("StockHistoryClient.java")
   }
 
   test("inventory module has no outbound http sinks") {

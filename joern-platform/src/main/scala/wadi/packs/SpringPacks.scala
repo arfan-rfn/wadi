@@ -171,13 +171,16 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
 
 /** Tags outbound HTTP client call sites (§5.2.5).
   *
-  * Three shapes:
+  * Four shapes:
   *   - RestTemplate: any call on the RestTemplate type -> `sink=http-client`.
-  *   - WebClient: the fluent chain's `.uri(...)` step is the sink (it carries
-  *     the URL argument; the chain root `.get()` does not) -> `sink=http-client`
-  *     plus `wadi-client=webclient` and, when the chain root names a verb,
-  *     `wadi-verb=<VERB>`. *Rejected: tagging the chain root (Phase 2
-  *     as-shipped) — no URL argument, every WebClient sink exported null.*
+  *   - WebClient / RestClient (T2, §5.4.2): both are the same fluent shape —
+  *     the chain's `.uri(...)` step is the sink (it carries the URL argument;
+  *     the chain root `.get()` does not) -> `sink=http-client` plus
+  *     `wadi-client=<webclient|restclient>` and, when the chain root names a
+  *     verb, `wadi-verb=<VERB>`. RestClient was the yas lesson: 34 real call
+  *     sites exported as a clean zero because no pass modelled the type.
+  *     *Rejected: tagging the chain root (Phase 2 as-shipped) — no URL
+  *     argument, every WebClient sink exported null.*
   *   - Suspected: an HTTP-shaped call name on a receiver the CPG could not
   *     resolve -> `sink=http-client-suspected`. A countable maybe (P10) —
   *     silently vanishing sinks were how coverage losses became invisible.
@@ -190,9 +193,14 @@ class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
     "RestTemplate"
   )
 
-  /** WebClient fluent chain verb steps (chain root, receiver = WebClient). */
-  private val WebClientVerbSteps =
+  /** Fluent-chain verb steps (chain root, receiver = WebClient/RestClient). */
+  private val FluentVerbSteps =
     Set("get", "post", "put", "delete", "patch", "head", "options", "method")
+
+  /** Fluent HTTP clients that share the verb-root + `.uri(...)` chain shape,
+    * in detection order (a chain mentions exactly one of them).
+    */
+  private val FluentClients = List("WebClient" -> "webclient", "RestClient" -> "restclient")
 
   /** Unambiguously HTTP-shaped call names for suspected-sink detection —
     * deliberately excludes generic names (`put`, `delete`, `execute`, `get`).
@@ -214,12 +222,27 @@ class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
   override def run(builder: DiffGraphBuilder): Unit =
     cpg.call.l.foreach { call =>
       val target = call.methodFullName
+      lazy val fluentClient: Option[(String, Call)] =
+        if (call.name != "uri") None
+        else
+          FluentClients.iterator.flatMap { case (marker, mechanism) =>
+            fluentChainRoot(call, marker).map(root => (mechanism, root))
+          }.nextOption()
       if (RestTemplatePrefixes.exists(prefix => target.startsWith(prefix + "."))) {
         Iterator(call).newTagNodePair("sink", "http-client").store()(using builder)
-      } else if (call.name == "uri" && webClientChainRoot(call).isDefined) {
+        // RequestEntity-form exchange (T2): the verb lives on the entity's
+        // builder chain, off the call site — recover it here so the export's
+        // literal-HttpMethod fallback isn't the only source.
+        if (call.name == "exchange") {
+          requestEntityVerbOf(call).foreach { verb =>
+            Iterator(call).newTagNodePair("wadi-verb", verb).store()(using builder)
+          }
+        }
+      } else if (fluentClient.isDefined) {
+        val (mechanism, root) = fluentClient.get
         Iterator(call).newTagNodePair("sink", "http-client").store()(using builder)
-        Iterator(call).newTagNodePair("wadi-client", "webclient").store()(using builder)
-        webClientChainRoot(call).flatMap(verbOfChainRoot).foreach { verb =>
+        Iterator(call).newTagNodePair("wadi-client", mechanism).store()(using builder)
+        verbOfChainRoot(root).foreach { verb =>
           Iterator(call).newTagNodePair("wadi-verb", verb).store()(using builder)
         }
       } else if (receiverUnresolvable(call) && declaredReceiverMentions(call, "RestTemplate")) {
@@ -278,23 +301,26 @@ class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
   }
 
   /** The verb step under a `.uri(...)` call: its receiver, when that is a
-    * WebClient chain (resolved `WebClient`/`WebClient$…Spec` type, or — for
-    * jar-less CPGs — a receiver chain touching something WebClient-typed).
+    * fluent client chain (resolved `WebClient`/`RestClient` (+`$…Spec`) type,
+    * or — for jar-less CPGs — a receiver chain touching a marker-typed node).
     */
-  private def webClientChainRoot(uriCall: Call): Option[Call] =
+  private def fluentChainRoot(uriCall: Call, marker: String): Option[Call] =
     uriCall.argument.argumentIndexLte(0).headOption.collect {
-      case root: Call if WebClientVerbSteps.contains(root.name) && chainTouchesWebClient(root) =>
+      case root: Call if FluentVerbSteps.contains(root.name) && chainTouches(root, marker) =>
         root
     }
 
-  private def chainTouchesWebClient(node: io.shiftleft.codepropertygraph.generated.nodes.Expression): Boolean = {
-    val mentionsWebClient = (s: String) => s == "WebClient" || s.contains(".WebClient") || s.contains("WebClient$")
+  private def chainTouches(
+    node: io.shiftleft.codepropertygraph.generated.nodes.Expression,
+    marker: String
+  ): Boolean = {
+    val mentions = (s: String) => s == marker || s.contains(s".$marker") || s.contains(s"$marker$$")
     node match {
       case call: Call =>
-        mentionsWebClient(call.methodFullName.split(':').head) ||
-        call.argument.argumentIndexLte(0).headOption.exists(chainTouchesWebClient)
+        mentions(call.methodFullName.split(':').head) ||
+        call.argument.argumentIndexLte(0).headOption.exists(chainTouches(_, marker))
       case identifier: io.shiftleft.codepropertygraph.generated.nodes.Identifier =>
-        mentionsWebClient(identifier.typeFullName)
+        mentions(identifier.typeFullName)
       case _ => false
     }
   }
@@ -305,9 +331,46 @@ class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
         root.argument.argumentIndexGt(0).code.headOption.map(_.trim).collect {
           case VerbArgument(verb) => verb
         }
-      case verbName if WebClientVerbSteps.contains(verbName) => Some(verbName.toUpperCase)
-      case _                                                 => None
+      case verbName if FluentVerbSteps.contains(verbName) => Some(verbName.toUpperCase)
+      case _                                              => None
     }
+
+  private val RequestEntityVerbs = Map(
+    "get"     -> "GET",
+    "post"    -> "POST",
+    "put"     -> "PUT",
+    "delete"  -> "DELETE",
+    "patch"   -> "PATCH",
+    "head"    -> "HEAD",
+    "options" -> "OPTIONS"
+  )
+
+  /** The verb of a `RequestEntity` passed to `exchange(entity, …)` — from the
+    * inline builder chain, or from the method-local assignment feeding the
+    * argument. Only a RequestEntity-anchored verb call counts (never a guess).
+    */
+  private def requestEntityVerbOf(call: Call): Option[String] = {
+    def verbIn(node: io.shiftleft.codepropertygraph.generated.nodes.AstNode): Option[String] =
+      node.ast.isCall.l.sortBy(_.id).collectFirst {
+        case c
+            if RequestEntityVerbs.contains(c.name) &&
+              (c.methodFullName.contains("RequestEntity") ||
+                c.code.replaceAll("\\s", "").contains("RequestEntity.")) =>
+          RequestEntityVerbs(c.name)
+      }
+    call.argument.argumentIndex(1).headOption.flatMap {
+      case inline: Call => verbIn(inline)
+      case identifier: io.shiftleft.codepropertygraph.generated.nodes.Identifier =>
+        call.method.assignment
+          .where(_.target.isIdentifier.nameExact(identifier.name))
+          .l
+          .sortBy(_.id)
+          .iterator
+          .flatMap(a => verbIn(a.source))
+          .nextOption()
+      case _ => None
+    }
+  }
 
   /** javasrc2cpg marks unsolvable receivers with placeholder namespaces. */
   private def receiverUnresolvable(call: Call): Boolean = {

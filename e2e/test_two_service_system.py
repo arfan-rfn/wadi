@@ -158,8 +158,9 @@ class TestTwoServiceSystem:
         coverage = (await http.get(f"/api/v1/snapshots/{snapshot_id}/coverage")).json()
         totals = coverage["totals"]
         # ${inventory.url} + Feign + service-registry + long-concat exchange +
-        # WebClient + shared-DTO stockSummary (§5.2.6 union)
-        assert totals["analyzed"] == 6
+        # WebClient + shared-DTO stockSummary (§5.2.6 union) + RestClient +
+        # UriComponentsBuilder + RequestEntity exchange (T2)
+        assert totals["analyzed"] == 9
         # audit.example.com: branch candidate + the hierarchy-chain report sink
         assert totals["external"] == 2
         assert totals["undetermined"] == 2  # events-primary no-endpoint-match + DB-row URL
@@ -188,13 +189,13 @@ class TestTwoServiceSystem:
         section = coverage["analysis_coverage"]
         per_service = {e["name"]: e for e in section["services"]}
         assert set(per_service) == {"petstore", "inventory"}
-        assert per_service["petstore"]["production_methods"] == 24
-        assert per_service["petstore"]["reachable_methods"] == 19
+        assert per_service["petstore"]["production_methods"] == 27
+        assert per_service["petstore"]["reachable_methods"] == 22
         assert per_service["inventory"]["production_methods"] == 7
         assert per_service["inventory"]["reachable_methods"] == 6
-        assert section["production_methods"] == 31
-        assert section["reachable_methods"] == 25
-        assert section["coverage_percent"] == 80.6
+        assert section["production_methods"] == 34
+        assert section["reachable_methods"] == 28
+        assert section["coverage_percent"] == 82.4
 
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
@@ -203,7 +204,7 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         analyzed_edges = [e for e in outbound if e["target_kind"] == "analyzed"]
-        assert len(analyzed_edges) == 6
+        assert len(analyzed_edges) == 9
         # §5.2.6: the shared-module DTO resolved through the staged union — the
         # DI signature matched exactly and the call stitched to the inventory.
         summary_edge = next(
@@ -233,11 +234,29 @@ class TestTwoServiceSystem:
         assert webclient_edge["mechanism"] == "webclient"
         assert webclient_edge["http_verb"] == "POST"
         assert webclient_edge["target_simplified_uri"] == "/admin/restock"
+        # T2: the RestClient fluent chain — the yas idiom, now a first-class edge.
+        restclient_edge = by_url["${inventory.api.url}/api/v1/inventory/stock/{?}"]
+        assert restclient_edge["mechanism"] == "restclient"
+        assert restclient_edge["http_verb"] == "GET"
+        assert restclient_edge["target_simplified_uri"] == "/api/v1/inventory/stock/{?}"
+        assert restclient_edge["confidence"] == "high"
+        assert restclient_edge["provenance"] == "config-resolved"
+        # T2: the UriComponentsBuilder chain — base + path steps, query skipped.
+        ucb_edge = by_url["${inventory.api.url}/stock/{?}"]
+        assert ucb_edge["target_simplified_uri"] == "/stock/{?}"
+        assert ucb_edge["http_verb"] == "GET"
+        assert ucb_edge["confidence"] == "high"
+        # T2: RequestEntity-form exchange — verb + URI.create URL off-call-site;
+        # the literal "/1" segment is absorbed by the {count} template.
+        entity_edge = by_url["${inventory.api.url}/stock/reserve/{?}/1"]
+        assert entity_edge["target_simplified_uri"] == "/stock/reserve/{?}/{?}"
+        assert entity_edge["http_verb"] == "PUT"
+        assert entity_edge["confidence"] == "high"
 
         inbound = (
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{inventory_id}/remote-edges")
         ).json()["inbound"]
-        assert len(inbound) == 6  # inventory is called six ways, by one service
+        assert len(inbound) == 9  # inventory is called nine ways, by one service
 
         # 6. Structured auth arrived on the wire (goal 9).
         inventory_endpoints = (

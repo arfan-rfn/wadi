@@ -51,8 +51,8 @@ class TestPetstoreModule:
         """§5.4.3: the counts pinned in PetstoreSystemConformanceTest arrive
         intact across the language boundary."""
         assert petstore.analysis_coverage is not None
-        assert petstore.analysis_coverage.production_methods == 24
-        assert petstore.analysis_coverage.reachable_production_methods == 19
+        assert petstore.analysis_coverage.production_methods == 27
+        assert petstore.analysis_coverage.reachable_production_methods == 22
         assert inventory.analysis_coverage is not None
         assert inventory.analysis_coverage.production_methods == 7
         assert inventory.analysis_coverage.reachable_production_methods == 6
@@ -89,19 +89,27 @@ class TestPetstoreModule:
         assert undetermined[0].url_confidence is Confidence.NONE
 
     def test_config_refs_arrive(self, petstore: ServiceExport) -> None:
-        assert [ref.key for ref in petstore.config_refs] == ["inventory.url"]
-        assert "PetServiceImpl.java" in petstore.config_refs[0].anchor.file
+        keys = sorted(ref.key for ref in petstore.config_refs)
+        # Three T2 probe classes each @Value the api key; PetServiceImpl the base key.
+        assert keys == ["inventory.api.url"] * 3 + ["inventory.url"]
+        by_key = {ref.key: ref for ref in petstore.config_refs}
+        assert "PetServiceImpl.java" in by_key["inventory.url"].anchor.file
 
     def test_exchange_verb_and_long_concat_assemble(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
         reserve = [c for c in result.remote_calls if c.url and "/stock/reserve/" in c.url]
-        assert len(reserve) == 1
-        call = reserve[0]
-        assert call.url == "http://inventory/stock/reserve/{?}/{?}"
-        assert call.http_verb is HttpMethod.PUT
-        assert call.url_confidence is Confidence.HIGH
-        assert call.reachable
-        assert not call.suspected
+        # Two idioms hit the reserve endpoint: the long-concat exchange (T1)
+        # and the RequestEntity-form exchange (T2).
+        assert len(reserve) == 2
+        by_url = {c.url: c for c in reserve}
+        concat = by_url["http://inventory/stock/reserve/{?}/{?}"]
+        assert concat.http_verb is HttpMethod.PUT
+        assert concat.url_confidence is Confidence.HIGH
+        assert concat.reachable
+        assert not concat.suspected
+        entity = by_url["${inventory.api.url}/stock/reserve/{?}/1"]
+        assert entity.http_verb is HttpMethod.PUT
+        assert entity.url_confidence is Confidence.HIGH
 
     def test_webclient_chain_assembles_with_mechanism(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)

@@ -156,22 +156,24 @@ def test_inventory_facts_are_counted_not_stitched() -> None:
 
 
 def test_unmodelled_mechanisms_surface_in_coverage() -> None:
-    """§5.4.2: RestClient-only systems must not read as a clean zero (yas)."""
+    """§5.4.2: a system whose only client is unmodelled must not read as a
+    clean zero (the yas RestClient lesson; RestClient itself is modelled
+    since T2, so okhttp/retrofit play the unmodelled role here)."""
     from wadi_stitcher.coverage import build_unmodelled_mechanisms
 
     snapshot = make_snapshot(make_system())
     a = make_service(snapshot, "services/a")
     b = make_service(snapshot, "services/b")
-    a = a.model_copy(update={"client_libraries": ["restclient", "resttemplate"]})
-    b = b.model_copy(update={"client_libraries": ["restclient", "okhttp"]})
+    a = a.model_copy(update={"client_libraries": ["okhttp", "resttemplate", "restclient"]})
+    b = b.model_copy(update={"client_libraries": ["okhttp", "retrofit"]})
 
     entries = build_unmodelled_mechanisms([a, b])
     assert [(e.mechanism, len(e.service_ids)) for e in entries] == [
-        ("okhttp", 1),
-        ("restclient", 2),
+        ("okhttp", 2),
+        ("retrofit", 1),
     ]
-    # Modelled clients (resttemplate) never appear.
-    assert all(e.mechanism != "resttemplate" for e in entries)
+    # Modelled clients (resttemplate, restclient) never appear.
+    assert all(e.mechanism not in ("resttemplate", "restclient") for e in entries)
 
     report = build_coverage_report(
         snapshot.id,
@@ -182,7 +184,7 @@ def test_unmodelled_mechanisms_surface_in_coverage() -> None:
         placeholder_names={},
         unmodelled_mechanisms=entries,
     )
-    assert [e.mechanism for e in report.unmodelled_mechanisms] == ["okhttp", "restclient"]
+    assert [e.mechanism for e in report.unmodelled_mechanisms] == ["okhttp", "retrofit"]
 
 
 # --- analysis coverage (§5.4.3) ----------------------------------------------------

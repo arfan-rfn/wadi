@@ -19,6 +19,22 @@ All notable changes to wadi. One version spans the whole release set
   will be measured as a before/after on this number.
 - `wadi coverage` human output also lists unmodelled client libraries
   (the §5.4.2 census was previously JSON-only).
+- **T2 client APIs + URL idioms, tranche 1 (§5.4.2, Phase 2.5 M3):**
+  - **RestClient (Spring 6.1+/Boot 3.2+)** modelled as a first-class sink —
+    the same fluent shape as WebClient (`.uri(...)` is the sink, the chain
+    root carries the verb), mechanism `restclient`, now in
+    `MODELLED_CLIENT_LIBRARIES`. This closes the yas lesson: its 34
+    RestClient call sites stop being an invisible zero.
+  - **UriComponentsBuilder chains** sliced (base + `path`/`pathSegment` in
+    call order; `queryParam`/`fragment`/`build*`/`encode` identity-neutral
+    and trace-noted; unmodelled steps yield honest holes) — the predecessor
+    -study regression, closed.
+  - **RequestEntity-form `exchange`** — verb and URL recovered from the
+    entity's builder chain off the call site (inline or via method-local
+    assignment), and **`URI.create`** unwrapped transparently.
+  - petstore-system gains one P8 probe per idiom (StockHistoryClient,
+    CheckupScheduleClient, ReservationClient), each proven end to end as a
+    HIGH-confidence analyzed edge through the public API.
 - **`wadi export` (§14, Phase 2.5 M2):** the third consumption surface.
   `GET /api/v1/snapshots/{id}/export` streams every artifact of a succeeded
   snapshot as NDJSON with an `ExportManifest` trailer (counts-last so a

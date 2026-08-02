@@ -5,3 +5,5 @@ server:
   port: 8080
 inventory:
   url: http://inventory:8081
+  api:
+    url: http://inventory:8081

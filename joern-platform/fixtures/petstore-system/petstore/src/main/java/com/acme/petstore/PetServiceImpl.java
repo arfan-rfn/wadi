@@ -24,6 +24,7 @@ public class PetServiceImpl implements PetService {
     private final BillingNotifier billingNotifier;
     private final LegacyBillingBridge legacyBillingBridge;
     private final StatsService statsService;
+    private final StockHistoryClient stockHistoryClient;
     private final boolean preferAudit;
 
     public PetServiceImpl(
@@ -35,6 +36,7 @@ public class PetServiceImpl implements PetService {
             BillingNotifier billingNotifier,
             LegacyBillingBridge legacyBillingBridge,
             StatsService statsService,
+            StockHistoryClient stockHistoryClient,
             boolean preferAudit) {
         this.restTemplate = restTemplate;
         this.webClient = webClient;
@@ -44,6 +46,7 @@ public class PetServiceImpl implements PetService {
         this.billingNotifier = billingNotifier;
         this.legacyBillingBridge = legacyBillingBridge;
         this.statsService = statsService;
+        this.stockHistoryClient = stockHistoryClient;
         this.preferAudit = preferAudit;
     }
 
@@ -57,7 +60,9 @@ public class PetServiceImpl implements PetService {
         // interprocedural return resolution.
         Integer viaResolver = restTemplate.getForObject(
                 serviceUrlResolver.getServiceUrl("inventory-api") + "/stock/" + id, Integer.class);
-        return "pet-" + id + ":" + stock + "/" + viaFeign + "/" + viaResolver;
+        // RestClient fluent chain (T2, the yas idiom).
+        Integer history = stockHistoryClient.history(id);
+        return "pet-" + id + ":" + stock + "/" + viaFeign + "/" + viaResolver + "/" + history;
     }
 
     @Override

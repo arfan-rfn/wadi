@@ -236,8 +236,9 @@ object UrlSlicer {
     }
   }
 
-  /** A non-operator call: constant-map lookup → interprocedural return
-    * resolution → Lombok getter bridge → honest opaque hole.
+  /** A non-operator call: UriComponentsBuilder chain → constant-map lookup →
+    * interprocedural return resolution → Lombok getter bridge → honest
+    * opaque hole.
     */
   private def resolveCall(
     cpg: Cpg,
@@ -246,12 +247,208 @@ object UrlSlicer {
     tracker: Budget,
     frame: Frame
   ): List[Candidate] =
-    resolveConstantMapGet(cpg, call, depth, tracker, frame)
+    resolveUriCreate(cpg, call, depth, tracker, frame)
+      .orElse(resolveUriBuilderChain(cpg, call, depth, tracker, frame))
+      .orElse(resolveRequestEntityChain(cpg, call, depth, tracker, frame))
+      .orElse(resolveConfigPropertiesAccessor(cpg, call))
+      .orElse(resolveConstantMapGet(cpg, call, depth, tracker, frame))
       .orElse(resolveInterprocReturn(cpg, call, depth, tracker, frame))
       .orElse(resolveGetterBridge(cpg, call, depth, tracker, frame))
       .getOrElse(
         List(Candidate(List(Hole), List(s"${firstLine(call.code)} -> opaque call result")))
       )
+
+  /** `serviceUrlConfig.customer()` on a `@ConfigurationProperties(prefix=…)`
+    * type resolves to the bound config key `<prefix>.<accessor>` (T2 — the
+    * yas base-URL idiom). Must run BEFORE interprocedural return resolution:
+    * the record accessor's body resolves into a constructor-parameter hole,
+    * losing the key. v1 binds the exact accessor name (Spring relaxed
+    * binding's kebab-case variants are a recorded refinement).
+    */
+  private def resolveConfigPropertiesAccessor(cpg: Cpg, call: Call): Option[List[Candidate]] = {
+    val owner = call.callee
+      .filterNot(_.isExternal)
+      .typeDecl
+      .headOption
+      .orElse(
+        call.argument
+          .argumentIndexLte(0)
+          .headOption
+          .flatMap(receiver => cpg.typeDecl.fullNameExact(receiver.typ.fullName.l*).headOption)
+      )
+    owner.flatMap { typeDecl =>
+      val annotation = typeDecl.ast.isAnnotation
+        .filter(_.astParent == typeDecl)
+        .find(_.name == "ConfigurationProperties")
+      annotation.flatMap { a =>
+        val prefix = "\"([^\"]*)\"".r.findFirstMatchIn(a.code).map(_.group(1)).getOrElse("")
+        val isAccessor = typeDecl.member.nameExact(call.name).nonEmpty ||
+          typeDecl.method.nameExact(call.name).nonEmpty
+        Option.when(isAccessor && prefix.nonEmpty) {
+          val key = s"$prefix.${call.name}"
+          List(
+            Candidate(
+              List(ConfigKey(key)),
+              List(
+                s"${call.name}() <- @ConfigurationProperties(\"$prefix\") accessor -> $${$key}"
+              ),
+              viaConfigKey = true
+            )
+          )
+        }
+      }
+    }
+  }
+
+  /** `URI.create(expr)` is a transparent wrapper — the URL is the argument (T2). */
+  private def resolveUriCreate(
+    cpg: Cpg,
+    call: Call,
+    depth: Int,
+    tracker: Budget,
+    frame: Frame
+  ): Option[List[Candidate]] = {
+    val isUriCreate = call.name == "create" &&
+      (call.methodFullName.startsWith("java.net.URI") ||
+        call.code.replaceAll("\\s", "").startsWith("URI.create("))
+    if (!isUriCreate) return None
+    call.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex).headOption.map { arg =>
+      resolve(cpg, arg, depth - 1, tracker, frame).map(c =>
+        c.copy(trace = "URI.create(…) unwrapped" :: c.trace)
+      )
+    }
+  }
+
+  /** `RequestEntity.put(uri).headers(…).build()` (T2): the URL lives on the
+    * verb-named factory root; every intermediate step is identity-neutral.
+    * The verb itself is tagged by the sink pass (`wadi-verb`).
+    */
+  private def resolveRequestEntityChain(
+    cpg: Cpg,
+    call: Call,
+    depth: Int,
+    tracker: Budget,
+    frame: Frame
+  ): Option[List[Candidate]] = {
+    val terminals = Set("build", "body", "headers", "accept", "contentType", "header")
+    if (!terminals.contains(call.name)) return None
+    val verbRoots = Set("get", "post", "put", "delete", "patch", "head", "options", "method")
+    var current   = Option(call): Option[AstNode]
+    var root      = Option.empty[Call]
+    var hops      = 0
+    while (current.isDefined && root.isEmpty && hops < 12) {
+      hops += 1
+      current = current.get match {
+        case c: Call if verbRoots.contains(c.name) && mentionsRequestEntity(c) =>
+          root = Some(c); None
+        case c: Call => c.argument.argumentIndexLte(0).headOption
+        case _       => None
+      }
+    }
+    root.flatMap { factory =>
+      factory.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex).headOption.map { arg =>
+        resolve(cpg, arg, depth - 1, tracker, frame).map(c =>
+          c.copy(trace = s"RequestEntity.${factory.name}(…) chain" :: c.trace)
+        )
+      }
+    }
+  }
+
+  private def mentionsRequestEntity(call: Call): Boolean =
+    call.methodFullName.contains("RequestEntity") ||
+      call.code.replaceAll("\\s", "").contains("RequestEntity.")
+
+  // --- UriComponentsBuilder chains (T2, §5.4.2) -------------------------------------
+
+  /** Terminal steps that render the built URI as the sliced value. */
+  private val UriBuilderTerminals = Set("toUriString", "toUri", "toString")
+
+  /** Factory roots that start a chain; the first argument is the base URL. */
+  private val UriBuilderRoots = Set("fromHttpUrl", "fromUriString", "fromUri")
+
+  /** Steps that never affect endpoint identity — skipped with a trace note:
+    * query strings and fragments don't select the target endpoint, and
+    * build/expand keep `{var}` templates, which align with the path-template
+    * form the matcher already understands.
+    */
+  private val UriBuilderIdentityNeutralSteps =
+    Set("queryParam", "queryParams", "fragment", "build", "buildAndExpand", "encode")
+
+  /** `UriComponentsBuilder.fromHttpUrl(base).path("/x/").path(id).toUriString()`
+    * — the top real-world URL idiom after `+` concatenation (predecessor-study
+    * regression, §5.4.2). Resolves base + path/pathSegment steps in call
+    * order; a step outside the modelled set contributes an honest hole (never
+    * a fabricated URL), so confidence degrades instead of lying.
+    */
+  private def resolveUriBuilderChain(
+    cpg: Cpg,
+    call: Call,
+    depth: Int,
+    tracker: Budget,
+    frame: Frame
+  ): Option[List[Candidate]] = {
+    if (!UriBuilderTerminals.contains(call.name)) return None
+    // Walk receivers inward, collecting intermediate steps until the factory root.
+    var steps    = List.empty[Call] // accumulates in call order (innermost first)
+    var current  = call.argument.argumentIndexLte(0).headOption
+    var root     = Option.empty[Call]
+    var bailed   = false
+    while (current.isDefined && root.isEmpty && !bailed) {
+      current.get match {
+        case c: Call if UriBuilderRoots.contains(c.name) && mentionsUriBuilder(c) =>
+          root = Some(c)
+        case c: Call =>
+          steps = c :: steps
+          current = c.argument.argumentIndexLte(0).headOption
+        case _ =>
+          bailed = true // chain rooted in a local/field-held builder — not modelled (v1)
+      }
+    }
+    root.map { factory =>
+      val header = s"UriComponentsBuilder chain (${steps.length + 1} steps)"
+      val base: List[Candidate] = factory.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex) match {
+        case Nil        => List(Candidate(Nil, List(s"${factory.name}() with no base")))
+        case arg :: _   => resolve(cpg, arg, depth - 1, tracker, frame)
+      }
+      val combined = steps.foldLeft(base.map(c => c.copy(trace = header :: c.trace))) {
+        (acc, step) =>
+          step.name match {
+            case "path" =>
+              val appended = step.argument.argumentIndexGt(0).headOption
+                .map(arg => resolve(cpg, arg, depth - 1, tracker, frame))
+                .getOrElse(List(Candidate(Nil, Nil)))
+              tracker.capCandidates(for { left <- acc; right <- appended } yield left ++ right)
+            case "pathSegment" =>
+              step.argument.argumentIndexGt(0).l.sortBy(_.argumentIndex).foldLeft(acc) {
+                (inner, arg) =>
+                  val segment = resolve(cpg, arg, depth - 1, tracker, frame)
+                  tracker.capCandidates(for {
+                    left  <- inner
+                    right <- segment
+                  } yield left ++ Candidate(List(Lit("/")), Nil) ++ right)
+              }
+            case name if UriBuilderIdentityNeutralSteps.contains(name) =>
+              acc.map(c =>
+                c.copy(trace = c.trace :+ s".$name(…) skipped (identity-neutral step)")
+              )
+            case other =>
+              // host/scheme/port/replacePath/… — unmodelled steps yield an
+              // honest hole, never a guessed URL (P10).
+              acc.map(c =>
+                c.copy(
+                  parts = c.parts :+ Hole,
+                  trace = c.trace :+ s".$other(…) -> unsupported UriComponentsBuilder step"
+                )
+              )
+          }
+      }
+      tracker.capCandidates(combined)
+    }
+  }
+
+  private def mentionsUriBuilder(call: Call): Boolean =
+    call.methodFullName.contains("UriComponentsBuilder") ||
+      call.code.replaceAll("\\s", "").contains("UriComponentsBuilder.")
 
   /** `map.get(key)` on a local whose visible `put`s are all literal→literal —
     * the constant service registry idiom (TrainTicket's ServiceResolver).
@@ -627,6 +824,9 @@ object UrlSlicer {
     * identity form; `{?}/stock/5` (unknown authority) does not.
     */
   private def allHolesBenign(rendered: String): Boolean = {
+    // A leading hole with no scheme IS the authority — an unknown base is
+    // never benign (found via the yas idiom: `{?}/profile` shipped as HIGH).
+    if (!rendered.contains("://") && rendered.startsWith("{?}")) return false
     val pathStart = {
       val schemeIdx = rendered.indexOf("://")
       if (schemeIdx >= 0) {
