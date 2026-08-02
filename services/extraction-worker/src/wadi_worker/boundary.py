@@ -23,7 +23,12 @@ logger = logging.getLogger(__name__)
 _SKIP_DIRS = {"target", "build", "node_modules", ".git", ".idea", "src", "old-docs"}
 
 # Annotations that mark a module as a runnable service (§5.2.6 classification).
-_SERVICE_MARKERS = ("@SpringBootApplication", "@RestController", "@Controller")
+# Word-boundary matched: @ControllerAdvice / @RestControllerAdvice are library
+# code (yas common-library ships a global exception handler) and must NOT trip
+# the @Controller / @RestController markers by substring.
+_SERVICE_MARKER_PATTERN = re.compile(
+    r"@(?:SpringBootApplication|RestController|Controller)(?![A-Za-z0-9_])"
+)
 
 
 @dataclass(frozen=True)
@@ -125,7 +130,7 @@ def _has_service_markers(module_dir: Path) -> bool:
             text = source.read_text(errors="replace")
         except OSError:
             continue
-        if any(marker in text for marker in _SERVICE_MARKERS):
+        if _SERVICE_MARKER_PATTERN.search(text):
             return True
     return False
 

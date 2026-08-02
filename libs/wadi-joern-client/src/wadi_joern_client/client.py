@@ -27,12 +27,14 @@ _ANSI_ESCAPES = re.compile(r"\x1b\[[0-9;]*m")
 
 PIPELINE_SUMMARY_MARKER = "wadi export:"
 
-EXCLUDE_REGEX = ".*/src/test/.*|.*/old-docs/.*|.*/[.][^/]+/.*"
-"""§5.2.6 discovery hygiene: test sources are not production topology;
-`old-docs/` is the archived-tree idiom; `/[.]<dir>/` drops hidden shadow
-trees (`.evosuite-work` duplicates every class into the CPG). Character
-classes avoid backslashes so the pattern survives the CPGQL string channel.
-Mirrored in `wadi.WadiPipeline.ExcludeRegex` (Scala test path)."""
+EXCLUDE_REGEX = ".*/src/test/.*|.*/src/it/.*|.*/old-docs/.*|.*/[.][^/]+/.*"
+"""§5.2.6 discovery hygiene: test sources (`src/test` and the Failsafe
+`src/it` integration-test convention — yas keeps 17 modules' IT classes
+there) are not production topology; `old-docs/` is the archived-tree idiom;
+`/[.]<dir>/` drops hidden shadow trees (`.evosuite-work` duplicates every
+class into the CPG). Character classes avoid backslashes so the pattern
+survives the CPGQL string channel. Mirrored in
+`wadi.WadiPipeline.ExcludeRegex` (Scala test path)."""
 
 
 class JoernError(RuntimeError):

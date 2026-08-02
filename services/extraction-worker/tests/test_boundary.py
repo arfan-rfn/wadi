@@ -219,3 +219,40 @@ class TestModuleClassification:
         write_pom(tmp_path / "svc", "svc")
         write_pom(tmp_path / "frontend", "frontend", java_source=None)
         assert [s.build_root for s in discover_services(tmp_path)] == ["svc"]
+
+
+class TestServiceMarkerBoundaries:
+    """§5.2.6: @ControllerAdvice (yas common-library) is library code — the
+    @Controller marker must match on a word boundary, never by substring."""
+
+    def test_controller_advice_does_not_flip_a_library_to_service(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "parent", modules=["svc", "shared"])
+        write_pom(tmp_path / "svc", "svc", dependencies=["shared"])
+        write_pom(
+            tmp_path / "shared",
+            "shared",
+            java_source="@ControllerAdvice class Handler {}",
+        )
+        by_root = {s.build_root: s for s in discover_services(tmp_path)}
+        assert by_root["shared"].kind == "library"
+        assert by_root["svc"].library_roots == ["shared"]
+
+    def test_rest_controller_advice_is_not_a_marker_either(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "parent", modules=["svc", "shared"])
+        write_pom(tmp_path / "svc", "svc", dependencies=["shared"])
+        write_pom(
+            tmp_path / "shared",
+            "shared",
+            java_source="@RestControllerAdvice class Handler {}",
+        )
+        assert {s.build_root: s.kind for s in discover_services(tmp_path)}["shared"] == "library"
+
+    def test_real_controller_still_marks_a_service(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "parent", modules=["svc", "shared"])
+        write_pom(tmp_path / "svc", "svc", dependencies=["shared"])
+        write_pom(
+            tmp_path / "shared",
+            "shared",
+            java_source='@Controller class Web { @GetMapping("/x") void x() {} }',
+        )
+        assert {s.build_root: s.kind for s in discover_services(tmp_path)}["shared"] == "service"

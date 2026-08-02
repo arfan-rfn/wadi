@@ -31,7 +31,7 @@ object WadiPipeline {
     * the conformance test path identical). Character classes avoid backslashes
     * so the same string survives both channels.
     */
-  val ExcludeRegex = ".*/src/test/.*|.*/old-docs/.*|.*/[.][^/]+/.*"
+  val ExcludeRegex = ".*/src/test/.*|.*/src/it/.*|.*/old-docs/.*|.*/[.][^/]+/.*"
 
   def run(cpg: Cpg, exportDir: String): String = {
     new SpringDIPass(cpg).createAndApply()
