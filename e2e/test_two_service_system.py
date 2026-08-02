@@ -148,11 +148,18 @@ class TestTwoServiceSystem:
         # 4. Coverage FIRST (P10): the report states exactly what is unknown.
         coverage = (await http.get(f"/api/v1/snapshots/{snapshot_id}/coverage")).json()
         totals = coverage["totals"]
-        assert totals["analyzed"] == 3  # ${inventory.url} + Feign + service-registry idiom
+        # ${inventory.url} + Feign + service-registry + long-concat exchange + WebClient
+        assert totals["analyzed"] == 5
         assert totals["external"] == 1  # audit.example.com (branch candidate)
         assert totals["undetermined"] == 2  # events-primary no-endpoint-match + DB-row URL
-        assert totals["placeholder"] == 0
+        assert totals["placeholder"] == 1  # billing (bare hostname, owner-scoped field URL)
+        # T1 honesty inventory (§5.2.5): excluded from the map, counted here.
+        assert totals["unreachable_call_sites"] == 1  # OrphanedAuditNotifier
+        assert totals["suspected_call_sites"] == 1  # LegacyBillingBridge (unresolved receiver)
         assert [e["host"] for e in coverage["external_apis"]] == ["audit.example.com"]
+        assert [(p["name"], p["resolved_via"]) for p in coverage["placeholders"]] == [
+            ("billing", "bare-hostname")
+        ]
         reasons = sorted(entry["reason_code"] for entry in coverage["unresolved"])
         assert reasons == ["no-endpoint-match", "url-undetermined"]
 
@@ -163,7 +170,7 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         analyzed_edges = [e for e in outbound if e["target_kind"] == "analyzed"]
-        assert len(analyzed_edges) == 3
+        assert len(analyzed_edges) == 5
         by_url = {e["url"]: e for e in analyzed_edges}
         rest_edge = by_url["${inventory.url}/stock/{?}"]
         assert rest_edge["target_simplified_uri"] == "/stock/{?}"
@@ -176,11 +183,21 @@ class TestTwoServiceSystem:
         registry_edge = by_url["http://inventory/stock/{?}"]
         assert registry_edge["target_simplified_uri"] == "/stock/{?}"
         assert registry_edge["confidence"] == "high"
+        # T1: the long-concat exchange() carries its argument verb end to end.
+        reserve_edge = by_url["http://inventory/stock/reserve/{?}/{?}"]
+        assert reserve_edge["http_verb"] == "PUT"
+        assert reserve_edge["target_simplified_uri"] == "/stock/reserve/{?}/{?}"
+        assert reserve_edge["confidence"] == "high"
+        # T1: the WebClient fluent chain stitches with its own mechanism label.
+        webclient_edge = by_url["http://inventory:8081/admin/restock"]
+        assert webclient_edge["mechanism"] == "webclient"
+        assert webclient_edge["http_verb"] == "POST"
+        assert webclient_edge["target_simplified_uri"] == "/admin/restock"
 
         inbound = (
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{inventory_id}/remote-edges")
         ).json()["inbound"]
-        assert len(inbound) == 3  # inventory is called three ways, by one service
+        assert len(inbound) == 5  # inventory is called five ways, by one service
 
         # 6. Structured auth arrived on the wire (goal 9).
         inventory_endpoints = (

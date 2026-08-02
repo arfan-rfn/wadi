@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -33,5 +34,11 @@ public class InventoryController {
     @PostMapping("/admin/restock")
     public void restock(@RequestBody String payload) {
         stockRepository.restock(payload);
+    }
+
+    /** Serves the long-concat exchange() path (T1 §5.2.5 fixture case). */
+    @PutMapping("/stock/reserve/{id}/{count}")
+    public Integer reserve(@PathVariable String id, @PathVariable String count) {
+        return stockRepository.countFor(id);
     }
 }

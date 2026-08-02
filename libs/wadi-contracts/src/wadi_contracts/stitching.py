@@ -15,12 +15,13 @@ trusting what it claims (§5.4.4).
 
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
 from wadi_contracts.enums import Confidence, HttpMethod, Provenance, TargetKind
 from wadi_contracts.ids import remote_edge_id
 from wadi_contracts.source import SourceAnchor
+from wadi_contracts.version import SCHEMA_VERSION
 
 _EXTERNAL_KEY_PREFIX = "external:"
 _PLACEHOLDER_KEY_PREFIX = "placeholder:"
@@ -208,6 +209,24 @@ class ExternalApiEntry(WadiModel):
     caller_service_ids: list[str] = Field(min_length=1)
 
 
+UNRESOLVED_REASON_CODES: frozenset[str] = frozenset(
+    {
+        "url-undetermined",
+        "url-unparseable",
+        "no-endpoint-match",
+        "lombok-generated-interior",
+        "slice-budget-truncated",
+        "unresolved-receiver-type",
+    }
+)
+"""Versioned reason-code vocabulary (§5.4.2) — the queryable-gap registry.
+
+Additive changes bump ``SCHEMA_VERSION`` minor. ``host-unresolvable`` was
+removed in 1.2.0: documented since Phase 2 but never emitted — unresolved
+hosts classify as external/placeholder nodes instead (recorded correction).
+"""
+
+
 class UnresolvedCallEntry(WadiModel):
     """One call site the stitcher could not resolve, with the reason stated.
 
@@ -221,12 +240,19 @@ class UnresolvedCallEntry(WadiModel):
     site: SourceAnchor
     reason_code: str = Field(
         min_length=1,
-        description=(
-            "'url-undetermined' | 'url-unparseable' | 'host-unresolvable' | "
-            "'no-endpoint-match' | 'lombok-generated-interior'"
-        ),
+        description="One of wadi_contracts.stitching.UNRESOLVED_REASON_CODES",
     )
     reason: str = Field(min_length=1, description="Human-readable explanation")
+
+    @field_validator("reason_code")
+    @classmethod
+    def _registered_reason_code(cls, value: str) -> str:
+        if value not in UNRESOLVED_REASON_CODES:
+            raise ValueError(
+                f"unregistered reason_code {value!r}; the vocabulary is "
+                f"UNRESOLVED_REASON_CODES (schema {SCHEMA_VERSION})"
+            )
+        return value
 
 
 class CoverageTotals(WadiModel):
@@ -238,6 +264,24 @@ class CoverageTotals(WadiModel):
     external: int = Field(ge=0)
     placeholder: int = Field(ge=0)
     undetermined: int = Field(ge=0)
+    unreachable_call_sites: int = Field(
+        ge=0,
+        default=0,
+        description=(
+            "Sink call sites outside the endpoint-reachable closure — excluded "
+            "from the map by design, inventoried so the exclusion is queryable "
+            "(§5.2.5; detail rows live in remote_calls with reachable=false)"
+        ),
+    )
+    suspected_call_sites: int = Field(
+        ge=0,
+        default=0,
+        description=(
+            "HTTP-shaped calls on receivers the CPG could not type-resolve — "
+            "never matched, never blended into resolved results (P7); detail "
+            "rows live in remote_calls with suspected=true"
+        ),
+    )
     by_confidence: dict[str, int] = Field(
         default_factory=dict[str, int], description="Edge count per Confidence value"
     )

@@ -39,6 +39,22 @@ class RemoteCall(ArtifactEnvelope):
             "'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence)"
         ),
     )
+    reachable: bool = Field(
+        default=True,
+        description=(
+            "False = the call site exists but no endpoint-reachable path leads "
+            "to it (dead/unwired code). Excluded from stitching by design; "
+            "inventoried so the exclusion is queryable (§5.2.5)"
+        ),
+    )
+    suspected: bool = Field(
+        default=False,
+        description=(
+            "True = HTTP-shaped call on a receiver the CPG could not "
+            "type-resolve — a countable maybe, never matched or blended into "
+            "resolved results (P7, §5.2.5)"
+        ),
+    )
 
     @model_validator(mode="after")
     def _undetermined_targets_are_honest(self) -> Self:

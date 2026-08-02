@@ -100,24 +100,102 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
       }
 }
 
-/** Tags RestTemplate/WebClient call sites: `sink=http-client`. */
+/** Tags outbound HTTP client call sites (§5.2.5).
+  *
+  * Three shapes:
+  *   - RestTemplate: any call on the RestTemplate type -> `sink=http-client`.
+  *   - WebClient: the fluent chain's `.uri(...)` step is the sink (it carries
+  *     the URL argument; the chain root `.get()` does not) -> `sink=http-client`
+  *     plus `wadi-client=webclient` and, when the chain root names a verb,
+  *     `wadi-verb=<VERB>`. *Rejected: tagging the chain root (Phase 2
+  *     as-shipped) — no URL argument, every WebClient sink exported null.*
+  *   - Suspected: an HTTP-shaped call name on a receiver the CPG could not
+  *     resolve -> `sink=http-client-suspected`. A countable maybe (P10) —
+  *     silently vanishing sinks were how coverage losses became invisible.
+  */
 class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
 
-  private val ClientTypePrefixes = List(
+  private val RestTemplatePrefixes = List(
     "org.springframework.web.client.RestTemplate",
-    "org.springframework.web.reactive.function.client.WebClient",
-    // Unresolved-type fallbacks (no dependency jars): javasrc2cpg emits short names.
-    "RestTemplate",
-    "WebClient"
+    // Unresolved-type fallback (no dependency jars): javasrc2cpg emits short names.
+    "RestTemplate"
   )
+
+  /** WebClient fluent chain verb steps (chain root, receiver = WebClient). */
+  private val WebClientVerbSteps =
+    Set("get", "post", "put", "delete", "patch", "head", "options", "method")
+
+  /** Unambiguously HTTP-shaped call names for suspected-sink detection —
+    * deliberately excludes generic names (`put`, `delete`, `execute`, `get`).
+    */
+  private val SuspectedHttpNames = Set(
+    "getForObject",
+    "getForEntity",
+    "postForObject",
+    "postForEntity",
+    "postForLocation",
+    "patchForObject",
+    "headForHeaders",
+    "optionsForAllow",
+    "exchange"
+  )
+
+  private val VerbArgument = """(?:org\.springframework\.http\.)?HttpMethod\.([A-Z]+)""".r
 
   override def run(builder: DiffGraphBuilder): Unit =
     cpg.call.l.foreach { call =>
       val target = call.methodFullName
-      if (ClientTypePrefixes.exists(prefix => target.startsWith(prefix + "."))) {
+      if (RestTemplatePrefixes.exists(prefix => target.startsWith(prefix + "."))) {
         Iterator(call).newTagNodePair("sink", "http-client").store()(using builder)
+      } else if (call.name == "uri" && webClientChainRoot(call).isDefined) {
+        Iterator(call).newTagNodePair("sink", "http-client").store()(using builder)
+        Iterator(call).newTagNodePair("wadi-client", "webclient").store()(using builder)
+        webClientChainRoot(call).flatMap(verbOfChainRoot).foreach { verb =>
+          Iterator(call).newTagNodePair("wadi-verb", verb).store()(using builder)
+        }
+      } else if (SuspectedHttpNames.contains(call.name) && receiverUnresolvable(call)) {
+        Iterator(call).newTagNodePair("sink", "http-client-suspected").store()(using builder)
       }
     }
+
+  /** The verb step under a `.uri(...)` call: its receiver, when that is a
+    * WebClient chain (resolved `WebClient`/`WebClient$…Spec` type, or — for
+    * jar-less CPGs — a receiver chain touching something WebClient-typed).
+    */
+  private def webClientChainRoot(uriCall: Call): Option[Call] =
+    uriCall.argument.argumentIndexLte(0).headOption.collect {
+      case root: Call if WebClientVerbSteps.contains(root.name) && chainTouchesWebClient(root) =>
+        root
+    }
+
+  private def chainTouchesWebClient(node: io.shiftleft.codepropertygraph.generated.nodes.Expression): Boolean = {
+    val mentionsWebClient = (s: String) => s == "WebClient" || s.contains(".WebClient") || s.contains("WebClient$")
+    node match {
+      case call: Call =>
+        mentionsWebClient(call.methodFullName.split(':').head) ||
+        call.argument.argumentIndexLte(0).headOption.exists(chainTouchesWebClient)
+      case identifier: io.shiftleft.codepropertygraph.generated.nodes.Identifier =>
+        mentionsWebClient(identifier.typeFullName)
+      case _ => false
+    }
+  }
+
+  private def verbOfChainRoot(root: Call): Option[String] =
+    root.name match {
+      case "method" =>
+        root.argument.argumentIndexGt(0).code.headOption.map(_.trim).collect {
+          case VerbArgument(verb) => verb
+        }
+      case verbName if WebClientVerbSteps.contains(verbName) => Some(verbName.toUpperCase)
+      case _                                                 => None
+    }
+
+  /** javasrc2cpg marks unsolvable receivers with placeholder namespaces. */
+  private def receiverUnresolvable(call: Call): Boolean = {
+    val declaring = call.methodFullName.split(':').head
+    declaring.startsWith("<unresolved") || declaring.startsWith("ANY.") ||
+    declaring.startsWith("<empty>") || !declaring.contains(".")
+  }
 }
 
 /** Tags spring-data repository call sites: `sink=db`. */

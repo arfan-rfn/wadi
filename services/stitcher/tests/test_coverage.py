@@ -126,3 +126,28 @@ def test_empty_snapshot_reports_zero() -> None:
     assert report.placeholders == []
     assert report.external_apis == []
     assert report.unresolved == []
+
+
+def test_inventory_facts_are_counted_not_stitched() -> None:
+    """T1 (§5.2.5): unreachable/suspected call facts appear in totals only."""
+    snapshot = make_snapshot(make_system())
+    caller = make_service(snapshot, "services/petstore")
+    callee = make_service(snapshot, "services/inventory")
+    target = make_endpoint(snapshot, callee, uri="/stock/{id}")
+
+    stitched = make_remote_call(snapshot, caller, line=10)
+    unreachable = make_remote_call(snapshot, caller, line=20, reachable=False)
+    suspected = make_remote_call(snapshot, caller, line=30, suspected=True, mechanism="unknown")
+
+    report = build_coverage_report(
+        snapshot.id,
+        remote_calls=[stitched, unreachable, suspected],
+        edges=[make_analyzed_edge(stitched, target)],
+        unresolved=[],
+        phonebook_conflicts=[],
+        placeholder_names={},
+    )
+    assert report.totals.call_sites == 1
+    assert report.totals.unreachable_call_sites == 1
+    assert report.totals.suspected_call_sites == 1
+    assert report.totals.analyzed == 1

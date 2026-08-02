@@ -144,6 +144,8 @@ def make_remote_call(
     line: int = 27,
     mechanism: str = "resttemplate",
     http_verb: HttpMethod | None = HttpMethod.GET,
+    reachable: bool = True,
+    suspected: bool = False,
 ) -> RemoteCall:
     return RemoteCall(
         snapshot_id=snapshot.id,
@@ -155,6 +157,8 @@ def make_remote_call(
         http_verb=http_verb,
         url=url,
         url_confidence=confidence if url is not None else Confidence.NONE,
+        reachable=reachable,
+        suspected=suspected,
     )
 
 

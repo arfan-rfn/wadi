@@ -38,9 +38,23 @@
           "title": "Placeholder",
           "type": "integer"
         },
+        "suspected_call_sites": {
+          "default": 0,
+          "description": "HTTP-shaped calls on receivers the CPG could not type-resolve \u2014 never matched, never blended into resolved results (P7); detail rows live in remote_calls with suspected=true",
+          "minimum": 0,
+          "title": "Suspected Call Sites",
+          "type": "integer"
+        },
         "undetermined": {
           "minimum": 0,
           "title": "Undetermined",
+          "type": "integer"
+        },
+        "unreachable_call_sites": {
+          "default": 0,
+          "description": "Sink call sites outside the endpoint-reachable closure \u2014 excluded from the map by design, inventoried so the exclusion is queryable (\u00a75.2.5; detail rows live in remote_calls with reachable=false)",
+          "minimum": 0,
+          "title": "Unreachable Call Sites",
           "type": "integer"
         }
       },
@@ -185,7 +199,7 @@
           "type": "string"
         },
         "reason_code": {
-          "description": "'url-undetermined' | 'url-unparseable' | 'host-unresolvable' | 'no-endpoint-match' | 'lombok-generated-interior'",
+          "description": "One of wadi_contracts.stitching.UNRESOLVED_REASON_CODES",
           "minLength": 1,
           "title": "Reason Code",
           "type": "string"
@@ -214,7 +228,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.1.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.2.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What the map knows it doesn't know (\u00a75.4.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
@@ -263,7 +277,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.1.0",
+      "default": "1.2.0",
       "title": "Schema Version",
       "type": "string"
     },

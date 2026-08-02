@@ -378,42 +378,83 @@ class Assembler:
 
     # --- artifact builders --------------------------------------------------------
 
+    _HTTP_SINK_KINDS = frozenset({SinkKind.HTTP_CLIENT, SinkKind.HTTP_CLIENT_SUSPECTED})
+
     def _build_remote_calls(
         self, export: ServiceExport, methods: dict[int, ExportMethod]
     ) -> list[RemoteCall]:
         calls: list[RemoteCall] = []
         seen: set[str] = set()
         for sink in export.sinks:
-            if self._sink_kind(sink.kind) is not SinkKind.HTTP_CLIENT:
+            kind = self._sink_kind(sink.kind)
+            if kind not in self._HTTP_SINK_KINDS:
                 continue
             method = methods.get(sink.method_id)
             if method is None:
                 continue
             line = self._sink_line(sink, export)
-            call_id = remote_call_id(
-                self._service_id, method.filename, line, sink.value or "<undetermined>"
+            call = self._remote_call(
+                sink,
+                filename=method.filename,
+                line=line,
+                method_ref=self._method_ref(method),
+                suspected=kind is SinkKind.HTTP_CLIENT_SUSPECTED,
+                reachable=True,
             )
-            if call_id in seen:
+            if call.id in seen:
                 continue
-            seen.add(call_id)
-            calls.append(
-                RemoteCall(
-                    snapshot_id=self._snapshot_id,
-                    service_id=self._service_id,
-                    id=call_id,
-                    site=self._anchor(method.filename, line, line),
-                    method=self._method_ref(method),
-                    mechanism=sink.mechanism or "http-client",
-                    http_verb=HttpMethod(sink.http_verb.upper()) if sink.http_verb else None,
-                    url=sink.value,
-                    url_confidence=_CONFIDENCE_MAP[sink.value_confidence]
-                    if sink.value is not None
-                    else Confidence.NONE,
-                    evidence=sink.evidence,
-                    auth_propagation=sink.auth_propagation,
-                )
+            seen.add(call.id)
+            calls.append(call)
+        # Sinks outside the endpoint closure (§5.2.5): excluded from the map by
+        # design, inventoried so the exclusion is a queryable fact (P10).
+        for unreachable in export.unreachable_sinks:
+            kind = self._sink_kind(unreachable.kind)
+            if kind not in self._HTTP_SINK_KINDS:
+                continue
+            call = self._remote_call(
+                unreachable,
+                filename=unreachable.file,
+                line=max(unreachable.line, 1),
+                method_ref=MethodRef(
+                    id=method_id(self._service_id, unreachable.method_full_name),
+                    signature=unreachable.method_full_name,
+                ),
+                suspected=kind is SinkKind.HTTP_CLIENT_SUSPECTED,
+                reachable=False,
             )
+            if call.id in seen:
+                continue
+            seen.add(call.id)
+            calls.append(call)
         return calls
+
+    def _remote_call(
+        self,
+        sink: ExportSink,
+        *,
+        filename: str,
+        line: int,
+        method_ref: MethodRef,
+        suspected: bool,
+        reachable: bool,
+    ) -> RemoteCall:
+        return RemoteCall(
+            snapshot_id=self._snapshot_id,
+            service_id=self._service_id,
+            id=remote_call_id(self._service_id, filename, line, sink.value or "<undetermined>"),
+            site=self._anchor(filename, line, line),
+            method=method_ref,
+            mechanism=sink.mechanism or "http-client",
+            http_verb=HttpMethod(sink.http_verb.upper()) if sink.http_verb else None,
+            url=sink.value,
+            url_confidence=_CONFIDENCE_MAP[sink.value_confidence]
+            if sink.value is not None
+            else Confidence.NONE,
+            evidence=sink.evidence,
+            auth_propagation=sink.auth_propagation,
+            suspected=suspected,
+            reachable=reachable,
+        )
 
     def _build_mq_interactions(
         self, export: ServiceExport, methods: dict[int, ExportMethod]
@@ -523,6 +564,8 @@ class Assembler:
             return SinkKind.DB
         if kind == "http-client":
             return SinkKind.HTTP_CLIENT
+        if kind == "http-client-suspected":
+            return SinkKind.HTTP_CLIENT_SUSPECTED
         return SinkKind.MQ
 
     def _sink_line(self, sink: ExportSink, export: ServiceExport) -> int:

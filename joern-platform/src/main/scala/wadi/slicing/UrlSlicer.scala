@@ -47,6 +47,12 @@ object UrlSlicer {
   /** Marker consumed verbatim by the stitcher (coverage reason code). */
   val LombokBlockedMarker = "lombok-generated interior"
 
+  /** Marker consumed verbatim by the stitcher (`slice-budget-truncated`,
+    * §5.2.5): a budget-starved resolution must say so — it never masquerades
+    * as a semantic result.
+    */
+  val BudgetTruncatedMarker = "slice-budget-truncated"
+
   // Follow existing CALL edges only (incl. the DI pass's added edges).
   private given ICallResolver = NoResolve
 
@@ -159,7 +165,11 @@ object UrlSlicer {
       case literal: Literal =>
         List(Candidate(List(Lit(stripQuotes(literal.code))), Nil))
       case call: Call if call.name == Operators.addition =>
-        val operands = call.argument.l.sortBy(_.argumentIndex)
+        // Depth measures indirection, not expression size (§5.2.5): Java's
+        // left-associative `+` nests one addition per operand, so charging per
+        // AST level starved the interproc + map stages on long URLs — the
+        // TrainTicket 21-false-unknowns bug. Flatten the chain: one charge.
+        val operands = flattenedConcatOperands(call)
         operands.foldLeft(List(Candidate(Nil, Nil))) { (acc, operand) =>
           val resolvedOperand = resolve(cpg, operand, depth - 1, tracker, frame)
           tracker.capCandidates(for {
@@ -179,6 +189,15 @@ object UrlSlicer {
         List(Candidate(List(Hole), List(s"${firstLine(node.code)} -> unresolvable expression")))
     }
   }
+
+  /** `a + b + c` parses as nested additions; flatten to the operand list so a
+    * whole concat chain costs one depth level.
+    */
+  private def flattenedConcatOperands(call: Call): List[AstNode] =
+    call.argument.l.sortBy(_.argumentIndex).flatMap {
+      case nested: Call if nested.name == Operators.addition => flattenedConcatOperands(nested)
+      case operand                                           => List(operand)
+    }
 
   private def resolveStringFormat(
     cpg: Cpg,
@@ -305,10 +324,15 @@ object UrlSlicer {
               )
             )
         }
-      case _ =>
-        Some(
-          List(Candidate(List(Hole), List(s"$name.get(…) -> key is not a single constant")))
-        )
+      case candidates =>
+        // Honesty (§5.2.5): a starved key resolution is a budget fact, not a
+        // semantic one — saying "not a single constant" here was factually
+        // wrong (the key WAS a literal) and hid the bug behind HIGH holes.
+        val truncated = candidates.exists(_.truncated)
+        val reason =
+          if (truncated) s"$name.get(…) -> key resolution truncated by slice budget"
+          else s"$name.get(…) -> key is not a single constant"
+        Some(List(Candidate(List(Hole), List(reason), truncated = truncated)))
     }
   }
 
@@ -462,12 +486,24 @@ object UrlSlicer {
           )
         )
       case None =>
+        // Owner-scoped (§5.2.5): match assignments only inside the owning type
+        // (or its ancestors — inherited fields are assigned in the parent's
+        // constructor). A CPG-global name match conflated same-named fields
+        // across classes into false multi-assignment fan-outs.
+        val allowedOwners: Set[String] = owner match {
+          case Some(o) => o.inheritsFromTypeFullName.toSet + o.fullName
+          case None    => Set.empty
+        }
         val assignments = cpg.assignment
           .where(_.target.isCall.name(Operators.fieldAccess))
           .filter(a =>
             a.target.ast
               .collectFirst { case fi: FieldIdentifier if fi.canonicalName == fieldName => fi }
               .nonEmpty
+          )
+          .filter(a =>
+            allowedOwners.isEmpty ||
+              a.method.typeDecl.headOption.exists(td => allowedOwners.contains(td.fullName))
           )
           .l
           .sortBy(a => (lineOf(a), a.id))
@@ -570,7 +606,10 @@ object UrlSlicer {
         "high"
       else "exact"
     val header = s"slice: ${firstLine(call.code)} @ ${fileOf(call)}:${lineOf(call)}"
-    val trace  = (header :: candidate.trace).mkString("\n  ")
+    val traceLines =
+      if (candidate.truncated) (header :: candidate.trace) :+ s"[$BudgetTruncatedMarker]"
+      else header :: candidate.trace
+    val trace = traceLines.mkString("\n  ")
     if (confidence == "none") UrlCandidate(None, "none", trace)
     else UrlCandidate(Some(text), confidence, trace)
   }

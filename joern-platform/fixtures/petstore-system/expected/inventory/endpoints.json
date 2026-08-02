@@ -13,5 +13,10 @@
     "http_method": "POST",
     "full_uri": "/admin/restock",
     "simplified_uri": "/admin/restock"
+  },
+  {
+    "http_method": "PUT",
+    "full_uri": "/stock/reserve/{id}/{count}",
+    "simplified_uri": "/stock/reserve/{?}/{?}"
   }
 ]

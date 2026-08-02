@@ -138,3 +138,56 @@ class TestMissingConfig:
         facts = parse_app_config(tmp_path)
         assert facts.env == {}
         assert facts.gateway_routes == []
+
+
+class TestMultiDocumentYaml:
+    """T1 (§5.2.5): a `---` multi-doc file used to silently zero ALL facts."""
+
+    def test_base_document_parses_and_partial_is_recorded(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+spring:
+  application:
+    name: petstore
+server:
+  port: 8080
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+server:
+  port: 9090
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.application_name == "petstore"
+        assert facts.server_port == 8080
+        assert "config-multi-doc-partial" in facts.notes
+
+    def test_single_document_carries_no_note(self, tmp_path: Path) -> None:
+        _write(tmp_path, "application.yml", "spring:\n  application:\n    name: petstore\n")
+        assert parse_app_config(tmp_path).notes == []
+
+
+class TestProfileFileNotes:
+    """Profile-specific files are not merged (T3) — the skip is queryable, not silent."""
+
+    def test_profile_files_are_recorded(self, tmp_path: Path) -> None:
+        _write(tmp_path, "application.yml", "spring:\n  application:\n    name: petstore\n")
+        _write(tmp_path, "application-docker.yml", "server:\n  port: 9090\n")
+        _write(tmp_path, "application-prod.properties", "server.port=9091\n")
+        facts = parse_app_config(tmp_path)
+        assert facts.application_name == "petstore"
+        assert facts.notes == [
+            "config-profile-files-skipped:application-docker.yml",
+            "config-profile-files-skipped:application-prod.properties",
+        ]
+
+    def test_profile_files_recorded_even_without_base_config(self, tmp_path: Path) -> None:
+        _write(tmp_path, "application-docker.yml", "server:\n  port: 9090\n")
+        facts = parse_app_config(tmp_path)
+        assert facts.env == {}
+        assert facts.notes == ["config-profile-files-skipped:application-docker.yml"]

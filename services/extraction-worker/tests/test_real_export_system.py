@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from wadi_contracts import AuthEvidenceKind, Confidence
+from wadi_contracts import AuthEvidenceKind, Confidence, HttpMethod
 from wadi_joern_client.export import ServiceExport
 from wadi_worker.assembler import Assembler
 
@@ -42,7 +42,7 @@ def inventory() -> ServiceExport:
 
 class TestPetstoreModule:
     def test_parses_under_schema_2(self, petstore: ServiceExport) -> None:
-        assert petstore.export_schema_version == "2.0.0"
+        assert petstore.export_schema_version == "2.1.0"
         assert petstore.compatible_with_reader()
 
     def test_config_key_candidate_assembles(self, petstore: ServiceExport) -> None:
@@ -79,6 +79,48 @@ class TestPetstoreModule:
     def test_config_refs_arrive(self, petstore: ServiceExport) -> None:
         assert [ref.key for ref in petstore.config_refs] == ["inventory.url"]
         assert "PetServiceImpl.java" in petstore.config_refs[0].anchor.file
+
+    def test_exchange_verb_and_long_concat_assemble(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        reserve = [c for c in result.remote_calls if c.url and "/stock/reserve/" in c.url]
+        assert len(reserve) == 1
+        call = reserve[0]
+        assert call.url == "http://inventory/stock/reserve/{?}/{?}"
+        assert call.http_verb is HttpMethod.PUT
+        assert call.url_confidence is Confidence.HIGH
+        assert call.reachable
+        assert not call.suspected
+
+    def test_webclient_chain_assembles_with_mechanism(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        webclient = [c for c in result.remote_calls if c.mechanism == "webclient"]
+        assert len(webclient) == 1
+        call = webclient[0]
+        assert call.url == "http://inventory:8081/admin/restock"
+        assert call.http_verb is HttpMethod.POST
+
+    def test_suspected_sink_is_a_countable_maybe(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        suspected = [c for c in result.remote_calls if c.suspected]
+        assert len(suspected) == 1
+        call = suspected[0]
+        assert call.mechanism == "unknown"
+        assert call.url == "http://billing:9999/charge/{?}"
+        assert call.reachable
+
+    def test_unreachable_sink_is_inventoried(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        unreachable = [c for c in result.remote_calls if not c.reachable]
+        assert len(unreachable) == 1
+        call = unreachable[0]
+        assert call.url == "https://audit.example.com/orphaned/{?}"
+        assert "OrphanedAuditNotifier" in call.method.signature
+        assert "OrphanedAuditNotifier.java" in call.site.file
+
+    def test_owner_scoped_field_yields_one_candidate(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        billing = [c for c in result.remote_calls if c.url and "/billing-events" in c.url]
+        assert [c.url for c in billing] == ["http://billing:9082/billing-events"]
 
 
 class TestEndpointParams:
@@ -118,6 +160,7 @@ class TestInventoryModule:
             ("GET", "/stock/{?}"),
             ("GET", "/api/v1/inventory/stock/{?}"),
             ("POST", "/admin/restock"),
+            ("PUT", "/stock/reserve/{?}/{?}"),
         }
 
     def test_auth_merges_annotation_and_chain(self, inventory: ServiceExport) -> None:

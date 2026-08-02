@@ -86,6 +86,7 @@ class SinkKind(StrEnum):
 
     DB = "db"
     HTTP_CLIENT = "http-client"
+    HTTP_CLIENT_SUSPECTED = "http-client-suspected"
     MQ = "mq"
 
 

@@ -10,7 +10,7 @@ never to a failed extraction.
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
@@ -48,6 +48,9 @@ class AppConfigFacts:
     server_port: int | None = None
     gateway_routes: list[AppGatewayRoute] = field(default_factory=list[AppGatewayRoute])
     gateway_discovery_locator: bool = False
+    notes: list[str] = field(default_factory=list[str])
+    """Machine-readable parsing-gap notes (§5.4.2): what this parser knowingly
+    skipped — queryable, never just prose (P10)."""
 
 
 _EMPTY = AppConfigFacts()
@@ -56,26 +59,50 @@ _EMPTY = AppConfigFacts()
 def parse_app_config(build_root: Path) -> AppConfigFacts:
     """Facts from the service's base application config, or empty facts."""
     resources = build_root / "src" / "main" / "resources"
+    notes = _profile_file_notes(resources)
     for candidate in ("application.yml", "application.yaml", "application.properties"):
         config_path = resources / candidate
         if config_path.exists():
             if candidate.endswith(".properties"):
-                return _from_flat(_parse_properties(config_path))
-            return _from_yaml(config_path)
-    return _EMPTY
+                facts = _from_flat(_parse_properties(config_path))
+            else:
+                facts = _from_yaml(config_path)
+            return facts if not notes else replace(facts, notes=facts.notes + notes)
+    return _EMPTY if not notes else AppConfigFacts(notes=notes)
+
+
+def _profile_file_notes(resources: Path) -> list[str]:
+    """Profile-specific config files are not merged (T3, §5.4.2) — record each."""
+    if not resources.is_dir():
+        return []
+    return [
+        f"config-profile-files-skipped:{path.name}"
+        for path in sorted(resources.glob("application-*"))
+        if path.suffix in (".yml", ".yaml", ".properties")
+    ]
 
 
 def _from_yaml(config_path: Path) -> AppConfigFacts:
+    """Parse the base document; extra `---` profile documents are recorded, not
+    silently dropped — a multi-doc file used to zero ALL facts (T1 fix, §5.2.5).
+    """
     try:
-        parsed: object = yaml.safe_load(config_path.read_text())
+        documents: list[object] = [
+            document
+            for document in yaml.safe_load_all(config_path.read_text())
+            if document is not None
+        ]
     except yaml.YAMLError:
         logger.warning("unparseable %s — no config facts extracted", config_path)
         return _EMPTY
-    if not isinstance(parsed, dict):
+    if not documents or not isinstance(documents[0], dict):
         return _EMPTY
     flat: dict[str, str] = {}
-    routes = _flatten(cast(dict[object, object], parsed), prefix="", into=flat)
-    return _from_flat(flat, routes)
+    routes = _flatten(cast(dict[object, object], documents[0]), prefix="", into=flat)
+    facts = _from_flat(flat, routes)
+    if len(documents) > 1:
+        return replace(facts, notes=[*facts.notes, "config-multi-doc-partial"])
+    return facts
 
 
 def _flatten(

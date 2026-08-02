@@ -85,11 +85,14 @@ class StitchPipeline:
             boundaries_by_service={b.service_id: b for b in boundaries},
         )
 
-        # 3. MATCH — deterministic order: calls sorted by id.
+        # 3. MATCH — deterministic order: calls sorted by id. Unreachable and
+        # suspected call facts are inventory, not map edges (§5.2.5): excluded
+        # from matching, counted in the coverage report.
+        stitchable = [c for c in remote_calls if c.reachable and not c.suspected]
         edges: list[StitchedEdge] = []
         unresolved: list[UnresolvedCallEntry] = []
         placeholder_names: dict[str, tuple[str, str]] = {}
-        for call in sorted(remote_calls, key=lambda c: c.id):
+        for call in sorted(stitchable, key=lambda c: c.id):
             outcome = match_call(call, context, MATCHERS, self._hints)
             edges.extend(outcome.edges)
             unresolved.extend(outcome.unresolved)
@@ -115,7 +118,7 @@ class StitchPipeline:
             snapshot_id,
             boundaries=boundaries,
             endpoints=endpoints,
-            remote_calls=remote_calls,
+            remote_calls=stitchable,
             edges=edges,
             placeholders=report.placeholders,
         )

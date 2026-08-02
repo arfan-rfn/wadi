@@ -20,7 +20,11 @@ from wadi_contracts import (
     placeholder_service_id,
 )
 from wadi_stitcher.matching import MatchContext, match_call
-from wadi_stitcher.matching.base import LOMBOK_BLOCKED_MARKER, confidence_min
+from wadi_stitcher.matching.base import (
+    BUDGET_TRUNCATED_MARKER,
+    LOMBOK_BLOCKED_MARKER,
+    confidence_min,
+)
 from wadi_stitcher.matching.http import HttpMatcher
 from wadi_stitcher.matching.paths import PathQuality, path_match
 from wadi_stitcher.phonebook import PhoneBook
@@ -238,6 +242,15 @@ class TestTargetKinds:
         )
         outcome = match_call(call, _context(snapshot, [caller], []), MATCHERS)
         assert outcome.unresolved[0].reason_code == "lombok-generated-interior"
+
+    def test_budget_truncated_reason_is_machine_readable(self) -> None:
+        # T1 (§5.2.5): a starved slice is a budget fact, not a semantic unknown.
+        snapshot, caller = self._base()
+        call = make_remote_call(snapshot, caller, url=None).model_copy(
+            update={"evidence": f"slice: … \n  [{BUDGET_TRUNCATED_MARKER}]"}
+        )
+        outcome = match_call(call, _context(snapshot, [caller], []), MATCHERS)
+        assert outcome.unresolved[0].reason_code == "slice-budget-truncated"
 
     def test_relative_url_unparseable(self) -> None:
         snapshot, caller = self._base()

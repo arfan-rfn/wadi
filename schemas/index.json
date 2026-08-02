@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "schemas": {
     "coverage_report": "coverage_report.schema.json",
     "data_model": "data_model.schema.json",
@@ -15,5 +15,5 @@
     "stitched_edge": "stitched_edge.schema.json",
     "system": "system.schema.json"
   },
-  "tag_registry_version": "1.1.0"
+  "tag_registry_version": "1.2.0"
 }

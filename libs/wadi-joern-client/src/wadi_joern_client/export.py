@@ -11,12 +11,18 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EXPORT_SCHEMA_VERSION = "2.0.0"
+EXPORT_SCHEMA_VERSION = "2.1.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
 ``auth_propagation``; ``value_confidence`` gained ``high``; endpoints gained
-``params``; new top-level ``security_rules`` and ``config_refs`` sections."""
+``params``; new top-level ``security_rules`` and ``config_refs`` sections.
+
+2.1.0 (additive, §5.2.5): new top-level ``unreachable_sinks`` inventory
+(http-client sinks outside the endpoint closure, with inline anchors — their
+methods are not in the export); sink ``kind`` may be
+``http-client-suspected`` (unresolved receiver type); ``mechanism`` may be
+``webclient`` / ``unknown``."""
 
 
 class ExportModelBase(BaseModel):
@@ -157,6 +163,19 @@ class ExportAnchor(ExportModelBase):
     line: int = Field(ge=0)
 
 
+class ExportUnreachableSink(ExportSink):
+    """An http-client sink outside the endpoint-reachable closure (§5.2.5).
+
+    Excluded from the map by design; inventoried so the exclusion is queryable
+    (P10) and cross-tool comparisons can reconcile counts. Anchors are inline
+    because the enclosing method is not exported.
+    """
+
+    method_full_name: str
+    file: str
+    line: int = Field(ge=0)
+
+
 class ExportSecurityRule(ExportModelBase):
     """One SecurityFilterChain DSL rule (collected CPG-wide; §5.1).
 
@@ -197,6 +216,9 @@ class ServiceExport(ExportModelBase):
     cfgs: list[ExportCfg]
     endpoints: list[ExportEndpoint]
     sinks: list[ExportSink]
+    unreachable_sinks: list[ExportUnreachableSink] = Field(
+        default_factory=list[ExportUnreachableSink]
+    )
     data_models: list[ExportDataModel] = Field(default_factory=list[ExportDataModel])
     security_rules: list[ExportSecurityRule] = Field(default_factory=list[ExportSecurityRule])
     config_refs: list[ExportConfigRef] = Field(default_factory=list[ExportConfigRef])

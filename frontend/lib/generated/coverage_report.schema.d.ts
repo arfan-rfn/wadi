@@ -57,13 +57,21 @@ export type CallSites = number
 export type Edges = number
 export type External = number
 export type Placeholder = number
+/**
+ * HTTP-shaped calls on receivers the CPG could not type-resolve — never matched, never blended into resolved results (P7); detail rows live in remote_calls with suspected=true
+ */
+export type SuspectedCallSites = number
 export type Undetermined = number
+/**
+ * Sink call sites outside the endpoint-reachable closure — excluded from the map by design, inventoried so the exclusion is queryable (§5.2.5; detail rows live in remote_calls with reachable=false)
+ */
+export type UnreachableCallSites = number
 /**
  * Human-readable explanation
  */
 export type Reason = string
 /**
- * 'url-undetermined' | 'url-unparseable' | 'host-unresolvable' | 'no-endpoint-match' | 'lombok-generated-interior'
+ * One of wadi_contracts.stitching.UNRESOLVED_REASON_CODES
  */
 export type ReasonCode = string
 export type RemoteCallId = string
@@ -132,7 +140,9 @@ export interface CoverageTotals {
   edges: Edges
   external: External
   placeholder: Placeholder
+  suspected_call_sites?: SuspectedCallSites
   undetermined: Undetermined
+  unreachable_call_sites?: UnreachableCallSites
 }
 /**
  * Edge count per Confidence value

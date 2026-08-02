@@ -29,8 +29,12 @@ object WadiExport {
   /** 2.0.0: one sink row PER CANDIDATE value (node_id no longer unique across
     * rows), rows carry call_id / evidence / auth_propagation, endpoints carry
     * auth_tags + params, new top-level security_rules + config_refs sections.
+    * 2.1.0 (additive, §5.2.5): new top-level `unreachable_sinks` inventory
+    * (http-client sinks outside the endpoint closure, with inline anchors);
+    * sinks may carry kind `http-client-suspected` (unresolved receiver) and
+    * mechanism `webclient`.
     */
-  val ExportSchemaVersion = "2.0.0"
+  val ExportSchemaVersion = "2.1.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -84,6 +88,8 @@ object WadiExport {
       )
     }
 
+    val unreachableObjs = unreachableSinkObjs(cpg, methodIds)
+
     val document = ujson.Obj(
       "export_schema_version" -> ExportSchemaVersion,
       "language"              -> "java",
@@ -91,6 +97,7 @@ object WadiExport {
       "cfgs"                  -> cfgObjs,
       "endpoints"             -> endpointObjs,
       "sinks"                 -> sinkRows.toList,
+      "unreachable_sinks"     -> unreachableObjs,
       "data_models"           -> modelObjs,
       "security_rules"        -> securityRuleObjs(cpg),
       "config_refs"           -> configRefObjs(cpg)
@@ -104,7 +111,8 @@ object WadiExport {
       StandardOpenOption.CREATE,
       StandardOpenOption.TRUNCATE_EXISTING
     )
-    s"wadi export: ${closure.size} methods, ${endpointObjs.size} endpoints, ${sinkRows.size} sinks -> $outDir/export.json"
+    s"wadi export: ${closure.size} methods, ${endpointObjs.size} endpoints, " +
+      s"${sinkRows.size} sinks, ${unreachableObjs.size} unreachable sinks -> $outDir/export.json"
   }
 
   /** BFS over resolved calls (incl. DI-added edges), internal methods only. */
@@ -405,10 +413,18 @@ object WadiExport {
     call: Call
   ): List[ujson.Obj] = {
     val feignEncoded = call.tag.nameExact("wadi-feign").value.headOption
-    val verb = feignEncoded.map(_.split('|').head).orElse(httpVerbOf(call))
+    val verb = feignEncoded
+      .map(_.split('|').head)
+      // WebClient chains carry the verb on the chain root; the sink pass
+      // stores it as a tag on the tagged .uri(...) call (§5.2.5).
+      .orElse(call.tag.nameExact("wadi-verb").value.headOption)
+      .orElse(httpVerbOf(call))
+    val clientTag = call.tag.nameExact("wadi-client").value.headOption
+    val isHttpKind = kind == "http-client" || kind == "http-client-suspected"
     val mechanism =
       if (feignEncoded.isDefined) Some("feign")
-      else if (kind == "http-client") Some("resttemplate")
+      else if (kind == "http-client-suspected") Some("unknown")
+      else if (kind == "http-client") Some(clientTag.getOrElse("resttemplate"))
       else None
     val candidates: List[(Option[String], String, Option[String])] = feignEncoded match {
       case Some(encoded) =>
@@ -420,7 +436,7 @@ object WadiExport {
             Some(s"feign client: declared mapping composes $url (discovery-name authority)")
           )
         )
-      case None if kind != "http-client" => List((None, "none", None))
+      case None if !isHttpKind => List((None, "none", None))
       case None =>
         val sliced = UrlSlicer.slice(cpg, call)
         val usable = sliced.filter(_.url.isDefined)
@@ -449,6 +465,33 @@ object WadiExport {
       )
     }
   }
+
+  /** http-client sinks outside the endpoint-reachable closure (§5.2.5).
+    *
+    * Dead/unwired code is excluded from the architecture map by design, but
+    * the exclusion itself is a queryable fact — dropped-silently was a P10
+    * violation, and cross-tool comparisons need the inventory to reconcile
+    * counts. Anchors are inline because the enclosing methods are not in the
+    * export.
+    */
+  private def unreachableSinkObjs(cpg: Cpg, reachableMethodIds: Set[Long]): List[ujson.Obj] =
+    cpg.call
+      .where(_.tag.nameExact("sink"))
+      .l
+      .filterNot(call => reachableMethodIds.contains(call.method.id))
+      .sortBy(_.id)
+      .flatMap { call =>
+        call.tag.nameExact("sink").value.headOption.toList
+          .filter(_.startsWith("http-client"))
+          .flatMap { kind =>
+            sinkRowsFor(cpg, call.id, call.method.id, kind, call).map { row =>
+              row("method_full_name") = call.method.fullName
+              row("file") = call.method.filename
+              row("line") = lineOf(call.lineNumber)
+              row
+            }
+          }
+      }
 
   /** SecurityFilterChain DSL rules from `auth-rule=` tags, CPG-wide — the
     * chain beans live outside the endpoint-reachable closure (§5.1). Order is
@@ -479,16 +522,36 @@ object WadiExport {
         }
       }
 
+  private val HttpVerbs = Set("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE")
+  private val HttpMethodArgument = """(?:org\.springframework\.http\.)?HttpMethod\.([A-Z]+)""".r
+
   private def httpVerbOf(call: Call): Option[String] =
     call.name.toLowerCase match {
-      case n if n.startsWith("get")      => Some("GET")
-      case n if n.startsWith("post")     => Some("POST")
-      case n if n.startsWith("put")      => Some("PUT")
-      case n if n.startsWith("delete")   => Some("DELETE")
-      case n if n.startsWith("patch")    => Some("PATCH")
-      case n if n.startsWith("exchange") => None
-      case _                             => None
+      case n if n.startsWith("get")     => Some("GET")
+      case n if n.startsWith("post")    => Some("POST")
+      case n if n.startsWith("put")     => Some("PUT")
+      case n if n.startsWith("delete")  => Some("DELETE")
+      case n if n.startsWith("patch")   => Some("PATCH")
+      case n if n.startsWith("head")    => Some("HEAD")
+      case n if n.startsWith("options") => Some("OPTIONS")
+      // exchange/execute carry the verb as an argument (§5.2.5); WebClient's
+      // .method(HttpMethod.X) is the same shape.
+      case "exchange" | "execute" | "method" => verbArgumentOf(call)
+      case _                                 => None
     }
+
+  /** `exchange(url, HttpMethod.PUT, …)`: only a literal enum reference counts —
+    * `HttpMethod.valueOf(expr)` and other dynamic verbs stay an honest null
+    * (P10), never a guess.
+    */
+  private def verbArgumentOf(call: Call): Option[String] =
+    call.argument
+      .argumentIndexGt(0)
+      .l
+      .sortBy(_.argumentIndex)
+      .iterator
+      .map(_.code.trim)
+      .collectFirst { case HttpMethodArgument(verb) if HttpVerbs.contains(verb) => verb }
 
   /** Phase-1 literal/concat recovery, kept as the slice floor. */
   private def legacyRecoverUrl(call: Call): (Option[String], String) =

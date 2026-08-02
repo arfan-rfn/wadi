@@ -40,7 +40,18 @@ class NetworkIdentity(WadiModel):
     env: dict[str, str] = Field(
         default_factory=dict[str, str],
         description=(
-            "Network-relevant config keys (flattened application.yml allowlist + compose env)"
+            "Network-relevant config keys (flattened application.yml allowlist; "
+            "compose environment blocks are a recorded T3 gap, §5.4.2)"
+        ),
+    )
+    config_notes: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Machine-readable notes about config parsing gaps for this service "
+            "(§5.4.2): 'config-multi-doc-partial' (multi-document application "
+            "file, base document parsed, profile documents skipped) | "
+            "'config-profile-files-skipped:<name>' (profile-specific config "
+            "file present but not merged)"
         ),
     )
     application_name: str | None = Field(

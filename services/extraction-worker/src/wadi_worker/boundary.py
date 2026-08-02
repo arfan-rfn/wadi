@@ -8,7 +8,8 @@ on top of exactly this output.
 
 import logging
 import re
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 from xml.etree import ElementTree
@@ -56,7 +57,32 @@ def discover_services(repo_root: Path) -> list[DiscoveredService]:
             )
         )
     services.sort(key=lambda s: s.build_root)
-    return services
+    return _disambiguate_names(services)
+
+
+def _disambiguate_names(services: list[DiscoveredService]) -> list[DiscoveredService]:
+    """Colliding display names fall back to the module directory name.
+
+    TrainTicket's two gateways both declare ``<artifactId>gateway</artifactId>``
+    — surfacing both as "gateway" is a human-facing collision even though ids
+    and build roots stay distinct. The directory name (build-root basename) is
+    unique per module in practice; the full build-root path is the last resort.
+    Deterministic: derived purely from discovered facts.
+    """
+    name_counts = Counter(service.name for service in services)
+    colliding = {name for name, count in name_counts.items() if count > 1}
+    if not colliding:
+        return services
+    basenames = [Path(service.build_root).name or service.name for service in services]
+    basenames_unique = len(set(basenames)) == len(basenames)
+
+    def fallback(service: DiscoveredService, basename: str) -> str:
+        return basename if basenames_unique else service.build_root
+
+    return [
+        replace(service, name=fallback(service, basename)) if service.name in colliding else service
+        for service, basename in zip(services, basenames, strict=True)
+    ]
 
 
 def _find_maven_leaf_modules(repo_root: Path) -> list[Path]:

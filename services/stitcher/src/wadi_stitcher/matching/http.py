@@ -33,6 +33,7 @@ from wadi_contracts import (
     placeholder_service_id,
 )
 from wadi_stitcher.matching.base import (
+    BUDGET_TRUNCATED_MARKER,
     LOMBOK_BLOCKED_MARKER,
     MatchContext,
     MatchOutcome,
@@ -73,11 +74,12 @@ class HttpMatcher:
 
     def match(self, call: RemoteCall, ctx: MatchContext) -> MatchOutcome:
         if call.url is None:
-            reason_code = (
-                "lombok-generated-interior"
-                if call.evidence and LOMBOK_BLOCKED_MARKER in call.evidence
-                else "url-undetermined"
-            )
+            if call.evidence and LOMBOK_BLOCKED_MARKER in call.evidence:
+                reason_code = "lombok-generated-interior"
+            elif call.evidence and BUDGET_TRUNCATED_MARKER in call.evidence:
+                reason_code = "slice-budget-truncated"
+            else:
+                reason_code = "url-undetermined"
             return self._undetermined(
                 call, reason_code, call.evidence or "target is runtime-only (P10)"
             )

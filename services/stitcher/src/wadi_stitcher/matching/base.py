@@ -29,6 +29,11 @@ from wadi_stitcher.phonebook import PhoneBook
 # (recorded decision: accepted limitations stay queryable, never just prose).
 LOMBOK_BLOCKED_MARKER = "lombok-generated interior"
 
+# The T1 slicer emits this marker when a resolution was cut short by the slice
+# budget (§5.2.5): a starved slice is a budget fact, not a semantic unknown —
+# it must be countable separately or budget bugs hide inside honest unknowns.
+BUDGET_TRUNCATED_MARKER = "slice-budget-truncated"
+
 _CONFIDENCE_ORDER = (Confidence.EXACT, Confidence.HIGH, Confidence.HEURISTIC, Confidence.NONE)
 
 

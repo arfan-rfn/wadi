@@ -33,6 +33,10 @@ export type Name = string
  */
 export type ApplicationName = string | null
 /**
+ * Machine-readable notes about config parsing gaps for this service (§5.4.2): 'config-multi-doc-partial' (multi-document application file, base document parsed, profile documents skipped) | 'config-profile-files-skipped:<name>' (profile-specific config file present but not merged)
+ */
+export type ConfigNotes = string[]
+/**
  * Names this service registers under in service discovery (Eureka/Consul)
  */
 export type DiscoveryNames = string[]
@@ -115,6 +119,7 @@ export interface ServiceBoundary {
  */
 export interface NetworkIdentity {
   application_name?: ApplicationName
+  config_notes?: ConfigNotes
   discovery_names?: DiscoveryNames
   env?: Env
   gateway_discovery_locator?: GatewayDiscoveryLocator
@@ -124,7 +129,7 @@ export interface NetworkIdentity {
   server_port?: ServerPort
 }
 /**
- * Network-relevant config keys (flattened application.yml allowlist + compose env)
+ * Network-relevant config keys (flattened application.yml allowlist; compose environment blocks are a recorded T3 gap, §5.4.2)
  */
 export interface Env {
   [k: string]: string

@@ -72,15 +72,23 @@ def build_coverage_report(
         and edge.target_kind is not TargetKind.UNDETERMINED
     )
 
+    # Inventory facts (§5.2.5): excluded from matching by design, counted so
+    # the exclusion is queryable. `call_sites` stays the stitchable population.
+    unreachable_count = sum(1 for call in remote_calls if not call.reachable)
+    suspected_count = sum(1 for call in remote_calls if call.reachable and call.suspected)
+    stitchable_count = sum(1 for call in remote_calls if call.reachable and not call.suspected)
+
     return CoverageReport(
         snapshot_id=snapshot_id,
         totals=CoverageTotals(
-            call_sites=len(remote_calls),
+            call_sites=stitchable_count,
             edges=len(edges),
             analyzed=len(by_kind[TargetKind.ANALYZED]),
             external=len(by_kind[TargetKind.EXTERNAL]),
             placeholder=len(by_kind[TargetKind.PLACEHOLDER]),
             undetermined=len(by_kind[TargetKind.UNDETERMINED]),
+            unreachable_call_sites=unreachable_count,
+            suspected_call_sites=suspected_count,
             by_confidence=dict(sorted(by_confidence.items())),
         ),
         placeholders=placeholders,

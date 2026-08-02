@@ -84,12 +84,13 @@ def _validate_endpoint(value: str) -> None:
 
 
 def _validate_sink(value: str) -> None:
-    if value in ("db", "http-client"):
+    if value in ("db", "http-client", "http-client-suspected"):
         return
     if _MQ_SINK_VALUE.match(value):
         return
     raise TagValidationError(
-        f"sink tag value must be 'db', 'http-client', or 'mq:<broker>', got {value!r}"
+        f"sink tag value must be 'db', 'http-client', 'http-client-suspected', "
+        f"or 'mq:<broker>', got {value!r}"
     )
 
 

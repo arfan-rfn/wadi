@@ -26,6 +26,10 @@ export type Id1 = string
  * Fully-qualified method signature
  */
 export type Signature = string
+/**
+ * False = the call site exists but no endpoint-reachable path leads to it (dead/unwired code). Excluded from stitching by design; inventoried so the exclusion is queryable (§5.2.5)
+ */
+export type Reachable = boolean
 export type SchemaVersion = string
 export type ServiceId = string
 export type EndLine = number
@@ -42,6 +46,10 @@ export type StartLine = number
  */
 export type SourceVariant = "original" | "generated"
 export type SnapshotId = string
+/**
+ * True = HTTP-shaped call on a receiver the CPG could not type-resolve — a countable maybe, never matched or blended into resolved results (P7, §5.2.5)
+ */
+export type Suspected = boolean
 /**
  * Sliced candidate URL/template; None = target undetermined (P10)
  */
@@ -62,10 +70,12 @@ export interface RemoteCall {
   id: Id
   mechanism: Mechanism
   method: MethodRef
+  reachable?: Reachable
   schema_version?: SchemaVersion
   service_id: ServiceId
   site: SourceAnchor
   snapshot_id: SnapshotId
+  suspected?: Suspected
   url?: Url
   url_confidence: Confidence
 }

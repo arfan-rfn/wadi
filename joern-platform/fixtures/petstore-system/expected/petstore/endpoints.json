@@ -8,5 +8,15 @@
     "http_method": "GET",
     "full_uri": "/pets",
     "simplified_uri": "/pets"
+  },
+  {
+    "http_method": "PUT",
+    "full_uri": "/pets/{id}/reserve/{count}",
+    "simplified_uri": "/pets/{?}/reserve/{?}"
+  },
+  {
+    "http_method": "POST",
+    "full_uri": "/pets/{id}/alert",
+    "simplified_uri": "/pets/{?}/alert"
   }
 ]

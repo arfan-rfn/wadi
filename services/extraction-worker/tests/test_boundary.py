@@ -142,3 +142,25 @@ class TestAppConfigWiring:
         assert by_name["orders"].config.server_port == 8085
         assert by_name["billing"].config.application_name is None
         assert by_name["billing"].config.env == {}
+
+
+class TestNameCollisions:
+    """T1 (§5.2.5): TrainTicket's two gateways both declare artifactId 'gateway'."""
+
+    def test_colliding_artifact_ids_fall_back_to_directory_names(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "parent", modules=["ts-gateway", "ts-new-gateway", "ts-order"])
+        write_pom(tmp_path / "ts-gateway", "gateway")
+        write_pom(tmp_path / "ts-new-gateway", "gateway")
+        write_pom(tmp_path / "ts-order", "ts-order-service")
+        services = discover_services(tmp_path)
+        by_root = {s.build_root: s.name for s in services}
+        assert by_root["ts-gateway"] == "ts-gateway"
+        assert by_root["ts-new-gateway"] == "ts-new-gateway"
+        # Non-colliding names keep the artifactId.
+        assert by_root["ts-order"] == "ts-order-service"
+
+    def test_unique_artifact_ids_are_untouched(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "parent", modules=["a", "b"])
+        write_pom(tmp_path / "a", "svc-a")
+        write_pom(tmp_path / "b", "svc-b")
+        assert {s.name for s in discover_services(tmp_path)} == {"svc-a", "svc-b"}

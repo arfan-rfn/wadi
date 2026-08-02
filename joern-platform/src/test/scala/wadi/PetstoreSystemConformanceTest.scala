@@ -39,19 +39,25 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   // --- endpoint sets per module ----------------------------------------------------
 
-  test("petstore serves exactly its two controller endpoints") {
-    endpoints(petstore) shouldBe Set("GET /pets/{id}", "GET /pets")
+  test("petstore serves exactly its four controller endpoints") {
+    endpoints(petstore) shouldBe Set(
+      "GET /pets/{id}",
+      "GET /pets",
+      "PUT /pets/{id}/reserve/{count}",
+      "POST /pets/{id}/alert"
+    )
   }
 
   test("feign mappings never count as served endpoints (TrainTicket trap)") {
     endpoints(petstore).exists(_.contains("/api/v1/inventory")) shouldBe false
   }
 
-  test("inventory serves its three endpoints incl. the role-protected one") {
+  test("inventory serves its four endpoints incl. the role-protected one") {
     endpoints(inventory) shouldBe Set(
       "GET /stock/{id}",
       "GET /api/v1/inventory/stock/{id}",
-      "POST /admin/restock"
+      "POST /admin/restock",
+      "PUT /stock/reserve/{id}/{count}"
     )
   }
 
@@ -113,7 +119,7 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   test("service-registry idiom resolves through DI + constant map (TrainTicket)") {
     val resolved = httpSinks(petstore).filter(s =>
-      s("value").strOpt.exists(_.startsWith("http://inventory/stock/"))
+      s("value").strOpt.contains("http://inventory/stock/{?}")
     )
     resolved should have size 1
     val sink = resolved.head
@@ -151,5 +157,59 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   test("inventory module has no outbound http sinks") {
     httpSinks(inventory) shouldBe empty
+  }
+
+  // --- Tranche 1 (§5.2.5): budget model, verbs, WebClient, honesty ----------------
+
+  test("long-concat exchange() resolves through the map AND recovers the verb (T1)") {
+    val reserve = httpSinks(petstore).filter(s =>
+      s("value").strOpt.exists(_.startsWith("http://inventory/stock/reserve/"))
+    )
+    reserve should have size 1
+    val sink = reserve.head
+    // Five operands + DI hop + constant map: the old per-AST-level depth charge
+    // starved this exact shape (the TrainTicket 21-false-unknowns bug).
+    sink("value").str shouldBe "http://inventory/stock/reserve/{?}/{?}"
+    sink("value_confidence").str shouldBe "high"
+    sink("evidence").str should include("serviceMap.get(\"inventory-api\") = \"inventory\"")
+    sink("evidence").str should not include "truncated"
+    // The verb lives in the HttpMethod.PUT argument, not the method name.
+    sink("http_verb").str shouldBe "PUT"
+  }
+
+  test("WebClient fluent chain: .uri() is the sink, verb from the chain root (T1)") {
+    val webclient = httpSinks(petstore).filter(_("mechanism").strOpt.contains("webclient"))
+    webclient should have size 1
+    val sink = webclient.head
+    sink("value").str shouldBe "http://inventory:8081/admin/restock"
+    sink("http_verb").str shouldBe "POST"
+  }
+
+  test("same-named field in another class does not bleed into the slice (T1)") {
+    val billing = httpSinks(petstore).filter(s =>
+      s("value").strOpt.exists(_.contains("/billing-events"))
+    )
+    // One candidate only — the AuditNotifier decoy's baseUrl must not appear.
+    billing should have size 1
+    billing.head("value").str shouldBe "http://billing:9082/billing-events"
+    billing.head("value_confidence").str shouldBe "high"
+  }
+
+  test("unresolvable receiver surfaces as a suspected sink, never vanishes (T1)") {
+    val suspected = petstore("sinks").arr.toSeq.filter(_("kind").str == "http-client-suspected")
+    suspected should have size 1
+    val sink = suspected.head
+    sink("mechanism").str shouldBe "unknown"
+    // The URL argument still slices even though the receiver is unknown.
+    sink("value").str shouldBe "http://billing:9999/charge/{?}"
+  }
+
+  test("sinks in unwired classes land in the unreachable inventory (T1)") {
+    val rows = petstore("unreachable_sinks").arr
+    rows.map(_("value").strOpt.getOrElse("")).toSet shouldBe
+      Set("https://audit.example.com/orphaned/{?}")
+    rows.head("method_full_name").str should include("OrphanedAuditNotifier")
+    rows.head("file").str should include("OrphanedAuditNotifier.java")
+    inventory("unreachable_sinks").arr shouldBe empty
   }
 }

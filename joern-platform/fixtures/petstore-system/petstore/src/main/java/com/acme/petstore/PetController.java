@@ -2,6 +2,8 @@ package com.acme.petstore;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,5 +26,15 @@ public class PetController {
     @GetMapping
     public String listPets(@RequestParam(required = false) String owner) {
         return petService.listPets(owner);
+    }
+
+    @PutMapping("/{id}/reserve/{count}")
+    public String reserve(@PathVariable String id, @PathVariable String count) {
+        return petService.reserveStock(id, count);
+    }
+
+    @PostMapping("/{id}/alert")
+    public String alert(@PathVariable String id) {
+        return petService.stockAlert(id);
     }
 }

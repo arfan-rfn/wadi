@@ -67,7 +67,7 @@ export type RemoteCallIds = string[]
 /**
  * Sink classification mirroring the ``sink=`` tag namespace.
  */
-export type SinkKind = "db" | "http-client" | "mq"
+export type SinkKind = "db" | "http-client" | "http-client-suspected" | "mq"
 /**
  * The node's one-line source text (graph labels are real code)
  */
