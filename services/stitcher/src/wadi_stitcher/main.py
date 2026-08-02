@@ -8,7 +8,15 @@ import uuid
 from wadi_config import get_settings
 from wadi_contracts import ExtractionJob, JobType
 from wadi_stitcher.pipeline import StitchPipeline
-from wadi_storage import ArtifactRepository, JobQueue, WadiDatabase, create_client
+from wadi_storage import (
+    ArtifactRepository,
+    GraphRepository,
+    GraphStore,
+    JobQueue,
+    StitchRepository,
+    WadiDatabase,
+    create_client,
+)
 from wadi_storage.runner import JobRunner
 
 logger = logging.getLogger(__name__)
@@ -20,23 +28,36 @@ async def serve() -> None:
     database = WadiDatabase(client, settings.mongo_database)
     await database.ensure_indexes()
     queue = JobQueue(database, lease_seconds=settings.job_lease_seconds)
-    pipeline = StitchPipeline(ArtifactRepository(database))
+    async with GraphStore(
+        settings.neo4j_uri,
+        settings.neo4j_user,
+        settings.neo4j_password.get_secret_value(),
+    ) as store:
+        graph = GraphRepository(
+            store,
+            database=settings.neo4j_database,
+            batch_size=settings.graph_write_batch_size,
+        )
+        # The graph's single writer bootstraps its own schema (P4), mirroring
+        # ensure_indexes on the Mongo side.
+        await graph.ensure_schema()
+        pipeline = StitchPipeline(ArtifactRepository(database), StitchRepository(database), graph)
 
-    async def handle(job: ExtractionJob) -> None:
-        await pipeline.run(job.snapshot_id)
+        async def handle(job: ExtractionJob) -> None:
+            await pipeline.run(job.snapshot_id)
 
-    runner = JobRunner(
-        queue,
-        worker_id=f"stitcher-{socket.gethostname()}-{uuid.uuid4().hex[:8]}",
-        handler=handle,
-        types=[JobType.STITCH],
-        heartbeat_seconds=settings.job_heartbeat_seconds,
-        poll_seconds=settings.job_poll_seconds,
-    )
-    try:
-        await runner.run_forever()
-    finally:
-        await database.close()
+        runner = JobRunner(
+            queue,
+            worker_id=f"stitcher-{socket.gethostname()}-{uuid.uuid4().hex[:8]}",
+            handler=handle,
+            types=[JobType.STITCH],
+            heartbeat_seconds=settings.job_heartbeat_seconds,
+            poll_seconds=settings.job_poll_seconds,
+        )
+        try:
+            await runner.run_forever()
+        finally:
+            await database.close()
 
 
 def main() -> None:
