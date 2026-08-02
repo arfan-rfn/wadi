@@ -7,6 +7,8 @@ from wadi_mcp.server import create_server
 from wadi_mcp.service import NotFoundError, WadiMcpService
 from wadi_storage import (
     ArtifactRepository,
+    GraphRepository,
+    GraphStore,
     SnapshotRepository,
     SystemRepository,
     WadiDatabase,
@@ -43,7 +45,7 @@ class TestListingTools:
     async def test_full_navigation_chain(
         self, database: WadiDatabase, seeded: dict[str, str]
     ) -> None:
-        service = WadiMcpService(database)
+        service = _service(database)
 
         systems = await service.list_systems()
         assert [s["name"] for s in systems] == ["mcp-shop"]
@@ -59,7 +61,7 @@ class TestListingTools:
         assert endpoints[0]["auth"]["authenticated"] is None  # honest unknown (P10)
 
     async def test_not_found_errors_guide_the_agent(self, database: WadiDatabase) -> None:
-        service = WadiMcpService(database)
+        service = _service(database)
         with pytest.raises(NotFoundError, match="list_systems"):
             await service.list_snapshots("sys_" + "0" * 16)
         with pytest.raises(NotFoundError, match="list_snapshots"):
@@ -70,7 +72,7 @@ class TestEndpointIcfgTool:
     async def test_method_rollup_default(
         self, database: WadiDatabase, seeded: dict[str, str]
     ) -> None:
-        service = WadiMcpService(database)
+        service = _service(database)
         rollup = await service.endpoint_icfg(seeded["snapshot_id"], seeded["endpoint_id"])
         assert rollup["detail"] == "methods"
         assert len(rollup["methods"]) >= 2
@@ -78,7 +80,7 @@ class TestEndpointIcfgTool:
     async def test_statement_drilldown(
         self, database: WadiDatabase, seeded: dict[str, str]
     ) -> None:
-        service = WadiMcpService(database)
+        service = _service(database)
         rollup = await service.endpoint_icfg(seeded["snapshot_id"], seeded["endpoint_id"])
         target = rollup["root_method_id"]
         detail = await service.endpoint_icfg(
@@ -90,21 +92,27 @@ class TestEndpointIcfgTool:
     async def test_statements_without_method_id_rejected(
         self, database: WadiDatabase, seeded: dict[str, str]
     ) -> None:
-        service = WadiMcpService(database)
+        service = _service(database)
         with pytest.raises(ValueError, match="method_id"):
             await service.endpoint_icfg(seeded["snapshot_id"], seeded["endpoint_id"], "statements")
 
     async def test_missing_icfg_not_found(
         self, database: WadiDatabase, seeded: dict[str, str]
     ) -> None:
-        service = WadiMcpService(database)
+        service = _service(database)
         with pytest.raises(NotFoundError, match="list_endpoints"):
             await service.endpoint_icfg(seeded["snapshot_id"], "ep_" + "0" * 16)
 
 
+def _service(database: "WadiDatabase") -> WadiMcpService:
+    """Service with a lazily-connected graph — these tests never touch Neo4j."""
+    store = GraphStore("neo4j://127.0.0.1:1", "neo4j", "unused")
+    return WadiMcpService(database, GraphRepository(store))
+
+
 class TestServerRegistration:
     async def test_all_phase1_tools_registered(self, database: WadiDatabase) -> None:
-        server = create_server(WadiMcpService(database))
+        server = create_server(_service(database))
         tools = await server.list_tools()
         assert {tool.name for tool in tools} == {
             "list_systems",
@@ -112,6 +120,8 @@ class TestServerRegistration:
             "list_services",
             "list_endpoints",
             "endpoint_icfg",
+            "coverage_report",
+            "remote_edges",
         }
         # Every tool ships an agent-facing description (the docstring).
         assert all(tool.description for tool in tools)

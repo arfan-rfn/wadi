@@ -304,6 +304,76 @@ def endpoints(snapshot_id: str, service_id: str, output_json: JsonFlag = False) 
     )
 
 
+@app.command()
+def coverage(snapshot_id: str, output_json: JsonFlag = False) -> None:
+    """Show what the stitched map knows it doesn't know (check this first)."""
+    with _api_client() as client:
+        try:
+            report = client.get_coverage(snapshot_id)
+        except ApiUnreachableError as exc:
+            raise _fail_unreachable(exc) from exc
+        except ApiError as exc:
+            raise _fail_api(exc) from exc
+    if output_json:
+        console.print_json(report.model_dump_json())
+        return
+    totals = report.totals
+    console.print(
+        f"[bold]Coverage for {snapshot_id}[/bold]\n"
+        f"  call sites: {totals.call_sites}   edges: {totals.edges}\n"
+        f"  analyzed: {totals.analyzed}   external: {totals.external}   "
+        f"placeholder: {totals.placeholder}   undetermined: {totals.undetermined}\n"
+        f"  by confidence: {totals.by_confidence}"
+    )
+    if report.placeholders:
+        console.print("\n[bold]Placeholder services[/bold] (grant access to analyze them):")
+        for placeholder in report.placeholders:
+            console.print(
+                f"  - {placeholder.name} ({placeholder.resolved_via}, "
+                f"{placeholder.call_count} call(s))"
+            )
+    if report.external_apis:
+        console.print("\n[bold]External APIs[/bold]:")
+        for external in report.external_apis:
+            console.print(f"  - {external.host} ({external.call_count} call(s))")
+    if report.unresolved:
+        console.print("\n[bold]Unresolved calls[/bold]:")
+        for entry in report.unresolved:
+            console.print(
+                f"  - {entry.site.file}:{entry.site.start_line} [{entry.reason_code}] "
+                f"{entry.reason}"
+            )
+    if report.phonebook_conflicts:
+        console.print("\n[bold yellow]Config conflicts[/bold yellow]:")
+        for conflict in report.phonebook_conflicts:
+            console.print(f"  - {conflict}")
+
+
+@app.command()
+def restitch(
+    snapshot_id: str,
+    wait: Annotated[bool, typer.Option("--wait", help="Wait for the restitch to finish")] = False,
+    output_json: JsonFlag = False,
+) -> None:
+    """Re-run stitching over a snapshot's stored artifacts (no re-extraction)."""
+    with _api_client() as client:
+        try:
+            snapshot = client.restitch(snapshot_id)
+        except ApiUnreachableError as exc:
+            raise _fail_unreachable(exc) from exc
+        except ApiError as exc:
+            raise _fail_api(exc) from exc
+        if wait:
+            snapshot = _wait_for_snapshot(client, snapshot_id)
+    if output_json:
+        console.print_json(snapshot.model_dump_json())
+    else:
+        console.print(f"snapshot {snapshot_id}: {snapshot.status.value}")
+    if snapshot.status is SnapshotStatus.FAILED:
+        error_console.print(f"[red]restitch failed: {snapshot.error}[/red]")
+        raise typer.Exit(EXIT_ANALYSIS_FAILED)
+
+
 # --- mcp -----------------------------------------------------------------------
 
 

@@ -6,7 +6,7 @@ import logging
 from wadi_config import get_settings
 from wadi_mcp.server import create_server
 from wadi_mcp.service import WadiMcpService
-from wadi_storage import WadiDatabase, create_client
+from wadi_storage import GraphRepository, GraphStore, WadiDatabase, create_client
 
 
 def main() -> None:
@@ -24,7 +24,12 @@ def main() -> None:
     settings = get_settings()
     client = create_client(settings.mongo_uri)
     database = WadiDatabase(client, settings.mongo_database)
-    service = WadiMcpService(database)
+    # Both transports need only connection strings (§8) — the driver connects
+    # lazily, so stdio startup stays instant even if Neo4j is down.
+    store = GraphStore(
+        settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password.get_secret_value()
+    )
+    service = WadiMcpService(database, GraphRepository(store, database=settings.neo4j_database))
     server = create_server(service)
 
     if args.http:

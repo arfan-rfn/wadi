@@ -10,8 +10,10 @@ from importlib.metadata import version
 import httpx
 
 from wadi_contracts import (
+    CoverageReport,
     Endpoint,
     ExtractionJob,
+    RemoteEdgesView,
     RepoSource,
     ServiceSummary,
     Snapshot,
@@ -113,6 +115,11 @@ class WadiApiClient:
         response = self._request("GET", f"/api/v1/snapshots/{snapshot_id}/jobs")
         return [ExtractionJob.model_validate(item) for item in response.json()]
 
+    def restitch(self, snapshot_id: str) -> Snapshot:
+        """Re-run stitching over stored artifacts (recovery — no re-extraction)."""
+        response = self._request("POST", f"/api/v1/snapshots/{snapshot_id}/restitch")
+        return Snapshot.model_validate(response.json()["snapshot"])
+
     # --- read API ----------------------------------------------------------------
 
     def list_services(self, snapshot_id: str) -> list[ServiceSummary]:
@@ -124,6 +131,16 @@ class WadiApiClient:
             "GET", f"/api/v1/snapshots/{snapshot_id}/services/{service_id}/endpoints"
         )
         return [Endpoint.model_validate(item) for item in response.json()]
+
+    def get_coverage(self, snapshot_id: str) -> CoverageReport:
+        response = self._request("GET", f"/api/v1/snapshots/{snapshot_id}/coverage")
+        return CoverageReport.model_validate(response.json())
+
+    def get_remote_edges(self, snapshot_id: str, service_id: str) -> RemoteEdgesView:
+        response = self._request(
+            "GET", f"/api/v1/snapshots/{snapshot_id}/services/{service_id}/remote-edges"
+        )
+        return RemoteEdgesView.model_validate(response.json())
 
     def healthz(self) -> dict[str, str]:
         response = self._request("GET", "/healthz")

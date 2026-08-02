@@ -17,9 +17,18 @@ from wadi_mcp.service import WadiMcpService
 
 SERVER_INSTRUCTIONS = (
     "Wadi serves the analyzed, ground-truth architecture of microservice systems: "
-    "services, REST endpoints (with structured auth), and per-endpoint control-flow "
-    "graphs down to database/HTTP/message-queue calls. Navigate top-down: "
-    "list_systems -> list_snapshots -> list_services -> list_endpoints -> endpoint_icfg."
+    "services, REST endpoints (with structured auth), per-endpoint control-flow "
+    "graphs down to database/HTTP/message-queue calls, and the stitched "
+    "cross-service graph. Navigate top-down: "
+    "list_systems -> list_snapshots -> list_services -> list_endpoints -> endpoint_icfg. "
+    "Before trusting cross-service answers, call coverage_report for the snapshot "
+    "first: it lists what the map knows it doesn't know — placeholder services, "
+    "external APIs, unresolved/low-confidence calls. Use remote_edges for a "
+    "service's callers/callees, and endpoint_icfg with cross_service=true to see "
+    "which downstream endpoints a flow reaches (recurse into them with further "
+    "endpoint_icfg calls). Every stitched edge carries confidence "
+    "(exact/high/heuristic/none) and provenance (how it was determined) — "
+    "undetermined targets are explicit facts, never silently dropped."
 )
 
 
@@ -47,19 +56,44 @@ def create_server(service: WadiMcpService) -> MCPServer:
         return await service.list_endpoints(snapshot_id, service_id)
 
     @mcp.tool()
+    async def coverage_report(snapshot_id: str) -> dict[str, Any]:
+        """What the stitched map knows it doesn't know — check this FIRST.
+
+        Lists placeholder services (config knows them, wadi wasn't given the
+        repo), external APIs, unresolved calls with machine-readable reasons,
+        low-confidence edges, and config conflicts.
+        """
+        return await service.coverage_report(snapshot_id)
+
+    @mcp.tool()
+    async def remote_edges(snapshot_id: str, service_id: str) -> dict[str, Any]:
+        """Who this service calls and who calls it, from the stitched graph.
+
+        Each edge carries the target kind (analyzed service / external API /
+        placeholder), confidence, provenance, and the resolution evidence.
+        """
+        return await service.remote_edges(snapshot_id, service_id)
+
+    @mcp.tool()
     async def endpoint_icfg(
         snapshot_id: str,
         endpoint_id: str,
         detail: Literal["methods", "statements"] = "methods",
         method_id: str | None = None,
+        cross_service: bool = False,
     ) -> dict[str, Any]:
         """Get an endpoint's control-flow graph.
 
         Default detail='methods' returns the method-level roll-up (which methods
         run, what they call, DB/HTTP/MQ sinks). Use detail='statements' with a
         method_id from the roll-up to drill into one method's statements,
-        branches, and loops with source anchors.
+        branches, and loops with source anchors. With cross_service=true the
+        roll-up gains 'remote_targets' (stitched targets per call site) and
+        'downstream' (analyzed endpoints this flow reaches — recurse into them
+        with further endpoint_icfg calls).
         """
-        return await service.endpoint_icfg(snapshot_id, endpoint_id, detail, method_id)
+        return await service.endpoint_icfg(
+            snapshot_id, endpoint_id, detail, method_id, cross_service
+        )
 
     return mcp

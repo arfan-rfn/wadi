@@ -20,10 +20,13 @@ from pydantic import BaseModel, Field
 
 from wadi_config import WadiSettings
 from wadi_contracts import (
+    CoverageReport,
     Endpoint,
     ExtractionJob,
     Icfg,
+    JobStatus,
     JobType,
+    RemoteEdgesView,
     RepoSource,
     ServiceSummary,
     Snapshot,
@@ -120,6 +123,7 @@ def create_app(
                 monitor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor_task
+            await state.graph_store.close()
             if owns_database:
                 await db.close()
 
@@ -241,6 +245,78 @@ def create_app(
     )
     async def list_jobs(snapshot_id: str, state: StateDep) -> list[ExtractionJob]:
         return await state.jobs.list_for_snapshot(snapshot_id)
+
+    # --- stitched graph: coverage / remote edges / restitch ---------------------------
+
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/coverage",
+        response_model=CoverageReport,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def get_coverage(snapshot_id: str, state: StateDep) -> CoverageReport:
+        """What the map knows it doesn't know (§5.4.4) — check this first."""
+        if await state.snapshots.get(snapshot_id) is None:
+            raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
+        report = await state.stitch.get_coverage_report(snapshot_id)
+        if report is None:
+            raise HTTPException(
+                status_code=404, detail=f"snapshot {snapshot_id} is not stitched yet"
+            )
+        return report
+
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/services/{{service_id}}/remote-edges",
+        response_model=RemoteEdgesView,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def get_remote_edges(
+        snapshot_id: str, service_id: str, state: StateDep
+    ) -> RemoteEdgesView:
+        """Who this service calls and who calls it (§8), from the stitched graph."""
+        if await state.artifacts.get_service_boundary(snapshot_id, service_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"service {service_id} not found in snapshot {snapshot_id}",
+            )
+        return await state.graph.remote_edges(snapshot_id, service_id)
+
+    @app.post(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/restitch",
+        response_model=AnalyzeResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def restitch(snapshot_id: str, state: StateDep) -> AnalyzeResponse:
+        """Re-run stitching over the stored artifacts (§5.4 recovery).
+
+        No re-fetch, no re-extraction: extraction artifacts are Tier-1 truth.
+        The fresh stitch job supersedes any earlier one (monitor uses only the
+        latest); a FAILED snapshot goes back to running.
+        """
+        snapshot = await state.snapshots.get(snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
+        jobs = await state.jobs.list_for_snapshot(snapshot_id)
+        active = [j for j in jobs if j.status in (JobStatus.PENDING, JobStatus.RUNNING)]
+        if active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"snapshot {snapshot_id} has active jobs; wait for them to finish",
+            )
+        extract_jobs = [j for j in jobs if j.type is JobType.EXTRACT]
+        if not extract_jobs or any(j.status is not JobStatus.SUCCEEDED for j in extract_jobs):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"snapshot {snapshot_id} has no successful extraction to restitch",
+            )
+        job = ExtractionJob(
+            id=f"job_{uuid.uuid4().hex}", type=JobType.STITCH, snapshot_id=snapshot_id
+        )
+        await state.jobs.enqueue(job)
+        await state.snapshots.set_status(snapshot_id, SnapshotStatus.RUNNING)
+        refreshed = await state.snapshots.get(snapshot_id)
+        assert refreshed is not None
+        return AnalyzeResponse(snapshot=refreshed, job_ids=[job.id])
 
     # --- read API: services / endpoints / ICFG ---------------------------------------
 

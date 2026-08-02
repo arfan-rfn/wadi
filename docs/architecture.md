@@ -770,6 +770,7 @@ wadi up / down / status / upgrade                 # lifecycle (local context onl
 wadi analyze <path|--repo URL>... [--wait] [--output json]
 wadi systems / snapshots / services / endpoints   # reads, table or JSON
 wadi coverage <snapshot-id>                       # Phase 2 — the coverage report (§5.4), first thing to check
+wadi restitch <snapshot-id> [--wait]              # Phase 2 — re-run stitching over stored artifacts (§5.4 recovery; no re-extraction)
 wadi export <snapshot-id> --dir ./out             # Phase 2
 wadi mcp / wadi mcp install
 wadi context list / add / use                     # Phase 2 — lands with remote mode (§11)
