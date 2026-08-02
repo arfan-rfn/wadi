@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Protocol
 
@@ -23,6 +24,7 @@ from wadi_contracts import (
     GatewayRoute,
     NetworkIdentity,
     ServiceBoundary,
+    ServiceKind,
     normalize_repo_source,
     service_id,
 )
@@ -30,7 +32,7 @@ from wadi_joern_client import JoernClient, ServiceExport
 from wadi_repo import RepoCache
 from wadi_storage import ArtifactRepository, SnapshotRepository, SystemRepository
 from wadi_worker.assembler import Assembler
-from wadi_worker.boundary import discover_services
+from wadi_worker.boundary import DiscoveredService, discover_services
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,7 @@ class ExtractionPipeline:
         workspace = self._settings.workspace_dir / snapshot.id
         endpoint_count = 0
         service_count = 0
+        extracted_count = 0
 
         for repo in system.repos:
             normalized = normalize_repo_source(repo.source)
@@ -110,7 +113,6 @@ class ExtractionPipeline:
             if not discovered:
                 logger.warning("no analyzable services found in %s", normalized)
             for service in discovered:
-                service_count += 1
                 svc_id = service_id(repo.source, service.build_root)
                 boundary = ServiceBoundary(
                     snapshot_id=snapshot.id,
@@ -120,6 +122,8 @@ class ExtractionPipeline:
                     build_root=service.build_root,
                     languages=service.languages,
                     build_system=service.build_system,
+                    kind=ServiceKind.LIBRARY if service.kind == "library" else ServiceKind.SERVICE,
+                    library_roots=service.library_roots,
                     network=NetworkIdentity(
                         hostnames=service.hostnames,
                         ports=service.ports,
@@ -139,18 +143,33 @@ class ExtractionPipeline:
                         config_notes=service.config.notes,
                     ),
                 )
-                await self._artifacts.write_service_boundaries([boundary])
 
-                build_root_path = (
-                    checkout if service.build_root == "." else checkout / service.build_root
-                )
-                export_dir = workspace / "exports" / svc_id
-                export = await asyncio.to_thread(
-                    self._extractor.extract,
-                    build_root_path,
-                    export_dir,
-                    f"{snapshot.id}-{svc_id}",
-                )
+                # Libraries are classification facts, never analysis units (§5.2.6).
+                if service.kind == "library":
+                    await self._artifacts.write_service_boundaries([boundary])
+                    continue
+
+                service_count += 1
+                # Per-service isolation (§5.2.6): one bad module is a queryable
+                # fact on its boundary, not a snapshot outage.
+                try:
+                    parse_root = self._parse_root(workspace, checkout, service, svc_id)
+                    export_dir = workspace / "exports" / svc_id
+                    export = await asyncio.to_thread(
+                        self._extractor.extract,
+                        parse_root,
+                        export_dir,
+                        f"{snapshot.id}-{svc_id}",
+                    )
+                except Exception as exc:
+                    logger.exception("extraction failed for %s (%s)", service.name, svc_id)
+                    failed = boundary.model_copy(
+                        update={"extraction_error": f"{type(exc).__name__}: {exc}"}
+                    )
+                    await self._artifacts.write_service_boundaries([failed])
+                    continue
+
+                await self._artifacts.write_service_boundaries([boundary])
                 assembled = Assembler(
                     snapshot_id=snapshot.id,
                     service_id=svc_id,
@@ -163,13 +182,47 @@ class ExtractionPipeline:
                 await self._artifacts.write_mq_interactions(assembled.mq_interactions)
                 await self._artifacts.write_data_models(assembled.data_models)
                 endpoint_count += len(assembled.endpoints)
+                extracted_count += 1
 
+        if service_count > 0 and extracted_count == 0:
+            raise RuntimeError(
+                f"snapshot {snapshot.id}: extraction failed for all {service_count} services"
+            )
         logger.info(
-            "snapshot %s: extracted %d endpoints across %d services",
+            "snapshot %s: extracted %d endpoints across %d/%d services",
             snapshot.id,
             endpoint_count,
+            extracted_count,
             service_count,
         )
+
+    def _parse_root(
+        self, workspace: Path, checkout: Path, service: DiscoveredService, svc_id: str
+    ) -> Path:
+        """The frontend's inputPath: the build root itself, or — when the
+        service has in-repo library dependencies — a staged union (§5.2.6):
+        the service tree at the stage root (service-relative anchors and ids
+        stay byte-identical) plus each library's `src/main/java` under
+        `wadi-libs/<dirname>/`.
+        """
+        build_root_path = checkout if service.build_root == "." else checkout / service.build_root
+        if not service.library_roots:
+            return build_root_path
+        stage = workspace / "stage" / svc_id
+        if stage.exists():
+            shutil.rmtree(stage)
+        shutil.copytree(
+            build_root_path,
+            stage,
+            ignore=shutil.ignore_patterns("target", "build", "node_modules", ".git"),
+        )
+        for lib_root in service.library_roots:
+            lib_main = checkout / lib_root / "src" / "main" / "java"
+            if not lib_main.is_dir():
+                continue
+            destination = stage / "wadi-libs" / Path(lib_root).name / "src" / "main" / "java"
+            shutil.copytree(lib_main, destination)
+        return stage
 
 
 def _path_slug(normalized_source: str) -> str:

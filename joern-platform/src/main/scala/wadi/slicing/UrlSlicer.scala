@@ -489,10 +489,15 @@ object UrlSlicer {
         // Owner-scoped (§5.2.5): match assignments only inside the owning type
         // (or its ancestors — inherited fields are assigned in the parent's
         // constructor). A CPG-global name match conflated same-named fields
-        // across classes into false multi-assignment fan-outs.
+        // across classes into false multi-assignment fan-outs. Ancestors of
+        // out-of-CPG parents render as short names (§5.2.6), so both the full
+        // and short renderings are accepted on each side.
         val allowedOwners: Set[String] = owner match {
-          case Some(o) => o.inheritsFromTypeFullName.toSet + o.fullName
-          case None    => Set.empty
+          case Some(o) =>
+            (o.inheritsFromTypeFullName.toSet + o.fullName).flatMap(name =>
+              Set(name, shortTypeName(name))
+            )
+          case None => Set.empty
         }
         val assignments = cpg.assignment
           .where(_.target.isCall.name(Operators.fieldAccess))
@@ -503,7 +508,10 @@ object UrlSlicer {
           )
           .filter(a =>
             allowedOwners.isEmpty ||
-              a.method.typeDecl.headOption.exists(td => allowedOwners.contains(td.fullName))
+              a.method.typeDecl.headOption.exists(td =>
+                allowedOwners.contains(td.fullName) ||
+                  allowedOwners.contains(shortTypeName(td.fullName))
+              )
           )
           .l
           .sortBy(a => (lineOf(a), a.id))
@@ -635,6 +643,12 @@ object UrlSlicer {
 
   private def stripQuotes(literal: String): String =
     literal.stripPrefix("\"").stripSuffix("\"")
+
+  private def shortTypeName(typeName: String): String = {
+    val stripped = typeName.takeWhile(_ != '<')
+    val lastDot  = stripped.lastIndexOf('.')
+    if (lastDot < 0) stripped else stripped.substring(lastDot + 1)
+  }
 
   private def lineOf(node: AstNode): Int =
     node.lineNumber.map(_.toString.toInt).getOrElse(0)

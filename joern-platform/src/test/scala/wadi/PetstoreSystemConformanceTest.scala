@@ -39,12 +39,20 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   // --- endpoint sets per module ----------------------------------------------------
 
-  test("petstore serves exactly its four controller endpoints") {
+  test("petstore serves exactly its eight controller endpoints") {
     endpoints(petstore) shouldBe Set(
       "GET /pets/{id}",
       "GET /pets",
       "PUT /pets/{id}/reserve/{count}",
-      "POST /pets/{id}/alert"
+      "POST /pets/{id}/alert",
+      "GET /pets/summary/{id}",
+      // §5.4.2 endpoint idioms: constant class prefix + one endpoint per
+      // multi-path array entry (the yas ApiConstant / storefront+backoffice
+      // idioms — CIMET emits raw constant text here; wadi resolves it).
+      "GET /admin/pets/summary",
+      "GET /admin/pets/report",
+      // Nested constant holder (yas Constants.ApiConstant shape).
+      "GET /vet/pets/checkups"
     )
   }
 
@@ -211,5 +219,37 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     rows.head("method_full_name").str should include("OrphanedAuditNotifier")
     rows.head("file").str should include("OrphanedAuditNotifier.java")
     inventory("unreachable_sinks").arr shouldBe empty
+  }
+
+  // --- analysis-unit resilience (§5.2.6): this suite parses the petstore module
+  // WITHOUT the staged source union, so com.acme.common.* is deliberately
+  // unresolvable here — exactly the ts-common condition. The e2e suite proves
+  // the union path; these prove the fallbacks.
+
+  test("shared-module DTO in the DI signature no longer drops the closure (§5.2.6)") {
+    // stockSummary(StockQuery) — the exact shape that lost 29 TrainTicket calls.
+    val summary = httpSinks(petstore).filter(s =>
+      s("value").strOpt.exists(_.startsWith("http://inventory:8081/stock/"))
+    )
+    summary should have size 1
+    summary.head("value").str shouldBe "http://inventory:8081/stock/{?}"
+    summary.head("http_verb").str shouldBe "GET"
+  }
+
+  test("interface -> abstract base -> impl chain reaches the leaf sink (§5.2.6)") {
+    val reports = httpSinks(petstore).filter(s =>
+      s("value").strOpt.exists(_.contains("/reports/"))
+    )
+    reports should have size 1
+    reports.head("value").str shouldBe "https://audit.example.com/reports/{?}"
+    reports.head("http_verb").str shouldBe "POST"
+  }
+
+  test("test sources never enter the CPG (§5.2.6 discovery hygiene)") {
+    val everywhere =
+      petstore("sinks").arr.toSeq ++ petstore("unreachable_sinks").arr.toSeq
+    everywhere.flatMap(_("value").strOpt) should not contain
+      "http://test-only-host:1/smoke"
+    petstore("methods").arr.map(_("full_name").str).exists(_.contains("SmokeTest")) shouldBe false
   }
 }

@@ -26,6 +26,13 @@ import wadi.passes.SpringDIPass
   */
 object WadiPipeline {
 
+  /** §5.2.6 discovery hygiene — mirrors `wadi_joern_client.client.EXCLUDE_REGEX`
+    * (the production path passes it over the CPGQL channel; this constant keeps
+    * the conformance test path identical). Character classes avoid backslashes
+    * so the same string survives both channels.
+    */
+  val ExcludeRegex = ".*/src/test/.*|.*/old-docs/.*|.*/[.][^/]+/.*"
+
   def run(cpg: Cpg, exportDir: String): String = {
     new SpringDIPass(cpg).createAndApply()
     SpringPacks.applyAll(cpg)
@@ -38,6 +45,7 @@ object WadiPipeline {
       .withDelombokMode("types-only")
       .withInputPath(sourceDir)
       .withOutputPath(cpgFile.toString)
+      .withIgnoredFilesRegex(ExcludeRegex)
     Using.resource(new JavaSrc2Cpg().createCpg(config).get) { cpg =>
       X2Cpg.applyDefaultOverlays(cpg)
       val summary = run(cpg, exportDir)

@@ -93,3 +93,20 @@ class ServiceBoundary(ArtifactEnvelope):
     build_system: str = Field(min_length=1, description="e.g. 'maven', 'gradle'")
     network: NetworkIdentity = Field(default_factory=NetworkIdentity)
     kind: ServiceKind = ServiceKind.SERVICE
+    library_roots: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Build roots of in-repo library modules whose sources were staged "
+            "into this service's parse (§5.2.6 source union); empty for "
+            "kind=library and for services with no in-repo dependencies"
+        ),
+    )
+    extraction_error: str | None = Field(
+        default=None,
+        description=(
+            "Set when this service's CPG extraction failed (§5.2.6 per-service "
+            "isolation): the error, recorded as a queryable fact (P10). The "
+            "service then has no endpoints/calls — absence with a stated cause, "
+            "never silence"
+        ),
+    )

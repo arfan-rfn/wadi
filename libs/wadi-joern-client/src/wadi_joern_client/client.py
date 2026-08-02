@@ -27,6 +27,13 @@ _ANSI_ESCAPES = re.compile(r"\x1b\[[0-9;]*m")
 
 PIPELINE_SUMMARY_MARKER = "wadi export:"
 
+EXCLUDE_REGEX = ".*/src/test/.*|.*/old-docs/.*|.*/[.][^/]+/.*"
+"""§5.2.6 discovery hygiene: test sources are not production topology;
+`old-docs/` is the archived-tree idiom; `/[.]<dir>/` drops hidden shadow
+trees (`.evosuite-work` duplicates every class into the CPG). Character
+classes avoid backslashes so the pattern survives the CPGQL string channel.
+Mirrored in `wadi.WadiPipeline.ExcludeRegex` (Scala test path)."""
+
 
 class JoernError(RuntimeError):
     """A Joern query failed; carries the server's stderr."""
@@ -105,12 +112,19 @@ class JoernClient:
         Delombok runs in types-only mode: type information from delombok, but
         analysis on the ORIGINAL source, so anchors align with committed text
         (§5.3 source-on-demand guarantee; validated by lombok-mini).
+
+        The exclude regex (§5.2.6 discovery hygiene) keeps test sources,
+        archived trees, and hidden shadow directories (`.evosuite-work`-style
+        duplicated source shadows) out of every CPG. Mirrored by the constant
+        in `wadi.WadiPipeline` for the Scala-side conformance path; the e2e
+        suite exercises the real string below.
         """
         source = _scala_string(source_path)
         project = _scala_string(project_name)
         stdout = self.execute(
             f"importCode.java(inputPath={source}, projectName={project}, "
-            f'args=List("--delombok-mode", "types-only"))'
+            f'args=List("--delombok-mode", "types-only", '
+            f'"--exclude-regex", {_scala_string(EXCLUDE_REGEX)}))'
         )
         if "Cpg[" not in stdout:
             # REPL "success" only means evaluated — failures land in stdout.

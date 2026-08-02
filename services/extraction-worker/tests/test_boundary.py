@@ -14,13 +14,33 @@ POM = """<?xml version="1.0"?>
 """
 
 
-def write_pom(directory: Path, artifact: str, *, modules: list[str] | None = None) -> None:
+def write_pom(
+    directory: Path,
+    artifact: str,
+    *,
+    modules: list[str] | None = None,
+    dependencies: list[str] | None = None,
+    java_source: str | None = "@RestController class App {}",
+) -> None:
+    """Write a pom; non-aggregators get a Java source (no-Java modules are
+    skipped by discovery, §5.2.6). Default source carries a service marker.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     extra = ""
     if modules:
         module_tags = "".join(f"<module>{m}</module>" for m in modules)
         extra = f"<modules>{module_tags}</modules>"
+    if dependencies:
+        dep_tags = "".join(
+            f"<dependency><groupId>g</groupId><artifactId>{d}</artifactId></dependency>"
+            for d in dependencies
+        )
+        extra += f"<dependencies>{dep_tags}</dependencies>"
     (directory / "pom.xml").write_text(POM.format(artifact=artifact, extra=extra))
+    if not modules and java_source is not None:
+        source_dir = directory / "src" / "main" / "java"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "App.java").write_text(java_source)
 
 
 class TestMavenDiscovery:
@@ -66,6 +86,9 @@ class TestMavenDiscovery:
             '<?xml version="1.0"?><project xmlns="http://maven.apache.org/POM/4.0.0">'
             "<modelVersion>4.0.0</modelVersion></project>"
         )
+        source_dir = directory / "src" / "main" / "java"
+        source_dir.mkdir(parents=True)
+        (source_dir / "App.java").write_text("@RestController class App {}")
         services = discover_services(tmp_path)
         assert services[0].name == "mystery"
 
@@ -164,3 +187,35 @@ class TestNameCollisions:
         write_pom(tmp_path / "a", "svc-a")
         write_pom(tmp_path / "b", "svc-b")
         assert {s.name for s in discover_services(tmp_path)} == {"svc-a", "svc-b"}
+
+
+class TestModuleClassification:
+    """§5.2.6: service vs library vs skipped, and transitive library roots."""
+
+    def test_shared_library_is_classified_and_staged_transitively(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "parent", modules=["svc", "libA", "libB"])
+        write_pom(tmp_path / "svc", "svc", dependencies=["libA"])
+        # libA -> libB: the lib->lib chain (yas payment-paypal shape).
+        write_pom(tmp_path / "libA", "libA", dependencies=["libB"], java_source="class A {}")
+        write_pom(tmp_path / "libB", "libB", java_source="class B {}")
+        by_root = {s.build_root: s for s in discover_services(tmp_path)}
+        assert by_root["svc"].kind == "service"
+        assert by_root["libA"].kind == "library"
+        assert by_root["libB"].kind == "library"
+        assert by_root["svc"].library_roots == ["libA", "libB"]
+        assert by_root["libA"].library_roots == []
+
+    def test_module_with_service_markers_is_never_a_library(self, tmp_path: Path) -> None:
+        # payment -> payment-paypal where the dep HAS controllers: not staged.
+        write_pom(tmp_path, "parent", modules=["a", "b"])
+        write_pom(tmp_path / "a", "a", dependencies=["b"])
+        write_pom(tmp_path / "b", "b")  # default source carries @RestController
+        by_root = {s.build_root: s for s in discover_services(tmp_path)}
+        assert by_root["b"].kind == "service"
+        assert by_root["a"].library_roots == []
+
+    def test_no_java_module_is_skipped(self, tmp_path: Path) -> None:
+        write_pom(tmp_path, "parent", modules=["svc", "frontend"])
+        write_pom(tmp_path / "svc", "svc")
+        write_pom(tmp_path / "frontend", "frontend", java_source=None)
+        assert [s.build_root for s in discover_services(tmp_path)] == ["svc"]

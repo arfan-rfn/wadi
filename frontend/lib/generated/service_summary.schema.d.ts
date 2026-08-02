@@ -16,15 +16,28 @@ export type BuildSystem = string
 export type CreatedAt = string
 export type EndpointCount = number
 /**
- * v1: service. Reserved for Phase 9 (§7): function, edge-worker, firmware.
+ * Set when this service's CPG extraction failed (§5.2.6 per-service isolation): the error, recorded as a queryable fact (P10). The service then has no endpoints/calls — absence with a stated cause, never silence
  */
-export type ServiceKind = "service" | "function" | "edge-worker" | "firmware"
+export type ExtractionError = string | null
+/**
+ * v1: service | library. Reserved for Phase 9 (§7): function, edge-worker, firmware.
+ *
+ * ``library`` (§5.2.6): an in-repo module other services depend on — never
+ * analyzed as a service (no endpoints, no own CPG); its sources join each
+ * dependent service's staged parse. Recorded so classification is queryable.
+ */
+export type ServiceKind =
+  "service" | "library" | "function" | "edge-worker" | "firmware"
 /**
  * e.g. ['java']
  *
  * @minItems 1
  */
 export type Languages = [string, ...string[]]
+/**
+ * Build roots of in-repo library modules whose sources were staged into this service's parse (§5.2.6 source union); empty for kind=library and for services with no in-repo dependencies
+ */
+export type LibraryRoots = string[]
 /**
  * Display name (e.g. compose/module name)
  */
@@ -100,8 +113,10 @@ export interface ServiceSummary {
   build_system: BuildSystem
   created_at?: CreatedAt
   endpoint_count?: EndpointCount
+  extraction_error?: ExtractionError
   kind?: ServiceKind
   languages: Languages
+  library_roots?: LibraryRoots
   name: Name
   network?: NetworkIdentity
   repo: Repo

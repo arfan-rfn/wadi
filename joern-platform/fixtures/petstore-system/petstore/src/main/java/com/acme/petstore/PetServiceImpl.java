@@ -1,5 +1,6 @@
 package com.acme.petstore;
 
+import com.acme.common.StockQuery;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ public class PetServiceImpl implements PetService {
     private final ServiceUrlResolver serviceUrlResolver;
     private final BillingNotifier billingNotifier;
     private final LegacyBillingBridge legacyBillingBridge;
+    private final StatsService statsService;
     private final boolean preferAudit;
 
     public PetServiceImpl(
@@ -32,6 +34,7 @@ public class PetServiceImpl implements PetService {
             ServiceUrlResolver serviceUrlResolver,
             BillingNotifier billingNotifier,
             LegacyBillingBridge legacyBillingBridge,
+            StatsService statsService,
             boolean preferAudit) {
         this.restTemplate = restTemplate;
         this.webClient = webClient;
@@ -40,6 +43,7 @@ public class PetServiceImpl implements PetService {
         this.serviceUrlResolver = serviceUrlResolver;
         this.billingNotifier = billingNotifier;
         this.legacyBillingBridge = legacyBillingBridge;
+        this.statsService = statsService;
         this.preferAudit = preferAudit;
     }
 
@@ -72,6 +76,8 @@ public class PetServiceImpl implements PetService {
         // Owner-scoped member + suspected-sink fixture paths (§5.2.5).
         billingNotifier.report(owner);
         legacyBillingBridge.charge(owner);
+        // Interface -> abstract base -> impl chain (§5.2.6).
+        statsService.weekly(owner);
         return "pets-of-" + owner;
     }
 
@@ -91,5 +97,24 @@ public class PetServiceImpl implements PetService {
         // the chain root carries the verb.
         return webClient.post().uri("http://inventory:8081/admin/restock")
                 .retrieve().bodyToMono(String.class).block();
+    }
+
+    @Override
+    public String stockSummary(StockQuery query) {
+        // Shared-module DTO in the DI signature (§5.2.6, the ts-common shape):
+        // without the staged source union this parameter type is unresolvable
+        // and exact-signature DI matching used to drop this whole method from
+        // the closure — the sink must survive via the name+arity fallback.
+        return summarize(query);
+    }
+
+    private String summarize(StockQuery query) {
+        // Intra-class helper with an unresolved-parameter signature (§5.2.6):
+        // the frontend links no call edge for stockSummary -> summarize when
+        // StockQuery is off-CPG (the TrainTicket BasicServiceImpl helpers) —
+        // self-type name+arity linking must keep this sink reachable.
+        Integer stock = restTemplate.getForObject(
+                "http://inventory:8081/stock/" + query.getId(), Integer.class);
+        return "summary-" + stock;
     }
 }

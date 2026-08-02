@@ -113,13 +113,22 @@ class TestTwoServiceSystem:
         await monitor.tick()
         assert (await http.get(f"/api/v1/snapshots/{snapshot_id}")).json()["status"] == "succeeded"
 
-        # 2. Both services discovered with their compose/application identities.
-        services = (await http.get(f"/api/v1/snapshots/{snapshot_id}/services")).json()
-        by_name = {s["name"]: s for s in services}
-        assert set(by_name) == {"petstore", "inventory"}
+        # 2. Both services discovered with their compose/application identities,
+        # and the shared module classified as a LIBRARY boundary (§5.2.6) —
+        # queryable, never analyzed as a service.
+        all_boundaries = (await http.get(f"/api/v1/snapshots/{snapshot_id}/services")).json()
+        assert {s["name"]: s["kind"] for s in all_boundaries} == {
+            "petstore": "service",
+            "inventory": "service",
+            "petstore-common": "library",
+        }
+        by_name = {s["name"]: s for s in all_boundaries if s["kind"] == "service"}
         assert by_name["inventory"]["network"]["hostnames"] == ["inventory"]
         assert by_name["inventory"]["network"]["application_name"] == "inventory"
         assert by_name["petstore"]["network"]["env"]["inventory.url"] == "http://inventory:8081"
+        # The staged source union is recorded on the dependent service.
+        assert by_name["petstore"]["library_roots"] == ["common"]
+        assert by_name["petstore"]["extraction_error"] is None
 
         # 3. Endpoint inventories diff against the fixture's expected JSON.
         for name, service in by_name.items():
@@ -148,15 +157,18 @@ class TestTwoServiceSystem:
         # 4. Coverage FIRST (P10): the report states exactly what is unknown.
         coverage = (await http.get(f"/api/v1/snapshots/{snapshot_id}/coverage")).json()
         totals = coverage["totals"]
-        # ${inventory.url} + Feign + service-registry + long-concat exchange + WebClient
-        assert totals["analyzed"] == 5
-        assert totals["external"] == 1  # audit.example.com (branch candidate)
+        # ${inventory.url} + Feign + service-registry + long-concat exchange +
+        # WebClient + shared-DTO stockSummary (§5.2.6 union)
+        assert totals["analyzed"] == 6
+        # audit.example.com: branch candidate + the hierarchy-chain report sink
+        assert totals["external"] == 2
         assert totals["undetermined"] == 2  # events-primary no-endpoint-match + DB-row URL
         assert totals["placeholder"] == 1  # billing (bare hostname, owner-scoped field URL)
         # T1 honesty inventory (§5.2.5): excluded from the map, counted here.
         assert totals["unreachable_call_sites"] == 1  # OrphanedAuditNotifier
         assert totals["suspected_call_sites"] == 1  # LegacyBillingBridge (unresolved receiver)
         assert [e["host"] for e in coverage["external_apis"]] == ["audit.example.com"]
+        assert coverage["external_apis"][0]["call_count"] == 2
         assert [(p["name"], p["resolved_via"]) for p in coverage["placeholders"]] == [
             ("billing", "bare-hostname")
         ]
@@ -170,7 +182,14 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         analyzed_edges = [e for e in outbound if e["target_kind"] == "analyzed"]
-        assert len(analyzed_edges) == 5
+        assert len(analyzed_edges) == 6
+        # §5.2.6: the shared-module DTO resolved through the staged union — the
+        # DI signature matched exactly and the call stitched to the inventory.
+        summary_edge = next(
+            e for e in analyzed_edges if e["url"] == "http://inventory:8081/stock/{?}"
+        )
+        assert summary_edge["target_simplified_uri"] == "/stock/{?}"
+        assert summary_edge["http_verb"] == "GET"
         by_url = {e["url"]: e for e in analyzed_edges}
         rest_edge = by_url["${inventory.url}/stock/{?}"]
         assert rest_edge["target_simplified_uri"] == "/stock/{?}"
@@ -197,7 +216,7 @@ class TestTwoServiceSystem:
         inbound = (
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{inventory_id}/remote-edges")
         ).json()["inbound"]
-        assert len(inbound) == 5  # inventory is called five ways, by one service
+        assert len(inbound) == 6  # inventory is called six ways, by one service
 
         # 6. Structured auth arrived on the wire (goal 9).
         inventory_endpoints = (

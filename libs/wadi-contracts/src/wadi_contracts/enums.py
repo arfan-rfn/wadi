@@ -45,9 +45,15 @@ class TargetKind(StrEnum):
 
 
 class ServiceKind(StrEnum):
-    """v1: service. Reserved for Phase 9 (§7): function, edge-worker, firmware."""
+    """v1: service | library. Reserved for Phase 9 (§7): function, edge-worker, firmware.
+
+    ``library`` (§5.2.6): an in-repo module other services depend on — never
+    analyzed as a service (no endpoints, no own CPG); its sources join each
+    dependent service's staged parse. Recorded so classification is queryable.
+    """
 
     SERVICE = "service"
+    LIBRARY = "library"
     FUNCTION = "function"
     EDGE_WORKER = "edge-worker"
     FIRMWARE = "firmware"

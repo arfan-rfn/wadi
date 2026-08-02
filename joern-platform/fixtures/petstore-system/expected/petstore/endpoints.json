@@ -18,5 +18,25 @@
     "http_method": "POST",
     "full_uri": "/pets/{id}/alert",
     "simplified_uri": "/pets/{?}/alert"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/pets/summary/{id}",
+    "simplified_uri": "/pets/summary/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/admin/pets/summary",
+    "simplified_uri": "/admin/pets/summary"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/admin/pets/report",
+    "simplified_uri": "/admin/pets/report"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/vet/pets/checkups",
+    "simplified_uri": "/vet/pets/checkups"
   }
 ]

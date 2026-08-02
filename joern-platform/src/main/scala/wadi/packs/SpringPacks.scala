@@ -41,6 +41,64 @@ object SpringPacks {
     quoted.findFirstMatchIn(code).map(_.group(1))
   }
 
+  /** ALL paths a mapping annotation declares (§5.4.2 endpoint idioms):
+    *   - `@GetMapping({"/storefront/x", "/backoffice/x"})` — one endpoint per
+    *     array entry (the yas multi-path idiom; first-string-only lost the rest)
+    *   - `@RequestMapping(Constants.ApiConstant.COUNTRIES_URL)` — a static
+    *     final constant reference, resolved from the in-CPG initializer (the
+    *     yas prefix idiom; unresolvable constants fall back to no prefix —
+    *     honest truncation, and CIMET's raw-text alternative emits garbage
+    *     paths, which is worse)
+    */
+  private[wadi] def pathsFromAnnotationCode(cpg: Cpg, code: String): List[String] = {
+    // Greedy across nested `{id}` template braces: the array block is the
+    // OUTERMOST brace pair (`{"/a/{id}", "/b/{id}"}`).
+    val arrayInner = "\\{(.*)\\}".r.findFirstMatchIn(code).map(_.group(1))
+    val arrayPaths = arrayInner.toList.flatMap { inner =>
+      "\"([^\"]*)\"".r.findAllMatchIn(inner).map(_.group(1)).toList
+    }
+    if (arrayPaths.nonEmpty) arrayPaths
+    else
+      pathFromAnnotationCode(code)
+        .map(List(_))
+        .getOrElse(constantPathFromCode(cpg, code).toList)
+  }
+
+  /** Resolve `Klass.FIELD` (possibly nested, `Constants.ApiConstant.X`) to its
+    * static-final string literal via the constructor/clinit-lowered
+    * assignment. Only a literal counts (P10 — never a guess).
+    */
+  private def constantPathFromCode(cpg: Cpg, code: String): Option[String] = {
+    val inner = code.dropWhile(_ != '(').stripPrefix("(").takeWhile(_ != ')')
+    val reference = inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
+    val segments  = reference.split('.').toList.filter(_.nonEmpty)
+    if (segments.sizeIs < 2 || !segments.forall(_.matches("[A-Za-z_$][\\w$]*"))) return None
+    val fieldName = segments.last
+    val className = segments(segments.length - 2)
+    cpg.assignment
+      .filter(a =>
+        a.target.ast.collectFirst {
+          case fi: io.shiftleft.codepropertygraph.generated.nodes.FieldIdentifier
+              if fi.canonicalName == fieldName =>
+            fi
+        }.nonEmpty
+      )
+      // Nested constant holders (yas `Constants.ApiConstant`): the lowered
+      // assignment may sit in the inner OR outer class's initializer, and the
+      // inner name only appears as a `$` segment of the fullName.
+      .filter(a =>
+        a.method.typeDecl.exists(td =>
+          td.name == className || td.fullName.split("[.$]").contains(className)
+        ) || a.target.code.contains(s"$className.")
+      )
+      .flatMap(_.source match {
+        case literal: io.shiftleft.codepropertygraph.generated.nodes.Literal =>
+          Some(literal.code.stripPrefix("\"").stripSuffix("\""))
+        case _ => None
+      })
+      .headOption
+  }
+
   private[wadi] def joinPaths(prefix: String, path: String): String = {
     val left = prefix.stripSuffix("/")
     val joined =
@@ -77,7 +135,7 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
           .filter(a => a.name == "RequestMapping")
           .filter(_.astParent == controller)
           .headOption
-          .flatMap(a => pathFromAnnotationCode(a.code))
+          .flatMap(a => pathsFromAnnotationCode(cpg, a.code).headOption)
           .getOrElse("")
 
         controller.method.l.foreach { method =>
@@ -85,14 +143,25 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
             MappingAnnotations.get(annotation.name).foreach { httpMethod =>
               // A path-less mapping serves the class prefix itself — an empty
               // path must not append a trailing slash (identity form, §7).
-              val path = pathFromAnnotationCode(annotation.code).getOrElse("")
-              val uri  = joinPaths(classPrefix, path)
-              Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
+              // Multi-path arrays emit one endpoint per declared path (§5.4.2).
+              val paths = pathsFromAnnotationCode(cpg, annotation.code) match {
+                case Nil      => List("")
+                case declared => declared
+              }
+              paths.foreach { path =>
+                val uri = joinPaths(classPrefix, path)
+                Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
+              }
             }
             if (annotation.name == "RequestMapping" && MappingAnnotations.values.exists(v => annotation.code.contains(v))) {
               MappingAnnotations.values.filter(v => annotation.code.contains(v)).foreach { httpMethod =>
-                val path = pathFromAnnotationCode(annotation.code).getOrElse("/")
-                Iterator(method).newTagNodePair("endpoint", s"$httpMethod ${joinPaths(classPrefix, path)}").store()(using builder)
+                val paths = pathsFromAnnotationCode(cpg, annotation.code) match {
+                  case Nil      => List("/")
+                  case declared => declared
+                }
+                paths.foreach { path =>
+                  Iterator(method).newTagNodePair("endpoint", s"$httpMethod ${joinPaths(classPrefix, path)}").store()(using builder)
+                }
               }
             }
           }
@@ -153,10 +222,60 @@ class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
         webClientChainRoot(call).flatMap(verbOfChainRoot).foreach { verb =>
           Iterator(call).newTagNodePair("wadi-verb", verb).store()(using builder)
         }
+      } else if (receiverUnresolvable(call) && declaredReceiverMentions(call, "RestTemplate")) {
+        // The receiver's DECLARED member type says RestTemplate even though
+        // the frontend couldn't type the access — the inherited-field idiom
+        // (client held by an abstract base, §5.2.6): a confirmed sink, not a
+        // suspected one.
+        Iterator(call).newTagNodePair("sink", "http-client").store()(using builder)
       } else if (SuspectedHttpNames.contains(call.name) && receiverUnresolvable(call)) {
         Iterator(call).newTagNodePair("sink", "http-client-suspected").store()(using builder)
       }
     }
+
+  /** The declared type of the receiver's backing member, resolved through the
+    * in-CPG class hierarchy — inherited `protected final RestTemplate` fields
+    * defeat the frontend's receiver typing but their declarations don't lie.
+    */
+  private def declaredReceiverMentions(call: Call, marker: String): Boolean = {
+    val receiver = call.argument.argumentIndexLte(0).headOption
+    val receiverTyped = receiver.exists {
+      case identifier: io.shiftleft.codepropertygraph.generated.nodes.Identifier =>
+        identifier.typeFullName.contains(marker)
+      case _ => false
+    }
+    if (receiverTyped) return true
+    val fieldName = receiver.flatMap {
+      case identifier: io.shiftleft.codepropertygraph.generated.nodes.Identifier =>
+        Some(identifier.name)
+      case access: Call if access.name == "<operator>.fieldAccess" =>
+        access.ast.collectFirst {
+          case fi: io.shiftleft.codepropertygraph.generated.nodes.FieldIdentifier =>
+            fi.canonicalName
+        }
+      case _ => None
+    }
+    fieldName.exists { name =>
+      var owners  = call.method.typeDecl.l
+      val visited = scala.collection.mutable.Set.empty[Long]
+      var found   = false
+      while (owners.nonEmpty && !found) {
+        val fresh = owners.filterNot(td => visited.contains(td.id))
+        fresh.foreach(td => visited.add(td.id))
+        found = fresh.exists(_.member.nameExact(name).typeFullName.exists(_.contains(marker)))
+        owners =
+          if (found) Nil
+          else
+            fresh
+              .flatMap(_.inheritsFromTypeFullName)
+              .flatMap(parent =>
+                cpg.typeDecl.fullNameExact(parent).l ++
+                  cpg.typeDecl.nameExact(parent.split('.').last).filterNot(_.isExternal).l
+              )
+      }
+      found
+    }
+  }
 
   /** The verb step under a `.uri(...)` call: its receiver, when that is a
     * WebClient chain (resolved `WebClient`/`WebClient$…Spec` type, or — for

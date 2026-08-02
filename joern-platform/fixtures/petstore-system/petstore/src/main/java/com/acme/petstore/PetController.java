@@ -37,4 +37,11 @@ public class PetController {
     public String alert(@PathVariable String id) {
         return petService.stockAlert(id);
     }
+
+    @GetMapping("/summary/{id}")
+    public String summary(@PathVariable String id) {
+        com.acme.common.StockQuery query = new com.acme.common.StockQuery();
+        query.setId(id);
+        return petService.stockSummary(query);
+    }
 }

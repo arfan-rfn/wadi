@@ -479,6 +479,10 @@ object WadiExport {
       .where(_.tag.nameExact("sink"))
       .l
       .filterNot(call => reachableMethodIds.contains(call.method.id))
+      // Staged library sources (§5.2.6): a library's own unwired code belongs
+      // to whichever service reaches it — inventorying it here would duplicate
+      // the same rows into every dependent service's export.
+      .filterNot(call => call.method.filename.startsWith("wadi-libs/"))
       .sortBy(_.id)
       .flatMap { call =>
         call.tag.nameExact("sink").value.headOption.toList

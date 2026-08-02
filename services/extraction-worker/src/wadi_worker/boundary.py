@@ -20,7 +20,10 @@ from wadi_worker.appconfig import AppConfigFacts, parse_app_config
 
 logger = logging.getLogger(__name__)
 
-_SKIP_DIRS = {"target", "build", "node_modules", ".git", ".idea", "src"}
+_SKIP_DIRS = {"target", "build", "node_modules", ".git", ".idea", "src", "old-docs"}
+
+# Annotations that mark a module as a runnable service (§5.2.6 classification).
+_SERVICE_MARKERS = ("@SpringBootApplication", "@RestController", "@Controller")
 
 
 @dataclass(frozen=True)
@@ -32,32 +35,145 @@ class DiscoveredService:
     hostnames: list[str] = field(default_factory=list[str])
     ports: list[int] = field(default_factory=list[int])
     config: AppConfigFacts = field(default_factory=AppConfigFacts)
+    kind: str = "service"  # 'service' | 'library' (§5.2.6)
+    library_roots: list[str] = field(default_factory=list[str])
+    """Build roots of transitive in-repo library deps to stage into the parse."""
 
 
 def discover_services(repo_root: Path) -> list[DiscoveredService]:
-    """Find analyzable services in one repo checkout."""
+    """Find analyzable services + in-repo library modules in one repo checkout.
+
+    §5.2.6: every Maven leaf module is classified — *service* (Spring Boot
+    main / controller markers or a compose identity), *library* (depended on
+    by another in-repo module, no service markers), or skipped when it has no
+    Java sources at all (frontend/pom-only modules). Libraries are never
+    analyzed as services; their build roots land on each dependent service's
+    ``library_roots`` (transitively) so the worker can stage a source union.
+    """
     maven_roots = _find_maven_leaf_modules(repo_root)
     compose_identities = _parse_compose_identities(repo_root)
-    services: list[DiscoveredService] = []
+
+    modules: list[tuple[Path, str, str]] = []  # (pom, build_root, artifact)
     for pom_path in maven_roots:
-        build_root = pom_path.parent.relative_to(repo_root).as_posix()
-        if build_root == ".":
-            build_root = "."
-        name = _artifact_id(pom_path) or pom_path.parent.name or repo_root.name
-        identity = compose_identities.get(build_root) or compose_identities.get(name)
+        if not _has_java_sources(pom_path.parent):
+            logger.info("module %s has no Java sources — skipped", pom_path.parent)
+            continue
+        build_root = pom_path.parent.relative_to(repo_root).as_posix() or "."
+        artifact = _artifact_id(pom_path) or pom_path.parent.name or repo_root.name
+        modules.append((pom_path, build_root, artifact))
+
+    root_by_artifact = {artifact: build_root for _, build_root, artifact in modules}
+    deps_by_root: dict[str, set[str]] = {}
+    depended_on: set[str] = set()
+    for pom_path, build_root, _ in modules:
+        in_repo = {
+            dep for dep in _declared_dependency_artifacts(pom_path) if dep in root_by_artifact
+        }
+        deps_by_root[build_root] = in_repo
+        depended_on.update(in_repo)
+
+    services: list[DiscoveredService] = []
+    library_artifacts: set[str] = set()
+    for pom_path, build_root, artifact in modules:
+        identity = compose_identities.get(build_root) or compose_identities.get(artifact)
+        is_library = (
+            artifact in depended_on
+            and identity is None
+            and not _has_service_markers(pom_path.parent)
+        )
+        if is_library:
+            library_artifacts.add(artifact)
         services.append(
             DiscoveredService(
-                name=name,
+                name=artifact,
                 build_root=build_root,
                 build_system="maven",
                 languages=["java"],
                 hostnames=identity.hostnames if identity else [],
                 ports=identity.ports if identity else [],
                 config=parse_app_config(pom_path.parent),
+                kind="library" if is_library else "service",
             )
         )
+
+    services = [
+        replace(
+            service,
+            library_roots=_transitive_library_roots(
+                service.build_root, deps_by_root, root_by_artifact, library_artifacts
+            ),
+        )
+        if service.kind == "service"
+        else service
+        for service in services
+    ]
     services.sort(key=lambda s: s.build_root)
     return _disambiguate_names(services)
+
+
+def _has_java_sources(module_dir: Path) -> bool:
+    main = module_dir / "src" / "main" / "java"
+    return main.is_dir() and any(main.rglob("*.java"))
+
+
+def _has_service_markers(module_dir: Path) -> bool:
+    main = module_dir / "src" / "main" / "java"
+    if not main.is_dir():
+        return False
+    for source in main.rglob("*.java"):
+        try:
+            text = source.read_text(errors="replace")
+        except OSError:
+            continue
+        if any(marker in text for marker in _SERVICE_MARKERS):
+            return True
+    return False
+
+
+def _declared_dependency_artifacts(pom_path: Path) -> set[str]:
+    """artifactIds in <dependencies> — pure XML, nothing executed (§5.2.6)."""
+    try:
+        root = ElementTree.parse(pom_path).getroot()
+    except ElementTree.ParseError:
+        return set()
+    namespace = _pom_namespace(root)
+    artifacts: set[str] = set()
+    for dependency in root.iter(f"{namespace}dependency"):
+        element = dependency.find(f"{namespace}artifactId")
+        if element is not None and element.text:
+            artifacts.add(element.text.strip())
+    return artifacts
+
+
+def _transitive_library_roots(
+    build_root: str,
+    deps_by_root: dict[str, set[str]],
+    root_by_artifact: dict[str, str],
+    library_artifacts: set[str],
+) -> list[str]:
+    """BFS over in-repo deps, collecting library build roots (lib→lib chains
+    included). A dependency on another *service* module is not staged —
+    merging two services' sources would blur their identities.
+    """
+    roots: list[str] = []
+    queue = list(deps_by_root.get(build_root, ()))
+    seen: set[str] = set()
+    while queue:
+        artifact = queue.pop(0)
+        if artifact in seen:
+            continue
+        seen.add(artifact)
+        if artifact not in library_artifacts:
+            logger.info(
+                "module %s depends on service module %s — not staged (§5.2.6)",
+                build_root,
+                artifact,
+            )
+            continue
+        lib_root = root_by_artifact[artifact]
+        roots.append(lib_root)
+        queue.extend(deps_by_root.get(lib_root, ()))
+    return sorted(roots)
 
 
 def _disambiguate_names(services: list[DiscoveredService]) -> list[DiscoveredService]:
