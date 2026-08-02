@@ -11,6 +11,9 @@ dev = [
     "pytest-cov>=6.0",
     "pyright>=1.1.390",
     "ruff>=0.9",
+    # Property-based tests, narrow scope: path-template matching properties and
+    # matcher/phone-book determinism under input permutation (Phase 2 stitcher).
+    "hypothesis>=6.120",
 ]
 
 # ---------------------------------------------------------------------------

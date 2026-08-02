@@ -24,6 +24,8 @@ ICFG_PARTS = "icfg_parts"  # writer: extraction worker (overflow parts)
 REMOTE_CALLS = "remote_calls"  # writer: extraction worker
 MQ_INTERACTIONS = "mq_interactions"  # writer: extraction worker
 DATA_MODELS = "data_models"  # writer: extraction worker
+STITCHED_EDGES = "stitched_edges"  # writer: stitcher (§5.4, Tier-1 truth; Neo4j is derived)
+COVERAGE_REPORTS = "coverage_reports"  # writer: stitcher (§5.4.4, snapshot-level)
 
 
 def create_client(mongo_uri: str) -> AsyncMongoClient[MongoDocument]:
@@ -87,6 +89,17 @@ class WadiDatabase:
         )
         await self._db[ICFG_PARTS].create_indexes(
             [IndexModel([("snapshot_id", 1), ("endpoint_id", 1), ("part", 1)], unique=True)]
+        )
+        await self._db[STITCHED_EDGES].create_indexes(
+            [
+                IndexModel([("snapshot_id", 1), ("service_id", 1), ("id", 1)], unique=True),
+                IndexModel([("snapshot_id", 1), ("remote_call_id", 1)]),
+                # Inbound reads: "who calls this service" (§8 remote_edges).
+                IndexModel([("snapshot_id", 1), ("target_service_id", 1)]),
+            ]
+        )
+        await self._db[COVERAGE_REPORTS].create_indexes(
+            [IndexModel([("snapshot_id", 1)], unique=True)]
         )
 
     async def close(self) -> None:

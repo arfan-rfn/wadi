@@ -8,9 +8,10 @@ from wadi_storage.chunking import (
     needs_chunking,
     pack_items,
 )
-from wadi_storage.graph import GraphStore
+from wadi_storage.graph import GraphRepository, GraphStore
 from wadi_storage.jobs import JobQueue
 from wadi_storage.mongo import WadiDatabase, create_client
+from wadi_storage.stitch import StitchRepository
 from wadi_storage.systems import (
     DuplicateSystemNameError,
     SnapshotRepository,
@@ -22,10 +23,12 @@ __all__ = [
     "SAFE_PART_BYTES",
     "ArtifactRepository",
     "DuplicateSystemNameError",
+    "GraphRepository",
     "GraphStore",
     "JobQueue",
     "OversizedItemError",
     "SnapshotRepository",
+    "StitchRepository",
     "SystemRepository",
     "WadiDatabase",
     "create_client",

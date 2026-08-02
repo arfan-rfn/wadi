@@ -36,6 +36,12 @@ class WadiSettings(BaseSettings):
     )
     neo4j_user: str = Field(default="neo4j")
     neo4j_password: SecretStr = Field(default=SecretStr("wadi-local"))
+    neo4j_database: str = Field(
+        default="neo4j", description="Neo4j database name (Community ships exactly one)"
+    )
+    graph_write_batch_size: int = Field(
+        default=1000, ge=1, description="Rows per UNWIND chunk when the stitcher rebuilds Tier 2"
+    )
 
     # --- Joern ---
     joern_url: str = Field(

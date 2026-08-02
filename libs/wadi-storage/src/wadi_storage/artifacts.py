@@ -109,6 +109,15 @@ class ArtifactRepository:
         )
         return [from_doc(Endpoint, doc) async for doc in cursor]
 
+    async def list_endpoints_for_snapshot(self, snapshot_id: str) -> list[Endpoint]:
+        """Every endpoint in the snapshot, all services — the matcher's index input."""
+        cursor = (
+            self._db.collection(ENDPOINTS)
+            .find({"snapshot_id": snapshot_id})
+            .sort([("service_id", 1), ("simplified_uri", 1), ("http_method", 1)])
+        )
+        return [from_doc(Endpoint, doc) async for doc in cursor]
+
     async def count_endpoints_by_service(self, snapshot_id: str) -> dict[str, int]:
         """Endpoint counts per service for one snapshot (single aggregation)."""
         pipeline = [

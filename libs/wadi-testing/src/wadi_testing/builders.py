@@ -3,6 +3,7 @@
 import uuid
 
 from wadi_contracts import (
+    Confidence,
     Endpoint,
     HttpMethod,
     Icfg,
@@ -12,12 +13,17 @@ from wadi_contracts import (
     IcfgNodeKind,
     MethodInfo,
     MethodRef,
+    Provenance,
+    RemoteCall,
     RepoSource,
     ServiceBoundary,
     Snapshot,
     SourceAnchor,
+    StitchedEdge,
     System,
+    TargetKind,
     method_id,
+    remote_call_id,
     service_id,
 )
 
@@ -125,4 +131,50 @@ def make_icfg(
         entry_node_id="entry",
         nodes=nodes,
         edges=edges,
+    )
+
+
+def make_remote_call(
+    snapshot: Snapshot,
+    boundary: ServiceBoundary,
+    *,
+    url: str | None = "http://inventory:8081/stock/{?}",
+    confidence: Confidence = Confidence.HIGH,
+    file: str = "src/main/java/com/acme/PetServiceImpl.java",
+    line: int = 27,
+    mechanism: str = "resttemplate",
+    http_verb: HttpMethod | None = HttpMethod.GET,
+) -> RemoteCall:
+    return RemoteCall(
+        snapshot_id=snapshot.id,
+        service_id=boundary.service_id,
+        id=remote_call_id(boundary.service_id, file, line, url or "<undetermined>"),
+        site=SourceAnchor(file=file, start_line=line, end_line=line),
+        method=make_method(boundary.service_id, "com.acme.PetServiceImpl.findPet(String)"),
+        mechanism=mechanism,
+        http_verb=http_verb,
+        url=url,
+        url_confidence=confidence if url is not None else Confidence.NONE,
+    )
+
+
+def make_analyzed_edge(
+    call: RemoteCall,
+    target: Endpoint,
+    *,
+    confidence: Confidence = Confidence.EXACT,
+    provenance: Provenance = Provenance.CONFIG_RESOLVED,
+) -> StitchedEdge:
+    return StitchedEdge.create(
+        snapshot_id=call.snapshot_id,
+        service_id=call.service_id,
+        remote_call_id=call.id,
+        mechanism=call.mechanism,
+        http_verb=call.http_verb,
+        url=call.url,
+        target_kind=TargetKind.ANALYZED,
+        target_service_id=target.service_id,
+        target_endpoint_id=target.id,
+        confidence=confidence,
+        provenance=provenance,
     )
