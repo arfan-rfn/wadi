@@ -14,12 +14,17 @@ public class PetServiceImpl implements PetService {
     private String inventoryUrl;
 
     private final RestTemplate restTemplate;
+    private final InventoryClient inventoryClient;
     private final EndpointRegistry endpointRegistry;
     private final boolean preferAudit;
 
     public PetServiceImpl(
-            RestTemplate restTemplate, EndpointRegistry endpointRegistry, boolean preferAudit) {
+            RestTemplate restTemplate,
+            InventoryClient inventoryClient,
+            EndpointRegistry endpointRegistry,
+            boolean preferAudit) {
         this.restTemplate = restTemplate;
+        this.inventoryClient = inventoryClient;
         this.endpointRegistry = endpointRegistry;
         this.preferAudit = preferAudit;
     }
@@ -28,7 +33,9 @@ public class PetServiceImpl implements PetService {
     public String findPet(String id) {
         // Config-key slice: ${inventory.url}/stock/{?} at HIGH confidence.
         Integer stock = restTemplate.getForObject(inventoryUrl + "/stock/" + id, Integer.class);
-        return "pet-" + id + ":" + stock;
+        // Feign path: same target service resolved by discovery name (M5).
+        Integer viaFeign = inventoryClient.getStock(id);
+        return "pet-" + id + ":" + stock + "/" + viaFeign;
     }
 
     @Override

@@ -13,12 +13,18 @@ import io.shiftleft.semanticcpg.language.*
   */
 object SpringPacks {
 
-  /** All Phase 1 packs, applied in order. */
+  /** All packs, applied in order. The token-propagation pass runs LAST — it
+    * reads the sink tags the client/feign passes just stored.
+    */
   def applyAll(cpg: Cpg): Unit = {
     new SpringEndpointPass(cpg).createAndApply()
     new SpringHttpClientSinkPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringFeignSinkPass(cpg).createAndApply()
     new SpringDataSinkPass(cpg).createAndApply()
     new SpringModelPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringSecurityAnnotationPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringSecurityDslPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringTokenPropagationPass(cpg).createAndApply()
   }
 
   private[wadi] val MappingAnnotations: Map[String, String] = Map(

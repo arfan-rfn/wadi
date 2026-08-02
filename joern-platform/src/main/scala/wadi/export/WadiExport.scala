@@ -92,7 +92,7 @@ object WadiExport {
       "endpoints"             -> endpointObjs,
       "sinks"                 -> sinkRows.toList,
       "data_models"           -> modelObjs,
-      "security_rules"        -> ujson.Arr(), // filled by the security pack (M5)
+      "security_rules"        -> securityRuleObjs(cpg),
       "config_refs"           -> configRefObjs(cpg)
     )
 
@@ -404,10 +404,24 @@ object WadiExport {
     kind: String,
     call: Call
   ): List[ujson.Obj] = {
-    val verb = httpVerbOf(call)
-    val candidates: List[(Option[String], String, Option[String])] =
-      if (kind != "http-client") List((None, "none", None))
-      else {
+    val feignEncoded = call.tag.nameExact("wadi-feign").value.headOption
+    val verb = feignEncoded.map(_.split('|').head).orElse(httpVerbOf(call))
+    val mechanism =
+      if (feignEncoded.isDefined) Some("feign")
+      else if (kind == "http-client") Some("resttemplate")
+      else None
+    val candidates: List[(Option[String], String, Option[String])] = feignEncoded match {
+      case Some(encoded) =>
+        val url = encoded.split('|').last
+        List(
+          (
+            Some(url),
+            "high",
+            Some(s"feign client: declared mapping composes $url (discovery-name authority)")
+          )
+        )
+      case None if kind != "http-client" => List((None, "none", None))
+      case None =>
         val sliced = UrlSlicer.slice(cpg, call)
         val usable = sliced.filter(_.url.isDefined)
         if (usable.nonEmpty) usable.map(c => (c.url, c.confidence, Some(c.evidence)))
@@ -418,7 +432,8 @@ object WadiExport {
           else
             sliced.take(1).map(c => (None, "none", Some(c.evidence)))
         }
-      }
+    }
+    val authPropagation = call.tag.nameExact("token-propagation").value.headOption
     candidates.map { case (value, confidence, evidence) =>
       ujson.Obj(
         "node_id"          -> num(statementId),
@@ -428,12 +443,41 @@ object WadiExport {
         "value"            -> value.map(ujson.Str(_)).getOrElse(ujson.Null),
         "value_confidence" -> (if (value.isDefined) confidence else "none"),
         "http_verb"        -> verb.map(ujson.Str(_)).getOrElse(ujson.Null),
-        "mechanism"        -> (if (kind == "http-client") "resttemplate" else ujson.Null),
+        "mechanism"        -> mechanism.map(ujson.Str(_)).getOrElse(ujson.Null),
         "evidence"         -> evidence.map(ujson.Str(_)).getOrElse(ujson.Null),
-        "auth_propagation" -> ujson.Null // filled by the token-propagation pass (M5)
+        "auth_propagation" -> authPropagation.map(ujson.Str(_)).getOrElse(ujson.Null)
       )
     }
   }
+
+  /** SecurityFilterChain DSL rules from `auth-rule=` tags, CPG-wide — the
+    * chain beans live outside the endpoint-reachable closure (§5.1). Order is
+    * declaration order (line, then id): the worker applies first-match-wins.
+    */
+  private def securityRuleObjs(cpg: Cpg): List[ujson.Obj] =
+    cpg.call
+      .where(_.tag.nameExact("auth-rule"))
+      .l
+      // Declaration order: chains are outermost-call-first in the AST (the
+      // last declared rule wraps the others), so within one line the inner
+      // (earlier-declared) rule has the LARGER id — sort id-descending.
+      .sortBy(call => (lineOf(call.lineNumber), -call.id))
+      .flatMap { call =>
+        call.tag.nameExact("auth-rule").value.l.map { encoded =>
+          val Array(verb, pattern, access) = encoded.split('|')
+          ujson.Obj(
+            "pattern"     -> pattern,
+            "http_method" -> (if (verb == "*") ujson.Null else ujson.Str(verb)),
+            "access"      -> access,
+            "kind"        -> "filter-chain",
+            "anchor" -> ujson.Obj(
+              "file" -> call.file.name.headOption.getOrElse("<unknown>"),
+              "line" -> lineOf(call.lineNumber)
+            ),
+            "evidence" -> firstLine(call.code)
+          )
+        }
+      }
 
   private def httpVerbOf(call: Call): Option[String] =
     call.name.toLowerCase match {

@@ -20,7 +20,6 @@ from wadi_contracts import (
     DataModel,
     DataModelField,
     Endpoint,
-    EndpointAuth,
     EndpointParam,
     HttpMethod,
     Icfg,
@@ -50,6 +49,7 @@ from wadi_joern_client.export import (
     ServiceExport,
     SinkValueConfidence,
 )
+from wadi_worker.auth_merge import merge_endpoint_auth
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,16 @@ class ExportIncompatibleError(RuntimeError):
 
 
 class Assembler:
-    def __init__(self, *, snapshot_id: str, service_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        snapshot_id: str,
+        service_id: str,
+        config_env: dict[str, str] | None = None,
+    ) -> None:
         self._snapshot_id = snapshot_id
         self._service_id = service_id
+        self._config_env = config_env or {}
 
     def assemble(self, export: ServiceExport) -> AssembledArtifacts:
         if not export.compatible_with_reader():
@@ -121,10 +128,11 @@ class Assembler:
                     export_endpoint.method_id,
                 )
                 continue
+            http_method = HttpMethod(export_endpoint.http_method.upper())
             endpoint = Endpoint.create(
                 snapshot_id=self._snapshot_id,
                 service_id=self._service_id,
-                http_method=HttpMethod(export_endpoint.http_method.upper()),
+                http_method=http_method,
                 full_uri=export_endpoint.uri,
                 handler=self._method_ref(handler),
                 params=[
@@ -137,7 +145,14 @@ class Assembler:
                     for param in export_endpoint.params
                 ],
                 response_type=handler.return_type,
-                auth=EndpointAuth(),  # honest unknown until the security pack lands (M5)
+                auth=merge_endpoint_auth(
+                    full_uri=export_endpoint.uri,
+                    http_method=http_method,
+                    auth_tags=export_endpoint.auth_tags,
+                    security_rules=export.security_rules,
+                    handler_anchor=self._anchor(handler.filename, handler.line, handler.line_end),
+                    config_env=self._config_env,
+                ),
             )
             artifacts.endpoints.append(endpoint)
             artifacts.icfgs.append(

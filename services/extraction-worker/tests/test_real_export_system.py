@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from wadi_contracts import Confidence
+from wadi_contracts import AuthEvidenceKind, Confidence
 from wadi_joern_client.export import ServiceExport
 from wadi_worker.assembler import Assembler
 
@@ -99,6 +99,17 @@ class TestEndpointParams:
         )
 
 
+class TestFeign:
+    def test_feign_call_becomes_a_high_confidence_fact(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        feign_calls = [c for c in result.remote_calls if c.mechanism == "feign"]
+        assert len(feign_calls) == 1
+        call = feign_calls[0]
+        assert call.url == "http://inventory/api/v1/inventory/stock/{id}"
+        assert call.url_confidence is Confidence.HIGH
+        assert call.auth_propagation == "feign-interceptor"
+
+
 class TestInventoryModule:
     def test_endpoints_assemble(self, inventory: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "b" * 16).assemble(inventory)
@@ -108,3 +119,17 @@ class TestInventoryModule:
             ("GET", "/api/v1/inventory/stock/{?}"),
             ("POST", "/admin/restock"),
         }
+
+    def test_auth_merges_annotation_and_chain(self, inventory: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "b" * 16).assemble(inventory)
+        by_uri = {e.simplified_uri: e for e in result.endpoints}
+
+        restock = by_uri["/admin/restock"].auth
+        assert restock.authenticated is True
+        assert restock.roles == ["ADMIN"]
+        kinds = {e.kind for e in restock.evidence}
+        assert kinds == {AuthEvidenceKind.ANNOTATION, AuthEvidenceKind.SECURITY_DSL}
+
+        stock = by_uri["/stock/{?}"].auth
+        assert stock.authenticated is False  # permitAll, with evidence
+        assert stock.mechanism == "spring-security"

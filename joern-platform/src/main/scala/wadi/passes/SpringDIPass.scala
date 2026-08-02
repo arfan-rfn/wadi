@@ -15,11 +15,14 @@ import io.shiftleft.semanticcpg.language.*
   * strategy:
   *
   *   - `wadi-di=exact`     — exactly one implementation
-  *   - `wadi-di=ambiguous` — several implementations; edges to all of them
-  *     (over-approximation is the honest answer for an architecture map, §5.2),
-  *     confidence-marked for downstream consumers.
+  *   - `wadi-di=primary`   — several implementations, one carries `@Primary`
+  *     (Spring's own disambiguation rule) — the edge goes to that one
+  *   - `wadi-di=ambiguous` — several implementations, none primary; edges to
+  *     all of them (over-approximation is the honest answer for an
+  *     architecture map, §5.2), confidence-marked for downstream consumers.
   *
-  * `@Primary` / `@Qualifier` strategies land with the Phase 2 security pack.
+  * `@Qualifier` needs a bean-naming model (bean name derivation, `@Bean`
+  * methods, `@Component("name")`) — deferred to Phase 3, recorded here.
   */
 class SpringDIPass(cpg: Cpg) extends CpgPass(cpg) {
 
@@ -35,16 +38,23 @@ class SpringDIPass(cpg: Cpg) extends CpgPass(cpg) {
       val calleeFullName = call.methodFullName
       declaringTypeOf(calleeFullName).foreach { declaringType =>
         implementationsByInterface.get(declaringType).foreach { implementations =>
-          val targets = implementations.flatMap(findMatchingMethod(_, calleeFullName))
+          val primaries = implementations.filter(isPrimary)
+          val (chosen, strategy) =
+            if (implementations.sizeIs == 1) (implementations, "exact")
+            else if (primaries.sizeIs == 1) (primaries, "primary")
+            else (implementations, "ambiguous")
+          val targets = chosen.flatMap(findMatchingMethod(_, calleeFullName))
           if (targets.nonEmpty) {
             targets.foreach(target => builder.addEdge(call, target, EdgeTypes.CALL))
-            val strategy = if (targets.sizeIs == 1) "exact" else "ambiguous"
             Iterator(call).newTagNodePair("wadi-di", strategy).store()(using builder)
           }
         }
       }
     }
   }
+
+  private def isPrimary(typeDecl: TypeDecl): Boolean =
+    typeDecl.ast.isAnnotation.filter(_.astParent == typeDecl).exists(_.name == "Primary")
 
   /** `com.acme.PetService.findPet:com.acme.Pet(java.lang.String)` -> `com.acme.PetService`. */
   private def declaringTypeOf(methodFullName: String): Option[String] = {

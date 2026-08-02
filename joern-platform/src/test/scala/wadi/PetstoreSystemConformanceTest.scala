@@ -74,7 +74,7 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   test("config-key URL slices to a ${key} template at HIGH confidence") {
     val candidates = httpSinks(petstore).filter(s =>
-      s("value").strOpt.exists(_.contains("/stock/"))
+      s("value").strOpt.exists(_.startsWith("${inventory.url}"))
     )
     candidates should have size 1
     val sink = candidates.head
@@ -82,6 +82,33 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     sink("value_confidence").str shouldBe "high"
     sink("http_verb").str shouldBe "GET"
     sink("evidence").str should include("@Value")
+  }
+
+  test("feign call becomes an http-client sink with the discovery-name URL") {
+    val feignSinks = httpSinks(petstore).filter(_("mechanism").strOpt.contains("feign"))
+    feignSinks should have size 1
+    val sink = feignSinks.head
+    sink("value").str shouldBe "http://inventory/api/v1/inventory/stock/{id}"
+    sink("value_confidence").str shouldBe "high"
+    sink("http_verb").str shouldBe "GET"
+    // The RequestInterceptor in the module marks the call as token-forwarding.
+    sink("auth_propagation").str shouldBe "feign-interceptor"
+  }
+
+  test("inventory auth evidence arrives: annotation tags + filter-chain rules") {
+    val restock = inventory("endpoints").arr.find(_("uri").str == "/admin/restock").get
+    val authTags = restock("auth_tags").arr.map(_.str)
+    authTags should have size 1
+    authTags.head should startWith("auth=annotation:@PreAuthorize")
+    authTags.head should include("hasRole('ADMIN')")
+
+    val rules = inventory("security_rules").arr
+    rules.map(r => (r("pattern").str, r("access").str)) shouldBe Seq(
+      ("/admin/**", "hasRole(\"ADMIN\")"),
+      ("/stock/**", "permitAll()"),
+      ("/**", "authenticated()")
+    )
+    rules.head("anchor")("file").str should include("SecurityConfig.java")
   }
 
   test("branch-dependent URL yields one candidate row per path (§5.2)") {

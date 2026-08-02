@@ -149,7 +149,11 @@ class ExtractionPipeline:
                     export_dir,
                     f"{snapshot.id}-{svc_id}",
                 )
-                assembled = Assembler(snapshot_id=snapshot.id, service_id=svc_id).assemble(export)
+                assembled = Assembler(
+                    snapshot_id=snapshot.id,
+                    service_id=svc_id,
+                    config_env=service.config.env,
+                ).assemble(export)
                 await self._artifacts.write_endpoints(assembled.endpoints)
                 for icfg in assembled.icfgs:
                     await self._artifacts.write_icfg(icfg)
