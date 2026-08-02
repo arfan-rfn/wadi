@@ -1,6 +1,6 @@
 [project]
 name = "wadi-stitcher"
-version = "0.1.1"
+version = "0.2.0"
 description = "Wadi stitcher: cross-service graph assembly (architecture.md §5.4). Phase 1: skeleton pipeline."
 requires-python = ">=3.12"
 dependencies = [
