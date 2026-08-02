@@ -111,6 +111,18 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     rules.head("anchor")("file").str should include("SecurityConfig.java")
   }
 
+  test("service-registry idiom resolves through DI + constant map (TrainTicket)") {
+    val resolved = httpSinks(petstore).filter(s =>
+      s("value").strOpt.exists(_.startsWith("http://inventory/stock/"))
+    )
+    resolved should have size 1
+    val sink = resolved.head
+    sink("value").str shouldBe "http://inventory/stock/{?}"
+    sink("value_confidence").str shouldBe "high"
+    sink("evidence").str should include("return of getServiceUrl")
+    sink("evidence").str should include("serviceMap.get(\"inventory-api\") = \"inventory\"")
+  }
+
   test("branch-dependent URL yields one candidate row per path (§5.2)") {
     val eventCandidates = httpSinks(petstore).filter(s =>
       s("value").strOpt.exists(_.endsWith("/events"))

@@ -47,6 +47,7 @@ class AppConfigFacts:
     application_name: str | None = None
     server_port: int | None = None
     gateway_routes: list[AppGatewayRoute] = field(default_factory=list[AppGatewayRoute])
+    gateway_discovery_locator: bool = False
 
 
 _EMPTY = AppConfigFacts()
@@ -164,9 +165,11 @@ def _from_flat(flat: dict[str, str], routes: list[AppGatewayRoute] | None = None
             server_port = int(raw_port)
         except ValueError:
             logger.warning("non-numeric server.port %r ignored", raw_port)
+    locator = flat.get("spring.cloud.gateway.discovery.locator.enabled", "").lower() == "true"
     return AppConfigFacts(
         env=env,
         application_name=flat.get("spring.application.name") or None,
         server_port=server_port,
         gateway_routes=routes or [],
+        gateway_discovery_locator=locator,
     )

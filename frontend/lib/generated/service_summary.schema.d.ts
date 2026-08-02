@@ -37,6 +37,10 @@ export type ApplicationName = string | null
  * Names this service registers under in service discovery (Eureka/Consul)
  */
 export type DiscoveryNames = string[]
+/**
+ * Spring Cloud Gateway discovery locator: '/{service-name}/**' forwards to that service by its discovery name
+ */
+export type GatewayDiscoveryLocator = boolean
 export type EndLine = number
 /**
  * Path relative to the service build root
@@ -112,6 +116,7 @@ export interface NetworkIdentity {
   application_name?: ApplicationName
   discovery_names?: DiscoveryNames
   env?: Env
+  gateway_discovery_locator?: GatewayDiscoveryLocator
   gateway_routes?: GatewayRoutes
   hostnames?: Hostnames
   ports?: Ports

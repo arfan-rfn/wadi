@@ -189,7 +189,9 @@ class PhoneBook:
 
     @staticmethod
     def _single_gateway(claimants: list[ServiceBoundary]) -> ServiceBoundary | None:
-        if len(claimants) == 1 and claimants[0].network.gateway_routes:
+        if len(claimants) == 1 and (
+            claimants[0].network.gateway_routes or claimants[0].network.gateway_discovery_locator
+        ):
             return claimants[0]
         return None
 
@@ -198,7 +200,7 @@ class PhoneBook:
     ) -> HostResolution | None:
         route = _longest_route_match(gateway, path)
         if route is None:
-            return None
+            return self._via_discovery_locator(gateway, path)
         prefix, target_uri, strip_prefix = route
         rewritten = _strip_segments(path, strip_prefix)
         parsed = _TARGET_URI.match(target_uri.strip())
@@ -251,6 +253,47 @@ class PhoneBook:
             evidence=evidence + "; " + inner.evidence,
             ambiguous=inner.ambiguous,
             port_mismatch=inner.port_mismatch,
+            via_gateway=True,
+        )
+
+    def _via_discovery_locator(self, gateway: ServiceBoundary, path: str) -> HostResolution | None:
+        """Spring Cloud Gateway discovery locator: '/{service-name}/**' forwards
+        to that service by discovery name, stripping the first segment. The
+        locator effectively declares the first segment as a target name, so an
+        unknown name honestly becomes a config-known placeholder."""
+        if not gateway.network.gateway_discovery_locator:
+            return None
+        segments = [s for s in path.split("/") if s]
+        if len(segments) < 2:
+            return None
+        target_name = segments[0].strip().lower()
+        rewritten = "/" + "/".join(segments[1:])
+        evidence = (
+            f"gateway {gateway.name!r} discovery locator: first segment "
+            f"{target_name!r} is the target's discovery name"
+        )
+        claimants = self._ns.names.get(target_name)
+        if not claimants:
+            return HostResolution(
+                candidates=(
+                    ResolvedTarget(
+                        service_id=None, logical_name=target_name, rewritten_path=rewritten
+                    ),
+                ),
+                kind=ResolutionKind.GATEWAY_ROUTE,
+                evidence=evidence + " — target not among analyzed services",
+                via_gateway=True,
+            )
+        return HostResolution(
+            candidates=tuple(
+                ResolvedTarget(
+                    service_id=b.service_id, logical_name=target_name, rewritten_path=rewritten
+                )
+                for b in claimants
+            ),
+            kind=ResolutionKind.GATEWAY_ROUTE,
+            evidence=evidence,
+            ambiguous=len(claimants) > 1,
             via_gateway=True,
         )
 

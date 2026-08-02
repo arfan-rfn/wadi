@@ -89,6 +89,12 @@
           "title": "Env",
           "type": "object"
         },
+        "gateway_discovery_locator": {
+          "default": false,
+          "description": "Spring Cloud Gateway discovery locator: '/{service-name}/**' forwards to that service by its discovery name",
+          "title": "Gateway Discovery Locator",
+          "type": "boolean"
+        },
         "gateway_routes": {
           "description": "Routing rules when this service is a gateway; empty otherwise",
           "items": {

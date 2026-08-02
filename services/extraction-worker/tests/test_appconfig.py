@@ -67,6 +67,22 @@ spring:
             ("fallback", "/old/**", "http://legacy:8000", 0),
         ]
 
+    def test_discovery_locator_flag(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+""",
+        )
+        assert parse_app_config(tmp_path).gateway_discovery_locator is True
+        assert parse_app_config(tmp_path).gateway_routes == []
+
     def test_malformed_yaml_degrades_to_empty(self, tmp_path: Path) -> None:
         _write(tmp_path, "application.yml", "spring: [unclosed")
         facts = parse_app_config(tmp_path)

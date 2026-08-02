@@ -57,6 +57,13 @@ class NetworkIdentity(WadiModel):
         default_factory=list[GatewayRoute],
         description="Routing rules when this service is a gateway; empty otherwise",
     )
+    gateway_discovery_locator: bool = Field(
+        default=False,
+        description=(
+            "Spring Cloud Gateway discovery locator: '/{service-name}/**' "
+            "forwards to that service by its discovery name"
+        ),
+    )
 
 
 class ServiceBoundary(ArtifactEnvelope):

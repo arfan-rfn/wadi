@@ -16,16 +16,19 @@ public class PetServiceImpl implements PetService {
     private final RestTemplate restTemplate;
     private final InventoryClient inventoryClient;
     private final EndpointRegistry endpointRegistry;
+    private final ServiceUrlResolver serviceUrlResolver;
     private final boolean preferAudit;
 
     public PetServiceImpl(
             RestTemplate restTemplate,
             InventoryClient inventoryClient,
             EndpointRegistry endpointRegistry,
+            ServiceUrlResolver serviceUrlResolver,
             boolean preferAudit) {
         this.restTemplate = restTemplate;
         this.inventoryClient = inventoryClient;
         this.endpointRegistry = endpointRegistry;
+        this.serviceUrlResolver = serviceUrlResolver;
         this.preferAudit = preferAudit;
     }
 
@@ -35,7 +38,11 @@ public class PetServiceImpl implements PetService {
         Integer stock = restTemplate.getForObject(inventoryUrl + "/stock/" + id, Integer.class);
         // Feign path: same target service resolved by discovery name (M5).
         Integer viaFeign = inventoryClient.getStock(id);
-        return "pet-" + id + ":" + stock + "/" + viaFeign;
+        // Service-registry idiom (TrainTicket): DI interface -> constant map ->
+        // interprocedural return resolution.
+        Integer viaResolver = restTemplate.getForObject(
+                serviceUrlResolver.getServiceUrl("inventory-api") + "/stock/" + id, Integer.class);
+        return "pet-" + id + ":" + stock + "/" + viaFeign + "/" + viaResolver;
     }
 
     @Override

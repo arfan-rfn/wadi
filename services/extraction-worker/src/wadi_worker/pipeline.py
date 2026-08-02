@@ -135,6 +135,7 @@ class ExtractionPipeline:
                             )
                             for route in service.config.gateway_routes
                         ],
+                        gateway_discovery_locator=service.config.gateway_discovery_locator,
                     ),
                 )
                 await self._artifacts.write_service_boundaries([boundary])

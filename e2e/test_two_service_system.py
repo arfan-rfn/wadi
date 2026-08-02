@@ -148,7 +148,7 @@ class TestTwoServiceSystem:
         # 4. Coverage FIRST (P10): the report states exactly what is unknown.
         coverage = (await http.get(f"/api/v1/snapshots/{snapshot_id}/coverage")).json()
         totals = coverage["totals"]
-        assert totals["analyzed"] == 2  # RestTemplate via ${inventory.url} + Feign
+        assert totals["analyzed"] == 3  # ${inventory.url} + Feign + service-registry idiom
         assert totals["external"] == 1  # audit.example.com (branch candidate)
         assert totals["undetermined"] == 2  # events-primary no-endpoint-match + DB-row URL
         assert totals["placeholder"] == 0
@@ -163,21 +163,24 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         analyzed_edges = [e for e in outbound if e["target_kind"] == "analyzed"]
-        assert len(analyzed_edges) == 2
-        by_mechanism = {e["mechanism"]: e for e in analyzed_edges}
-        rest_edge = by_mechanism["resttemplate"]
-        assert rest_edge["url"] == "${inventory.url}/stock/{?}"
+        assert len(analyzed_edges) == 3
+        by_url = {e["url"]: e for e in analyzed_edges}
+        rest_edge = by_url["${inventory.url}/stock/{?}"]
         assert rest_edge["target_simplified_uri"] == "/stock/{?}"
         assert rest_edge["confidence"] == "high"
         assert rest_edge["provenance"] == "config-resolved"
-        feign_edge = by_mechanism["feign"]
+        feign_edge = next(e for e in analyzed_edges if e["mechanism"] == "feign")
         assert feign_edge["target_simplified_uri"] == "/api/v1/inventory/stock/{?}"
         assert feign_edge["confidence"] == "high"
+        # The service-registry idiom (DI interface -> constant map) stitched too.
+        registry_edge = by_url["http://inventory/stock/{?}"]
+        assert registry_edge["target_simplified_uri"] == "/stock/{?}"
+        assert registry_edge["confidence"] == "high"
 
         inbound = (
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{inventory_id}/remote-edges")
         ).json()["inbound"]
-        assert len(inbound) == 2  # inventory is called twice, by one service
+        assert len(inbound) == 3  # inventory is called three ways, by one service
 
         # 6. Structured auth arrived on the wire (goal 9).
         inventory_endpoints = (

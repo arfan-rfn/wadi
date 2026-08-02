@@ -175,6 +175,55 @@ class TestGateway:
         assert resolution.kind is ResolutionKind.COMPOSE_HOSTNAME
         assert resolution.candidates[0].service_id == gateway.service_id
 
+    def test_discovery_locator_routes_by_first_segment(self) -> None:
+        gateway = _svc("services/gateway", hostnames=["ts-new-gateway"])
+        gateway = gateway.model_copy(
+            update={
+                "network": gateway.network.model_copy(update={"gateway_discovery_locator": True})
+            }
+        )
+        target = _svc("services/assurance", application_name="ts-assurance-service")
+        book = PhoneBook.build([gateway, target])
+        resolution = book.resolve(
+            "ts-new-gateway", 8888, "/ts-assurance-service/api/v1/trainservice/trains"
+        )
+        assert resolution is not None
+        assert resolution.kind is ResolutionKind.GATEWAY_ROUTE
+        assert resolution.via_gateway
+        candidate = resolution.candidates[0]
+        assert candidate.service_id == target.service_id
+        assert candidate.rewritten_path == "/api/v1/trainservice/trains"
+
+    def test_discovery_locator_unknown_name_is_config_known_placeholder(self) -> None:
+        gateway = _svc("services/gateway", hostnames=["ts-new-gateway"])
+        gateway = gateway.model_copy(
+            update={
+                "network": gateway.network.model_copy(update={"gateway_discovery_locator": True})
+            }
+        )
+        book = PhoneBook.build([gateway])
+        resolution = book.resolve("ts-new-gateway", 8888, "/ts-ghost-service/api/v1/x")
+        assert resolution is not None
+        assert resolution.candidates[0].service_id is None
+        assert resolution.candidates[0].logical_name == "ts-ghost-service"
+
+    def test_explicit_routes_win_over_locator(self) -> None:
+        gateway = _svc(
+            "services/gateway",
+            hostnames=["gw"],
+            gateway_routes=[GatewayRoute(path_prefix="/api/**", target_uri="lb://explicit-target")],
+        )
+        gateway = gateway.model_copy(
+            update={
+                "network": gateway.network.model_copy(update={"gateway_discovery_locator": True})
+            }
+        )
+        explicit = _svc("services/explicit", application_name="explicit-target")
+        book = PhoneBook.build([gateway, explicit])
+        resolution = book.resolve("gw", None, "/api/v1/things")
+        assert resolution is not None
+        assert resolution.candidates[0].service_id == explicit.service_id
+
     def test_gateway_cycle_terminates(self) -> None:
         looping = _svc(
             "services/loop",
