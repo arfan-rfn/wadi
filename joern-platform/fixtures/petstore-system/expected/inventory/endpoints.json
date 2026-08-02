@@ -1,0 +1,17 @@
+[
+  {
+    "http_method": "GET",
+    "full_uri": "/stock/{id}",
+    "simplified_uri": "/stock/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/api/v1/inventory/stock/{id}",
+    "simplified_uri": "/api/v1/inventory/stock/{?}"
+  },
+  {
+    "http_method": "POST",
+    "full_uri": "/admin/restock",
+    "simplified_uri": "/admin/restock"
+  }
+]

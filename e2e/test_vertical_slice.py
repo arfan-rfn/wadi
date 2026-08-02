@@ -2,9 +2,9 @@
 
 Register the spring-petstore-mini fixture as a system → analyze → the
 extraction pipeline drives the REAL wadi-joern container over CPGQL → the
-stitcher skeleton runs → the snapshot succeeds → the public API serves
-endpoints (diffed against the fixture's expected JSON), the ICFG, and
-pinned-SHA source.
+stitcher runs (Mongo truth + coverage + Neo4j) → the snapshot succeeds → the
+public API serves endpoints (diffed against the fixture's expected JSON), the
+ICFG, and pinned-SHA source.
 
 Requirements: Docker + the ghcr.io/wadi-sh/joern image built at the version in
 the VERSION file (`make joern-image`).
@@ -16,15 +16,11 @@ in production) — the compose stack adds process boundaries, not logic.
 """
 
 import json
-import shutil
-import subprocess
-import tempfile
-import time
-import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
+from e2e_support import REPO_ROOT, make_fixture_repo, requires_joern_image
 from httpx import ASGITransport, AsyncClient
 
 from wadi_config import WadiSettings
@@ -35,110 +31,19 @@ from wadi_orchestrator.monitor import SnapshotMonitor
 from wadi_orchestrator.state import AppState
 from wadi_repo import RepoCache
 from wadi_stitcher.pipeline import StitchPipeline
-from wadi_storage import WadiDatabase
+from wadi_storage import GraphRepository, StitchRepository, WadiDatabase
 from wadi_worker.pipeline import CpgqlJoernExtractor, ExtractionPipeline
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-# The image tag tracks the VERSION file, same as the compose pins (§13) and
-# the tag CI builds for this test.
-JOERN_IMAGE = f"ghcr.io/wadi-sh/joern:{(REPO_ROOT / 'VERSION').read_text().strip()}"
 FIXTURE = REPO_ROOT / "joern-platform" / "fixtures" / "spring-petstore-mini"
 EXPECTED_ENDPOINTS = FIXTURE / "expected" / "endpoints.json"
 
 pytestmark = pytest.mark.integration
 
 
-def _docker_image_present() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    probe = subprocess.run(
-        ["docker", "image", "inspect", JOERN_IMAGE], capture_output=True, check=False
-    )
-    return probe.returncode == 0
-
-
-requires_joern_image = pytest.mark.skipif(
-    not _docker_image_present(),
-    reason=f"{JOERN_IMAGE} not built — run: docker build -t {JOERN_IMAGE} joern-platform/",
-)
-
-
-def _git(*args: str, cwd: Path) -> None:
-    subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        check=True,
-        env={
-            "GIT_AUTHOR_NAME": "E2E",
-            "GIT_AUTHOR_EMAIL": "e2e@wadi.test",
-            "GIT_COMMITTER_NAME": "E2E",
-            "GIT_COMMITTER_EMAIL": "e2e@wadi.test",
-            "GIT_CONFIG_GLOBAL": "/dev/null",
-            "GIT_CONFIG_SYSTEM": "/dev/null",
-            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-            "HOME": str(cwd),
-        },
-    )
-
-
-@pytest.fixture(scope="module")
-def shared_dir() -> Iterator[Path]:
-    """Host dir mounted at the SAME path inside the Joern container (§13 topology)."""
-    path = Path(tempfile.mkdtemp(prefix="wadi-e2e-", dir="/tmp"))
-    yield path
-    shutil.rmtree(path, ignore_errors=True)
-
-
-@pytest.fixture(scope="module")
-def joern_url(shared_dir: Path) -> Iterator[str]:
-    container = f"wadi-e2e-joern-{uuid.uuid4().hex[:8]}"
-    subprocess.run(
-        [
-            "docker",
-            "run",
-            "--detach",
-            "--rm",
-            "--name",
-            container,
-            "--publish",
-            "127.0.0.1:0:8080",
-            "--volume",
-            f"{shared_dir}:{shared_dir}",
-            JOERN_IMAGE,
-        ],
-        check=True,
-        capture_output=True,
-    )
-    try:
-        port_line = subprocess.run(
-            ["docker", "port", container, "8080/tcp"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.splitlines()[0]
-        url = f"http://127.0.0.1:{port_line.rsplit(':', 1)[1].strip()}"
-        client = JoernClient(url, request_timeout=60)
-        deadline = time.monotonic() + 180
-        while not client.is_ready():
-            if time.monotonic() > deadline:
-                raise RuntimeError("wadi-joern container never became ready")
-            time.sleep(2)
-        client.close()
-        yield url
-    finally:
-        subprocess.run(["docker", "rm", "-f", container], capture_output=True, check=False)
-
-
 @pytest.fixture
 def fixture_repo(shared_dir: Path) -> Path:
     """The petstore fixture as a real git repo (what a user would analyze)."""
-    repo = shared_dir / f"petstore-{uuid.uuid4().hex[:8]}"
-    shutil.copytree(FIXTURE, repo, ignore=shutil.ignore_patterns("expected"))
-    _git("init", "--initial-branch=main", cwd=repo)
-    _git("add", ".", cwd=repo)
-    _git("commit", "-m", "petstore fixture", cwd=repo)
-    return repo
+    return make_fixture_repo(FIXTURE, shared_dir)
 
 
 @requires_joern_image
@@ -162,7 +67,11 @@ class TestVerticalSlice:
             yield http, app.state.wadi, joern_url
 
     async def test_full_slice(
-        self, stack: tuple[AsyncClient, AppState, str], fixture_repo: Path
+        self,
+        stack: tuple[AsyncClient, AppState, str],
+        fixture_repo: Path,
+        database: WadiDatabase,
+        graph_repository: GraphRepository,
     ) -> None:
         http, state, joern_url = stack
 
@@ -195,18 +104,29 @@ class TestVerticalSlice:
             joern.close()
         assert await state.jobs.complete(job.id, "e2e-worker")
 
-        # 3. Monitor advances: stitch job → stitcher runs → snapshot succeeds.
+        # 3. Monitor advances: stitch job → the REAL stitcher runs → succeeds.
         monitor = SnapshotMonitor(state)
         await monitor.tick()
         stitch = await state.jobs.claim("e2e-stitcher", types=[JobType.STITCH])
         assert stitch is not None
-        summary = await StitchPipeline(state.artifacts).run(snapshot_id)
+        summary = await StitchPipeline(
+            state.artifacts, StitchRepository(database), graph_repository
+        ).run(snapshot_id)
         assert summary.service_count == 1
         assert summary.endpoint_count == 3
+        # The single-service fixture's outbound call resolves to a placeholder:
+        # host 'inventory' is a bare name no config in this snapshot knows.
+        assert summary.remote_call_count == 1
+        assert summary.placeholder == 1
         assert await state.jobs.complete(stitch.id, "e2e-stitcher")
         await monitor.tick()
         snapshot = await http.get(f"/api/v1/snapshots/{snapshot_id}")
         assert snapshot.json()["status"] == "succeeded"
+
+        # 3b. The coverage report is served and honest about the placeholder.
+        coverage = (await http.get(f"/api/v1/snapshots/{snapshot_id}/coverage")).json()
+        assert coverage["totals"]["placeholder"] == 1
+        assert [p["name"] for p in coverage["placeholders"]] == ["inventory"]
 
         # 4. Conformance diff: endpoints through the public API vs expected JSON.
         services = (await http.get(f"/api/v1/snapshots/{snapshot_id}/services")).json()

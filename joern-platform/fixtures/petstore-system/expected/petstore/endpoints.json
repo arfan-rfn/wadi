@@ -1,0 +1,12 @@
+[
+  {
+    "http_method": "GET",
+    "full_uri": "/pets/{id}",
+    "simplified_uri": "/pets/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/pets",
+    "simplified_uri": "/pets"
+  }
+]
