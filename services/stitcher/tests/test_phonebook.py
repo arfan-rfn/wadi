@@ -207,6 +207,20 @@ class TestGateway:
         assert resolution.candidates[0].service_id is None
         assert resolution.candidates[0].logical_name == "ts-ghost-service"
 
+    def test_locator_never_fabricates_a_name_from_a_hole(self) -> None:
+        gateway = _svc("services/gateway", hostnames=["ts-new-gateway"])
+        gateway = gateway.model_copy(
+            update={
+                "network": gateway.network.model_copy(update={"gateway_discovery_locator": True})
+            }
+        )
+        book = PhoneBook.build([gateway])
+        resolution = book.resolve("ts-new-gateway", 8888, "/{?}/api/v1/orderservice/order")
+        # Falls through to the gateway itself -> undetermined downstream (P10).
+        assert resolution is not None
+        assert resolution.candidates[0].service_id == gateway.service_id
+        assert not resolution.via_gateway
+
     def test_explicit_routes_win_over_locator(self) -> None:
         gateway = _svc(
             "services/gateway",

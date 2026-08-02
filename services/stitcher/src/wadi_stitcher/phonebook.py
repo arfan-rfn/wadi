@@ -267,6 +267,12 @@ class PhoneBook:
         if len(segments) < 2:
             return None
         target_name = segments[0].strip().lower()
+        # An unrecovered hole or config template is NOT a name — fabricating a
+        # placeholder identity from it would be a false claim (P10). Returning
+        # None lands the call on the gateway itself, where no endpoint matches
+        # and it becomes an honest undetermined fact with evidence.
+        if "{?}" in target_name or "${" in target_name:
+            return None
         rewritten = "/" + "/".join(segments[1:])
         evidence = (
             f"gateway {gateway.name!r} discovery locator: first segment "
