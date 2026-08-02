@@ -26,6 +26,38 @@ class TestComposeCommand:
             "--detach",
         ]
 
+    def test_profiles_precede_the_action_verb(self) -> None:
+        command = compose.compose_command(
+            ["up", "--detach"], [Path("/data/a.yml")], profiles=["frontend"]
+        )
+        assert command == [
+            "docker",
+            "compose",
+            "-p",
+            "wadi",
+            "-f",
+            "/data/a.yml",
+            "--profile",
+            "frontend",
+            "up",
+            "--detach",
+        ]
+
+    def test_all_profiles_match_the_embedded_compose(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """ALL_PROFILES must track the profiles declared in the compose file —
+        a drifted list would leave profile containers running after `wadi down`."""
+        monkeypatch.setattr(compose, "data_dir", lambda: tmp_path)
+        content = compose.render_compose_file().read_text()
+        declared = {
+            profile
+            for line in content.splitlines()
+            if "profiles:" in line
+            for profile in line.split("[", 1)[1].rstrip("]").replace('"', "").split(",")
+        }
+        assert {p.strip() for p in declared} == set(compose.ALL_PROFILES)
+
 
 class TestRenderComposeFile:
     def test_embedded_definition_rendered(

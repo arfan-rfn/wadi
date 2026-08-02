@@ -115,19 +115,70 @@ def up(
 
 @app.command()
 def down() -> None:
-    """Stop the local wadi stack."""
+    """Stop the local wadi stack (including profile services like the UI)."""
     try:
-        compose.run_compose(["down"])
+        compose.run_compose(["down"], profiles=compose.ALL_PROFILES)
     except compose.ComposeError as exc:
         error_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(EXIT_UNREACHABLE) from exc
 
 
 @app.command()
-def status() -> None:
-    """Show stack container status and API health."""
+def ui(
+    no_open: Annotated[
+        bool, typer.Option("--no-open", help="Don't open the browser automatically")
+    ] = False,
+) -> None:
+    """Start the web UI (compose `frontend` profile) and open it in the browser.
+
+    Converges with a running stack: core services already up are untouched.
+    """
+    if not compose.container_runtime_available():
+        error_console.print(
+            "[red]No usable container runtime found — install/start Docker Desktop, "
+            "Podman, or OrbStack.[/red]"
+        )
+        raise typer.Exit(EXIT_UNREACHABLE)
+    ui_port = int(os.environ.get("WADI_UI_PORT", "9235"))
+    url = f"http://127.0.0.1:{ui_port}"
     try:
-        compose.run_compose(["ps"])
+        compose.run_compose(["up", "--detach", "--wait"], profiles=["frontend"])
+    except compose.ComposeError as exc:
+        error_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(EXIT_UNREACHABLE) from exc
+    if not _wait_for_ui(url):
+        error_console.print(
+            f"[yellow]the UI container is up but {url} is not answering yet — "
+            "give it a few seconds and reload[/yellow]"
+        )
+    console.print(f"[green]wadi UI is up[/green] — {url}")
+    if not no_open:
+        import webbrowser
+
+        webbrowser.open(url)
+
+
+def _wait_for_ui(url: str, timeout_seconds: float = 60.0) -> bool:
+    import httpx
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            response = httpx.get(url, timeout=2.0)
+        except httpx.TransportError:
+            time.sleep(1.0)
+            continue
+        if response.status_code < 500:
+            return True
+        time.sleep(1.0)
+    return False
+
+
+@app.command()
+def status() -> None:
+    """Show stack container status (profiles included) and API health."""
+    try:
+        compose.run_compose(["ps"], profiles=compose.ALL_PROFILES)
     except compose.ComposeError as exc:
         error_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(EXIT_UNREACHABLE) from exc

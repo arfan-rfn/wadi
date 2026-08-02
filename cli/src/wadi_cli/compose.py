@@ -16,6 +16,11 @@ from wadi_cli.client import CLI_VERSION
 
 PROJECT_NAME = "wadi"
 
+# Every optional profile in the embedded compose file. `wadi down` passes them
+# all so profile-started containers (e.g. the UI) are torn down too — compose
+# ignores inactive profiles on `down`, so this is always safe.
+ALL_PROFILES = ["frontend", "mcp-http"]
+
 
 class ComposeError(RuntimeError):
     """A lifecycle command failed."""
@@ -57,15 +62,20 @@ def check_port_free(port: int, override_var: str) -> None:
             ) from exc
 
 
-def compose_command(action: list[str], compose_files: list[Path]) -> list[str]:
+def compose_command(
+    action: list[str], compose_files: list[Path], profiles: list[str] | None = None
+) -> list[str]:
     file_args = [arg for path in compose_files for arg in ("-f", str(path))]
-    return ["docker", "compose", "-p", PROJECT_NAME, *file_args, *action]
+    # --profile is a global compose flag: it must precede the action verb.
+    profile_args = [arg for profile in (profiles or []) for arg in ("--profile", profile)]
+    return ["docker", "compose", "-p", PROJECT_NAME, *file_args, *profile_args, *action]
 
 
 def run_compose(
     action: list[str],
     *,
     expose_db: bool = False,
+    profiles: list[str] | None = None,
     env: dict[str, str] | None = None,
 ) -> None:
     import os
@@ -73,7 +83,7 @@ def run_compose(
     compose_files = [render_compose_file()]
     if expose_db:
         compose_files.append(render_compose_file("docker-compose.expose-db.yml"))
-    command = compose_command(action, compose_files)
+    command = compose_command(action, compose_files, profiles)
     result = subprocess.run(command, env={**os.environ, **(env or {})}, check=False)
     if result.returncode != 0:
         raise ComposeError(f"'{' '.join(command)}' exited with {result.returncode}")

@@ -58,9 +58,14 @@ request).
 ### Web UI
 
 The explorer (services → endpoints → flow graphs) ships in the stack and serves
-at `http://127.0.0.1:9235`. In v0.1.0 it starts via the compose profile from a
-source checkout (`docker compose -p wadi -f infra/docker-compose.yml --profile
-frontend up -d`); a `wadi ui` command is planned.
+at `http://127.0.0.1:9235`:
+
+```sh
+wadi ui        # starts the UI (and any core service not yet running) and opens the browser
+```
+
+Use `--no-open` to skip the browser, `WADI_UI_PORT` to change the port;
+`wadi down` stops the UI together with the rest of the stack.
 
 ## What you get, concretely
 

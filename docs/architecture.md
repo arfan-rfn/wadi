@@ -585,7 +585,7 @@ Python end-to-end through the *same* worker: FastAPI routes, `requests`/`httpx` 
 ```
 wadi up                    # pull pinned images, start the stack, health-check
 wadi analyze .             # register cwd (or repo URLs) as a system, run a snapshot
-wadi ui                    # open the frontend
+wadi ui                    # start the frontend profile + open the browser (shipped in Phase 2 by user decision — no phase was assigned in the roadmap)
 wadi mcp                   # run the MCP server over stdio (for coding agents)
 wadi mcp install           # write the MCP config snippet for Claude Code etc.
 wadi status / down / upgrade
