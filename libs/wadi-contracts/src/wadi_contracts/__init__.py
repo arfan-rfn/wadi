@@ -35,6 +35,7 @@ from wadi_contracts.enums import (
     TargetKind,
     TriggerKind,
 )
+from wadi_contracts.export import ExportManifest
 from wadi_contracts.icfg import (
     BranchCondition,
     Icfg,
@@ -106,6 +107,7 @@ __all__ = [
     "Endpoint",
     "EndpointAuth",
     "EndpointParam",
+    "ExportManifest",
     "ExternalApiEntry",
     "ExtractionJob",
     "GatewayRoute",

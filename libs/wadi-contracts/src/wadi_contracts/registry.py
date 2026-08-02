@@ -6,6 +6,7 @@ from wadi_contracts.boundary import ServiceBoundary
 from wadi_contracts.comms import MqInteraction, RemoteCall
 from wadi_contracts.datamodel import DataModel
 from wadi_contracts.endpoint import Endpoint
+from wadi_contracts.export import ExportManifest
 from wadi_contracts.icfg import Icfg
 from wadi_contracts.jobs import ExtractionJob
 from wadi_contracts.stitching import CoverageReport, StitchedEdge
@@ -27,5 +28,7 @@ CONTRACT_MODELS: dict[str, type[BaseModel]] = {
     # API views (derived at read time, never stored — §7 note in views.py):
     "service_summary": ServiceSummary,
     "remote_edges_view": RemoteEdgesView,
+    # Export-bundle trailer (derived at export time, never stored — §14):
+    "export_manifest": ExportManifest,
 }
 """Every published contract, keyed by its canonical artifact name."""

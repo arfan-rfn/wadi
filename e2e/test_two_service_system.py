@@ -17,7 +17,7 @@ from e2e_support import REPO_ROOT, make_fixture_repo, requires_joern_image
 from httpx import ASGITransport, AsyncClient
 
 from wadi_config import WadiSettings
-from wadi_contracts import JobType
+from wadi_contracts import CONTRACT_MODELS, ExportManifest, JobType
 from wadi_joern_client import JoernClient
 from wadi_orchestrator.app import create_app
 from wadi_orchestrator.monitor import SnapshotMonitor
@@ -273,3 +273,34 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         assert sorted(e["edge_id"] for e in outbound_after) == edges_before
+
+        # 9. Export (§14): every record re-validates against its published
+        # contract, the manifest trailer's counts are authoritative, and two
+        # exports differ ONLY in the manifest's produced_at (determinism rule).
+        first = await http.get(f"/api/v1/snapshots/{snapshot_id}/export")
+        assert first.status_code == 200, first.text
+        first_lines = [line for line in first.text.splitlines() if line.strip()]
+        records = [json.loads(line) for line in first_lines]
+        assert records[0]["kind"] == "system"
+        assert records[-1]["kind"] == "manifest"
+        manifest = ExportManifest.model_validate(records[-1]["artifact"])
+        received: dict[str, int] = {}
+        for record in records[:-1]:
+            received[record["kind"]] = received.get(record["kind"], 0) + 1
+            CONTRACT_MODELS[record["kind"]].model_validate(record["artifact"])
+        assert manifest.artifact_counts == dict(sorted(received.items()))
+        # The bundle mirrors the API's own answers.
+        assert received["service_boundary"] == 3  # petstore + inventory + the library
+        assert received["endpoint"] == 12
+        assert received["icfg"] == 12
+        assert received["stitched_edge"] == coverage["totals"]["edges"]
+        assert received["coverage_report"] == 1
+
+        second = await http.get(f"/api/v1/snapshots/{snapshot_id}/export")
+        second_lines = [line for line in second.text.splitlines() if line.strip()]
+        assert first_lines[:-1] == second_lines[:-1]  # byte-identical artifacts
+        first_manifest = json.loads(first_lines[-1])["artifact"]
+        second_manifest = json.loads(second_lines[-1])["artifact"]
+        assert first_manifest.pop("produced_at") != ""
+        assert second_manifest.pop("produced_at") != ""
+        assert first_manifest == second_manifest

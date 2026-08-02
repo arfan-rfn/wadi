@@ -16,6 +16,7 @@ from importlib.metadata import version as metadata_version
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from wadi_config import WadiSettings
@@ -35,6 +36,7 @@ from wadi_contracts import (
     System,
     normalize_repo_source,
 )
+from wadi_orchestrator.export import export_stream
 from wadi_orchestrator.monitor import SnapshotMonitor
 from wadi_orchestrator.state import AppState
 from wadi_repo import GitError, RefNotFoundError
@@ -245,6 +247,34 @@ def create_app(
     )
     async def list_jobs(snapshot_id: str, state: StateDep) -> list[ExtractionJob]:
         return await state.jobs.list_for_snapshot(snapshot_id)
+
+    # --- export (§14): the full artifact bundle as an NDJSON stream -------------------
+
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/export",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def export_snapshot(snapshot_id: str, state: StateDep) -> StreamingResponse:
+        """Every artifact of a succeeded snapshot, one NDJSON record each,
+        with the manifest as the completeness trailer (§14)."""
+        snapshot = await state.snapshots.get(snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
+        if snapshot.status is not SnapshotStatus.SUCCEEDED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"snapshot {snapshot_id} is {snapshot.status.value}; only succeeded "
+                    "snapshots export — a partial bundle is a misleading half-map (§14)"
+                ),
+            )
+        system = await state.systems.get(snapshot.system_id)
+        if system is None:
+            raise HTTPException(status_code=404, detail=f"system {snapshot.system_id} not found")
+        return StreamingResponse(
+            export_stream(state, system, snapshot, ORCHESTRATOR_VERSION),
+            media_type="application/x-ndjson",
+        )
 
     # --- stitched graph: coverage / remote edges / restitch ---------------------------
 

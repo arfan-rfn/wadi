@@ -20,6 +20,7 @@ from wadi_cli.client import (
     ApiUnreachableError,
     WadiApiClient,
 )
+from wadi_cli.export_writer import ExportStreamError, write_bundle
 from wadi_cli.output import console, error_console, print_models
 from wadi_contracts import RepoSource, Snapshot, SnapshotStatus
 
@@ -426,6 +427,43 @@ def coverage(snapshot_id: str, output_json: JsonFlag = False) -> None:
         console.print("\n[bold yellow]Config conflicts[/bold yellow]:")
         for conflict in report.phonebook_conflicts:
             console.print(f"  - {conflict}")
+
+
+@app.command()
+def export(
+    snapshot_id: str,
+    out_dir: Annotated[
+        Path, typer.Option("--dir", help="Target directory for the bundle (created if missing)")
+    ],
+    force: Annotated[
+        bool, typer.Option("--force", help="Write into a non-empty directory")
+    ] = False,
+    output_json: JsonFlag = False,
+) -> None:
+    """Write the snapshot's full artifact bundle as schema-valid JSON files (§14)."""
+    target = out_dir.expanduser()
+    if target.exists() and any(target.iterdir()) and not force:
+        raise typer.BadParameter(
+            f"{target} is not empty — pass --force to write into it anyway", param_hint="--dir"
+        )
+    with _api_client() as client:
+        try:
+            counts = write_bundle(client.iter_export(snapshot_id), target)
+        except ApiUnreachableError as exc:
+            raise _fail_unreachable(exc) from exc
+        except ApiError as exc:
+            raise _fail_api(exc) from exc
+        except ExportStreamError as exc:
+            error_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(EXIT_ANALYSIS_FAILED) from exc
+    if output_json:
+        console.print_json(
+            json.dumps({"snapshot_id": snapshot_id, "dir": str(target), "artifact_counts": counts})
+        )
+    else:
+        console.print(f"exported {sum(counts.values())} artifacts for {snapshot_id} to {target}")
+        for kind in sorted(counts):
+            console.print(f"  {kind}: {counts[kind]}")
 
 
 @app.command()

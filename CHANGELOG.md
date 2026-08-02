@@ -19,6 +19,17 @@ All notable changes to wadi. One version spans the whole release set
   will be measured as a before/after on this number.
 - `wadi coverage` human output also lists unmodelled client libraries
   (the §5.4.2 census was previously JSON-only).
+- **`wadi export` (§14, Phase 2.5 M2):** the third consumption surface.
+  `GET /api/v1/snapshots/{id}/export` streams every artifact of a succeeded
+  snapshot as NDJSON with an `ExportManifest` trailer (counts-last so a
+  truncated stream is always detectable); `wadi export <snapshot-id> --dir`
+  writes the §14 on-disk layout — `manifest.json` + per-collection JSON
+  arrays + `icfgs/<endpoint_id>.json` — every file validating against the
+  published schemas. The CLI verifies the manifest before writing anything
+  (no partial bundles), refuses a non-empty directory without `--force`, and
+  re-exports are byte-identical except the manifest's `produced_at`.
+  Only succeeded snapshots export (409 otherwise — a partial artifact set is
+  a misleading half-map).
 
 ## 0.2.0 — 2026-08-02 (the benchmark-accuracy release)
 

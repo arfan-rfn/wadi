@@ -5,7 +5,10 @@ The CLI's only data path: everything goes over ``/api/v1`` with
 API — if the CLI can do it over REST, third parties can too (§14).
 """
 
+import json
+from collections.abc import Iterator
 from importlib.metadata import version
+from typing import Any
 
 import httpx
 
@@ -135,6 +138,28 @@ class WadiApiClient:
     def get_coverage(self, snapshot_id: str) -> CoverageReport:
         response = self._request("GET", f"/api/v1/snapshots/{snapshot_id}/coverage")
         return CoverageReport.model_validate(response.json())
+
+    def iter_export(self, snapshot_id: str) -> Iterator[dict[str, Any]]:
+        """Stream the snapshot's export bundle (§14): parsed NDJSON records,
+        manifest last. Raises like :meth:`_request` on transport/API errors."""
+        try:
+            with self._http.stream("GET", f"/api/v1/snapshots/{snapshot_id}/export") as response:
+                if response.status_code >= 400:
+                    body = response.read()
+                    try:
+                        detail = json.loads(body).get("detail", body.decode())
+                    except ValueError:
+                        detail = body.decode()
+                    raise ApiError(response.status_code, str(detail))
+                for line in response.iter_lines():
+                    if line.strip():
+                        record: dict[str, Any] = json.loads(line)
+                        yield record
+        except httpx.TransportError as exc:
+            raise ApiUnreachableError(
+                f"cannot reach the wadi API at {self._http.base_url} ({exc}); "
+                "is the stack up? (wadi up)"
+            ) from exc
 
     def get_remote_edges(self, snapshot_id: str, service_id: str) -> RemoteEdgesView:
         response = self._request(
