@@ -5,6 +5,10 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
+/**
+ * How auth crosses this call, when statically visible: 'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence)
+ */
+export type AuthPropagation = string | null
 export type CreatedAt = string
 /**
  * Raw slice evidence behind the recovered URL
@@ -51,6 +55,7 @@ export type Confidence = "exact" | "high" | "heuristic" | "none"
  * One candidate outbound HTTP call from one call site.
  */
 export interface RemoteCall {
+  auth_propagation?: AuthPropagation
   created_at?: CreatedAt
   evidence?: Evidence
   http_verb?: HttpMethod | null

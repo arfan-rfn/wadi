@@ -34,6 +34,16 @@ class Provenance(StrEnum):
     FEDERATED = "federated"
 
 
+class TargetKind(StrEnum):
+    """What a stitched edge lands on (§5.4.2) — the three target kinds that
+    keep partial coverage honest, plus the explicit undetermined fact (P10)."""
+
+    ANALYZED = "analyzed"
+    EXTERNAL = "external"
+    PLACEHOLDER = "placeholder"
+    UNDETERMINED = "undetermined"
+
+
 class ServiceKind(StrEnum):
     """v1: service. Reserved for Phase 9 (§7): function, edge-worker, firmware."""
 

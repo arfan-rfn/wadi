@@ -29,8 +29,53 @@ export type Languages = [string, ...string[]]
  * Display name (e.g. compose/module name)
  */
 export type Name = string
+/**
+ * spring.application.name (or equivalent declared identity)
+ */
+export type ApplicationName = string | null
+/**
+ * Names this service registers under in service discovery (Eureka/Consul)
+ */
+export type DiscoveryNames = string[]
+export type EndLine = number
+/**
+ * Path relative to the service build root
+ */
+export type File = string
+export type StartLine = number
+/**
+ * Whether an anchor refers to original repo text or a generated variant (§5.3).
+ *
+ * ``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) — the text
+ * that was actually analyzed, served by source-on-demand with a badge.
+ */
+export type SourceVariant = "original" | "generated"
+/**
+ * Matched prefix, e.g. '/api/v1/orders/**'
+ */
+export type PathPrefix = string
+/**
+ * Config route id, when present
+ */
+export type RouteId = string | null
+/**
+ * StripPrefix filter segment count
+ */
+export type StripPrefix = number
+/**
+ * Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'
+ */
+export type TargetUri = string
+/**
+ * Routing rules when this service is a gateway; empty otherwise
+ */
+export type GatewayRoutes = GatewayRoute[]
 export type Hostnames = string[]
 export type Ports = number[]
+/**
+ * Configured listen port (server.port)
+ */
+export type ServerPort = number | null
 /**
  * Normalized repo source this service lives in
  */
@@ -58,15 +103,53 @@ export interface ServiceSummary {
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.
+ *
+ * Raw config facts extracted by the worker at extraction time (P2/P6 split:
+ * the worker extracts, the stitcher resolves). All fields best-effort — an
+ * absent fact is honest, never guessed (P10).
  */
 export interface NetworkIdentity {
+  application_name?: ApplicationName
+  discovery_names?: DiscoveryNames
   env?: Env
+  gateway_routes?: GatewayRoutes
   hostnames?: Hostnames
   ports?: Ports
+  server_port?: ServerPort
 }
 /**
- * Network-relevant environment (e.g. compose service env) — values, not secrets
+ * Network-relevant config keys (flattened application.yml allowlist + compose env)
  */
 export interface Env {
   [k: string]: string
+}
+/**
+ * One gateway routing rule extracted from config (§5.4.1 phone-book input).
+ *
+ * Only populated on services that ARE gateways (Spring Cloud Gateway routes
+ * in application.yml). The stitcher re-resolves ``target_uri`` through the
+ * phone book after applying the prefix rewrite.
+ */
+export interface GatewayRoute {
+  /**
+   * Where in config this route is declared (evidence)
+   */
+  anchor?: SourceAnchor | null
+  path_prefix: PathPrefix
+  route_id?: RouteId
+  strip_prefix?: StripPrefix
+  target_uri: TargetUri
+}
+/**
+ * A file + line range in the text that was actually analyzed.
+ *
+ * For preprocessed files (delombok) the anchor refers to the generated
+ * variant — source-on-demand serves that same text, so anchors and served
+ * source stay aligned by construction (§5.3).
+ */
+export interface SourceAnchor {
+  end_line: EndLine
+  file: File
+  start_line: StartLine
+  variant?: SourceVariant
 }

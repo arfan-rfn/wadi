@@ -11,10 +11,24 @@ Grammar: ``<namespace>=<value>``. Registered namespaces and value grammars:
 ``endpoint``            ``<HTTP-METHOD> <path>`` — e.g. ``endpoint=GET /orders``
 ``sink``                ``db`` | ``http-client`` | ``mq:<broker>``
 ``model``               entity name — e.g. ``model=Order``
+``auth``                ``<source>:<raw annotation>`` where source is
+                        ``annotation`` (Spring Security) or ``jsr250`` — e.g.
+                        ``auth=annotation:@PreAuthorize("hasRole('ADMIN')")``.
+                        Raw text is preserved verbatim (§5.2 step 5 evidence).
+``auth-rule``           ``<verb>|<pattern>|<access>`` — one SecurityFilterChain
+                        DSL rule; verb is an HTTP method or ``*`` — e.g.
+                        ``auth-rule=*|/admin/**|hasRole('ADMIN')``
+``token-propagation``   ``authorization-header`` | ``feign-interceptor`` —
+                        how auth crosses an outbound call site (§5.1)
 ======================  ======================================================
 
 Additions are additive (minor ``TAG_REGISTRY_VERSION`` bump); removals or
 grammar changes are breaking (major bump).
+
+**Internal tags are exempt:** tag names prefixed ``wadi-`` (e.g. ``wadi-di``,
+``wadi-feign``) are exporter-private plumbing between passes and the export
+step. They never appear in exported artifacts and are not part of this
+registry's vocabulary.
 """
 
 import re
@@ -37,6 +51,11 @@ _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPT
 _ENDPOINT_VALUE = re.compile(r"^(?P<method>[A-Z]+) (?P<path>/\S*)$")
 _MQ_SINK_VALUE = re.compile(r"^mq:[a-z0-9][a-z0-9-]*$")
 _MODEL_VALUE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$]*$")
+_AUTH_VALUE = re.compile(r"^(annotation|jsr250):@.+$", re.DOTALL)
+_AUTH_RULE_VALUE = re.compile(
+    r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|\*)\|[^|]+\|.+$", re.DOTALL
+)
+_TOKEN_PROPAGATION_VALUES = frozenset({"authorization-header", "feign-interceptor"})
 
 
 class TagValidationError(ValueError):
@@ -79,10 +98,33 @@ def _validate_model(value: str) -> None:
         raise TagValidationError(f"model tag value must be an entity name, got {value!r}")
 
 
+def _validate_auth(value: str) -> None:
+    if not _AUTH_VALUE.match(value):
+        raise TagValidationError(
+            f"auth tag value must be '<annotation|jsr250>:@<raw annotation>', got {value!r}"
+        )
+
+
+def _validate_auth_rule(value: str) -> None:
+    if not _AUTH_RULE_VALUE.match(value):
+        raise TagValidationError(
+            f"auth-rule tag value must be '<verb>|<pattern>|<access>', got {value!r}"
+        )
+
+
+def _validate_token_propagation(value: str) -> None:
+    if value not in _TOKEN_PROPAGATION_VALUES:
+        allowed = " | ".join(sorted(_TOKEN_PROPAGATION_VALUES))
+        raise TagValidationError(f"token-propagation tag value must be {allowed}, got {value!r}")
+
+
 _VALIDATORS: dict[str, Callable[[str], None]] = {
     "endpoint": _validate_endpoint,
     "sink": _validate_sink,
     "model": _validate_model,
+    "auth": _validate_auth,
+    "auth-rule": _validate_auth_rule,
+    "token-propagation": _validate_token_propagation,
 }
 
 

@@ -23,6 +23,24 @@ class TestParseTag:
             ("sink=mq:rabbitmq", "sink", "mq:rabbitmq"),
             ("model=Order", "model", "Order"),
             ("model=com.acme.Order", "model", "com.acme.Order"),
+            (
+                "auth=annotation:@PreAuthorize(\"hasRole('ADMIN')\")",
+                "auth",
+                "annotation:@PreAuthorize(\"hasRole('ADMIN')\")",
+            ),
+            ('auth=jsr250:@RolesAllowed({"ADMIN"})', "auth", 'jsr250:@RolesAllowed({"ADMIN"})'),
+            (
+                "auth-rule=*|/admin/**|hasRole('ADMIN')",
+                "auth-rule",
+                "*|/admin/**|hasRole('ADMIN')",
+            ),
+            ("auth-rule=GET|/stock/**|permitAll", "auth-rule", "GET|/stock/**|permitAll"),
+            (
+                "token-propagation=authorization-header",
+                "token-propagation",
+                "authorization-header",
+            ),
+            ("token-propagation=feign-interceptor", "token-propagation", "feign-interceptor"),
         ],
     )
     def test_valid(self, raw: str, namespace: str, value: str) -> None:
@@ -46,6 +64,13 @@ class TestParseTag:
             "sink=mq:Kafka",  # broker must be lowercase token
             "model=1Order",  # not an identifier
             "model=",
+            "auth=@PreAuthorize('x')",  # missing source prefix
+            "auth=spring:@Secured",  # unknown source
+            "auth=annotation:PreAuthorize",  # raw text must start with '@'
+            "auth-rule=/admin/**|hasRole('ADMIN')",  # missing verb component
+            "auth-rule=FETCH|/x|permitAll",  # not an HTTP verb or '*'
+            "auth-rule=GET||permitAll",  # empty pattern
+            "token-propagation=cookie",  # unregistered propagation kind
         ],
     )
     def test_invalid(self, raw: str) -> None:
@@ -61,7 +86,9 @@ class TestParseTag:
 
 class TestRegistry:
     def test_registered_namespaces(self) -> None:
-        assert registered_namespaces() == frozenset({"endpoint", "sink", "model"})
+        assert registered_namespaces() == frozenset(
+            {"endpoint", "sink", "model", "auth", "auth-rule", "token-propagation"}
+        )
 
     def test_validate_tag_unknown_namespace_names_known_ones(self) -> None:
         with pytest.raises(TagValidationError, match="endpoint"):

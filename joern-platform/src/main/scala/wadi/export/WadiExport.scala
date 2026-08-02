@@ -24,7 +24,11 @@ object WadiExport {
   // Follow existing CALL edges only (which include the DI pass's added edges).
   private given ICallResolver = NoResolve
 
-  val ExportSchemaVersion = "1.0.0"
+  /** 2.0.0: one sink row PER CANDIDATE value (node_id no longer unique across
+    * rows), rows carry call_id / evidence / auth_propagation, endpoints carry
+    * auth_tags + params, new top-level security_rules + config_refs sections.
+    */
+  val ExportSchemaVersion = "2.0.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -54,7 +58,15 @@ object WadiExport {
       method.tag.nameExact("endpoint").value.l.flatMap { value =>
         value.split(" ", 2) match {
           case Array(httpMethod, uri) =>
-            Some(ujson.Obj("method_id" -> num(method.id), "http_method" -> httpMethod, "uri" -> uri))
+            Some(
+              ujson.Obj(
+                "method_id"   -> num(method.id),
+                "http_method" -> httpMethod,
+                "uri"         -> uri,
+                "auth_tags"   -> method.tag.nameExact("auth").value.l.map(v => s"auth=$v"),
+                "params"      -> ujson.Arr() // filled by the params pass (M4)
+              )
+            )
           case _ => None
         }
       }
@@ -77,7 +89,9 @@ object WadiExport {
       "cfgs"                  -> cfgObjs,
       "endpoints"             -> endpointObjs,
       "sinks"                 -> sinkRows.toList,
-      "data_models"           -> modelObjs
+      "data_models"           -> modelObjs,
+      "security_rules"        -> ujson.Arr(), // filled by the security pack (M5)
+      "config_refs"           -> ujson.Arr()  // filled by the URL slicer (M3)
     )
 
     val target: Path = Paths.get(outDir)
@@ -346,12 +360,15 @@ object WadiExport {
       if (kind == "http-client") recoverUrl(call) else (None, "none", None)
     ujson.Obj(
       "node_id"          -> num(statementId),
+      "call_id"          -> num(call.id),
       "method_id"        -> num(methodId),
       "kind"             -> kind,
       "value"            -> value.map(ujson.Str(_)).getOrElse(ujson.Null),
       "value_confidence" -> (if (value.isDefined) confidence else "none"),
       "http_verb"        -> verb.map(ujson.Str(_)).getOrElse(ujson.Null),
-      "mechanism"        -> (if (kind == "http-client") "resttemplate" else ujson.Null)
+      "mechanism"        -> (if (kind == "http-client") "resttemplate" else ujson.Null),
+      "evidence"         -> ujson.Null, // filled by the URL slicer (M3)
+      "auth_propagation" -> ujson.Null  // filled by the token-propagation pass (M5)
     )
   }
 

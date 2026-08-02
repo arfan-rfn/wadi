@@ -13,6 +13,7 @@ Full source bodies are never duplicated into artifacts — served on demand
 (§5.3).
 """
 
+import re
 from enum import StrEnum
 from typing import Self
 
@@ -21,6 +22,8 @@ from pydantic import Field, model_validator
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.enums import IcfgEdgeKind, IcfgNodeKind, SinkKind
 from wadi_contracts.source import MethodRef, SourceAnchor
+
+_RC_ID = re.compile(r"^rc_[0-9a-f]{16}$")
 
 
 class OperandOrigin(StrEnum):
@@ -74,7 +77,21 @@ class IcfgNode(WadiModel):
     condition: BranchCondition | None = None
     callee: MethodRef | None = None
     sink: SinkKind | None = None
-    remote_call_id: str | None = Field(default=None, pattern=r"^rc_[0-9a-f]{16}$")
+    remote_call_id: str | None = Field(
+        default=None,
+        pattern=r"^rc_[0-9a-f]{16}$",
+        description=(
+            "DEPRECATED (since 1.1.0): first entry of remote_call_ids, kept for "
+            "readers predating multi-candidate URL slicing. Prefer remote_call_ids."
+        ),
+    )
+    remote_call_ids: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "All RemoteCall facts at this call site — one per sliced candidate "
+            "URL (§5.2 over-approximation). Order matches the export."
+        ),
+    )
     mq_interaction_id: str | None = Field(default=None, pattern=r"^mq_[0-9a-f]{16}$")
     method_info: MethodInfo | None = None
 
@@ -89,8 +106,17 @@ class IcfgNode(WadiModel):
             raise ValueError(f"callee is only valid on call nodes, not {self.kind}")
         if self.method_info is not None and self.kind is not IcfgNodeKind.ENTRY:
             raise ValueError(f"method_info is only valid on entry nodes, not {self.kind}")
-        if (self.remote_call_id or self.mq_interaction_id) and self.kind is not IcfgNodeKind.CALL:
+        if (
+            self.remote_call_id or self.remote_call_ids or self.mq_interaction_id
+        ) and self.kind is not IcfgNodeKind.CALL:
             raise ValueError("remote-call / MQ markers are only valid on call nodes")
+        for rc_id in self.remote_call_ids:
+            if not _RC_ID.match(rc_id):
+                raise ValueError(f"remote_call_ids entries must be rc_ ids, got {rc_id!r}")
+        # Legacy 1.0.x artifacts carry only the singular field; artifacts are
+        # never rewritten in place (§7), so that shape must stay readable.
+        if self.remote_call_ids and self.remote_call_id != self.remote_call_ids[0]:
+            raise ValueError("remote_call_id must equal remote_call_ids[0] (back-compat invariant)")
         return self
 
 

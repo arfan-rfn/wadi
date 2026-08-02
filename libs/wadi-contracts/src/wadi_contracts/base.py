@@ -16,13 +16,20 @@ class WadiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
 
-class ArtifactEnvelope(WadiModel):
-    """Common envelope carried by every stored artifact (P9).
+class SnapshotEnvelope(WadiModel):
+    """Envelope for snapshot-scoped artifacts with no owning service (P9).
 
-    ``schema_version`` + snapshot key + tz-aware UTC creation time.
+    ``schema_version`` + snapshot key + tz-aware UTC creation time. Most
+    artifacts belong to one service and use :class:`ArtifactEnvelope`; a few
+    (e.g. the coverage report, §5.4.4) describe the whole snapshot.
     """
 
     schema_version: str = SCHEMA_VERSION
     snapshot_id: str
-    service_id: str
     created_at: UtcDatetime = Field(default_factory=utc_now)
+
+
+class ArtifactEnvelope(SnapshotEnvelope):
+    """Common envelope carried by every per-service stored artifact (P9)."""
+
+    service_id: str

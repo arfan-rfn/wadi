@@ -1,0 +1,242 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "Confidence tiers for recovered facts (\u00a75.4). Ordered EXACT > HIGH > HEURISTIC > NONE.",
+      "enum": [
+        "exact",
+        "high",
+        "heuristic",
+        "none"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
+      ],
+      "title": "HttpMethod",
+      "type": "string"
+    },
+    "Provenance": {
+      "description": "Where a claim came from (\u00a75.4). Never blended \u2014 every edge/fact carries one.",
+      "enum": [
+        "machine-proven",
+        "config-resolved",
+        "heuristic",
+        "llm-guessed",
+        "human-asserted",
+        "federated"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    },
+    "RemoteEdgeItem": {
+      "additionalProperties": false,
+      "description": "One stitched edge enriched for display (read-time join over the graph).",
+      "properties": {
+        "caller_service_id": {
+          "title": "Caller Service Id",
+          "type": "string"
+        },
+        "caller_service_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Service Name"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "edge_id": {
+          "title": "Edge Id",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "external_host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Host"
+        },
+        "http_verb": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mechanism": {
+          "title": "Mechanism",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "remote_call_id": {
+          "title": "Remote Call Id",
+          "type": "string"
+        },
+        "target_endpoint_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Endpoint Id"
+        },
+        "target_http_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target_kind": {
+          "$ref": "#/$defs/TargetKind"
+        },
+        "target_service_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Service Id"
+        },
+        "target_service_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Service Name"
+        },
+        "target_simplified_uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Simplified Uri"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "edge_id",
+        "remote_call_id",
+        "caller_service_id",
+        "mechanism",
+        "target_kind",
+        "confidence",
+        "provenance"
+      ],
+      "title": "RemoteEdgeItem",
+      "type": "object"
+    },
+    "TargetKind": {
+      "description": "What a stitched edge lands on (\u00a75.4.2) \u2014 the three target kinds that\nkeep partial coverage honest, plus the explicit undetermined fact (P10).",
+      "enum": [
+        "analyzed",
+        "external",
+        "placeholder",
+        "undetermined"
+      ],
+      "title": "TargetKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.1.0/remote_edges_view.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Who a service calls and who calls it (\u00a78 ``remote_edges``).",
+  "properties": {
+    "inbound": {
+      "items": {
+        "$ref": "#/$defs/RemoteEdgeItem"
+      },
+      "title": "Inbound",
+      "type": "array"
+    },
+    "outbound": {
+      "items": {
+        "$ref": "#/$defs/RemoteEdgeItem"
+      },
+      "title": "Outbound",
+      "type": "array"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "service_id"
+  ],
+  "title": "RemoteEdgesView",
+  "type": "object"
+}

@@ -32,6 +32,13 @@ class RemoteCall(ArtifactEnvelope):
     evidence: str | None = Field(
         default=None, description="Raw slice evidence behind the recovered URL"
     )
+    auth_propagation: str | None = Field(
+        default=None,
+        description=(
+            "How auth crosses this call, when statically visible: "
+            "'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence)"
+        ),
+    )
 
     @model_validator(mode="after")
     def _undetermined_targets_are_honest(self) -> Self:

@@ -56,7 +56,14 @@ export type Params = MethodParam[]
 export type ReturnType = string | null
 export type Signature1 = string
 export type MqInteractionId = string | null
+/**
+ * DEPRECATED (since 1.1.0): first entry of remote_call_ids, kept for readers predating multi-candidate URL slicing. Prefer remote_call_ids.
+ */
 export type RemoteCallId = string | null
+/**
+ * All RemoteCall facts at this call site — one per sliced candidate URL (§5.2 over-approximation). Order matches the export.
+ */
+export type RemoteCallIds = string[]
 /**
  * Sink classification mirroring the ``sink=`` tag namespace.
  */
@@ -101,6 +108,7 @@ export interface IcfgNode {
   method_info?: MethodInfo | null
   mq_interaction_id?: MqInteractionId
   remote_call_id?: RemoteCallId
+  remote_call_ids?: RemoteCallIds
   sink?: SinkKind | null
   source_text: SourceText
 }

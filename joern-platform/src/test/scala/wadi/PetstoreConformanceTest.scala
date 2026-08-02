@@ -86,7 +86,7 @@ class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAf
   }
 
   test("export document declares the contract version") {
-    exportJson("export_schema_version").str shouldBe "1.0.0"
+    exportJson("export_schema_version").str shouldBe "2.0.0"
   }
 
   override def afterAll(): Unit = {

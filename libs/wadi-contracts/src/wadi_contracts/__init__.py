@@ -1,7 +1,7 @@
 """Wadi data contracts — the single source of truth (architecture.md §7)."""
 
-from wadi_contracts.base import ArtifactEnvelope, WadiModel
-from wadi_contracts.boundary import NetworkIdentity, ServiceBoundary
+from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
+from wadi_contracts.boundary import GatewayRoute, NetworkIdentity, ServiceBoundary
 from wadi_contracts.comms import MqInteraction, RemoteCall
 from wadi_contracts.datamodel import DataModel, DataModelField, DataModelRelation
 from wadi_contracts.endpoint import (
@@ -25,6 +25,7 @@ from wadi_contracts.enums import (
     SinkKind,
     SnapshotStatus,
     SourceVariant,
+    TargetKind,
     TriggerKind,
 )
 from wadi_contracts.icfg import (
@@ -43,13 +44,24 @@ from wadi_contracts.ids import (
     method_id,
     mq_interaction_id,
     normalize_repo_source,
+    placeholder_service_id,
     remote_call_id,
+    remote_edge_id,
     service_id,
     simplify_uri,
 )
 from wadi_contracts.jobs import ExtractionJob, JobClaim
 from wadi_contracts.registry import CONTRACT_MODELS
 from wadi_contracts.source import MethodRef, SourceAnchor
+from wadi_contracts.stitching import (
+    CoverageReport,
+    CoverageTotals,
+    ExternalApiEntry,
+    PlaceholderEntry,
+    StitchedEdge,
+    UnresolvedCallEntry,
+    edge_target_key,
+)
 from wadi_contracts.system import RepoSource, Snapshot, System
 from wadi_contracts.tags import (
     TAG_REGISTRY_VERSION,
@@ -61,7 +73,7 @@ from wadi_contracts.tags import (
 )
 from wadi_contracts.timeutil import UtcDatetime, ensure_utc, utc_now
 from wadi_contracts.version import SCHEMA_VERSION
-from wadi_contracts.views import ServiceSummary
+from wadi_contracts.views import RemoteEdgeItem, RemoteEdgesView, ServiceSummary
 
 __all__ = [
     "CONTRACT_MODELS",
@@ -72,13 +84,17 @@ __all__ = [
     "AuthEvidenceKind",
     "BranchCondition",
     "Confidence",
+    "CoverageReport",
+    "CoverageTotals",
     "DataModel",
     "DataModelField",
     "DataModelRelation",
     "Endpoint",
     "EndpointAuth",
     "EndpointParam",
+    "ExternalApiEntry",
     "ExtractionJob",
+    "GatewayRoute",
     "HttpMethod",
     "Icfg",
     "IcfgEdge",
@@ -97,32 +113,42 @@ __all__ = [
     "OperandOrigin",
     "OperandRef",
     "ParamLocation",
+    "PlaceholderEntry",
     "Provenance",
     "RemoteCall",
+    "RemoteEdgeItem",
+    "RemoteEdgesView",
     "RepoSource",
     "ServiceBoundary",
     "ServiceKind",
     "ServiceSummary",
     "SinkKind",
     "Snapshot",
+    "SnapshotEnvelope",
     "SnapshotStatus",
     "SourceAnchor",
     "SourceVariant",
+    "StitchedEdge",
     "System",
     "Tag",
     "TagValidationError",
+    "TargetKind",
     "TriggerKind",
+    "UnresolvedCallEntry",
     "UtcDatetime",
     "WadiModel",
     "data_model_id",
+    "edge_target_key",
     "endpoint_id",
     "ensure_utc",
     "method_id",
     "mq_interaction_id",
     "normalize_repo_source",
     "parse_tag",
+    "placeholder_service_id",
     "registered_namespaces",
     "remote_call_id",
+    "remote_edge_id",
     "service_id",
     "simplify_uri",
     "utc_now",

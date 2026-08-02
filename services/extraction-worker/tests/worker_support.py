@@ -25,6 +25,9 @@ CONTROLLER = 100
 SERVICE_IMPL = 200
 REPO_CALLSITE = 205
 HTTP_CALLSITE = 207
+# Inner CALL node ids (export 2.0.0 sink rows carry them for exact per-site dedup).
+REPO_CALL_ID = 3205
+HTTP_CALL_ID = 3207
 
 
 def petstore_like_export() -> ServiceExport:
@@ -148,14 +151,19 @@ def petstore_like_export() -> ServiceExport:
     sinks = [
         ExportSink(
             node_id=REPO_CALLSITE,
+            call_id=REPO_CALL_ID,
             method_id=SERVICE_IMPL,
             kind="db",
         ),
+        # Honest Phase-1 recovery: the field-held host is lost, only the
+        # concatenation template survives (matches the real Scala output —
+        # the URL slicer upgrades this in M3).
         ExportSink(
             node_id=HTTP_CALLSITE,
+            call_id=HTTP_CALL_ID,
             method_id=SERVICE_IMPL,
             kind="http-client",
-            value="http://inventory:8080/stock/{id}",
+            value="{?}/stock/{?}",
             value_confidence=SinkValueConfidence.HEURISTIC,
             http_verb="GET",
             mechanism="resttemplate",

@@ -1,16 +1,101 @@
 {
   "$defs": {
+    "GatewayRoute": {
+      "additionalProperties": false,
+      "description": "One gateway routing rule extracted from config (\u00a75.4.1 phone-book input).\n\nOnly populated on services that ARE gateways (Spring Cloud Gateway routes\nin application.yml). The stitcher re-resolves ``target_uri`` through the\nphone book after applying the prefix rewrite.",
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where in config this route is declared (evidence)"
+        },
+        "path_prefix": {
+          "description": "Matched prefix, e.g. '/api/v1/orders/**'",
+          "minLength": 1,
+          "title": "Path Prefix",
+          "type": "string"
+        },
+        "route_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Config route id, when present",
+          "title": "Route Id"
+        },
+        "strip_prefix": {
+          "default": 0,
+          "description": "StripPrefix filter segment count",
+          "minimum": 0,
+          "title": "Strip Prefix",
+          "type": "integer"
+        },
+        "target_uri": {
+          "description": "Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'",
+          "minLength": 1,
+          "title": "Target Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path_prefix",
+        "target_uri"
+      ],
+      "title": "GatewayRoute",
+      "type": "object"
+    },
     "NetworkIdentity": {
       "additionalProperties": false,
-      "description": "How this service is addressed at runtime, as far as statics can see.",
+      "description": "How this service is addressed at runtime, as far as statics can see.\n\nRaw config facts extracted by the worker at extraction time (P2/P6 split:\nthe worker extracts, the stitcher resolves). All fields best-effort \u2014 an\nabsent fact is honest, never guessed (P10).",
       "properties": {
+        "application_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "spring.application.name (or equivalent declared identity)",
+          "title": "Application Name"
+        },
+        "discovery_names": {
+          "description": "Names this service registers under in service discovery (Eureka/Consul)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Discovery Names",
+          "type": "array"
+        },
         "env": {
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Network-relevant environment (e.g. compose service env) \u2014 values, not secrets",
+          "description": "Network-relevant config keys (flattened application.yml allowlist + compose env)",
           "title": "Env",
           "type": "object"
+        },
+        "gateway_routes": {
+          "description": "Routing rules when this service is a gateway; empty otherwise",
+          "items": {
+            "$ref": "#/$defs/GatewayRoute"
+          },
+          "title": "Gateway Routes",
+          "type": "array"
         },
         "hostnames": {
           "items": {
@@ -25,6 +110,21 @@
           },
           "title": "Ports",
           "type": "array"
+        },
+        "server_port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Configured listen port (server.port)",
+          "title": "Server Port"
         }
       },
       "title": "NetworkIdentity",
@@ -40,9 +140,51 @@
       ],
       "title": "ServiceKind",
       "type": "string"
+    },
+    "SourceAnchor": {
+      "additionalProperties": false,
+      "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "file": {
+          "description": "Path relative to the service build root",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "variant": {
+          "$ref": "#/$defs/SourceVariant",
+          "default": "original"
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "title": "SourceAnchor",
+      "type": "object"
+    },
+    "SourceVariant": {
+      "description": "Whether an anchor refers to original repo text or a generated variant (\u00a75.3).\n\n``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) \u2014 the text\nthat was actually analyzed, served by source-on-demand with a badge.",
+      "enum": [
+        "original",
+        "generated"
+      ],
+      "title": "SourceVariant",
+      "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.0.0/service_summary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.1.0/service_summary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "A service boundary plus counts aggregated at read time.",
@@ -99,7 +241,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.0.0",
+      "default": "1.1.0",
       "title": "Schema Version",
       "type": "string"
     },

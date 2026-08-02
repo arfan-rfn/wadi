@@ -1,16 +1,19 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "schemas": {
+    "coverage_report": "coverage_report.schema.json",
     "data_model": "data_model.schema.json",
     "endpoint": "endpoint.schema.json",
     "extraction_job": "extraction_job.schema.json",
     "icfg": "icfg.schema.json",
     "mq_interaction": "mq_interaction.schema.json",
     "remote_call": "remote_call.schema.json",
+    "remote_edges_view": "remote_edges_view.schema.json",
     "service_boundary": "service_boundary.schema.json",
     "service_summary": "service_summary.schema.json",
     "snapshot": "snapshot.schema.json",
+    "stitched_edge": "stitched_edge.schema.json",
     "system": "system.schema.json"
   },
-  "tag_registry_version": "1.0.0"
+  "tag_registry_version": "1.1.0"
 }

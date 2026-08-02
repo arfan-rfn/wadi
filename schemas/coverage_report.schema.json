@@ -1,0 +1,299 @@
+{
+  "$defs": {
+    "CoverageTotals": {
+      "additionalProperties": false,
+      "description": "Aggregate counts for a snapshot's stitched graph.",
+      "properties": {
+        "analyzed": {
+          "minimum": 0,
+          "title": "Analyzed",
+          "type": "integer"
+        },
+        "by_confidence": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Edge count per Confidence value",
+          "title": "By Confidence",
+          "type": "object"
+        },
+        "call_sites": {
+          "description": "Distinct remote-call facts considered",
+          "minimum": 0,
+          "title": "Call Sites",
+          "type": "integer"
+        },
+        "edges": {
+          "minimum": 0,
+          "title": "Edges",
+          "type": "integer"
+        },
+        "external": {
+          "minimum": 0,
+          "title": "External",
+          "type": "integer"
+        },
+        "placeholder": {
+          "minimum": 0,
+          "title": "Placeholder",
+          "type": "integer"
+        },
+        "undetermined": {
+          "minimum": 0,
+          "title": "Undetermined",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "call_sites",
+        "edges",
+        "analyzed",
+        "external",
+        "placeholder",
+        "undetermined"
+      ],
+      "title": "CoverageTotals",
+      "type": "object"
+    },
+    "ExternalApiEntry": {
+      "additionalProperties": false,
+      "description": "A real dependency on an address outside the analyzed system.",
+      "properties": {
+        "call_count": {
+          "minimum": 1,
+          "title": "Call Count",
+          "type": "integer"
+        },
+        "caller_service_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Caller Service Ids",
+          "type": "array"
+        },
+        "host": {
+          "description": "Normalized host[:port]",
+          "minLength": 1,
+          "title": "Host",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "call_count",
+        "caller_service_ids"
+      ],
+      "title": "ExternalApiEntry",
+      "type": "object"
+    },
+    "PlaceholderEntry": {
+      "additionalProperties": false,
+      "description": "A config-resolved service name with no analyzed service behind it \u2014\nhonest partial coverage and a 'grant access to this repo' to-do item.",
+      "properties": {
+        "call_count": {
+          "minimum": 1,
+          "title": "Call Count",
+          "type": "integer"
+        },
+        "caller_service_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Caller Service Ids",
+          "type": "array"
+        },
+        "name": {
+          "description": "The config-resolved logical name",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "placeholder_id": {
+          "pattern": "^ph_[0-9a-f]{16}$",
+          "title": "Placeholder Id",
+          "type": "string"
+        },
+        "resolved_via": {
+          "description": "'compose-service' | 'discovery-name' | 'gateway-route' | 'bare-hostname'",
+          "minLength": 1,
+          "title": "Resolved Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "placeholder_id",
+        "name",
+        "resolved_via",
+        "call_count",
+        "caller_service_ids"
+      ],
+      "title": "PlaceholderEntry",
+      "type": "object"
+    },
+    "SourceAnchor": {
+      "additionalProperties": false,
+      "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "file": {
+          "description": "Path relative to the service build root",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "variant": {
+          "$ref": "#/$defs/SourceVariant",
+          "default": "original"
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "title": "SourceAnchor",
+      "type": "object"
+    },
+    "SourceVariant": {
+      "description": "Whether an anchor refers to original repo text or a generated variant (\u00a75.3).\n\n``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) \u2014 the text\nthat was actually analyzed, served by source-on-demand with a badge.",
+      "enum": [
+        "original",
+        "generated"
+      ],
+      "title": "SourceVariant",
+      "type": "string"
+    },
+    "UnresolvedCallEntry": {
+      "additionalProperties": false,
+      "description": "One call site the stitcher could not resolve, with the reason stated.\n\n``reason_code`` is machine-readable so limitations are queryable, not just\nprose \u2014 e.g. counting how often Lombok-generated interiors block URL\nrecovery is a coverage query, not an investigation.",
+      "properties": {
+        "reason": {
+          "description": "Human-readable explanation",
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "reason_code": {
+          "description": "'url-undetermined' | 'url-unparseable' | 'host-unresolvable' | 'no-endpoint-match' | 'lombok-generated-interior'",
+          "minLength": 1,
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "remote_call_id": {
+          "pattern": "^rc_[0-9a-f]{16}$",
+          "title": "Remote Call Id",
+          "type": "string"
+        },
+        "service_id": {
+          "title": "Service Id",
+          "type": "string"
+        },
+        "site": {
+          "$ref": "#/$defs/SourceAnchor"
+        }
+      },
+      "required": [
+        "remote_call_id",
+        "service_id",
+        "site",
+        "reason_code",
+        "reason"
+      ],
+      "title": "UnresolvedCallEntry",
+      "type": "object"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.1.0/coverage_report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What the map knows it doesn't know (\u00a75.4.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
+  "properties": {
+    "applied_hint_ids": {
+      "description": "Reserved \u2014 stitching hints land in Phase 4",
+      "items": {
+        "type": "string"
+      },
+      "title": "Applied Hint Ids",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "external_apis": {
+      "items": {
+        "$ref": "#/$defs/ExternalApiEntry"
+      },
+      "title": "External Apis",
+      "type": "array"
+    },
+    "low_confidence_edge_ids": {
+      "description": "Edges matched at HEURISTIC confidence",
+      "items": {
+        "type": "string"
+      },
+      "title": "Low Confidence Edge Ids",
+      "type": "array"
+    },
+    "phonebook_conflicts": {
+      "description": "Config identities claimed by more than one source (never silently picked)",
+      "items": {
+        "type": "string"
+      },
+      "title": "Phonebook Conflicts",
+      "type": "array"
+    },
+    "placeholders": {
+      "items": {
+        "$ref": "#/$defs/PlaceholderEntry"
+      },
+      "title": "Placeholders",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "stale_hint_ids": {
+      "description": "Reserved \u2014 stitching hints land in Phase 4",
+      "items": {
+        "type": "string"
+      },
+      "title": "Stale Hint Ids",
+      "type": "array"
+    },
+    "totals": {
+      "$ref": "#/$defs/CoverageTotals"
+    },
+    "unresolved": {
+      "items": {
+        "$ref": "#/$defs/UnresolvedCallEntry"
+      },
+      "title": "Unresolved",
+      "type": "array"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "totals"
+  ],
+  "title": "CoverageReport",
+  "type": "object"
+}

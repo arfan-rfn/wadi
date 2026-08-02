@@ -67,6 +67,7 @@ _EDGE_LABEL_TO_KIND = {
 
 _CONFIDENCE_MAP = {
     SinkValueConfidence.EXACT: Confidence.EXACT,
+    SinkValueConfidence.HIGH: Confidence.HIGH,
     SinkValueConfidence.HEURISTIC: Confidence.HEURISTIC,
     SinkValueConfidence.NONE: Confidence.NONE,
 }
@@ -97,7 +98,11 @@ class Assembler:
             )
         methods = {m.id: m for m in export.methods}
         cfgs = {c.method_id: c for c in export.cfgs}
-        sinks_by_node = {s.node_id: s for s in export.sinks}
+        # Since export 2.0.0 a call site emits one sink row per candidate value
+        # (§5.2 over-approximation) — rows sharing a node are one site.
+        sinks_by_node: dict[int, list[ExportSink]] = {}
+        for sink in export.sinks:
+            sinks_by_node.setdefault(sink.node_id, []).append(sink)
 
         artifacts = AssembledArtifacts()
         artifacts.remote_calls = self._build_remote_calls(export, methods)
@@ -137,7 +142,7 @@ class Assembler:
         handler: ExportMethod,
         methods: dict[int, ExportMethod],
         cfgs: dict[int, ExportCfg],
-        sinks_by_node: dict[int, ExportSink],
+        sinks_by_node: dict[int, list[ExportSink]],
     ) -> Icfg:
         closure = self._reachable_closure(handler.id, methods, cfgs)
         nodes: list[IcfgNode] = []
@@ -191,7 +196,7 @@ class Assembler:
         self,
         method: ExportMethod,
         cfg: ExportCfg | None,
-        sinks_by_node: dict[int, ExportSink],
+        sinks_by_node: dict[int, list[ExportSink]],
         methods: dict[int, ExportMethod],
         closure: list[int],
         nodes: list[IcfgNode],
@@ -223,32 +228,35 @@ class Assembler:
 
         for cfg_node in cfg_nodes:
             node_id = f"m{method.id}:n{cfg_node.id}"
-            sink = sinks_by_node.get(cfg_node.id)
+            site_sinks = sinks_by_node.get(cfg_node.id, [])
             kind = _CFG_KIND_TO_ICFG[cfg_node.kind]
             callee_ref: MethodRef | None = None
-            remote_id: str | None = None
+            remote_ids: list[str] = []
             mq_id: str | None = None
             sink_kind: SinkKind | None = None
             if cfg_node.kind is CfgNodeKind.CALL and cfg_node.call is not None:
                 callee_ref = self._callee_ref(
                     cfg_node.call.callee_id, cfg_node.call.callee_full_name, methods
                 )
-            if sink is not None and kind is IcfgNodeKind.CALL:
-                sink_kind = self._sink_kind(sink.kind)
+            if site_sinks and kind is IcfgNodeKind.CALL:
+                sink_kind = self._sink_kind(site_sinks[0].kind)
                 if sink_kind is SinkKind.HTTP_CLIENT:
-                    remote_id = remote_call_id(
-                        self._service_id,
-                        method.filename,
-                        cfg_node.line,
-                        sink.value or "<undetermined>",
-                    )
+                    for sink in site_sinks:
+                        candidate_id = remote_call_id(
+                            self._service_id,
+                            method.filename,
+                            cfg_node.line,
+                            sink.value or "<undetermined>",
+                        )
+                        if candidate_id not in remote_ids:
+                            remote_ids.append(candidate_id)
                 elif sink_kind is SinkKind.MQ:
                     mq_id = mq_interaction_id(
                         self._service_id,
                         method.filename,
                         cfg_node.line,
                         MqDirection.PUBLISH.value,
-                        sink.value or "<undetermined>",
+                        site_sinks[0].value or "<undetermined>",
                     )
             nodes.append(
                 IcfgNode(
@@ -265,7 +273,8 @@ class Assembler:
                     ),
                     callee=callee_ref,
                     sink=sink_kind,
-                    remote_call_id=remote_id,
+                    remote_call_id=remote_ids[0] if remote_ids else None,
+                    remote_call_ids=remote_ids,
                     mq_interaction_id=mq_id,
                 )
             )
@@ -374,6 +383,8 @@ class Assembler:
                     url_confidence=_CONFIDENCE_MAP[sink.value_confidence]
                     if sink.value is not None
                     else Confidence.NONE,
+                    evidence=sink.evidence,
+                    auth_propagation=sink.auth_propagation,
                 )
             )
         return calls
@@ -457,21 +468,19 @@ class Assembler:
         self,
         method: ExportMethod,
         cfg: ExportCfg | None,
-        sinks_by_node: dict[int, ExportSink],
+        sinks_by_node: dict[int, list[ExportSink]],
     ) -> list[str]:
         badges: set[str] = set()
         if any(tag.startswith("endpoint=") for tag in method.tags):
             badges.add("endpoint")
         for cfg_node in cfg.nodes if cfg is not None else []:
-            sink = sinks_by_node.get(cfg_node.id)
-            if sink is None:
-                continue
-            if sink.kind == "db":
-                badges.add("touches-db")
-            elif sink.kind == "http-client":
-                badges.add("calls-http")
-            elif sink.kind.startswith("mq:"):
-                badges.add("publishes-mq")
+            for sink in sinks_by_node.get(cfg_node.id, []):
+                if sink.kind == "db":
+                    badges.add("touches-db")
+                elif sink.kind == "http-client":
+                    badges.add("calls-http")
+                elif sink.kind.startswith("mq:"):
+                    badges.add("publishes-mq")
         return sorted(badges)
 
     def _sink_kind(self, kind: str) -> SinkKind:

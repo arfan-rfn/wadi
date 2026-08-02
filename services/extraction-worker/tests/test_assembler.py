@@ -22,7 +22,9 @@ from wadi_joern_client.export import (
     ExportCfgNode,
     ExportEndpoint,
     ExportMethod,
+    ExportSink,
     ServiceExport,
+    SinkValueConfidence,
 )
 from wadi_worker.assembler import Assembler, ExportIncompatibleError
 
@@ -83,11 +85,12 @@ class TestPetstoreAssembly:
         result = assembler.assemble(petstore_like_export())
         assert len(result.remote_calls) == 1
         call = result.remote_calls[0]
-        assert call.url == "http://inventory:8080/stock/{id}"
+        assert call.url == "{?}/stock/{?}"
         assert call.url_confidence is Confidence.HEURISTIC
         icfg = result.icfgs[0]
         marker = next(n for n in icfg.nodes if n.remote_call_id is not None)
         assert marker.remote_call_id == call.id  # same derived id on both sides
+        assert marker.remote_call_ids == [call.id]
 
     def test_method_info_and_badges(self, assembler: Assembler) -> None:
         icfg = assembler.assemble(petstore_like_export()).icfgs[0]
@@ -143,6 +146,73 @@ def _call_node(nid: int, callee_id: int, callee: str) -> ExportCfgNode:
             callee_full_name=f"com.acme.{callee}:void()", callee_id=callee_id, resolved=True
         ),
     )
+
+
+class TestMultiCandidateSinks:
+    """Export 2.0.0: one sink row per candidate URL at one call site (§5.2)."""
+
+    def _export_with_two_candidates(self) -> ServiceExport:
+        handler = _minimal_method(1, "handler")
+        node = ExportCfgNode(
+            id=11,
+            kind=CfgNodeKind.CALL,
+            code="restTemplate.getForObject(base + path, X.class);",
+            line=5,
+            line_end=5,
+            call=ExportCall(
+                callee_full_name="org.springframework.web.client.RestTemplate.getForObject",
+                resolved=False,
+            ),
+        )
+        candidates = [
+            ExportSink(
+                node_id=11,
+                call_id=911,
+                method_id=1,
+                kind="http-client",
+                value="http://orders:8080/orders/{?}",
+                value_confidence=SinkValueConfidence.HIGH,
+                http_verb="GET",
+                mechanism="resttemplate",
+                evidence="branch true: base <- ORDERS_URL",
+            ),
+            ExportSink(
+                node_id=11,
+                call_id=911,
+                method_id=1,
+                kind="http-client",
+                value="http://billing:8080/orders/{?}",
+                value_confidence=SinkValueConfidence.HIGH,
+                http_verb="GET",
+                mechanism="resttemplate",
+                evidence="branch false: base <- BILLING_URL",
+            ),
+        ]
+        return ServiceExport(
+            language="java",
+            methods=[handler],
+            cfgs=[ExportCfg(method_id=1, nodes=[node], edges=[])],
+            endpoints=[ExportEndpoint(method_id=1, http_method="GET", uri="/x")],
+            sinks=candidates,
+        )
+
+    def test_one_remote_call_fact_per_candidate(self, assembler: Assembler) -> None:
+        result = assembler.assemble(self._export_with_two_candidates())
+        assert len(result.remote_calls) == 2
+        urls = {c.url for c in result.remote_calls}
+        assert urls == {"http://orders:8080/orders/{?}", "http://billing:8080/orders/{?}"}
+        assert all(c.url_confidence is Confidence.HIGH for c in result.remote_calls)
+        assert {c.evidence for c in result.remote_calls} == {
+            "branch true: base <- ORDERS_URL",
+            "branch false: base <- BILLING_URL",
+        }
+
+    def test_icfg_node_carries_all_candidates(self, assembler: Assembler) -> None:
+        result = assembler.assemble(self._export_with_two_candidates())
+        marker = next(n for n in result.icfgs[0].nodes if n.remote_call_ids)
+        assert len(marker.remote_call_ids) == 2
+        assert marker.remote_call_id == marker.remote_call_ids[0]
+        assert set(marker.remote_call_ids) == {c.id for c in result.remote_calls}
 
 
 class TestEdgeCases:
@@ -201,7 +271,7 @@ class TestEdgeCases:
         assert result.icfgs == []
 
     def test_incompatible_export_version_rejected(self, assembler: Assembler) -> None:
-        export = petstore_like_export().model_copy(update={"export_schema_version": "2.0.0"})
+        export = petstore_like_export().model_copy(update={"export_schema_version": "3.0.0"})
         with pytest.raises(ExportIncompatibleError):
             assembler.assemble(export)
 
