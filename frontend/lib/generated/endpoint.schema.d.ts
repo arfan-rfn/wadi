@@ -48,6 +48,28 @@ export type Name = string
 export type Required = boolean
 export type TypeName = string | null
 export type Params = EndpointParam[]
+/**
+ * The Java field name, when it differs from the wire name
+ */
+export type JavaName = string | null
+/**
+ * Serialized name (@JsonProperty applied)
+ */
+export type Name1 = string
+/**
+ * kind=object only; @JsonIgnore omitted
+ */
+export type Fields = FieldShape[]
+/**
+ * The recovered wire-shape node kinds (§5.2.7). ``unresolved``/``cycle``/
+ * ``truncated`` are honest terminals — never fabricated fields (P10).
+ */
+export type ShapeKind =
+  "object" | "scalar" | "array" | "map" | "cycle" | "truncated" | "unresolved"
+/**
+ * Declared type, e.g. 'com.acme.Pet'
+ */
+export type TypeName1 = string
 export type ResponseType = string | null
 export type SchemaVersion = string
 export type ServiceId = string
@@ -72,6 +94,14 @@ export interface Endpoint {
   http_method: HttpMethod
   id: Id1
   params?: Params
+  /**
+   * Field-level @RequestBody shape (§5.2.7); None = no body or pre-1.6
+   */
+  request_schema?: TypeShape | null
+  /**
+   * Field-level response shape, wrappers unwrapped (§5.2.7)
+   */
+  response_schema?: TypeShape | null
   response_type?: ResponseType
   schema_version?: SchemaVersion
   service_id: ServiceId
@@ -124,4 +154,25 @@ export interface EndpointParam {
   name: Name
   required?: Required
   type_name?: TypeName
+}
+/**
+ * A recovered request/response shape (§5.2.7): the wire contract, walked
+ * from in-CPG type structure with honest terminals.
+ */
+export interface TypeShape {
+  /**
+   * Element shape for kind=array; value shape for kind=map
+   */
+  element?: TypeShape | null
+  fields?: Fields
+  kind: ShapeKind
+  type_name: TypeName1
+}
+/**
+ * One serialized field: the WIRE name (Jackson renames applied).
+ */
+export interface FieldShape {
+  java_name?: JavaName
+  name: Name1
+  shape: TypeShape
 }

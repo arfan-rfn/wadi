@@ -21,6 +21,7 @@ from wadi_contracts import (
     DataModelField,
     Endpoint,
     EndpointParam,
+    FieldShape,
     HttpMethod,
     Icfg,
     IcfgEdge,
@@ -34,8 +35,10 @@ from wadi_contracts import (
     MqInteraction,
     ParamLocation,
     RemoteCall,
+    ShapeKind,
     SinkKind,
     SourceAnchor,
+    TypeShape,
     method_id,
     mq_interaction_id,
     remote_call_id,
@@ -46,6 +49,7 @@ from wadi_joern_client.export import (
     ExportCfgEdgeLabel,
     ExportMethod,
     ExportSink,
+    ExportTypeShape,
     ServiceExport,
     SinkValueConfidence,
 )
@@ -145,6 +149,8 @@ class Assembler:
                     for param in export_endpoint.params
                 ],
                 response_type=handler.return_type,
+                request_schema=_shape(export_endpoint.request_schema),
+                response_schema=_shape(export_endpoint.response_schema),
                 auth=merge_endpoint_auth(
                     full_uri=export_endpoint.uri,
                     http_method=http_method,
@@ -575,3 +581,24 @@ class Assembler:
                     if node.id == sink.node_id:
                         return max(node.line, 1)
         return 1
+
+
+def _shape(exported: "ExportTypeShape | None") -> TypeShape | None:
+    """Recursive export→contract shape mapping (§5.2.7); identity by design."""
+    if exported is None:
+        return None
+    return TypeShape(
+        kind=ShapeKind(exported.kind),
+        type_name=exported.type_name,
+        fields=[
+            FieldShape(name=f.name, java_name=f.java_name, shape=_shape_required(f.shape))
+            for f in exported.fields
+        ],
+        element=_shape(exported.element),
+    )
+
+
+def _shape_required(exported: "ExportTypeShape") -> TypeShape:
+    shape = _shape(exported)
+    assert shape is not None
+    return shape

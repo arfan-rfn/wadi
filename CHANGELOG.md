@@ -19,6 +19,22 @@ All notable changes to wadi. One version spans the whole release set
   will be measured as a before/after on this number.
 - `wadi coverage` human output also lists unmodelled client libraries
   (the §5.4.2 census was previously JSON-only).
+- **Provider-side endpoint contracts (§5.2.7, Phase 2.5 M5):** every
+  endpoint now carries a field-level request/response wire shape.
+  `response_type: Pet` becomes `{id, display_name, stock: {…}, …}` — walked
+  from in-CPG type structure with generics recovered from the declared
+  source text (javasrc2cpg erases them in type names), wrappers unwrapped
+  (ResponseEntity/Optional/Mono/Flux/…), Jackson field semantics applied
+  (@JsonProperty renames the wire name, @JsonIgnore omits — the shape is the
+  wire contract, not the class layout), and honest terminals everywhere:
+  `unresolved` (off-CPG type — name only, never fabricated fields),
+  `cycle` (self-referencing DTOs terminate explicitly), `truncated` (depth
+  cap). Staged-library DTOs (§5.2.6 union) resolve as first-class shapes.
+  Export 2.3.0, contracts 1.6.0 (`TypeShape` on `Endpoint`), both additive.
+  The baseline harness prints a per-run schema spot-check; TrainTicket's
+  `Response{status, msg, data}` and yas's `AuthenticatedUser{username}`
+  hand-verified against source. Consumer-side `sends[]`/`reads[]` stays in
+  Phase 5 by design.
 - **T3 deployment-model resolution (§5.4.2, Phase 2.5 M4):** the deployment
   layer becomes phone-book input.
   - **Compose env surface:** `environment:` (map/list, bare pass-through

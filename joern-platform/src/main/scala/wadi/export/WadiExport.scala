@@ -35,8 +35,10 @@ object WadiExport {
     * mechanism `webclient`.
     * 2.2.0 (additive, §5.4.3): new top-level `analysis_coverage` counts —
     * production methods in the CPG vs. the endpoint-reachable subset.
+    * 2.3.0 (additive, §5.2.7): endpoints carry `request_schema` /
+    * `response_schema` — field-level wire shapes with honest terminals.
     */
-  val ExportSchemaVersion = "2.2.0"
+  val ExportSchemaVersion = "2.3.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -66,15 +68,24 @@ object WadiExport {
       method.tag.nameExact("endpoint").value.l.flatMap { value =>
         value.split(" ", 2) match {
           case Array(httpMethod, uri) =>
-            Some(
-              ujson.Obj(
+            Some {
+              val obj = ujson.Obj(
                 "method_id"   -> num(method.id),
                 "http_method" -> httpMethod,
                 "uri"         -> uri,
                 "auth_tags"   -> method.tag.nameExact("auth").value.l.map(v => s"auth=$v"),
                 "params"      -> endpointParamObjs(method)
               )
-            )
+              // §5.2.7: field-level wire shapes, honest terminals.
+              TypeShapes
+                .returnTypeTextOf(method)
+                .flatMap(TypeShapes.shapeOf(cpg, _))
+                .foreach(shape => obj("response_schema") = shape)
+              requestBodyTypeText(method)
+                .flatMap(TypeShapes.shapeOf(cpg, _))
+                .foreach(shape => obj("request_schema") = shape)
+              obj
+            }
           case _ => None
         }
       }
@@ -174,6 +185,31 @@ object WadiExport {
     "RequestBody"   -> "body",
     "RequestHeader" -> "header"
   )
+
+  /** The declared type text of the @RequestBody parameter, when present. */
+  private def requestBodyTypeText(method: Method): Option[String] =
+    method.parameter.indexGt(0).l
+      .find(_.ast.isAnnotation.exists(_.name == "RequestBody"))
+      .flatMap { parameter =>
+        val code    = parameter.code
+        val nameIdx = code.lastIndexOf(parameter.name)
+        if (nameIdx <= 0) None
+        else {
+          val before = code.substring(0, nameIdx).trim
+          // Trailing token, <>-aware — annotations are earlier tokens.
+          var depth = 0
+          var idx   = before.length - 1
+          var cut   = -1
+          while (idx >= 0 && cut < 0) {
+            val c = before(idx)
+            if (c == '>') depth += 1
+            else if (c == '<') depth -= 1
+            else if (c.isWhitespace && depth == 0) cut = idx
+            idx -= 1
+          }
+          Some(if (cut < 0) before else before.substring(cut + 1)).filter(_.nonEmpty)
+        }
+      }
 
   private def endpointParamObjs(method: Method): ujson.Arr = {
     val rows = method.parameter.indexGt(0).sortBy(_.index).flatMap { parameter =>

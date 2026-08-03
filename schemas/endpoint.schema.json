@@ -124,6 +124,40 @@
       "title": "EndpointParam",
       "type": "object"
     },
+    "FieldShape": {
+      "additionalProperties": false,
+      "description": "One serialized field: the WIRE name (Jackson renames applied).",
+      "properties": {
+        "java_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The Java field name, when it differs from the wire name",
+          "title": "Java Name"
+        },
+        "name": {
+          "description": "Serialized name (@JsonProperty applied)",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "shape": {
+          "$ref": "#/$defs/TypeShape"
+        }
+      },
+      "required": [
+        "name",
+        "shape"
+      ],
+      "title": "FieldShape",
+      "type": "object"
+    },
     "HttpMethod": {
       "enum": [
         "GET",
@@ -170,6 +204,20 @@
         "header"
       ],
       "title": "ParamLocation",
+      "type": "string"
+    },
+    "ShapeKind": {
+      "description": "The recovered wire-shape node kinds (\u00a75.2.7). ``unresolved``/``cycle``/\n``truncated`` are honest terminals \u2014 never fabricated fields (P10).",
+      "enum": [
+        "object",
+        "scalar",
+        "array",
+        "map",
+        "cycle",
+        "truncated",
+        "unresolved"
+      ],
+      "title": "ShapeKind",
       "type": "string"
     },
     "SourceAnchor": {
@@ -224,9 +272,50 @@
       ],
       "title": "TriggerKind",
       "type": "string"
+    },
+    "TypeShape": {
+      "additionalProperties": false,
+      "description": "A recovered request/response shape (\u00a75.2.7): the wire contract, walked\nfrom in-CPG type structure with honest terminals.",
+      "properties": {
+        "element": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeShape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Element shape for kind=array; value shape for kind=map"
+        },
+        "fields": {
+          "description": "kind=object only; @JsonIgnore omitted",
+          "items": {
+            "$ref": "#/$defs/FieldShape"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ShapeKind"
+        },
+        "type_name": {
+          "description": "Declared type, e.g. 'com.acme.Pet'",
+          "minLength": 1,
+          "title": "Type Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "type_name"
+      ],
+      "title": "TypeShape",
+      "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.5.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.6.0/endpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One REST endpoint of one service within a snapshot.",
@@ -263,6 +352,30 @@
       "title": "Params",
       "type": "array"
     },
+    "request_schema": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TypeShape"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Field-level @RequestBody shape (\u00a75.2.7); None = no body or pre-1.6"
+    },
+    "response_schema": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TypeShape"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Field-level response shape, wrappers unwrapped (\u00a75.2.7)"
+    },
     "response_type": {
       "anyOf": [
         {
@@ -276,7 +389,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.5.0",
+      "default": "1.6.0",
       "title": "Schema Version",
       "type": "string"
     },

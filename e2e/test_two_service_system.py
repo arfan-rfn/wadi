@@ -203,13 +203,13 @@ class TestTwoServiceSystem:
         section = coverage["analysis_coverage"]
         per_service = {e["name"]: e for e in section["services"]}
         assert set(per_service) == {"petstore", "inventory"}
-        assert per_service["petstore"]["production_methods"] == 38
-        assert per_service["petstore"]["reachable_methods"] == 33
+        assert per_service["petstore"]["production_methods"] == 44
+        assert per_service["petstore"]["reachable_methods"] == 39
         assert per_service["inventory"]["production_methods"] == 9
         assert per_service["inventory"]["reachable_methods"] == 8
-        assert section["production_methods"] == 47
-        assert section["reachable_methods"] == 41
-        assert section["coverage_percent"] == 87.2
+        assert section["production_methods"] == 53
+        assert section["reachable_methods"] == 47
+        assert section["coverage_percent"] == 88.7
 
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
@@ -329,6 +329,35 @@ class TestTwoServiceSystem:
             {"name": "id", "location": "path", "type_name": "java.lang.String", "required": True}
         ]
 
+        # 7b. Provider-side wire shapes through the public API (§5.2.7, M5):
+        # Jackson semantics, wrapper unwrapping, cycle + unresolved terminals —
+        # and the staged-union payoff: the shared-library Lombok DTO resolves
+        # to a real object shape here (module-only conformance sees unresolved).
+        petstore_eps = (
+            await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/endpoints")
+        ).json()
+        by_route = {(e["http_method"], e["full_uri"]): e for e in petstore_eps}
+        details_schema = by_route[("GET", "/catalog/pets/{id}")]["response_schema"]
+        assert details_schema["kind"] == "object"
+        field_names = [f["name"] for f in details_schema["fields"]]
+        assert "display_name" in field_names
+        assert "internalNote" not in field_names
+        listing = by_route[("GET", "/catalog/pets")]["response_schema"]
+        assert listing["kind"] == "array"
+        assert listing["element"]["type_name"] == "PetDetails"
+        create_schema = by_route[("POST", "/catalog/pets")]["request_schema"]
+        assert {f["name"] for f in create_schema["fields"]} == {"name", "breed"}
+        tree_children = next(
+            f
+            for f in by_route[("GET", "/catalog/tree")]["response_schema"]["fields"]
+            if f["name"] == "children"
+        )
+        assert tree_children["shape"]["element"]["kind"] == "cycle"
+        assert by_route[("GET", "/catalog/vendor")]["response_schema"]["kind"] == "unresolved"
+        union_shape = by_route[("GET", "/catalog/query-shape")]["response_schema"]
+        assert union_shape["kind"] == "object"  # staged union resolves StockQuery
+        assert [f["name"] for f in union_shape["fields"]] == ["id"]
+
         # 8. Recovery: restitch converges to the identical edge set.
         edges_before = sorted(e["edge_id"] for e in outbound)
         restitched = await http.post(f"/api/v1/snapshots/{snapshot_id}/restitch")
@@ -358,8 +387,8 @@ class TestTwoServiceSystem:
         assert manifest.artifact_counts == dict(sorted(received.items()))
         # The bundle mirrors the API's own answers.
         assert received["service_boundary"] == 3  # petstore + inventory + the library
-        assert received["endpoint"] == 14
-        assert received["icfg"] == 14
+        assert received["endpoint"] == 20
+        assert received["icfg"] == 20
         assert received["stitched_edge"] == coverage["totals"]["edges"]
         assert received["coverage_report"] == 1
 

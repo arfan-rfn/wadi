@@ -59,7 +59,7 @@ export type Name = string
  */
 export type ApplicationName = string | null
 /**
- * Machine-readable notes about config parsing gaps for this service (§5.4.2): 'config-multi-doc-partial' (multi-document application file, base document parsed, profile documents skipped) | 'config-profile-files-skipped:<name>' (profile-specific config file present but not merged)
+ * Machine-readable notes about config parsing for this service (§5.4.2, T3): 'config-profile-merged:<file>' / 'config-profile-doc-merged:<profiles>' (profile config merged over the base) | 'config-profile-merged-all' (active set unknown — every profile merged, over-approximation) | 'gateway-filter-unmodelled:<name>' / 'gateway-predicate-unmodelled:<name>' (gateway shape perceived but not modelled)
  */
 export type ConfigNotes = string[]
 /**
@@ -175,7 +175,7 @@ export interface NetworkIdentity {
   server_port?: ServerPort
 }
 /**
- * Network-relevant config keys (flattened application.yml allowlist; compose environment blocks are a recorded T3 gap, §5.4.2)
+ * Network-relevant config keys: flattened application.* allowlist (profiles merged, T3) plus compose environment/env_file entries in their raw env-var spelling — the stitcher's relaxed-binding lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (§5.4.2)
  */
 export interface Env {
   [k: string]: string

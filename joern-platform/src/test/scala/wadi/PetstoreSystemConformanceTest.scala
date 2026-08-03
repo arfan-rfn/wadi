@@ -39,13 +39,20 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   // --- endpoint sets per module ----------------------------------------------------
 
-  test("petstore serves exactly its eight controller endpoints") {
+  test("petstore serves exactly its fourteen controller endpoints") {
     endpoints(petstore) shouldBe Set(
       "GET /pets/{id}",
       "GET /pets",
       "PUT /pets/{id}/reserve/{count}",
       "POST /pets/{id}/alert",
       "GET /pets/summary/{id}",
+      // §5.2.7 shape probes (M5).
+      "GET /catalog/pets/{id}",
+      "GET /catalog/pets",
+      "POST /catalog/pets",
+      "GET /catalog/tree",
+      "GET /catalog/query-shape",
+      "GET /catalog/vendor",
       // §5.4.2 endpoint idioms: constant class prefix + one endpoint per
       // multi-path array entry (the yas ApiConstant / storefront+backoffice
       // idioms — CIMET emits raw constant text here; wadi resolves it).
@@ -93,8 +100,8 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     // LegacyPingProbe.ping (unwired classes), AuthForwardingInterceptor.apply
     // and CurrentRequest.bearerToken (framework-invoked, a recorded T4 root
     // class). Bodiless interface stubs count on neither side.
-    petstoreCoverage("production_methods").num.toInt shouldBe 38
-    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 33
+    petstoreCoverage("production_methods").num.toInt shouldBe 44
+    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 39
 
     val inventoryCoverage = inventory("analysis_coverage")
     // Inventory's one unreached method is SecurityConfig.filterChain — a @Bean
@@ -103,6 +110,64 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     // methods are production code, only abstract stubs are excluded.
     inventoryCoverage("production_methods").num.toInt shouldBe 9
     inventoryCoverage("reachable_production_methods").num.toInt shouldBe 8
+  }
+
+  // --- provider-side wire shapes (§5.2.7, M5) ---------------------------------------
+
+  private def endpointByUri(doc: ujson.Value, verb: String, uri: String): ujson.Value =
+    doc("endpoints").arr
+      .find(e => e("uri").str == uri && e("http_method").str == verb)
+      .get
+
+  test("response shape walks nested DTOs with Jackson wire semantics (M5)") {
+    val shape = endpointByUri(petstore, "GET", "/catalog/pets/{id}")("response_schema")
+    shape("kind").str shouldBe "object"
+    shape("type_name").str shouldBe "PetDetails"
+    val fields = shape("fields").arr.map(f => f("name").str)
+    // @JsonProperty renames; @JsonIgnore omits (wire contract, not layout).
+    fields should contain("display_name")
+    fields should not contain "internalNote"
+    val renamed = shape("fields").arr.find(_("name").str == "display_name").get
+    renamed("java_name").str shouldBe "name"
+    val stock = shape("fields").arr.find(_("name").str == "stock").get("shape")
+    stock("kind").str shouldBe "object"
+    stock("fields").arr.map(_("name").str).toSet shouldBe Set("available", "price")
+    val tags = shape("fields").arr.find(_("name").str == "tags").get("shape")
+    tags("kind").str shouldBe "array"
+    tags("element")("kind").str shouldBe "scalar"
+  }
+
+  test("generic wrappers unwrap: ResponseEntity<List<PetDetails>> (M5)") {
+    val shape = endpointByUri(petstore, "GET", "/catalog/pets")("response_schema")
+    shape("kind").str shouldBe "array"
+    shape("element")("kind").str shouldBe "object"
+    shape("element")("type_name").str shouldBe "PetDetails"
+  }
+
+  test("request body carries its own shape (M5)") {
+    val shape = endpointByUri(petstore, "POST", "/catalog/pets")("request_schema")
+    shape("kind").str shouldBe "object"
+    shape("type_name").str shouldBe "NewPetRequest"
+    shape("fields").arr.map(_("name").str).toSet shouldBe Set("name", "breed")
+  }
+
+  test("self-referencing DTOs terminate in an explicit cycle node (M5)") {
+    val shape = endpointByUri(petstore, "GET", "/catalog/tree")("response_schema")
+    val children = shape("fields").arr.find(_("name").str == "children").get("shape")
+    children("kind").str shouldBe "array"
+    children("element")("kind").str shouldBe "cycle"
+    children("element")("type_name").str shouldBe "Category"
+  }
+
+  test("off-CPG types are an honest unresolved name, never fabricated fields (M5)") {
+    val vendor = endpointByUri(petstore, "GET", "/catalog/vendor")("response_schema")
+    vendor("kind").str shouldBe "unresolved"
+    vendor("type_name").str shouldBe "VendorInfo"
+    vendor.obj.contains("fields") shouldBe false
+    // Without the staged union (module-only build) the shared-library DTO is
+    // ALSO honestly unresolved here — the e2e proves the union resolves it.
+    val query = endpointByUri(petstore, "GET", "/catalog/query-shape")("response_schema")
+    query("kind").str shouldBe "unresolved"
   }
 
   // --- URL slicing scenarios -------------------------------------------------------

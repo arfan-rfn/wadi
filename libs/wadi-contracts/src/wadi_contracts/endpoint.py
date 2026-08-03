@@ -25,6 +25,43 @@ class EndpointParam(WadiModel):
     required: bool = True
 
 
+class ShapeKind(StrEnum):
+    """The recovered wire-shape node kinds (§5.2.7). ``unresolved``/``cycle``/
+    ``truncated`` are honest terminals — never fabricated fields (P10)."""
+
+    OBJECT = "object"
+    SCALAR = "scalar"
+    ARRAY = "array"
+    MAP = "map"
+    CYCLE = "cycle"
+    TRUNCATED = "truncated"
+    UNRESOLVED = "unresolved"
+
+
+class FieldShape(WadiModel):
+    """One serialized field: the WIRE name (Jackson renames applied)."""
+
+    name: str = Field(min_length=1, description="Serialized name (@JsonProperty applied)")
+    java_name: str | None = Field(
+        default=None, description="The Java field name, when it differs from the wire name"
+    )
+    shape: "TypeShape"
+
+
+class TypeShape(WadiModel):
+    """A recovered request/response shape (§5.2.7): the wire contract, walked
+    from in-CPG type structure with honest terminals."""
+
+    kind: ShapeKind
+    type_name: str = Field(min_length=1, description="Declared type, e.g. 'com.acme.Pet'")
+    fields: list[FieldShape] = Field(
+        default_factory=list[FieldShape], description="kind=object only; @JsonIgnore omitted"
+    )
+    element: "TypeShape | None" = Field(
+        default=None, description="Element shape for kind=array; value shape for kind=map"
+    )
+
+
 class AuthEvidenceKind(StrEnum):
     ANNOTATION = "annotation"
     SECURITY_DSL = "security-dsl"
@@ -72,6 +109,14 @@ class Endpoint(ArtifactEnvelope):
     simplified_uri: str = Field(min_length=1, description="Identity form, e.g. /orders/{?}")
     params: list[EndpointParam] = Field(default_factory=list[EndpointParam])
     response_type: str | None = None
+    request_schema: TypeShape | None = Field(
+        default=None,
+        description="Field-level @RequestBody shape (§5.2.7); None = no body or pre-1.6",
+    )
+    response_schema: TypeShape | None = Field(
+        default=None,
+        description="Field-level response shape, wrappers unwrapped (§5.2.7)",
+    )
     auth: EndpointAuth = Field(default_factory=EndpointAuth)
     handler: MethodRef
     trigger: TriggerKind = TriggerKind.HTTP
@@ -103,6 +148,8 @@ class Endpoint(ArtifactEnvelope):
         handler: MethodRef,
         params: list[EndpointParam] | None = None,
         response_type: str | None = None,
+        request_schema: TypeShape | None = None,
+        response_schema: TypeShape | None = None,
         auth: EndpointAuth | None = None,
         trigger: TriggerKind = TriggerKind.HTTP,
     ) -> "Endpoint":
@@ -116,6 +163,8 @@ class Endpoint(ArtifactEnvelope):
             simplified_uri=simplify_uri(full_uri),
             params=params or [],
             response_type=response_type,
+            request_schema=request_schema,
+            response_schema=response_schema,
             auth=auth or EndpointAuth(),
             handler=handler,
             trigger=trigger,

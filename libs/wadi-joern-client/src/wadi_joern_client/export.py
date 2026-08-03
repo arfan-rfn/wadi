@@ -11,7 +11,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EXPORT_SCHEMA_VERSION = "2.2.0"
+EXPORT_SCHEMA_VERSION = "2.3.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -26,7 +26,11 @@ methods are not in the export); sink ``kind`` may be
 
 2.2.0 (additive, §5.4.3): new top-level ``analysis_coverage`` counts —
 production methods in the CPG vs. the endpoint-reachable subset; ``None``
-when the export predates the metric (never conflated with zero, P10)."""
+when the export predates the metric (never conflated with zero, P10).
+
+2.3.0 (additive, §5.2.7): endpoints carry ``request_schema`` /
+``response_schema`` — recovered field-level wire shapes with honest
+``unresolved``/``cycle``/``truncated`` terminals."""
 
 
 class ExportModelBase(BaseModel):
@@ -115,6 +119,21 @@ class ExportEndpointParam(ExportModelBase):
     required: bool = True
 
 
+class ExportTypeShape(ExportModelBase):
+    """A recovered wire shape (§5.2.7) — mirrors the contract TypeShape."""
+
+    kind: str = Field(description="object|scalar|array|map|cycle|truncated|unresolved")
+    type_name: str
+    fields: list["ExportFieldShape"] = Field(default_factory=lambda: [])
+    element: "ExportTypeShape | None" = None
+
+
+class ExportFieldShape(ExportModelBase):
+    name: str = Field(description="Serialized name (@JsonProperty applied)")
+    java_name: str | None = None
+    shape: ExportTypeShape
+
+
 class ExportEndpoint(ExportModelBase):
     method_id: int = Field(description="Handler method's Joern id")
     http_method: str
@@ -124,6 +143,8 @@ class ExportEndpoint(ExportModelBase):
         description="Registered auth= tags on the handler (raw annotation evidence)",
     )
     params: list[ExportEndpointParam] = Field(default_factory=list[ExportEndpointParam])
+    request_schema: ExportTypeShape | None = None
+    response_schema: ExportTypeShape | None = None
 
 
 class SinkValueConfidence(StrEnum):

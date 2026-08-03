@@ -98,7 +98,7 @@
           "title": "Application Name"
         },
         "config_notes": {
-          "description": "Machine-readable notes about config parsing gaps for this service (\u00a75.4.2): 'config-multi-doc-partial' (multi-document application file, base document parsed, profile documents skipped) | 'config-profile-files-skipped:<name>' (profile-specific config file present but not merged)",
+          "description": "Machine-readable notes about config parsing for this service (\u00a75.4.2, T3): 'config-profile-merged:<file>' / 'config-profile-doc-merged:<profiles>' (profile config merged over the base) | 'config-profile-merged-all' (active set unknown \u2014 every profile merged, over-approximation) | 'gateway-filter-unmodelled:<name>' / 'gateway-predicate-unmodelled:<name>' (gateway shape perceived but not modelled)",
           "items": {
             "type": "string"
           },
@@ -117,7 +117,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Network-relevant config keys (flattened application.yml allowlist; compose environment blocks are a recorded T3 gap, \u00a75.4.2)",
+          "description": "Network-relevant config keys: flattened application.* allowlist (profiles merged, T3) plus compose environment/env_file entries in their raw env-var spelling \u2014 the stitcher's relaxed-binding lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (\u00a75.4.2)",
           "title": "Env",
           "type": "object"
         },
@@ -223,7 +223,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.5.0/service_summary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.6.0/service_summary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "A service boundary plus counts aggregated at read time.",
@@ -321,7 +321,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.5.0",
+      "default": "1.6.0",
       "title": "Schema Version",
       "type": "string"
     },

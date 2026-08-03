@@ -38,5 +38,35 @@
     "http_method": "GET",
     "full_uri": "/vet/pets/checkups",
     "simplified_uri": "/vet/pets/checkups"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/catalog/pets/{id}",
+    "simplified_uri": "/catalog/pets/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/catalog/pets",
+    "simplified_uri": "/catalog/pets"
+  },
+  {
+    "http_method": "POST",
+    "full_uri": "/catalog/pets",
+    "simplified_uri": "/catalog/pets"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/catalog/tree",
+    "simplified_uri": "/catalog/tree"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/catalog/query-shape",
+    "simplified_uri": "/catalog/query-shape"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/catalog/vendor",
+    "simplified_uri": "/catalog/vendor"
   }
 ]

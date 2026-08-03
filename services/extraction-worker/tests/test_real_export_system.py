@@ -42,7 +42,7 @@ def inventory() -> ServiceExport:
 
 class TestPetstoreModule:
     def test_parses_under_schema_2(self, petstore: ServiceExport) -> None:
-        assert petstore.export_schema_version == "2.2.0"
+        assert petstore.export_schema_version == "2.3.0"
         assert petstore.compatible_with_reader()
 
     def test_analysis_coverage_matches_pinned_conformance(
@@ -51,8 +51,8 @@ class TestPetstoreModule:
         """§5.4.3: the counts pinned in PetstoreSystemConformanceTest arrive
         intact across the language boundary."""
         assert petstore.analysis_coverage is not None
-        assert petstore.analysis_coverage.production_methods == 38
-        assert petstore.analysis_coverage.reachable_production_methods == 33
+        assert petstore.analysis_coverage.production_methods == 44
+        assert petstore.analysis_coverage.reachable_production_methods == 39
         assert inventory.analysis_coverage is not None
         assert inventory.analysis_coverage.production_methods == 9
         assert inventory.analysis_coverage.reachable_production_methods == 8
@@ -213,3 +213,36 @@ class TestInventoryModule:
         stock = by_uri["/stock/{?}"].auth
         assert stock.authenticated is False  # permitAll, with evidence
         assert stock.mechanism == "spring-security"
+
+
+class TestProviderContracts:
+    """§5.2.7 (M5): wire shapes survive the Scala -> Python boundary."""
+
+    def test_response_shape_assembles_with_jackson_semantics(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        by_uri = {(e.http_method.value, e.full_uri): e for e in result.endpoints}
+        details = by_uri[("GET", "/catalog/pets/{id}")]
+        assert details.response_schema is not None
+        assert details.response_schema.kind.value == "object"
+        names = [f.name for f in details.response_schema.fields]
+        assert "display_name" in names  # @JsonProperty rename
+        assert "internalNote" not in names  # @JsonIgnore omitted
+        renamed = next(f for f in details.response_schema.fields if f.name == "display_name")
+        assert renamed.java_name == "name"
+
+    def test_request_schema_and_cycle_and_unresolved(self, petstore: ServiceExport) -> None:
+        result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)
+        by_uri = {(e.http_method.value, e.full_uri): e for e in result.endpoints}
+        create = by_uri[("POST", "/catalog/pets")]
+        assert create.request_schema is not None
+        assert {f.name for f in create.request_schema.fields} == {"name", "breed"}
+        tree = by_uri[("GET", "/catalog/tree")]
+        assert tree.response_schema is not None
+        children = next(f for f in tree.response_schema.fields if f.name == "children")
+        assert children.shape.kind.value == "array"
+        assert children.shape.element is not None
+        assert children.shape.element.kind.value == "cycle"
+        vendor = by_uri[("GET", "/catalog/vendor")]
+        assert vendor.response_schema is not None
+        assert vendor.response_schema.kind.value == "unresolved"
+        assert vendor.response_schema.fields == []

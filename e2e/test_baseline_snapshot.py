@@ -16,6 +16,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from e2e_support import requires_joern_image
@@ -151,3 +152,38 @@ class TestBaselineSnapshot:
                     f"  - {entry['name']}: {entry['reachable_methods']}/"
                     f"{entry['production_methods']} ({entry['coverage_percent']}%)"
                 )
+
+        # §5.2.7 spot-check: one recovered response schema, for hand-verification
+        # against the target repo's source.
+        def _shape_summary(shape: dict[str, Any], depth: int = 0) -> str:
+            if shape is None:
+                return "-"
+            kind = shape.get("kind")
+            if kind == "object" and depth < 2:
+                inner = ", ".join(
+                    f["name"] + ":" + _shape_summary(f["shape"], depth + 1)
+                    for f in shape.get("fields", [])[:8]
+                )
+                return f"{shape['type_name']}{{{inner}}}"
+            if kind == "array":
+                return f"[{_shape_summary(shape.get('element') or {}, depth + 1)}]"
+            return f"{shape.get('type_name')}<{kind}>"
+
+        for service in boundaries:
+            if service["kind"] != "service":
+                continue
+            endpoints = (
+                await http.get(
+                    f"/api/v1/snapshots/{snapshot_id}/services/{service['service_id']}/endpoints"
+                )
+            ).json()
+            sample = next(
+                (e for e in endpoints if (e.get("response_schema") or {}).get("kind") == "object"),
+                None,
+            )
+            if sample is not None:
+                print(
+                    f"schema spot-check: {service['name']} {sample['http_method']} "
+                    f"{sample['full_uri']} -> {_shape_summary(sample['response_schema'])}"
+                )
+                break
