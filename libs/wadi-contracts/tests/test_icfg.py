@@ -163,7 +163,9 @@ class TestIcfgIntegrity:
 
 
 class TestNodeKindPayloads:
-    def test_condition_only_on_branch_or_loop(self, method: MethodRef) -> None:
+    def test_condition_valid_on_any_real_statement_but_never_entry_exit(
+        self, method: MethodRef
+    ) -> None:
         condition = BranchCondition(
             expression="order.getTotal() > 100",
             operands=[OperandRef(name="order", origin=OperandOrigin.PAYLOAD)],
@@ -171,12 +173,30 @@ class TestNodeKindPayloads:
         node = _node("b1", IcfgNodeKind.BRANCH, method, condition=condition)
         assert node.condition is not None
         _node("l1", IcfgNodeKind.LOOP, method, condition=condition)
-        with pytest.raises(ValidationError, match="branch/loop"):
-            _node("s1", IcfgNodeKind.STATEMENT, method, condition=condition)
+        # 1.8.0 (§5.2.8): a switch-arrow carrier is a return/statement node
+        # holding the selector as its condition.
+        _node("r1", IcfgNodeKind.RETURN, method, condition=condition)
+        _node("s1", IcfgNodeKind.STATEMENT, method, condition=condition)
+        with pytest.raises(ValidationError, match="not valid on entry"):
+            _node("e1", IcfgNodeKind.ENTRY, method, condition=condition)
 
-    def test_callee_only_on_call(self, method: MethodRef) -> None:
-        with pytest.raises(ValidationError, match="call nodes"):
-            _node("s1", IcfgNodeKind.STATEMENT, method, callee=method)
+    def test_callee_valid_on_any_real_statement_but_never_entry_exit(
+        self, method: MethodRef
+    ) -> None:
+        # 1.8.0 (§5.2.8): `return svc.find(id)` is a RETURN node whose call
+        # resolves interprocedurally; a sink inside a branch condition puts
+        # the call on the BRANCH node.
+        _node("s1", IcfgNodeKind.STATEMENT, method, callee=method)
+        _node("r1", IcfgNodeKind.RETURN, method, callee=method)
+        _node("b1", IcfgNodeKind.BRANCH, method, callee=method)
+        with pytest.raises(ValidationError, match="not valid on exit"):
+            _node("x1", IcfgNodeKind.EXIT, method, callee=method)
+
+    def test_construct_kind_never_on_entry_exit(self, method: MethodRef) -> None:
+        node = _node("b1", IcfgNodeKind.BRANCH, method, construct_kind="switch")
+        assert node.construct_kind == "switch"
+        with pytest.raises(ValidationError, match="construct_kind is not valid"):
+            _node("e1", IcfgNodeKind.ENTRY, method, construct_kind="if")
 
     def test_method_info_only_on_entry(self, method: MethodRef) -> None:
         info = MethodInfo(signature=method.signature)

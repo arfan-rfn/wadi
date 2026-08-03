@@ -1,0 +1,101 @@
+{
+  "nodes": [
+    {
+      "key": "statement@26",
+      "kind": "statement",
+      "code": "int sum = 0",
+      "line": 26,
+      "line_end": 26
+    },
+    {
+      "key": "call@27",
+      "kind": "call",
+      "code": "List.of(\"a\", \"bb\", \"ccc\")",
+      "line": 27,
+      "line_end": 27,
+      "call": {
+        "callee": "java.util.List.iterator",
+        "resolved": false
+      }
+    },
+    {
+      "key": "call@27#1",
+      "kind": "call",
+      "code": "<empty>",
+      "line": 27,
+      "line_end": 27,
+      "call": {
+        "callee": "java.util.Iterator.next",
+        "resolved": false
+      }
+    },
+    {
+      "key": "loop@27",
+      "kind": "loop",
+      "code": "FOR",
+      "line": 27,
+      "line_end": 28,
+      "construct_kind": "foreach",
+      "condition_code": "for (String word : List.of(\"a\", \"bb\", \"ccc\")) {\n    sum += word.length() * n;\n}",
+      "call": {
+        "callee": "java.util.Iterator.hasNext",
+        "resolved": false
+      }
+    },
+    {
+      "key": "call@28",
+      "kind": "call",
+      "code": "sum += word.length() * n",
+      "line": 28,
+      "line_end": 28,
+      "call": {
+        "callee": "java.lang.String.length",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@30",
+      "kind": "return",
+      "code": "return String.valueOf(sum);",
+      "line": 30,
+      "line_end": 30,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "call@27",
+      "target": "loop@27",
+      "label": "flow"
+    },
+    {
+      "source": "call@27#1",
+      "target": "call@28",
+      "label": "flow"
+    },
+    {
+      "source": "call@28",
+      "target": "loop@27",
+      "label": "flow",
+      "back": true
+    },
+    {
+      "source": "loop@27",
+      "target": "call@27#1",
+      "label": "true"
+    },
+    {
+      "source": "loop@27",
+      "target": "return@30",
+      "label": "false"
+    },
+    {
+      "source": "statement@26",
+      "target": "call@27",
+      "label": "flow"
+    }
+  ]
+}

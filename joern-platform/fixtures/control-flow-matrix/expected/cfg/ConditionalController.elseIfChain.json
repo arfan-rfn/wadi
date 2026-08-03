@@ -1,0 +1,91 @@
+{
+  "nodes": [
+    {
+      "key": "branch@36",
+      "kind": "branch",
+      "code": "if (n < 0)",
+      "line": 36,
+      "line_end": 43,
+      "construct_kind": "if",
+      "condition_code": "n < 0"
+    },
+    {
+      "key": "return@37",
+      "kind": "return",
+      "code": "return \"negative\";",
+      "line": 37,
+      "line_end": 37
+    },
+    {
+      "key": "branch@38",
+      "kind": "branch",
+      "code": "if (n == 0)",
+      "line": 38,
+      "line_end": 43,
+      "construct_kind": "if",
+      "condition_code": "n == 0"
+    },
+    {
+      "key": "return@39",
+      "kind": "return",
+      "code": "return \"zero\";",
+      "line": 39,
+      "line_end": 39
+    },
+    {
+      "key": "branch@40",
+      "kind": "branch",
+      "code": "if (n < 10)",
+      "line": 40,
+      "line_end": 43,
+      "construct_kind": "if",
+      "condition_code": "n < 10"
+    },
+    {
+      "key": "return@41",
+      "kind": "return",
+      "code": "return \"small\";",
+      "line": 41,
+      "line_end": 41
+    },
+    {
+      "key": "return@43",
+      "kind": "return",
+      "code": "return \"large\";",
+      "line": 43,
+      "line_end": 43
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@36",
+      "target": "branch@38",
+      "label": "false"
+    },
+    {
+      "source": "branch@36",
+      "target": "return@37",
+      "label": "true"
+    },
+    {
+      "source": "branch@38",
+      "target": "branch@40",
+      "label": "false"
+    },
+    {
+      "source": "branch@38",
+      "target": "return@39",
+      "label": "true"
+    },
+    {
+      "source": "branch@40",
+      "target": "return@41",
+      "label": "true"
+    },
+    {
+      "source": "branch@40",
+      "target": "return@43",
+      "label": "false"
+    }
+  ]
+}

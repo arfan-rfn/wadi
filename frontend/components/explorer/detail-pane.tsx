@@ -140,8 +140,21 @@ export function DetailPane({
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         <span className="font-mono text-[11px] text-muted-foreground">
                           {method.statementCount} stmt · {method.branchCount}{" "}
-                          branch · {method.callCount} call
+                          branch · {method.loopCount} loop · {method.callCount}{" "}
+                          call
                         </span>
+                        {Object.entries(method.constructCounts).map(
+                          ([construct, count]) => (
+                            <Badge
+                              key={construct}
+                              variant="outline"
+                              className="px-1.5 py-0 font-mono text-[10px] text-muted-foreground"
+                            >
+                              {construct}
+                              {count > 1 ? ` ×${count}` : ""}
+                            </Badge>
+                          )
+                        )}
                         {method.sinks.map((sink) => {
                           const meta = SINK_META[sink]
                           const Icon = meta?.icon ?? Database

@@ -1,0 +1,79 @@
+{
+  "nodes": [
+    {
+      "key": "statement@29",
+      "kind": "statement",
+      "code": "try",
+      "line": 29,
+      "line_end": 34,
+      "construct_kind": "try"
+    },
+    {
+      "key": "statement@30",
+      "kind": "statement",
+      "code": "int quotient = 100 / n",
+      "line": 30,
+      "line_end": 30
+    },
+    {
+      "key": "statement@31",
+      "kind": "statement",
+      "code": "int[] window = new int[4]",
+      "line": 31,
+      "line_end": 31
+    },
+    {
+      "key": "return@32",
+      "kind": "return",
+      "code": "return String.valueOf(quotient + window[n]);",
+      "line": 32,
+      "line_end": 32,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@33",
+      "kind": "statement",
+      "code": "catch",
+      "line": 33,
+      "line_end": 34,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@34",
+      "kind": "return",
+      "code": "return \"arithmetic-or-bounds\";",
+      "line": 34,
+      "line_end": 34
+    }
+  ],
+  "edges": [
+    {
+      "source": "return@32",
+      "target": "statement@33",
+      "label": "exception"
+    },
+    {
+      "source": "statement@29",
+      "target": "statement@30",
+      "label": "flow"
+    },
+    {
+      "source": "statement@30",
+      "target": "statement@31",
+      "label": "flow"
+    },
+    {
+      "source": "statement@31",
+      "target": "return@32",
+      "label": "flow"
+    },
+    {
+      "source": "statement@33",
+      "target": "return@34",
+      "label": "flow"
+    }
+  ]
+}

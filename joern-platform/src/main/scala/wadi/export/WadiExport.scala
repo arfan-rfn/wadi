@@ -4,7 +4,9 @@ import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{
   AstNode,
   Call,
+  CfgNode,
   ControlStructure,
+  JumpTarget,
   Method,
   TypeDecl
 }
@@ -21,11 +23,18 @@ import wadi.slicing.UrlSlicer
   * `wadi_joern_client/export.py`, version below must track its major) to the
   * shared workspace volume. The CPGQL channel never carries bulk data.
   *
-  * Statement coarsening: statements are the AST nodes whose parent is a
-  * BLOCK (assignments and standalone calls are CALL nodes, control structures
-  * and returns their own kinds); the expression-level CFG is projected onto
-  * them (an edge between statements exists iff some expression-level CFG edge
-  * crosses them). IF-statement edges are relabeled true/false from the AST.
+  * Statement coarsening (§5.2.8): statements are the AST nodes whose parent
+  * is a BLOCK (assignments and standalone calls are CALL nodes, control
+  * structures and returns their own kinds), plus CATCH/FINALLY handlers
+  * (children of their TRY, not of a block). The expression-level CFG is
+  * projected onto them, walking transitively THROUGH nodes with no enclosing
+  * statement (BLOCKs, JUMP_TARGETs — the synchronized/labeled-jump routing).
+  * Edges are then given construct semantics: IF and loop successors labeled
+  * true/false (+ a `back` flag on cycle-closing loop edges), switch selectors
+  * emit one labeled case/default edge per arm with fallthrough made explicit,
+  * try/catch/finally containers route their interiors (catch entry =
+  * `exception` edge), and an explicit throw links to its handler on exact
+  * catch-type match.
   */
 object WadiExport {
 
@@ -48,8 +57,16 @@ object WadiExport {
     * endpoints ∪ async roots and traverses METHOD_REFs (lambdas, method
     * refs), anonymous-class bodies, constructor/`<clinit>` bodies; the
     * coverage denominator counts lambda bodies.
+    * 2.5.0 (additive, §5.2.8): CFG nodes carry `construct` (if/switch/
+    * switch-arrow/for/foreach/while/do-while/try/catch/finally/throw/break/
+    * continue/goto) and real `line_end` extents; SWITCH becomes a `branch`
+    * node keeping its selector condition; edges gain labels `case` (with
+    * `case_values`), `default`, `fallthrough`, `exception`, and a `back`
+    * flag on cycle-closing loop edges; if-without-else emits an explicit
+    * `false` join edge; catch/finally handlers are graph nodes; sinks inside
+    * conditions/throws/for-headers attach to their statement.
     */
-  val ExportSchemaVersion = "2.4.0"
+  val ExportSchemaVersion = "2.5.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -349,13 +366,32 @@ object WadiExport {
   /** Container control structures may legitimately hold nested statements;
     * everything else (calls, returns, throws) is a leaf — frontend lowering
     * artifacts inside them (e.g. `throw new X()` desugaring) are not statements.
+    * MATCH (arrow switch) is a container so block-bodied `yield` arm interiors
+    * survive; CATCH/FINALLY are containers so handler bodies stay legible.
     */
-  private val ContainerStructureTypes = Set("IF", "FOR", "WHILE", "DO", "SWITCH", "TRY", "ELSE")
+  private val ContainerStructureTypes =
+    Set("IF", "FOR", "WHILE", "DO", "SWITCH", "MATCH", "TRY", "CATCH", "FINALLY", "ELSE")
+
+  private val HandlerStructureTypes = Set("CATCH", "FINALLY")
+  private val LoopStructureTypes    = Set("FOR", "WHILE", "DO")
 
   private def isLeafStatement(node: AstNode): Boolean = node match {
     case cs: ControlStructure => !ContainerStructureTypes.contains(cs.controlStructureType)
     case _                    => true
   }
+
+  /** Statement admission (§5.2.8): block children, plus CATCH/FINALLY handlers
+    * whose AST parent is their TRY control structure, never a block.
+    */
+  private def isStatementPosition(node: AstNode): Boolean =
+    node.astParent.isBlock || (node match {
+      case cs: ControlStructure if HandlerStructureTypes.contains(cs.controlStructureType) =>
+        cs.astParent match {
+          case parent: ControlStructure => parent.controlStructureType == "TRY"
+          case _                        => false
+        }
+      case _ => false
+    })
 
   /** Statement nodes of a method: AST children of blocks, in line order,
     * excluding lowering artifacts nested inside leaf statements.
@@ -363,7 +399,7 @@ object WadiExport {
   private def statementsOf(method: Method): List[AstNode] = {
     val candidates = method.ast
       .filter(node => StatementLabels.contains(node.label))
-      .filter(node => node.astParent.isBlock)
+      .filter(isStatementPosition)
       .filterNot {
         case call: Call => call.name == "<operator>.fieldAccess" // bare field reads aren't statements
         case _          => false
@@ -383,6 +419,13 @@ object WadiExport {
     val leafIds = candidates.filter(isLeafStatement).map(_.id).toSet
     var current = node.astParent
     while (current != null && !current.isInstanceOf[Method]) {
+      current match {
+        // An expression-position MATCH shields its interior: `int b = switch(n)
+        // {...}` is a leaf CALL, but the yield-arm statements inside the MATCH
+        // are real statements, not lowering artifacts.
+        case cs: ControlStructure if cs.controlStructureType == "MATCH" => return false
+        case _                                                          => ()
+      }
       if (leafIds.contains(current.id) && candidateIds.contains(current.id)) return true
       current = current.astParent
     }
@@ -429,7 +472,7 @@ object WadiExport {
     val enclosing = nearestEnclosingStatement(method, statementIds)
 
     val nodeObjs = statements.map { statement =>
-      val (kind, callInfo) = classify(statement, exportedMethodIds)
+      val (kind, construct, callInfo) = classify(statement, exportedMethodIds, enclosing)
       callInfo.flatMap(_.sinkTag).foreach { case (sinkKind, sinkCall) =>
         sinkRows ++= sinkRowsFor(cpg, statement.id, method.id, sinkKind, sinkCall)
       }
@@ -438,8 +481,9 @@ object WadiExport {
         "kind"     -> kind,
         "code"     -> firstLine(statement.code),
         "line"     -> lineOf(statement.lineNumber),
-        "line_end" -> lineOf(statement.lineNumber)
+        "line_end" -> lineEndOf(statement)
       )
+      construct.foreach(c => obj("construct_kind") = c)
       callInfo.foreach { info =>
         obj("call") = ujson.Obj(
           "callee_full_name" -> info.calleeFullName,
@@ -451,63 +495,400 @@ object WadiExport {
       statement match {
         case cs: ControlStructure =>
           cs.condition.headOption.foreach(condition => obj("condition_code") = condition.code)
-        case _ => ()
+        case _ =>
+          // An expression-position arrow switch marks its carrier statement
+          // (`return switch(n){…}` / `int b = switch(n){…}`) — §5.2.8.
+          expressionMatchOf(statement, enclosing).foreach { m =>
+            obj("construct_kind") = "switch-arrow"
+            m.condition.headOption.foreach(c => obj("condition_code") = c.code)
+          }
       }
       obj
     }
 
-    // Project the expression-level CFG onto statements.
+    val projected = projectEdges(method, enclosing)
+    val semantics = new EdgeSemantics(projected, statements, statementIds, enclosing)
+    semantics.labelIfEdges()
+    semantics.labelLoopEdges()
+    semantics.routeContainers()
+    semantics.labelSwitchEdges()
+    semantics.fixJumpEdges()
+
+    ujson.Obj(
+      "method_id" -> num(method.id),
+      "nodes"     -> nodeObjs,
+      "edges"     -> semantics.edgeObjs
+    )
+  }
+
+  /** Project the expression-level CFG onto statements, walking transitively
+    * THROUGH nodes with no enclosing statement (BLOCK wrappers, JUMP_TARGETs —
+    * the synchronized/labeled-jump routing, §5.2.8). Self-edges are dropped:
+    * every statement's internal expression chain projects onto itself, so a
+    * self-edge carries no signal (statement-level self-loops are a recorded
+    * non-representable, §5.2.8).
+    */
+  private def projectEdges(
+    method: Method,
+    enclosing: mutable.Map[Long, Long]
+  ): mutable.LinkedHashSet[(Long, Long)] = {
     val projected = mutable.LinkedHashSet.empty[(Long, Long)]
     method.cfgNode.l.foreach { cfgNode =>
       enclosing.get(cfgNode.id).foreach { sourceStatement =>
-        cfgNode._cfgOut.foreach { successor =>
-          enclosing.get(successor.id).foreach { targetStatement =>
-            if (sourceStatement != targetStatement)
-              projected.add((sourceStatement, targetStatement))
+        val seen  = mutable.Set.empty[Long]
+        val queue = mutable.Queue.empty[CfgNode]
+        cfgNode._cfgOut.foreach {
+          case c: CfgNode => queue.enqueue(c)
+          case _          => ()
+        }
+        while (queue.nonEmpty) {
+          val successor = queue.dequeue()
+          if (seen.add(successor.id)) {
+            enclosing.get(successor.id) match {
+              case Some(targetStatement) =>
+                if (sourceStatement != targetStatement)
+                  projected.add((sourceStatement, targetStatement))
+              case None =>
+                successor._cfgOut.foreach {
+                  case c: CfgNode => queue.enqueue(c)
+                  case _          => ()
+                }
+            }
+          }
+        }
+      }
+    }
+    projected
+  }
+
+  /** §5.2.8 construct semantics over the projected statement edges: labeling,
+    * container routing, switch case structure, throw→handler linkage.
+    */
+  private final class EdgeSemantics(
+    projected: mutable.LinkedHashSet[(Long, Long)],
+    statements: List[AstNode],
+    statementIds: Set[Long],
+    enclosing: mutable.Map[Long, Long]
+  ) {
+    private val edges      = mutable.LinkedHashSet.from(projected)
+    private val labels     = mutable.Map.empty[(Long, Long), String]
+    private val caseValues = mutable.Map.empty[(Long, Long), List[String]]
+    private val backEdges  = mutable.Set.empty[(Long, Long)]
+
+    private val statementById = statements.map(s => s.id -> s).toMap
+
+    private def controlStructures(types: Set[String]): List[ControlStructure] =
+      statements.collect {
+        case cs: ControlStructure if types.contains(cs.controlStructureType) => cs
+      }
+
+    /** Statement ids AST-contained in `root` (excluding `root` itself). */
+    private def interiorOf(root: AstNode): Set[Long] =
+      root.ast.filter(n => n.id != root.id && statementIds.contains(n.id)).map(_.id).toSet
+
+    /** A loop's BODY statements: the last block child (a `for`'s init/update
+      * live in the FOR's AST but outside the body — an init→loop edge is the
+      * loop ENTRY, never a back edge).
+      */
+    private def loopBodyOf(loop: ControlStructure): Set[Long] =
+      loop.astChildren.isBlock.lastOption.map(interiorOf).getOrElse(Set.empty)
+
+    private def interiorIn(roots: List[AstNode]): Set[Long] =
+      roots.flatMap(r => r.ast.filter(n => statementIds.contains(n.id)).map(_.id)).toSet
+
+    /** IF successors: arm-entry edges labeled per arm; without an `else`, the
+      * join edge IS where control goes on false — labeled `false` (§5.2.8).
+      */
+    def labelIfEdges(): Unit =
+      controlStructures(Set("IF")).foreach { ifS =>
+        val trueIds  = interiorIn(ifS.whenTrue.l)
+        val falseIds = interiorIn(ifS.whenFalse.l)
+        val hasElse  = ifS.whenFalse.nonEmpty
+        edges.filter(_._1 == ifS.id).foreach { edge =>
+          if (trueIds.contains(edge._2)) labels(edge) = "true"
+          else if (falseIds.contains(edge._2)) labels(edge) = "false"
+          else if (!hasElse) labels(edge) = "false"
+        }
+      }
+
+    /** Loop successors labeled like IF (`true` = body, `false` = exit) plus a
+      * `back` flag on cycle-closing edges: interior→loop for for/while/foreach,
+      * loop→interior re-entry for do-while (the condition runs after the body).
+      * A nested loop's exit edge (inner→outer) is both the inner's `false`
+      * successor and the outer's back edge — both marks apply.
+      */
+    def labelLoopEdges(): Unit =
+      controlStructures(LoopStructureTypes).foreach { loop =>
+        val body = loopBodyOf(loop)
+        val isDo = loop.controlStructureType == "DO"
+        edges.foreach { edge =>
+          if (edge._1 == loop.id) {
+            if (body.contains(edge._2)) {
+              labels(edge) = "true"
+              // do-while runs its condition AFTER the body: loop→body is the
+              // re-entry that closes the cycle. body→loop is forward flow.
+              if (isDo) backEdges += edge
+            } else labels(edge) = "false"
+          } else if (edge._2 == loop.id && body.contains(edge._1) && !isDo) {
+            backEdges += edge
+          }
+        }
+      }
+
+    /** TRY/CATCH/FINALLY become routing nodes: every edge entering a
+      * container's first interior statement from outside is rerouted through
+      * the container node — catch entries as `exception` edges (javasrc2cpg's
+      * try-tail→handler approximation made explicit), try/finally entries keep
+      * the incoming label. Innermost containers route first so nesting holds.
+      */
+    def routeContainers(): Unit = {
+      val containers = controlStructures(Set("TRY") ++ HandlerStructureTypes)
+        .sortBy(cs => -astDepth(cs))
+      containers.foreach { container =>
+        val interior = interiorOf(container)
+        if (interior.nonEmpty) {
+          val entry = interior.minBy { id =>
+            val s = statementById(id)
+            (lineOf(s.lineNumber), id)
+          }
+          val isCatch = container.controlStructureType == "CATCH"
+          val incoming = edges.toList.filter { case (s, t) =>
+            t == entry && s != container.id && !interior.contains(s)
+          }
+          incoming.foreach { edge =>
+            val viaContainer = (edge._1, container.id)
+            edges -= edge
+            edges += viaContainer
+            labels(viaContainer) =
+              if (isCatch) "exception" else labels.getOrElse(edge, "flow")
+            labels.remove(edge)
+          }
+          // Always connect container→entry — a try that opens the method has
+          // no incoming edge to reroute, and an unconnected container would be
+          // entry-patched straight to exit downstream.
+          val toEntry = (container.id, entry)
+          edges += toEntry
+          labels.getOrElseUpdate(toEntry, "flow")
+        }
+      }
+    }
+
+    /** Labeled jumps inherit javasrc2cpg's approximation: the label's
+      * JUMP_TARGET re-enters at the labeled statement's start — for
+      * `continue outer` an acceptable statement-level shape, for `break outer`
+      * a false cycle (a break EXITS the loop). Redirect: a break edge landing
+      * inside an enclosing loop's subtree goes to that loop's `false` (exit)
+      * successors instead; a continue edge landing inside goes to the loop
+      * node itself. Every continue→loop edge is cycle-closing → `back`.
+      */
+    def fixJumpEdges(): Unit = {
+      val jumps = controlStructures(Set("BREAK", "CONTINUE"))
+      jumps.foreach { jump =>
+        val isBreak = jump.controlStructureType == "BREAK"
+        val enclosingLoops = enclosingChain(jump).collect {
+          case cs: ControlStructure
+              if LoopStructureTypes.contains(cs.controlStructureType) &&
+                statementIds.contains(cs.id) =>
+            cs
+        }
+        edges.toList.filter(_._1 == jump.id).foreach { edge =>
+          val target = edge._2
+          enclosingLoops.find(l => l.id == target || interiorOf(l).contains(target)) match {
+            case Some(loop) if isBreak =>
+              edges -= edge
+              labels.remove(edge)
+              edges.toList.filter(e => e._1 == loop.id && labels.get(e).contains("false")).foreach {
+                exitEdge =>
+                  val redirected = (jump.id, exitEdge._2)
+                  edges += redirected
+                  labels.getOrElseUpdate(redirected, "flow")
+              }
+            case Some(loop) if !isBreak && target != loop.id =>
+              edges -= edge
+              labels.remove(edge)
+              val toLoop = (jump.id, loop.id)
+              edges += toLoop
+              labels.getOrElseUpdate(toLoop, "flow")
+              backEdges += toLoop
+            case Some(loop) => // continue already targeting its loop node
+              backEdges += edge
+            case None => ()
           }
         }
       }
     }
 
-    // Relabel IF edges as true/false from the AST.
-    val labels = mutable.Map.empty[(Long, Long), String]
-    statements.collect { case cs: ControlStructure if cs.controlStructureType == "IF" => cs }.foreach { ifStatement =>
-      firstStatementIn(ifStatement.whenTrue.l, statementIds, enclosing, ifStatement.id).foreach {
-        target => labels((ifStatement.id, target)) = "true"
-      }
-      firstStatementIn(ifStatement.whenFalse.l, statementIds, enclosing, ifStatement.id).foreach {
-        target => labels((ifStatement.id, target)) = "false"
-      }
-    }
+    /** Switch selectors (classic SWITCH and statement-position MATCH): label
+      * each selector→arm edge `case`/`default` with the arm's stacked case
+      * values; rewrite the projection's fallthrough artifact (body→switch,
+      * a fabricated cycle) into an explicit body→next-arm `fallthrough` edge;
+      * drop the phantom selector→join edge when a `default` arm exists.
+      */
+    def labelSwitchEdges(): Unit =
+      controlStructures(Set("SWITCH", "MATCH")).foreach { switch =>
+        val interior = interiorOf(switch)
+        val groups   = caseGroupsOf(switch)
+        val groupOfStatement: Map[Long, Int] = groups.zipWithIndex.flatMap {
+          case (group, idx) => group.statementIds.map(_ -> idx)
+        }.toMap
+        val entryEdgeTarget = mutable.Map.empty[Int, Long]
 
-    ujson.Obj(
-      "method_id" -> num(method.id),
-      "nodes"     -> nodeObjs,
-      "edges" -> projected.toList.map { case (source, target) =>
-        ujson.Obj(
+        edges.filter(_._1 == switch.id).toList.foreach { edge =>
+          groupOfStatement.get(edge._2) match {
+            case Some(idx) =>
+              val group = groups(idx)
+              entryEdgeTarget(idx) = edge._2
+              if (group.isDefault) labels(edge) = "default"
+              else {
+                labels(edge) = "case"
+                caseValues(edge) = group.values
+              }
+            case None =>
+              // Selector→join: infeasible when a default arm exists (§5.2.8).
+              if (groups.exists(_.isDefault)) {
+                edges -= edge
+                labels.remove(edge)
+              }
+          }
+        }
+
+        // Fallthrough artifacts: an interior statement's edge BACK to the
+        // switch is the projection of body-end→next-JUMP_TARGET.
+        edges.toList.filter(e => e._2 == switch.id && interior.contains(e._1)).foreach { edge =>
+          edges -= edge
+          labels.remove(edge)
+          groupOfStatement.get(edge._1).foreach { idx =>
+            groups.zipWithIndex.drop(idx + 1).collectFirst {
+              case (g, i) if g.statementIds.nonEmpty => i
+            }.foreach { nextIdx =>
+              val target = entryEdgeTarget
+                .get(nextIdx)
+                .orElse(groups(nextIdx).firstStatementId(statementById, enclosing))
+              target.foreach { t =>
+                val fallthrough = (edge._1, t)
+                edges += fallthrough
+                labels(fallthrough) = "fallthrough"
+              }
+            }
+          }
+        }
+      }
+
+    // Throw→handler linkage is deliberately absent: javasrc2cpg drops the
+    // catch parameter (no Local, no type — §5.2.8), so typed matching is
+    // impossible and an untyped guess would mislead the map (P10).
+
+    def edgeObjs: List[ujson.Obj] =
+      edges.toList.map { case edge @ (source, target) =>
+        val obj = ujson.Obj(
           "source" -> num(source),
           "target" -> num(target),
-          "label"  -> labels.getOrElse((source, target), "flow")
+          "label"  -> labels.getOrElse(edge, "flow")
         )
+        caseValues.get(edge).foreach(values => obj("case_values") = values)
+        if (backEdges.contains(edge)) obj("back") = true
+        obj
       }
-    )
+
+    // --- switch case structure -------------------------------------------------
+
+    private case class CaseGroup(
+      values: List[String],
+      isDefault: Boolean,
+      bodyRoots: List[AstNode]
+    ) {
+      lazy val statementIds: Set[Long] =
+        bodyRoots.flatMap(r => r.ast.filter(n => n.label != "JUMP_TARGET").map(_.id)).toSet
+
+      def firstStatementId(
+        statementById: Map[Long, AstNode],
+        enclosing: mutable.Map[Long, Long]
+      ): Option[Long] =
+        bodyRoots.iterator
+          .flatMap(_.ast.l)
+          .flatMap(n => enclosing.get(n.id))
+          .find(statementById.contains)
+    }
+
+    /** Partition a switch body's children into (case labels, arm body) groups
+      * in source order; stacked labels (`case 1: case 2:` / `case 1, 2 ->`)
+      * share one group.
+      */
+    private def caseGroupsOf(switch: ControlStructure): List[CaseGroup] = {
+      val children = switch.astChildren.isBlock.headOption
+        .map(_.astChildren.l)
+        .getOrElse(Nil)
+        .sortBy(n => n.order)
+      val groups        = mutable.ListBuffer.empty[CaseGroup]
+      var currentBodies = mutable.ListBuffer.empty[AstNode]
+      var currentLabels = List.empty[JumpTarget]
+      def flush(): Unit = {
+        if (currentLabels.nonEmpty) {
+          groups += CaseGroup(
+            values = currentLabels.filterNot(_.name == "default").map(_.code),
+            isDefault = currentLabels.exists(_.name == "default"),
+            bodyRoots = currentBodies.toList
+          )
+        }
+        currentLabels = Nil
+        currentBodies = mutable.ListBuffer.empty[AstNode]
+      }
+      children.foreach {
+        case jt: JumpTarget =>
+          if (currentBodies.nonEmpty) flush()
+          currentLabels = currentLabels ++ List(jt)
+        case other =>
+          currentBodies += other
+      }
+      flush()
+      groups.toList
+    }
+
+    // --- throw→handler matching ------------------------------------------------
+
+    private def astDepth(node: AstNode): Int = {
+      var depth   = 0
+      var current = node.astParent
+      while (current != null && !current.isInstanceOf[Method] && depth < 10_000) {
+        depth += 1
+        current = current.astParent
+      }
+      depth
+    }
+
+    /** All AST-ancestor control structures of a node, nearest first. */
+    private def enclosingChain(node: AstNode): List[ControlStructure] = {
+      val chain   = mutable.ListBuffer.empty[ControlStructure]
+      var current = node.astParent
+      var steps   = 0
+      while (current != null && !current.isInstanceOf[Method] && steps < 10_000) {
+        current match {
+          case cs: ControlStructure => chain += cs
+          case _                    => ()
+        }
+        current = current.astParent
+        steps += 1
+      }
+      chain.toList
+    }
   }
 
-  /** The first statement inside a branch arm's subtree (for true/false labels).
-    *
-    * The arm's Block itself maps up to the surrounding IF — exclude it, or a
-    * branch label would degenerate to a self-loop.
+  private def lineEndOf(statement: AstNode): Int = {
+    val own = lineOf(statement.lineNumber)
+    val max = statement.ast.flatMap(n => n.lineNumber.map(_.toString.toInt)).maxOption.getOrElse(own)
+    math.max(own, max)
+  }
+
+  /** The MATCH control structure carried in expression position by this
+    * statement (its own enclosing statement is this one), if any.
     */
-  private def firstStatementIn(
-    roots: List[AstNode],
-    statementIds: Set[Long],
-    enclosing: mutable.Map[Long, Long],
-    excludeStatementId: Long
-  ): Option[Long] =
-    roots.iterator
-      .flatMap(_.ast.l)
-      .flatMap(node => enclosing.get(node.id))
-      .find(id => statementIds.contains(id) && id != excludeStatementId)
+  private def expressionMatchOf(
+    statement: AstNode,
+    enclosing: mutable.Map[Long, Long]
+  ): Option[ControlStructure] =
+    statement.ast
+      .collectAll[ControlStructure]
+      .find(m => m.controlStructureType == "MATCH" && enclosing.get(m.id).contains(statement.id))
 
   private case class CallInfo(
     calleeFullName: String,
@@ -517,27 +898,60 @@ object WadiExport {
     sinkTag: Option[(String, Call)]
   )
 
-  private def classify(statement: AstNode, exportedMethodIds: Set[Long]): (String, Option[CallInfo]) =
+  private def constructOf(cs: ControlStructure): String = cs.controlStructureType match {
+    case "IF"       => "if"
+    case "SWITCH"   => "switch"
+    case "MATCH"    => "switch-arrow"
+    case "FOR"      => "for"
+    case "WHILE"    => if (cs.code == "FOR") "foreach" else "while"
+    case "DO"       => "do-while"
+    case "TRY"      => "try"
+    case "CATCH"    => "catch"
+    case "FINALLY"  => "finally"
+    case "THROW"    => "throw"
+    case "BREAK"    => "break"
+    case "CONTINUE" => "continue"
+    case "GOTO"     => "goto"
+    case other      => other.toLowerCase
+  }
+
+  private def classify(
+    statement: AstNode,
+    exportedMethodIds: Set[Long],
+    enclosing: mutable.Map[Long, Long]
+  ): (String, Option[String], Option[CallInfo]) =
     statement match {
       case cs: ControlStructure =>
-        cs.controlStructureType match {
-          case "IF"                        => ("branch", None)
-          case "FOR" | "WHILE" | "DO"      => ("loop", None)
-          case _                           => ("statement", None)
+        val kind = cs.controlStructureType match {
+          case "IF" | "SWITCH" | "MATCH" => "branch"
+          case "FOR" | "WHILE" | "DO"    => "loop"
+          case _                         => "statement"
         }
+        // Calls the node itself owns (condition, for-header, throw argument —
+        // never body statements, which claim their own): sinks inside
+        // conditions and throws finally produce sink rows (§5.2.8).
+        (kind, Some(constructOf(cs)), primaryCallOf(statement, exportedMethodIds, enclosing))
       case _ if statement.label == "RETURN" =>
-        ("return", primaryCallOf(statement, exportedMethodIds))
+        ("return", None, primaryCallOf(statement, exportedMethodIds, enclosing))
       case _ =>
-        primaryCallOf(statement, exportedMethodIds) match {
-          case some @ Some(_) => ("call", some)
-          case None           => ("statement", None)
+        primaryCallOf(statement, exportedMethodIds, enclosing) match {
+          case some @ Some(_) => ("call", None, some)
+          case None           => ("statement", None, None)
         }
     }
 
-  /** The most interesting real (non-operator) call inside a statement subtree. */
-  private def primaryCallOf(statement: AstNode, exportedMethodIds: Set[Long]): Option[CallInfo] = {
+  /** The most interesting real (non-operator) call the statement itself owns
+    * (nearest enclosing statement is this one — container bodies never
+    * double-claim their statements' calls).
+    */
+  private def primaryCallOf(
+    statement: AstNode,
+    exportedMethodIds: Set[Long],
+    enclosing: mutable.Map[Long, Long]
+  ): Option[CallInfo] = {
     val realCalls = statement.ast.isCall
       .filterNot(_.name.startsWith(OperatorPrefix))
+      .filter(call => enclosing.get(call.id).contains(statement.id))
       .l
       .sortBy(_.id)
     // Prefer a tagged sink call, then one that resolves into the export, then the first.

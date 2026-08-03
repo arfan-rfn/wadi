@@ -26,6 +26,20 @@
     "IcfgEdge": {
       "additionalProperties": false,
       "properties": {
+        "back": {
+          "default": false,
+          "description": "Cycle-closing loop edge (\u00a75.2.8); orthogonal to kind (do-while: true+back)",
+          "title": "Back",
+          "type": "boolean"
+        },
+        "case_values": {
+          "description": "Stacked case labels on a `case` edge (source text of each value); empty on every other kind (\u00a75.2.8).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Case Values",
+          "type": "array"
+        },
         "kind": {
           "$ref": "#/$defs/IcfgEdgeKind"
         },
@@ -49,10 +63,14 @@
       "type": "object"
     },
     "IcfgEdgeKind": {
+      "description": "Intra-method flow labels plus interprocedural call/return.\n\n1.8.0 (\u00a75.2.8): ``case``/``default`` (switch selector \u2192 arm, case values on\nthe edge), ``fallthrough`` (case body \u2192 next arm), and ``exception``\n(try-tail \u2192 catch handler) gain writers; cycle-closing loop edges carry the\nedge-level ``back`` flag rather than a kind of their own (an edge can be\nboth a ``true`` body edge and a back edge \u2014 do-while).",
       "enum": [
         "flow",
         "true",
         "false",
+        "case",
+        "default",
+        "fallthrough",
         "call",
         "return",
         "exception"
@@ -87,6 +105,19 @@
             }
           ],
           "default": null
+        },
+        "construct_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which Java construct this node is (\u00a75.2.8): if | switch | switch-arrow | for | foreach | while | do-while | try | catch | finally | throw | break | continue | goto. None = plain statement or an artifact predating 1.8.0 (unknown, not 'statement' \u2014 P10). (Named construct_kind because pydantic reserves `construct`.)",
+          "title": "Construct Kind"
         },
         "id": {
           "minLength": 1,
@@ -376,7 +407,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.7.0/icfg.schema.json",
+  "$id": "https://trywadi.com/schemas/1.8.0/icfg.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The assembled ICFG of one endpoint (statement-granularity, coarsened).\n\nThe root is *explicit* (``entry_node_id``), never inferred from topology:\na recursive flow back into the handler would give the root incoming\nedges, so \"the entry with no incoming edges\" is not a sound definition.",
@@ -413,7 +444,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.7.0",
+      "default": "1.8.0",
       "title": "Schema Version",
       "type": "string"
     },

@@ -1,0 +1,82 @@
+{
+  "nodes": [
+    {
+      "key": "statement@77",
+      "kind": "statement",
+      "code": "try",
+      "line": 77,
+      "line_end": 84,
+      "construct_kind": "try"
+    },
+    {
+      "key": "branch@78",
+      "kind": "branch",
+      "code": "if (n < 0)",
+      "line": 78,
+      "line_end": 80,
+      "construct_kind": "if",
+      "condition_code": "n < 0"
+    },
+    {
+      "key": "statement@79",
+      "kind": "statement",
+      "code": "throw new IllegalStateException(rest.getForObject(\"http://inventory:8080/status\", String.class));",
+      "line": 79,
+      "line_end": 80,
+      "construct_kind": "throw",
+      "call": {
+        "callee": "org.springframework.web.client.RestTemplate.getForObject",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@82",
+      "kind": "return",
+      "code": "return \"no-throw\";",
+      "line": 82,
+      "line_end": 82
+    },
+    {
+      "key": "statement@83",
+      "kind": "statement",
+      "code": "catch",
+      "line": 83,
+      "line_end": 84,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@84",
+      "kind": "return",
+      "code": "return \"thrown\";",
+      "line": 84,
+      "line_end": 84
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@78",
+      "target": "return@82",
+      "label": "false"
+    },
+    {
+      "source": "branch@78",
+      "target": "statement@79",
+      "label": "true"
+    },
+    {
+      "source": "return@82",
+      "target": "statement@83",
+      "label": "exception"
+    },
+    {
+      "source": "statement@77",
+      "target": "branch@78",
+      "label": "flow"
+    },
+    {
+      "source": "statement@83",
+      "target": "return@84",
+      "label": "flow"
+    }
+  ]
+}

@@ -6,8 +6,33 @@
  */
 
 export type CreatedAt = string
+/**
+ * Cycle-closing loop edge (§5.2.8); orthogonal to kind (do-while: true+back)
+ */
+export type Back = boolean
+/**
+ * Stacked case labels on a `case` edge (source text of each value); empty on every other kind (§5.2.8).
+ */
+export type CaseValues = string[]
+/**
+ * Intra-method flow labels plus interprocedural call/return.
+ *
+ * 1.8.0 (§5.2.8): ``case``/``default`` (switch selector → arm, case values on
+ * the edge), ``fallthrough`` (case body → next arm), and ``exception``
+ * (try-tail → catch handler) gain writers; cycle-closing loop edges carry the
+ * edge-level ``back`` flag rather than a kind of their own (an edge can be
+ * both a ``true`` body edge and a back edge — do-while).
+ */
 export type IcfgEdgeKind =
-  "flow" | "true" | "false" | "call" | "return" | "exception"
+  | "flow"
+  | "true"
+  | "false"
+  | "case"
+  | "default"
+  | "fallthrough"
+  | "call"
+  | "return"
+  | "exception"
 export type Source = string
 export type Target = string
 export type Edges = IcfgEdge[]
@@ -42,6 +67,10 @@ export type Expression = string
 export type Name = string
 export type OperandOrigin = "payload" | "local" | "field" | "config" | "unknown"
 export type Operands = OperandRef[]
+/**
+ * Which Java construct this node is (§5.2.8): if | switch | switch-arrow | for | foreach | while | do-while | try | catch | finally | throw | break | continue | goto. None = plain statement or an artifact predating 1.8.0 (unknown, not 'statement' — P10). (Named construct_kind because pydantic reserves `construct`.)
+ */
+export type ConstructKind = string | null
 export type Id1 = string
 export type IcfgNodeKind =
   "entry" | "exit" | "statement" | "branch" | "loop" | "call" | "return"
@@ -94,6 +123,8 @@ export interface Icfg {
   snapshot_id: SnapshotId
 }
 export interface IcfgEdge {
+  back?: Back
+  case_values?: CaseValues
   kind: IcfgEdgeKind
   source: Source
   target: Target
@@ -102,6 +133,7 @@ export interface IcfgNode {
   anchor: SourceAnchor
   callee?: MethodRef | null
   condition?: BranchCondition | null
+  construct_kind?: ConstructKind
   id: Id1
   kind: IcfgNodeKind
   method: MethodRef1

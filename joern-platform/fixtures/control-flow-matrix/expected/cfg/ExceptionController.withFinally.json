@@ -1,0 +1,184 @@
+{
+  "nodes": [
+    {
+      "key": "statement@40",
+      "kind": "statement",
+      "code": "StringBuilder trace = new StringBuilder()",
+      "line": 40,
+      "line_end": 40
+    },
+    {
+      "key": "call@40",
+      "kind": "call",
+      "code": "new StringBuilder()",
+      "line": 40,
+      "line_end": 40,
+      "call": {
+        "callee": "java.lang.StringBuilder.<init>",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@41",
+      "kind": "statement",
+      "code": "try",
+      "line": 41,
+      "line_end": 50,
+      "construct_kind": "try"
+    },
+    {
+      "key": "call@42",
+      "kind": "call",
+      "code": "trace.append(\"try\")",
+      "line": 42,
+      "line_end": 42,
+      "call": {
+        "callee": "java.lang.StringBuilder.append",
+        "resolved": false
+      }
+    },
+    {
+      "key": "branch@43",
+      "kind": "branch",
+      "code": "if (n < 0)",
+      "line": 43,
+      "line_end": 44,
+      "construct_kind": "if",
+      "condition_code": "n < 0"
+    },
+    {
+      "key": "statement@44",
+      "kind": "statement",
+      "code": "throw new IllegalArgumentException(\"negative\");",
+      "line": 44,
+      "line_end": 44,
+      "construct_kind": "throw",
+      "call": {
+        "callee": "java.lang.IllegalArgumentException.<init>",
+        "resolved": false
+      }
+    },
+    {
+      "key": "call@46",
+      "kind": "call",
+      "code": "trace.append(\":ok\")",
+      "line": 46,
+      "line_end": 46,
+      "call": {
+        "callee": "java.lang.StringBuilder.append",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@47",
+      "kind": "statement",
+      "code": "catch",
+      "line": 47,
+      "line_end": 48,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "call@48",
+      "kind": "call",
+      "code": "trace.append(\":caught\")",
+      "line": 48,
+      "line_end": 48,
+      "call": {
+        "callee": "java.lang.StringBuilder.append",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@49",
+      "kind": "statement",
+      "code": "finally",
+      "line": 49,
+      "line_end": 50,
+      "construct_kind": "finally"
+    },
+    {
+      "key": "call@50",
+      "kind": "call",
+      "code": "trace.append(\":done\")",
+      "line": 50,
+      "line_end": 50,
+      "call": {
+        "callee": "java.lang.StringBuilder.append",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@52",
+      "kind": "return",
+      "code": "return trace.toString();",
+      "line": 52,
+      "line_end": 52,
+      "call": {
+        "callee": "java.lang.StringBuilder.toString",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@43",
+      "target": "call@46",
+      "label": "false"
+    },
+    {
+      "source": "branch@43",
+      "target": "statement@44",
+      "label": "true"
+    },
+    {
+      "source": "call@40",
+      "target": "statement@41",
+      "label": "flow"
+    },
+    {
+      "source": "call@42",
+      "target": "branch@43",
+      "label": "flow"
+    },
+    {
+      "source": "call@46",
+      "target": "statement@47",
+      "label": "exception"
+    },
+    {
+      "source": "call@46",
+      "target": "statement@49",
+      "label": "flow"
+    },
+    {
+      "source": "call@48",
+      "target": "statement@49",
+      "label": "flow"
+    },
+    {
+      "source": "call@50",
+      "target": "return@52",
+      "label": "flow"
+    },
+    {
+      "source": "statement@40",
+      "target": "call@40",
+      "label": "flow"
+    },
+    {
+      "source": "statement@41",
+      "target": "call@42",
+      "label": "flow"
+    },
+    {
+      "source": "statement@47",
+      "target": "call@48",
+      "label": "flow"
+    },
+    {
+      "source": "statement@49",
+      "target": "call@50",
+      "label": "flow"
+    }
+  ]
+}

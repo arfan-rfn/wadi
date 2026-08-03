@@ -1,0 +1,105 @@
+{
+  "nodes": [
+    {
+      "key": "statement@57",
+      "kind": "statement",
+      "code": "int cells = 0",
+      "line": 57,
+      "line_end": 57
+    },
+    {
+      "key": "statement@58",
+      "kind": "statement",
+      "code": "int row = 0",
+      "line": 58,
+      "line_end": 58
+    },
+    {
+      "key": "loop@58",
+      "kind": "loop",
+      "code": "for (int row = 0; row < n; row++)",
+      "line": 58,
+      "line_end": 60,
+      "construct_kind": "for",
+      "condition_code": "row < n"
+    },
+    {
+      "key": "statement@59",
+      "kind": "statement",
+      "code": "int col = 0",
+      "line": 59,
+      "line_end": 59
+    },
+    {
+      "key": "loop@59",
+      "kind": "loop",
+      "code": "for (int col = 0; col < n; col++)",
+      "line": 59,
+      "line_end": 60,
+      "construct_kind": "for",
+      "condition_code": "col < n"
+    },
+    {
+      "key": "statement@60",
+      "kind": "statement",
+      "code": "cells++",
+      "line": 60,
+      "line_end": 60
+    },
+    {
+      "key": "return@63",
+      "kind": "return",
+      "code": "return String.valueOf(cells);",
+      "line": 63,
+      "line_end": 63,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "loop@58",
+      "target": "return@63",
+      "label": "false"
+    },
+    {
+      "source": "loop@58",
+      "target": "statement@59",
+      "label": "true"
+    },
+    {
+      "source": "loop@59",
+      "target": "loop@58",
+      "label": "false",
+      "back": true
+    },
+    {
+      "source": "loop@59",
+      "target": "statement@60",
+      "label": "true"
+    },
+    {
+      "source": "statement@57",
+      "target": "statement@58",
+      "label": "flow"
+    },
+    {
+      "source": "statement@58",
+      "target": "loop@58",
+      "label": "flow"
+    },
+    {
+      "source": "statement@59",
+      "target": "loop@59",
+      "label": "flow"
+    },
+    {
+      "source": "statement@60",
+      "target": "loop@59",
+      "label": "flow",
+      "back": true
+    }
+  ]
+}

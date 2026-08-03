@@ -1,0 +1,59 @@
+{
+  "nodes": [
+    {
+      "key": "statement@88",
+      "kind": "statement",
+      "code": "AtomicInteger counter = new AtomicInteger(n)",
+      "line": 88,
+      "line_end": 88
+    },
+    {
+      "key": "call@88",
+      "kind": "call",
+      "code": "new AtomicInteger(n)",
+      "line": 88,
+      "line_end": 88,
+      "call": {
+        "callee": "java.util.concurrent.atomic.AtomicInteger.<init>",
+        "resolved": false
+      }
+    },
+    {
+      "key": "loop@89",
+      "kind": "loop",
+      "code": "while (counter.decrementAndGet() > 0)",
+      "line": 89,
+      "line_end": 89,
+      "construct_kind": "while",
+      "condition_code": "counter.decrementAndGet() > 0",
+      "call": {
+        "callee": "java.util.concurrent.atomic.AtomicInteger.decrementAndGet",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@90",
+      "kind": "return",
+      "code": "return \"drained\";",
+      "line": 90,
+      "line_end": 90
+    }
+  ],
+  "edges": [
+    {
+      "source": "call@88",
+      "target": "loop@89",
+      "label": "flow"
+    },
+    {
+      "source": "loop@89",
+      "target": "return@90",
+      "label": "false"
+    },
+    {
+      "source": "statement@88",
+      "target": "call@88",
+      "label": "flow"
+    }
+  ]
+}

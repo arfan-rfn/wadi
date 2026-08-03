@@ -1,0 +1,85 @@
+{
+  "nodes": [
+    {
+      "key": "statement@35",
+      "kind": "statement",
+      "code": "int remaining = n",
+      "line": 35,
+      "line_end": 35
+    },
+    {
+      "key": "statement@36",
+      "kind": "statement",
+      "code": "int steps = 0",
+      "line": 36,
+      "line_end": 36
+    },
+    {
+      "key": "loop@37",
+      "kind": "loop",
+      "code": "while (remaining > 0)",
+      "line": 37,
+      "line_end": 39,
+      "construct_kind": "while",
+      "condition_code": "remaining > 0"
+    },
+    {
+      "key": "statement@38",
+      "kind": "statement",
+      "code": "remaining -= 2",
+      "line": 38,
+      "line_end": 38
+    },
+    {
+      "key": "statement@39",
+      "kind": "statement",
+      "code": "steps++",
+      "line": 39,
+      "line_end": 39
+    },
+    {
+      "key": "return@41",
+      "kind": "return",
+      "code": "return String.valueOf(steps);",
+      "line": 41,
+      "line_end": 41,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "loop@37",
+      "target": "return@41",
+      "label": "false"
+    },
+    {
+      "source": "loop@37",
+      "target": "statement@38",
+      "label": "true"
+    },
+    {
+      "source": "statement@35",
+      "target": "statement@36",
+      "label": "flow"
+    },
+    {
+      "source": "statement@36",
+      "target": "loop@37",
+      "label": "flow"
+    },
+    {
+      "source": "statement@38",
+      "target": "statement@39",
+      "label": "flow"
+    },
+    {
+      "source": "statement@39",
+      "target": "loop@37",
+      "label": "flow",
+      "back": true
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "nodes": [
+    {
+      "key": "statement@33",
+      "kind": "statement",
+      "code": "int score = 0",
+      "line": 33,
+      "line_end": 33
+    },
+    {
+      "key": "branch@34",
+      "kind": "branch",
+      "code": "switch(n)",
+      "line": 34,
+      "line_end": 42,
+      "construct_kind": "switch",
+      "condition_code": "n"
+    },
+    {
+      "key": "statement@36",
+      "kind": "statement",
+      "code": "score += 10",
+      "line": 36,
+      "line_end": 36
+    },
+    {
+      "key": "statement@39",
+      "kind": "statement",
+      "code": "score += 10",
+      "line": 39,
+      "line_end": 39
+    },
+    {
+      "key": "statement@40",
+      "kind": "statement",
+      "code": "break;",
+      "line": 40,
+      "line_end": 40,
+      "construct_kind": "break"
+    },
+    {
+      "key": "statement@42",
+      "kind": "statement",
+      "code": "score = -1",
+      "line": 42,
+      "line_end": 42
+    },
+    {
+      "key": "return@44",
+      "kind": "return",
+      "code": "return String.valueOf(score);",
+      "line": 44,
+      "line_end": 44,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@34",
+      "target": "statement@36",
+      "label": "case",
+      "case_values": [
+        "2"
+      ]
+    },
+    {
+      "source": "branch@34",
+      "target": "statement@39",
+      "label": "case",
+      "case_values": [
+        "1"
+      ]
+    },
+    {
+      "source": "branch@34",
+      "target": "statement@42",
+      "label": "default"
+    },
+    {
+      "source": "statement@33",
+      "target": "branch@34",
+      "label": "flow"
+    },
+    {
+      "source": "statement@36",
+      "target": "statement@39",
+      "label": "fallthrough"
+    },
+    {
+      "source": "statement@39",
+      "target": "statement@40",
+      "label": "flow"
+    },
+    {
+      "source": "statement@40",
+      "target": "return@44",
+      "label": "flow"
+    },
+    {
+      "source": "statement@42",
+      "target": "return@44",
+      "label": "flow"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    {
+      "key": "call@95",
+      "kind": "call",
+      "code": "int total = List.of(1, 2, 3, 4).stream().filter(x -> x % 2 == 0).mapToInt(x -> x * n).sum()",
+      "line": 95,
+      "line_end": 95,
+      "call": {
+        "callee": "java.util.stream.IntStream.sum",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@100",
+      "kind": "return",
+      "code": "return String.valueOf(total);",
+      "line": 100,
+      "line_end": 100,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "call@95",
+      "target": "return@100",
+      "label": "flow"
+    }
+  ]
+}

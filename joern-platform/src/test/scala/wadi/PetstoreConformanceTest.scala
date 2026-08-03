@@ -4,26 +4,17 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.{Files, Paths}
-
 /** Conformance test (P8): the whole in-graph pipeline against spring-petstore-mini.
   *
   * Proves the week-one validation targets (§11): DI resolution crosses the
   * interface boundary, endpoints/sinks/models are tagged with registry
   * vocabulary, and the bulk export lands on disk in the contract shape.
   */
-class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
+class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with FixtureCpg {
 
-  private val fixtureDir = Paths.get("fixtures", "spring-petstore-mini").toAbsolutePath
   // Fixed output path (gitignored): the Python side's cross-language test reads
   // this exact file to prove the export parses and assembles end to end.
-  private val exportDir = Paths.get("target", "petstore-export").toAbsolutePath
-
-  private lazy val exportJson: ujson.Value = {
-    val summary = WadiPipeline.runFromSource(fixtureDir.toString, exportDir.toString)
-    info(summary)
-    ujson.read(Files.readString(exportDir.resolve("export.json")))
-  }
+  private lazy val exportJson: ujson.Value = exportFixture("spring-petstore-mini", "petstore-export")
 
   private def endpoints: Set[String] =
     exportJson("endpoints").arr.map(e => s"${e("http_method").str} ${e("uri").str}").toSet
@@ -90,7 +81,7 @@ class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAf
   }
 
   test("export document declares the contract version") {
-    exportJson("export_schema_version").str shouldBe "2.4.0"
+    exportJson("export_schema_version").str shouldBe "2.5.0"
   }
 
   test("analysis coverage counts production vs reachable methods (§5.4.3)") {

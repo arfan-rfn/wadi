@@ -1,0 +1,29 @@
+{
+  "nodes": [
+    {
+      "key": "statement@17",
+      "kind": "statement",
+      "code": "this.hits += n",
+      "line": 17,
+      "line_end": 17
+    },
+    {
+      "key": "return@19",
+      "kind": "return",
+      "code": "return String.valueOf(hits);",
+      "line": 19,
+      "line_end": 19,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "statement@17",
+      "target": "return@19",
+      "label": "flow"
+    }
+  ]
+}

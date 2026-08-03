@@ -251,7 +251,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.7.0/service_boundary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.8.0/service_boundary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One discovered service within a snapshot.\n\nThe envelope's ``service_id`` is this service's own stable id\n(content-derived from repo + build root, \u00a77).",
@@ -351,7 +351,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.7.0",
+      "default": "1.8.0",
       "title": "Schema Version",
       "type": "string"
     },

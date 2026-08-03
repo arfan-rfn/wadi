@@ -3,8 +3,6 @@ package wadi
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.{Files, Paths}
-
 /** Conformance test (P8) for the Phase 2 two-service fixture: one
   * `runFromSource` per Maven module, exactly as production analyzes each
   * discovered build root. Exercises the §5.2.4 URL slicer's scenario set:
@@ -13,20 +11,10 @@ import java.nio.file.{Files, Paths}
   * Exports land on fixed (gitignored) paths — the Python cross-language
   * golden test reads them.
   */
-class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
+class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers with FixtureCpg {
 
-  private val fixtureDir = Paths.get("fixtures", "petstore-system").toAbsolutePath
-  private val exportRoot = Paths.get("target", "petstore-system-export").toAbsolutePath
-
-  private def moduleExport(module: String): ujson.Value = {
-    val exportDir = exportRoot.resolve(module)
-    val summary = WadiPipeline.runFromSource(
-      fixtureDir.resolve(module).toString,
-      exportDir.toString
-    )
-    info(s"$module: $summary")
-    ujson.read(Files.readString(exportDir.resolve("export.json")))
-  }
+  private def moduleExport(module: String): ujson.Value =
+    exportFixture(s"petstore-system/$module", s"petstore-system-export/$module")
 
   private lazy val petstore: ujson.Value  = moduleExport("petstore")
   private lazy val inventory: ujson.Value = moduleExport("inventory")

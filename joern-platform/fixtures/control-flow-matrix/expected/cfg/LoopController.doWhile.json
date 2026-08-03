@@ -1,0 +1,85 @@
+{
+  "nodes": [
+    {
+      "key": "statement@46",
+      "kind": "statement",
+      "code": "int value = n",
+      "line": 46,
+      "line_end": 46
+    },
+    {
+      "key": "statement@47",
+      "kind": "statement",
+      "code": "int digits = 0",
+      "line": 47,
+      "line_end": 47
+    },
+    {
+      "key": "loop@48",
+      "kind": "loop",
+      "code": "do {...} while (value != 0)",
+      "line": 48,
+      "line_end": 51,
+      "construct_kind": "do-while",
+      "condition_code": "value != 0"
+    },
+    {
+      "key": "statement@49",
+      "kind": "statement",
+      "code": "value /= 10",
+      "line": 49,
+      "line_end": 49
+    },
+    {
+      "key": "statement@50",
+      "kind": "statement",
+      "code": "digits++",
+      "line": 50,
+      "line_end": 50
+    },
+    {
+      "key": "return@52",
+      "kind": "return",
+      "code": "return String.valueOf(digits);",
+      "line": 52,
+      "line_end": 52,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "loop@48",
+      "target": "return@52",
+      "label": "false"
+    },
+    {
+      "source": "loop@48",
+      "target": "statement@49",
+      "label": "true",
+      "back": true
+    },
+    {
+      "source": "statement@46",
+      "target": "statement@47",
+      "label": "flow"
+    },
+    {
+      "source": "statement@47",
+      "target": "statement@49",
+      "label": "flow"
+    },
+    {
+      "source": "statement@49",
+      "target": "statement@50",
+      "label": "flow"
+    },
+    {
+      "source": "statement@50",
+      "target": "loop@48",
+      "label": "flow"
+    }
+  ]
+}

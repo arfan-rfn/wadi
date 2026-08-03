@@ -1,0 +1,73 @@
+{
+  "nodes": [
+    {
+      "key": "statement@17",
+      "kind": "statement",
+      "code": "int sum = 0",
+      "line": 17,
+      "line_end": 17
+    },
+    {
+      "key": "statement@18",
+      "kind": "statement",
+      "code": "int i = 0",
+      "line": 18,
+      "line_end": 18
+    },
+    {
+      "key": "loop@18",
+      "kind": "loop",
+      "code": "for (int i = 0; i < n; i++)",
+      "line": 18,
+      "line_end": 19,
+      "construct_kind": "for",
+      "condition_code": "i < n"
+    },
+    {
+      "key": "statement@19",
+      "kind": "statement",
+      "code": "sum += i",
+      "line": 19,
+      "line_end": 19
+    },
+    {
+      "key": "return@21",
+      "kind": "return",
+      "code": "return String.valueOf(sum);",
+      "line": 21,
+      "line_end": 21,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "loop@18",
+      "target": "return@21",
+      "label": "false"
+    },
+    {
+      "source": "loop@18",
+      "target": "statement@19",
+      "label": "true"
+    },
+    {
+      "source": "statement@17",
+      "target": "statement@18",
+      "label": "flow"
+    },
+    {
+      "source": "statement@18",
+      "target": "loop@18",
+      "label": "flow"
+    },
+    {
+      "source": "statement@19",
+      "target": "loop@18",
+      "label": "flow",
+      "back": true
+    }
+  ]
+}

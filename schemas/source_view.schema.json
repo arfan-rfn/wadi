@@ -10,7 +10,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.7.0/source_view.schema.json",
+  "$id": "https://trywadi.com/schemas/1.8.0/source_view.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Source-on-demand response (\u00a75.3): the exact analyzed text at the pinned\nSHA \u2014 the delombok'd variant when preprocessing rewrote the file, flagged\nso consumers can say so.",

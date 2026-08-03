@@ -3,8 +3,6 @@ package wadi
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.{Files, Paths}
-
 /** Week-one validation (§11, §12 risk): Lombok must not dead-end extraction.
   *
   * `GreetingController` uses `@RequiredArgsConstructor` — the constructor that
@@ -12,17 +10,9 @@ import java.nio.file.{Files, Paths}
   * delombok handles the rewrite; the DI pass must still resolve the
   * interface call into the implementation.
   */
-class LombokConformanceTest extends AnyFunSuite with Matchers {
+class LombokConformanceTest extends AnyFunSuite with Matchers with FixtureCpg {
 
-  private val fixtureDir = Paths.get("fixtures", "lombok-mini").toAbsolutePath
-  // Fixed output path (gitignored) so slicing behavior is inspectable locally.
-  private val exportDir = Paths.get("target", "lombok-export").toAbsolutePath
-
-  private lazy val exportJson: ujson.Value = {
-    val summary = WadiPipeline.runFromSource(fixtureDir.toString, exportDir.toString)
-    info(summary)
-    ujson.read(Files.readString(exportDir.resolve("export.json")))
-  }
+  private lazy val exportJson: ujson.Value = exportFixture("lombok-mini", "lombok-export")
 
   test("analysis coverage is total on the fully-wired fixture (§5.4.3)") {
     val coverage = exportJson("analysis_coverage")

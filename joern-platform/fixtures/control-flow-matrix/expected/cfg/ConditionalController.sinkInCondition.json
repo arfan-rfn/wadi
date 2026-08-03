@@ -1,0 +1,81 @@
+{
+  "nodes": [
+    {
+      "key": "statement@67",
+      "kind": "statement",
+      "code": "try",
+      "line": 67,
+      "line_end": 73,
+      "construct_kind": "try"
+    },
+    {
+      "key": "branch@68",
+      "kind": "branch",
+      "code": "if (rest.getForObject(\"http://inventory:8080/ping\", String.class) != null)",
+      "line": 68,
+      "line_end": 69,
+      "construct_kind": "if",
+      "condition_code": "rest.getForObject(\"http://inventory:8080/ping\", String.class) != null",
+      "call": {
+        "callee": "org.springframework.web.client.RestTemplate.getForObject",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@69",
+      "kind": "return",
+      "code": "return \"upstream-alive\";",
+      "line": 69,
+      "line_end": 69
+    },
+    {
+      "key": "return@71",
+      "kind": "return",
+      "code": "return \"upstream-silent\";",
+      "line": 71,
+      "line_end": 71
+    },
+    {
+      "key": "statement@72",
+      "kind": "statement",
+      "code": "catch",
+      "line": 72,
+      "line_end": 73,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@73",
+      "kind": "return",
+      "code": "return \"upstream-unreachable\";",
+      "line": 73,
+      "line_end": 73
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@68",
+      "target": "return@69",
+      "label": "true"
+    },
+    {
+      "source": "branch@68",
+      "target": "return@71",
+      "label": "false"
+    },
+    {
+      "source": "return@71",
+      "target": "statement@72",
+      "label": "exception"
+    },
+    {
+      "source": "statement@67",
+      "target": "branch@68",
+      "label": "flow"
+    },
+    {
+      "source": "statement@72",
+      "target": "return@73",
+      "label": "flow"
+    }
+  ]
+}

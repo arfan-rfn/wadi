@@ -10,7 +10,10 @@ export interface MethodRollup {
   badges: string[]
   statementCount: number
   branchCount: number
+  loopCount: number
   callCount: number
+  /** §5.2.8 construct tallies, e.g. { for: 2, switch: 1, "try": 1 } */
+  constructCounts: Record<string, number>
   sinks: string[]
   file: string | null
   line: number | null
@@ -31,7 +34,9 @@ export function rollupMethods(icfg: Icfg): MethodRollup[] {
         badges: [],
         statementCount: 0,
         branchCount: 0,
+        loopCount: 0,
         callCount: 0,
+        constructCounts: {},
         sinks: [],
         file: null,
         line: null,
@@ -47,12 +52,18 @@ export function rollupMethods(icfg: Icfg): MethodRollup[] {
       if (node.method_info) {
         entry.badges = node.method_info.badges ?? []
       }
-    } else if (node.kind === "branch" || node.kind === "loop") {
+    } else if (node.kind === "branch") {
       entry.branchCount += 1
+    } else if (node.kind === "loop") {
+      entry.loopCount += 1
     } else if (node.kind === "call") {
       entry.callCount += 1
     } else if (node.kind === "statement" || node.kind === "return") {
       entry.statementCount += 1
+    }
+    if (node.construct_kind) {
+      entry.constructCounts[node.construct_kind] =
+        (entry.constructCounts[node.construct_kind] ?? 0) + 1
     }
     if (node.sink && !entry.sinks.includes(node.sink)) {
       entry.sinks.push(node.sink)

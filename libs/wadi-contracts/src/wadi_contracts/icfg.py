@@ -74,6 +74,16 @@ class IcfgNode(WadiModel):
         description="The node's one-line source text (graph labels are real code)"
     )
     method: MethodRef = Field(description="Owning method — the roll-up key (§7)")
+    construct_kind: str | None = Field(
+        default=None,
+        description=(
+            "Which Java construct this node is (§5.2.8): if | switch | "
+            "switch-arrow | for | foreach | while | do-while | try | catch | "
+            "finally | throw | break | continue | goto. None = plain statement "
+            "or an artifact predating 1.8.0 (unknown, not 'statement' — P10). "
+            "(Named construct_kind because pydantic reserves `construct`.)"
+        ),
+    )
     condition: BranchCondition | None = None
     callee: MethodRef | None = None
     sink: SinkKind | None = None
@@ -97,13 +107,20 @@ class IcfgNode(WadiModel):
 
     @model_validator(mode="after")
     def _kind_specific_payloads(self) -> Self:
-        if self.condition is not None and self.kind not in (
-            IcfgNodeKind.BRANCH,
-            IcfgNodeKind.LOOP,
-        ):
-            raise ValueError(f"condition is only valid on branch/loop nodes, not {self.kind}")
-        if self.callee is not None and self.kind is not IcfgNodeKind.CALL:
-            raise ValueError(f"callee is only valid on call nodes, not {self.kind}")
+        # Since 1.8.0 (§5.2.8) conditions live beyond branch/loop nodes: a
+        # switch-arrow CARRIER (`return switch(n){…}`) is a return/call/
+        # statement node carrying the selector. Only synthetic entry/exit can
+        # never hold one — same rule as markers and callees below.
+        synthetic = (IcfgNodeKind.ENTRY, IcfgNodeKind.EXIT)
+        if self.condition is not None and self.kind in synthetic:
+            raise ValueError(f"condition is not valid on {self.kind} nodes")
+        if self.construct_kind is not None and self.kind in synthetic:
+            raise ValueError(f"construct_kind is not valid on {self.kind} nodes")
+        # 1.8.0: a callee rides any real statement — `return svc.find(id)` is a
+        # RETURN node whose call resolves interprocedurally, a sink inside a
+        # branch condition puts the call on the BRANCH node (§5.2.8).
+        if self.callee is not None and self.kind in synthetic:
+            raise ValueError(f"callee is not valid on {self.kind} nodes")
         if self.method_info is not None and self.kind is not IcfgNodeKind.ENTRY:
             raise ValueError(f"method_info is only valid on entry nodes, not {self.kind}")
         # Markers anchor to the coarsened statement, which is not always a
@@ -127,6 +144,23 @@ class IcfgEdge(WadiModel):
     source: str = Field(min_length=1)
     target: str = Field(min_length=1)
     kind: IcfgEdgeKind
+    case_values: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Stacked case labels on a `case` edge (source text of each value); "
+            "empty on every other kind (§5.2.8)."
+        ),
+    )
+    back: bool = Field(
+        default=False,
+        description="Cycle-closing loop edge (§5.2.8); orthogonal to kind (do-while: true+back)",
+    )
+
+    @model_validator(mode="after")
+    def _case_values_only_on_case(self) -> Self:
+        if self.case_values and self.kind is not IcfgEdgeKind.CASE:
+            raise ValueError(f"case_values are only valid on case edges, not {self.kind}")
+        return self
 
 
 class Icfg(ArtifactEnvelope):

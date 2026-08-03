@@ -1,0 +1,99 @@
+{
+  "nodes": [
+    {
+      "key": "statement@57",
+      "kind": "statement",
+      "code": "StringWriter writer = new StringWriter()",
+      "line": 57,
+      "line_end": 57
+    },
+    {
+      "key": "call@57",
+      "kind": "call",
+      "code": "new StringWriter()",
+      "line": 57,
+      "line_end": 57,
+      "call": {
+        "callee": "java.io.StringWriter.<init>",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@57#1",
+      "kind": "statement",
+      "code": "try",
+      "line": 57,
+      "line_end": 61,
+      "construct_kind": "try"
+    },
+    {
+      "key": "call@58",
+      "kind": "call",
+      "code": "writer.write(text)",
+      "line": 58,
+      "line_end": 58,
+      "call": {
+        "callee": "java.io.StringWriter.write",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@59",
+      "kind": "return",
+      "code": "return writer.toString();",
+      "line": 59,
+      "line_end": 59,
+      "call": {
+        "callee": "java.io.StringWriter.toString",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@60",
+      "kind": "statement",
+      "code": "catch",
+      "line": 60,
+      "line_end": 61,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@61",
+      "kind": "return",
+      "code": "return \"io-error\";",
+      "line": 61,
+      "line_end": 61
+    }
+  ],
+  "edges": [
+    {
+      "source": "call@57",
+      "target": "statement@57#1",
+      "label": "flow"
+    },
+    {
+      "source": "call@58",
+      "target": "return@59",
+      "label": "flow"
+    },
+    {
+      "source": "return@59",
+      "target": "statement@60",
+      "label": "exception"
+    },
+    {
+      "source": "statement@57",
+      "target": "call@57",
+      "label": "flow"
+    },
+    {
+      "source": "statement@57#1",
+      "target": "call@58",
+      "label": "flow"
+    },
+    {
+      "source": "statement@60",
+      "target": "return@61",
+      "label": "flow"
+    }
+  ]
+}

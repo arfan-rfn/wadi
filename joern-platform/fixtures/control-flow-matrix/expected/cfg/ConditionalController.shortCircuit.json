@@ -1,0 +1,65 @@
+{
+  "nodes": [
+    {
+      "key": "branch@54",
+      "kind": "branch",
+      "code": "if (n > 0 && n % 3 == 0)",
+      "line": 54,
+      "line_end": 55,
+      "construct_kind": "if",
+      "condition_code": "n > 0 && n % 3 == 0"
+    },
+    {
+      "key": "return@55",
+      "kind": "return",
+      "code": "return \"positive-multiple-of-3\";",
+      "line": 55,
+      "line_end": 55
+    },
+    {
+      "key": "branch@57",
+      "kind": "branch",
+      "code": "if (n < 0 || n > 100)",
+      "line": 57,
+      "line_end": 58,
+      "construct_kind": "if",
+      "condition_code": "n < 0 || n > 100"
+    },
+    {
+      "key": "return@58",
+      "kind": "return",
+      "code": "return \"out-of-range\";",
+      "line": 58,
+      "line_end": 58
+    },
+    {
+      "key": "return@60",
+      "kind": "return",
+      "code": "return \"in-range\";",
+      "line": 60,
+      "line_end": 60
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@54",
+      "target": "branch@57",
+      "label": "false"
+    },
+    {
+      "source": "branch@54",
+      "target": "return@55",
+      "label": "true"
+    },
+    {
+      "source": "branch@57",
+      "target": "return@58",
+      "label": "true"
+    },
+    {
+      "source": "branch@57",
+      "target": "return@60",
+      "label": "false"
+    }
+  ]
+}

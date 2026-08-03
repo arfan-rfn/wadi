@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {
+      "key": "return@49",
+      "kind": "return",
+      "code": "return n < 0 ? \"negative\" : \"non-negative\";",
+      "line": 49,
+      "line_end": 49
+    }
+  ],
+  "edges": []
+}

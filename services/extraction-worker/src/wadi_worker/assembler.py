@@ -69,6 +69,10 @@ _EDGE_LABEL_TO_KIND = {
     ExportCfgEdgeLabel.FLOW: IcfgEdgeKind.FLOW,
     ExportCfgEdgeLabel.TRUE: IcfgEdgeKind.TRUE_BRANCH,
     ExportCfgEdgeLabel.FALSE: IcfgEdgeKind.FALSE_BRANCH,
+    ExportCfgEdgeLabel.CASE: IcfgEdgeKind.CASE,
+    ExportCfgEdgeLabel.DEFAULT: IcfgEdgeKind.DEFAULT,
+    ExportCfgEdgeLabel.FALLTHROUGH: IcfgEdgeKind.FALLTHROUGH,
+    ExportCfgEdgeLabel.EXCEPTION: IcfgEdgeKind.EXCEPTION,
 }
 
 _CONFIDENCE_MAP = {
@@ -266,7 +270,11 @@ class Assembler:
             remote_ids: list[str] = []
             mq_id: str | None = None
             sink_kind: SinkKind | None = None
-            if cfg_node.kind is CfgNodeKind.CALL and cfg_node.call is not None:
+            # A callee rides any real statement since 1.8.0 (§5.2.8):
+            # `return svc.find(id)` is a RETURN node whose call resolves
+            # interprocedurally, and a sink inside a branch condition puts
+            # the call on the BRANCH node itself.
+            if cfg_node.call is not None:
                 callee_ref = self._callee_ref(
                     cfg_node.call.callee_id, cfg_node.call.callee_full_name, methods
                 )
@@ -301,10 +309,14 @@ class Assembler:
                     anchor=self._anchor(method.filename, cfg_node.line, cfg_node.line_end),
                     source_text=cfg_node.code,
                     method=method_ref,
+                    construct_kind=cfg_node.construct_kind,
+                    # 1.8.0 (§5.2.8): conditions live beyond branch/loop —
+                    # a switch-arrow carrier is a return/call node holding
+                    # the selector. The exporter only emits condition_code
+                    # where it belongs; pass it through.
                     condition=(
                         BranchCondition(expression=cfg_node.condition_code)
                         if cfg_node.condition_code
-                        and kind in (IcfgNodeKind.BRANCH, IcfgNodeKind.LOOP)
                         else None
                     ),
                     callee=callee_ref,
@@ -338,6 +350,8 @@ class Assembler:
                         source=f"m{method.id}:n{edge.source}",
                         target=f"m{method.id}:n{edge.target}",
                         kind=_EDGE_LABEL_TO_KIND[edge.label],
+                        case_values=edge.case_values,
+                        back=edge.back,
                     )
                 )
         if cfg_nodes:

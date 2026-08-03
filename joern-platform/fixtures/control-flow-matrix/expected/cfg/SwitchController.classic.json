@@ -1,0 +1,118 @@
+{
+  "nodes": [
+    {
+      "key": "branch@17",
+      "kind": "branch",
+      "code": "switch(n)",
+      "line": 17,
+      "line_end": 26,
+      "construct_kind": "switch",
+      "condition_code": "n"
+    },
+    {
+      "key": "statement@19",
+      "kind": "statement",
+      "code": "label = \"zero\"",
+      "line": 19,
+      "line_end": 19
+    },
+    {
+      "key": "statement@20",
+      "kind": "statement",
+      "code": "break;",
+      "line": 20,
+      "line_end": 20,
+      "construct_kind": "break"
+    },
+    {
+      "key": "statement@22",
+      "kind": "statement",
+      "code": "label = \"one\"",
+      "line": 22,
+      "line_end": 22
+    },
+    {
+      "key": "statement@23",
+      "kind": "statement",
+      "code": "break;",
+      "line": 23,
+      "line_end": 23,
+      "construct_kind": "break"
+    },
+    {
+      "key": "statement@25",
+      "kind": "statement",
+      "code": "label = \"many\"",
+      "line": 25,
+      "line_end": 25
+    },
+    {
+      "key": "statement@26",
+      "kind": "statement",
+      "code": "break;",
+      "line": 26,
+      "line_end": 26,
+      "construct_kind": "break"
+    },
+    {
+      "key": "return@28",
+      "kind": "return",
+      "code": "return label;",
+      "line": 28,
+      "line_end": 28
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@17",
+      "target": "statement@19",
+      "label": "case",
+      "case_values": [
+        "0"
+      ]
+    },
+    {
+      "source": "branch@17",
+      "target": "statement@22",
+      "label": "case",
+      "case_values": [
+        "1"
+      ]
+    },
+    {
+      "source": "branch@17",
+      "target": "statement@25",
+      "label": "default"
+    },
+    {
+      "source": "statement@19",
+      "target": "statement@20",
+      "label": "flow"
+    },
+    {
+      "source": "statement@20",
+      "target": "return@28",
+      "label": "flow"
+    },
+    {
+      "source": "statement@22",
+      "target": "statement@23",
+      "label": "flow"
+    },
+    {
+      "source": "statement@23",
+      "target": "return@28",
+      "label": "flow"
+    },
+    {
+      "source": "statement@25",
+      "target": "statement@26",
+      "label": "flow"
+    },
+    {
+      "source": "statement@26",
+      "target": "return@28",
+      "label": "flow"
+    }
+  ]
+}

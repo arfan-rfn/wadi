@@ -1,0 +1,14 @@
+{
+  "nodes": [
+    {
+      "key": "return@73",
+      "kind": "return",
+      "code": "return switch(n) {",
+      "line": 73,
+      "line_end": 76,
+      "construct_kind": "switch-arrow",
+      "condition_code": "n"
+    }
+  ],
+  "edges": []
+}

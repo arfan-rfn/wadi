@@ -3,22 +3,13 @@ package wadi
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.{Files, Paths}
-
 /** Conformance (P8) for the exact yas outbound idiom: RestClient +
   * UriComponentsBuilder base from a @ConfigurationProperties record accessor,
   * through a URI-typed local into `.uri(url)`.
   */
-class RestClientYasConformanceTest extends AnyFunSuite with Matchers {
+class RestClientYasConformanceTest extends AnyFunSuite with Matchers with FixtureCpg {
 
-  private val fixtureDir = Paths.get("fixtures", "restclient-yas-mini").toAbsolutePath
-  private val exportDir  = Paths.get("target", "restclient-yas-export").toAbsolutePath
-
-  private lazy val exportJson: ujson.Value = {
-    val summary = WadiPipeline.runFromSource(fixtureDir.toString, exportDir.toString)
-    info(summary)
-    ujson.read(Files.readString(exportDir.resolve("export.json")))
-  }
+  private lazy val exportJson: ujson.Value = exportFixture("restclient-yas-mini", "restclient-yas-export")
 
   test("the yas idiom resolves to a config-key template (T2)") {
     val sinks = exportJson("sinks").arr.filter(_("kind").str == "http-client")

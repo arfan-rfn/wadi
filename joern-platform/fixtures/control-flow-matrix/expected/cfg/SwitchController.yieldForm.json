@@ -1,0 +1,52 @@
+{
+  "nodes": [
+    {
+      "key": "statement@82",
+      "kind": "statement",
+      "code": "int bucket = switch(n) {",
+      "line": 82,
+      "line_end": 86,
+      "construct_kind": "switch-arrow",
+      "condition_code": "n"
+    },
+    {
+      "key": "call@85",
+      "kind": "call",
+      "code": "int magnitude = Math.abs(n)",
+      "line": 85,
+      "line_end": 85,
+      "call": {
+        "callee": "java.lang.Math.abs",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@89",
+      "kind": "return",
+      "code": "return String.valueOf(bucket);",
+      "line": 89,
+      "line_end": 89,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "call@85",
+      "target": "statement@82",
+      "label": "flow"
+    },
+    {
+      "source": "statement@82",
+      "target": "call@85",
+      "label": "flow"
+    },
+    {
+      "source": "statement@82",
+      "target": "return@89",
+      "label": "flow"
+    }
+  ]
+}

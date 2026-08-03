@@ -79,9 +79,21 @@ class IcfgNodeKind(StrEnum):
 
 
 class IcfgEdgeKind(StrEnum):
+    """Intra-method flow labels plus interprocedural call/return.
+
+    1.8.0 (§5.2.8): ``case``/``default`` (switch selector → arm, case values on
+    the edge), ``fallthrough`` (case body → next arm), and ``exception``
+    (try-tail → catch handler) gain writers; cycle-closing loop edges carry the
+    edge-level ``back`` flag rather than a kind of their own (an edge can be
+    both a ``true`` body edge and a back edge — do-while).
+    """
+
     FLOW = "flow"
     TRUE_BRANCH = "true"
     FALSE_BRANCH = "false"
+    CASE = "case"
+    DEFAULT = "default"
+    FALLTHROUGH = "fallthrough"
     CALL = "call"
     RETURN = "return"
     EXCEPTION = "exception"

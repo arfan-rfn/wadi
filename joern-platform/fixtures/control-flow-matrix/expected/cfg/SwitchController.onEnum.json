@@ -1,0 +1,57 @@
+{
+  "nodes": [
+    {
+      "key": "branch@61",
+      "kind": "branch",
+      "code": "switch(size)",
+      "line": 61,
+      "line_end": 67,
+      "construct_kind": "switch",
+      "condition_code": "size"
+    },
+    {
+      "key": "return@63",
+      "kind": "return",
+      "code": "return \"s\";",
+      "line": 63,
+      "line_end": 63
+    },
+    {
+      "key": "return@65",
+      "kind": "return",
+      "code": "return \"m\";",
+      "line": 65,
+      "line_end": 65
+    },
+    {
+      "key": "return@67",
+      "kind": "return",
+      "code": "return \"l\";",
+      "line": 67,
+      "line_end": 67
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@61",
+      "target": "return@63",
+      "label": "case",
+      "case_values": [
+        "SMALL"
+      ]
+    },
+    {
+      "source": "branch@61",
+      "target": "return@65",
+      "label": "case",
+      "case_values": [
+        "MEDIUM"
+      ]
+    },
+    {
+      "source": "branch@61",
+      "target": "return@67",
+      "label": "default"
+    }
+  ]
+}

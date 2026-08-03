@@ -1,0 +1,67 @@
+{
+  "nodes": [
+    {
+      "key": "statement@19",
+      "kind": "statement",
+      "code": "try",
+      "line": 19,
+      "line_end": 23,
+      "construct_kind": "try"
+    },
+    {
+      "key": "call@20",
+      "kind": "call",
+      "code": "int parsed = Integer.parseInt(text)",
+      "line": 20,
+      "line_end": 20,
+      "call": {
+        "callee": "java.lang.Integer.parseInt",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@21",
+      "kind": "return",
+      "code": "return \"parsed:\" + parsed;",
+      "line": 21,
+      "line_end": 21
+    },
+    {
+      "key": "statement@22",
+      "kind": "statement",
+      "code": "catch",
+      "line": 22,
+      "line_end": 23,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@23",
+      "kind": "return",
+      "code": "return \"unparseable\";",
+      "line": 23,
+      "line_end": 23
+    }
+  ],
+  "edges": [
+    {
+      "source": "call@20",
+      "target": "return@21",
+      "label": "flow"
+    },
+    {
+      "source": "return@21",
+      "target": "statement@22",
+      "label": "exception"
+    },
+    {
+      "source": "statement@19",
+      "target": "call@20",
+      "label": "flow"
+    },
+    {
+      "source": "statement@22",
+      "target": "return@23",
+      "label": "flow"
+    }
+  ]
+}

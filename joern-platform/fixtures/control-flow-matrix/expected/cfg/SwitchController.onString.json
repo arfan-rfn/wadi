@@ -1,0 +1,57 @@
+{
+  "nodes": [
+    {
+      "key": "branch@49",
+      "kind": "branch",
+      "code": "switch(word)",
+      "line": 49,
+      "line_end": 55,
+      "construct_kind": "switch",
+      "condition_code": "word"
+    },
+    {
+      "key": "return@51",
+      "kind": "return",
+      "code": "return \"starting\";",
+      "line": 51,
+      "line_end": 51
+    },
+    {
+      "key": "return@53",
+      "kind": "return",
+      "code": "return \"stopping\";",
+      "line": 53,
+      "line_end": 53
+    },
+    {
+      "key": "return@55",
+      "kind": "return",
+      "code": "return \"unknown\";",
+      "line": 55,
+      "line_end": 55
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@49",
+      "target": "return@51",
+      "label": "case",
+      "case_values": [
+        "\"start\""
+      ]
+    },
+    {
+      "source": "branch@49",
+      "target": "return@53",
+      "label": "case",
+      "case_values": [
+        "\"stop\""
+      ]
+    },
+    {
+      "source": "branch@49",
+      "target": "return@55",
+      "label": "default"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "nodes": [
+    {
+      "key": "branch@67",
+      "kind": "branch",
+      "code": "if (n < 0)",
+      "line": 67,
+      "line_end": 68,
+      "construct_kind": "if",
+      "condition_code": "n < 0"
+    },
+    {
+      "key": "statement@68",
+      "kind": "statement",
+      "code": "throw new IllegalArgumentException(\"negative input\");",
+      "line": 68,
+      "line_end": 68,
+      "construct_kind": "throw",
+      "call": {
+        "callee": "java.lang.IllegalArgumentException.<init>",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@70",
+      "kind": "return",
+      "code": "return \"accepted\";",
+      "line": 70,
+      "line_end": 70
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@67",
+      "target": "return@70",
+      "label": "false"
+    },
+    {
+      "source": "branch@67",
+      "target": "statement@68",
+      "label": "true"
+    }
+  ]
+}

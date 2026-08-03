@@ -1,0 +1,65 @@
+{
+  "nodes": [
+    {
+      "key": "branch@24",
+      "kind": "branch",
+      "code": "if (n == 0)",
+      "line": 24,
+      "line_end": 25,
+      "construct_kind": "if",
+      "condition_code": "n == 0"
+    },
+    {
+      "key": "return@25",
+      "kind": "return",
+      "code": "return \"zero\";",
+      "line": 25,
+      "line_end": 25
+    },
+    {
+      "key": "branch@27",
+      "kind": "branch",
+      "code": "if (n < 0)",
+      "line": 27,
+      "line_end": 28,
+      "construct_kind": "if",
+      "condition_code": "n < 0"
+    },
+    {
+      "key": "return@28",
+      "kind": "return",
+      "code": "return \"negative\";",
+      "line": 28,
+      "line_end": 28
+    },
+    {
+      "key": "return@30",
+      "kind": "return",
+      "code": "return \"positive\";",
+      "line": 30,
+      "line_end": 30
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@24",
+      "target": "branch@27",
+      "label": "false"
+    },
+    {
+      "source": "branch@24",
+      "target": "return@25",
+      "label": "true"
+    },
+    {
+      "source": "branch@27",
+      "target": "return@28",
+      "label": "true"
+    },
+    {
+      "source": "branch@27",
+      "target": "return@30",
+      "label": "false"
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "nodes": [
+    {
+      "key": "statement@68",
+      "kind": "statement",
+      "code": "int visited = 0",
+      "line": 68,
+      "line_end": 68
+    },
+    {
+      "key": "statement@70",
+      "kind": "statement",
+      "code": "int row = 0",
+      "line": 70,
+      "line_end": 70
+    },
+    {
+      "key": "loop@70",
+      "kind": "loop",
+      "code": "for (int row = 0; row < n; row++)",
+      "line": 70,
+      "line_end": 78,
+      "construct_kind": "for",
+      "condition_code": "row < n"
+    },
+    {
+      "key": "statement@71",
+      "kind": "statement",
+      "code": "int col = 0",
+      "line": 71,
+      "line_end": 71
+    },
+    {
+      "key": "loop@71",
+      "kind": "loop",
+      "code": "for (int col = 0; col < n; col++)",
+      "line": 71,
+      "line_end": 78,
+      "construct_kind": "for",
+      "condition_code": "col < n"
+    },
+    {
+      "key": "branch@72",
+      "kind": "branch",
+      "code": "if (col > row)",
+      "line": 72,
+      "line_end": 73,
+      "construct_kind": "if",
+      "condition_code": "col > row"
+    },
+    {
+      "key": "statement@73",
+      "kind": "statement",
+      "code": "continue outer;",
+      "line": 73,
+      "line_end": 73,
+      "construct_kind": "continue"
+    },
+    {
+      "key": "branch@75",
+      "kind": "branch",
+      "code": "if (visited > 20)",
+      "line": 75,
+      "line_end": 76,
+      "construct_kind": "if",
+      "condition_code": "visited > 20"
+    },
+    {
+      "key": "statement@76",
+      "kind": "statement",
+      "code": "break outer;",
+      "line": 76,
+      "line_end": 76,
+      "construct_kind": "break"
+    },
+    {
+      "key": "statement@78",
+      "kind": "statement",
+      "code": "visited++",
+      "line": 78,
+      "line_end": 78
+    },
+    {
+      "key": "return@81",
+      "kind": "return",
+      "code": "return String.valueOf(visited);",
+      "line": 81,
+      "line_end": 81,
+      "call": {
+        "callee": "java.lang.String.valueOf",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@72",
+      "target": "branch@75",
+      "label": "false"
+    },
+    {
+      "source": "branch@72",
+      "target": "statement@73",
+      "label": "true"
+    },
+    {
+      "source": "branch@75",
+      "target": "statement@76",
+      "label": "true"
+    },
+    {
+      "source": "branch@75",
+      "target": "statement@78",
+      "label": "false"
+    },
+    {
+      "source": "loop@70",
+      "target": "return@81",
+      "label": "false"
+    },
+    {
+      "source": "loop@70",
+      "target": "statement@71",
+      "label": "true"
+    },
+    {
+      "source": "loop@71",
+      "target": "branch@72",
+      "label": "true"
+    },
+    {
+      "source": "loop@71",
+      "target": "loop@70",
+      "label": "false",
+      "back": true
+    },
+    {
+      "source": "statement@68",
+      "target": "statement@70",
+      "label": "flow"
+    },
+    {
+      "source": "statement@70",
+      "target": "loop@70",
+      "label": "flow"
+    },
+    {
+      "source": "statement@71",
+      "target": "loop@71",
+      "label": "flow"
+    },
+    {
+      "source": "statement@73",
+      "target": "loop@70",
+      "label": "flow",
+      "back": true
+    },
+    {
+      "source": "statement@76",
+      "target": "return@81",
+      "label": "flow"
+    },
+    {
+      "source": "statement@78",
+      "target": "loop@71",
+      "label": "flow",
+      "back": true
+    }
+  ]
+}

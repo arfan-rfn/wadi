@@ -11,7 +11,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EXPORT_SCHEMA_VERSION = "2.4.0"
+EXPORT_SCHEMA_VERSION = "2.5.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -30,7 +30,19 @@ when the export predates the metric (never conflated with zero, P10).
 
 2.3.0 (additive, §5.2.7): endpoints carry ``request_schema`` /
 ``response_schema`` — recovered field-level wire shapes with honest
-``unresolved``/``cycle``/``truncated`` terminals."""
+``unresolved``/``cycle``/``truncated`` terminals.
+
+2.4.0 (additive, §5.4.2 T4): new top-level ``async_roots`` (non-endpoint
+reachability roots); the closure is rooted at endpoints + async roots.
+
+2.5.0 (additive, §5.2.8): cfg nodes carry ``construct_kind`` (which Java construct
+this node is: if/switch/switch-arrow/for/foreach/while/do-while/try/catch/
+finally/throw/break/continue/goto) and real ``line_end`` extents; a SWITCH is
+a ``branch`` node keeping its selector as ``condition_code``; edge labels gain
+``case`` (with ``case_values``), ``default``, ``fallthrough``, ``exception``,
+plus a ``back`` flag on cycle-closing loop edges; catch/finally handlers are
+graph nodes; sinks inside conditions/throws/for-headers attach to their
+statement (their calls appear on branch/loop/statement nodes)."""
 
 
 class ExportModelBase(BaseModel):
@@ -84,9 +96,20 @@ class ExportCfgNode(ExportModelBase):
     code: str
     line: int = Field(ge=0)
     line_end: int = Field(ge=0)
+    construct_kind: str | None = Field(
+        default=None,
+        description=(
+            "Which Java construct this node is (§5.2.8): if | switch | "
+            "switch-arrow | for | foreach | while | do-while | try | catch | "
+            "finally | throw | break | continue | goto. None = plain statement "
+            "or exporter predates 2.5.0. (Named construct_kind because "
+            "pydantic reserves `construct`.)"
+        ),
+    )
     call: ExportCall | None = None
     condition_code: str | None = Field(
-        default=None, description="Branch/loop condition expression text"
+        default=None,
+        description="Branch/loop condition or switch selector expression text",
     )
 
 
@@ -94,12 +117,23 @@ class ExportCfgEdgeLabel(StrEnum):
     FLOW = "flow"
     TRUE = "true"
     FALSE = "false"
+    CASE = "case"
+    DEFAULT = "default"
+    FALLTHROUGH = "fallthrough"
+    EXCEPTION = "exception"
 
 
 class ExportCfgEdge(ExportModelBase):
     source: int
     target: int
     label: ExportCfgEdgeLabel = ExportCfgEdgeLabel.FLOW
+    case_values: list[str] = Field(
+        default_factory=list[str],
+        description="Stacked case labels on a `case` edge (source text of each value)",
+    )
+    back: bool = Field(
+        default=False, description="Cycle-closing loop edge (§5.2.8 back-edge marking)"
+    )
 
 
 class ExportCfg(ExportModelBase):
