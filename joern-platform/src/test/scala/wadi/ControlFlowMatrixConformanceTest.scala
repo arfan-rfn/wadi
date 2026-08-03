@@ -124,7 +124,8 @@ class ControlFlowMatrixConformanceTest extends AnyFunSuite with Matchers with Fi
       .iterator()
       .asScala
       .map(_.getFileName.toString)
-      .filter(f => f.endsWith(".json") && !liveNames.contains(f))
+      // bytecode-oracle.json is the M3 oracle's pinned counts, not a handler golden.
+      .filter(f => f.endsWith(".json") && f != "bytecode-oracle.json" && !liveNames.contains(f))
       .toList
     stale shouldBe empty
   }

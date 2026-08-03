@@ -28,7 +28,11 @@ libraryDependencies ++= Seq(
   "io.joern" %% "semanticcpg"       % joernVersion % Provided,
   "io.joern" %% "dataflowengineoss" % joernVersion % Provided,
   "com.lihaoyi" %% "upickle"        % "4.0.2",
-  "org.scalatest" %% "scalatest"    % "3.2.19" % Test
+  "org.scalatest" %% "scalatest"    % "3.2.19" % Test,
+  // §5.2.8 M3 bytecode oracle: pinned to javasrc2cpg's transitive ASM so the
+  // test classpath never carries two ASM versions. Test-only — the shipped
+  // assembly is unchanged.
+  "org.ow2.asm" % "asm-tree" % "9.9.1" % Test
 )
 
 assembly / assemblyMergeStrategy := {

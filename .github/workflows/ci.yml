@@ -17,7 +17,15 @@ jobs:
           java-version: "21"
           cache: sbt
       - uses: sbt/setup-sbt@v1
-      - name: Conformance tests (petstore + lombok fixtures)
+      - name: Cache Maven repository (matrix-fixture compile, §5.2.8 M3)
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-${{ runner.os }}-${{ hashFiles('joern-platform/fixtures/control-flow-matrix/pom.xml') }}
+          restore-keys: m2-${{ runner.os }}-
+      - name: Compile the construct-matrix fixture (bytecode-oracle input)
+        run: mvn -q -f joern-platform/fixtures/control-flow-matrix/pom.xml compile
+      - name: Conformance tests (fixtures + construct matrix + bytecode oracle)
         working-directory: joern-platform
         run: sbt -batch test
       - name: Assembly (the jar shipped in the wadi-joern image)
