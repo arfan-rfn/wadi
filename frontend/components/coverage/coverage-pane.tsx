@@ -324,7 +324,9 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                   )
                 )}
               </ul>
-              {(report.cfg_anomalies.services ?? []).some((s) => !s.checked) && (
+              {(report.cfg_anomalies.services ?? []).some(
+                (s) => !s.checked
+              ) && (
                 <p className="mt-2 text-xs text-muted-foreground">
                   Never checked:{" "}
                   {(report.cfg_anomalies.services ?? [])
