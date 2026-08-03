@@ -1,7 +1,13 @@
 package wadi.`export`
 
 import io.shiftleft.codepropertygraph.generated.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.{AstNode, Call, ControlStructure, Method}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+  AstNode,
+  Call,
+  ControlStructure,
+  Method,
+  TypeDecl
+}
 import io.shiftleft.semanticcpg.language.*
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
@@ -37,8 +43,13 @@ object WadiExport {
     * production methods in the CPG vs. the endpoint-reachable subset.
     * 2.3.0 (additive, §5.2.7): endpoints carry `request_schema` /
     * `response_schema` — field-level wire shapes with honest terminals.
+    * 2.4.0 (additive, §5.4.2 T4): new top-level `async_roots` (non-endpoint
+    * reachability roots, method_id + kind); the closure is rooted at
+    * endpoints ∪ async roots and traverses METHOD_REFs (lambdas, method
+    * refs), anonymous-class bodies, constructor/`<clinit>` bodies; the
+    * coverage denominator counts lambda bodies.
     */
-  val ExportSchemaVersion = "2.3.0"
+  val ExportSchemaVersion = "2.4.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -53,8 +64,15 @@ object WadiExport {
 
   def run(cpg: Cpg, outDir: String): String = {
     val endpointMethods = cpg.method.where(_.tag.nameExact("endpoint")).l
-    val closure         = reachableClosure(endpointMethods)
-    val methodIds       = closure.map(_.id).toSet
+    // T4 (§5.4.2): async roots from the service's OWN sources only — a
+    // staged-library `@Scheduled` method would root (and duplicate its call
+    // sites) into every dependent (§5.2.6 rationale).
+    val asyncRootMethods = cpg.method
+      .where(_.tag.nameExact("async-root"))
+      .filterNot(_.filename.startsWith("wadi-libs/"))
+      .l
+    val closure   = reachableClosure(endpointMethods ++ asyncRootMethods)
+    val methodIds = closure.map(_.id).toSet
 
     val sinkRows = mutable.ListBuffer.empty[ujson.Obj]
 
@@ -103,6 +121,12 @@ object WadiExport {
 
     val unreachableObjs = unreachableSinkObjs(cpg, methodIds)
     val coverageObj     = analysisCoverageObj(cpg, methodIds)
+    // T4 (§5.4.2): one row per (method, kind); a method may carry several.
+    val asyncRootObjs = asyncRootMethods.flatMap { method =>
+      method.tag.nameExact("async-root").value.l.distinct.sorted.map { kind =>
+        ujson.Obj("method_id" -> num(method.id), "kind" -> kind)
+      }
+    }
 
     val document = ujson.Obj(
       "export_schema_version" -> ExportSchemaVersion,
@@ -110,6 +134,7 @@ object WadiExport {
       "methods"               -> methodObjs,
       "cfgs"                  -> cfgObjs,
       "endpoints"             -> endpointObjs,
+      "async_roots"           -> asyncRootObjs,
       "sinks"                 -> sinkRows.toList,
       "unreachable_sinks"     -> unreachableObjs,
       "data_models"           -> modelObjs,
@@ -127,6 +152,7 @@ object WadiExport {
       StandardOpenOption.TRUNCATE_EXISTING
     )
     s"wadi export: ${closure.size} methods, ${endpointObjs.size} endpoints, " +
+      s"${asyncRootObjs.size} async roots, " +
       s"${sinkRows.size} sinks, ${unreachableObjs.size} unreachable sinks, " +
       s"coverage ${coverageObj("reachable_production_methods").num.toInt}/" +
       s"${coverageObj("production_methods").num.toInt} -> $outDir/export.json"
@@ -146,7 +172,12 @@ object WadiExport {
   private def analysisCoverageObj(cpg: Cpg, reachableMethodIds: Set[Long]): ujson.Obj = {
     val productionIds = cpg.method
       .filterNot(_.isExternal)
-      .filterNot(_.name.startsWith("<"))
+      // T4 refinement (§5.4.3): lambda bodies are real source and count;
+      // the remaining `<` exclusions are operators and `<init>`/`<clinit>`
+      // (javasrc2cpg synthesizes a default constructor per class with a line
+      // number — counting them would add one no-op entry per class; their
+      // bodies still enter the closure via the T4 traversal).
+      .filter(m => !m.name.startsWith("<") || m.modifier.modifierType.l.contains("LAMBDA"))
       .filterNot(_.modifier.modifierType.l.contains("ABSTRACT"))
       .filterNot(_.filename.startsWith("wadi-libs/"))
       .id
@@ -157,17 +188,85 @@ object WadiExport {
     )
   }
 
-  /** BFS over resolved calls (incl. DI-added edges), internal methods only. */
+  /** Anonymous classes are named `Outer$1`-style with a trailing numeric
+    * suffix (survey fact, §5.4.2 T4); named nested classes (`Outer$Inner`)
+    * do not match.
+    */
+  private val AnonymousClassName = ".*\\$\\d+$".r
+
+  /** `_refOut`, not `.referencedTypeDecl` — the strict accessor throws on a
+    * TYPE missing its mandatory REF edge (the unresolvable-method-ref
+    * failure class, benchmark-proven).
+    */
+  private def inheritsExternalSupertype(td: TypeDecl): Boolean =
+    td.inheritsFromOut.l
+      .flatMap(_._refOut.collectAll[TypeDecl])
+      .filterNot(_.fullName == "java.lang.Object")
+      .exists(_.isExternal)
+
+  /** BFS over the T4 reachability edges (§5.4.2), internal methods only:
+    *
+    *   1. resolved CALL callees (incl. DI-added edges) — operators excluded,
+    *      `<init>`/`<clinit>`/`<lambda>N` pass (constructor bodies used to be
+    *      filtered out wholesale by `name.startsWith("<")`);
+    *   2. METHOD_REF targets — javasrc2cpg binds lambdas and method
+    *      references (`this::x`) via METHOD_REF, not CALL;
+    *   3. an anonymous class's other methods once its `<init>` is reached —
+    *      its overrides dispatch through the external interface
+    *      (`java.lang.Runnable.run`) and are invisible to call-edge BFS;
+    *      instantiated-where-defined makes this the honest over-approximation;
+    *   4. the visited method's class `<clinit>` and `<init>` constructors —
+    *      if any method of a class runs, the class was loaded (static init
+    *      ran) and an instance was constructed; the constructor half makes
+    *      DI-bean constructors reachable (Spring beans are never `new`ed in
+    *      user code).
+    */
   private def reachableClosure(roots: List[Method]): List[Method] = {
     val ordered = mutable.LinkedHashMap.empty[Long, Method]
     val queue   = mutable.Queue.from(roots)
+    def enqueue(m: Method): Unit = if (!ordered.contains(m.id)) queue.enqueue(m)
     while (queue.nonEmpty) {
       val current = queue.dequeue()
       if (!ordered.contains(current.id)) {
         ordered.put(current.id, current)
-        current.call.callee.filterNot(_.isExternal).filterNot(_.name.startsWith("<")).l.foreach { callee =>
-          if (!ordered.contains(callee.id)) queue.enqueue(callee)
-        }
+        current.call.callee
+          .filterNot(_.isExternal)
+          .filterNot(_.name.startsWith(OperatorPrefix))
+          .l
+          .foreach { callee =>
+            enqueue(callee)
+            if (callee.name == "<init>") {
+              callee.typeDecl.l.foreach { td =>
+                if (AnonymousClassName.matches(td.name)) {
+                  // Anonymous: all methods (instantiated-where-defined).
+                  td.method.filterNot(_.isExternal).l.foreach(enqueue)
+                } else if (inheritsExternalSupertype(td)) {
+                  // Named class behind an external supertype (`PollThread
+                  // extends Thread`): the override surface runs through the
+                  // external parent, invisible to call-edge BFS.
+                  td.method
+                    .filterNot(_.isExternal)
+                    .filterNot(_.name.startsWith("<"))
+                    .filterNot(_.modifier.modifierType.l.contains("STATIC"))
+                    .filterNot(_.modifier.modifierType.l.contains("PRIVATE"))
+                    .l
+                    .foreach(enqueue)
+                }
+              }
+            }
+          }
+        // NOT `.referencedMethod` — that accessor treats the REF edge as
+        // mandatory and THROWS on unresolvable method refs (`Unknown::x`),
+        // which real repos are full of; `_refOut` is the tolerant spelling.
+        current.ast.isMethodRef.l
+          .flatMap(_._refOut.collectAll[Method])
+          .filterNot(_.isExternal)
+          .foreach(enqueue)
+        current.typeDecl.method
+          .nameExact("<clinit>", "<init>")
+          .filterNot(_.isExternal)
+          .l
+          .foreach(enqueue)
       }
     }
     ordered.values.toList

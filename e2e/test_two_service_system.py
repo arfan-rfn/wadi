@@ -120,6 +120,7 @@ class TestTwoServiceSystem:
         assert {s["name"]: s["kind"] for s in all_boundaries} == {
             "petstore": "service",
             "inventory": "service",
+            "sweeper": "service",
             "petstore-common": "library",
         }
         by_name = {s["name"]: s for s in all_boundaries if s["kind"] == "service"}
@@ -171,7 +172,8 @@ class TestTwoServiceSystem:
         # constant-name/url=${key}, ternary, StringBuilder, join, MessageFormat,
         # member map, ctor @Value — plus the T3 deployment probes: compose-env
         # key (relaxed binding), profile-file key, K8s service DNS
-        assert totals["analyzed"] == 23
+        # T4 adds petstore's 8 async-root/traversal probes + sweeper's sweep.
+        assert totals["analyzed"] == 33
         # audit.example.com: branch candidate + the hierarchy-chain report sink
         assert totals["external"] == 3  # audit branch + hierarchy sink + @HttpExchange feed
         assert totals["undetermined"] == 3  # no-endpoint-match + getenv idiom + base-undetermined
@@ -195,21 +197,23 @@ class TestTwoServiceSystem:
             (m["mechanism"], len(m["service_ids"])) for m in coverage["unmodelled_mechanisms"]
         ]
         assert unmodelled == [("jdk-httpclient", 1)]
-        # §5.4.3 analysis coverage: production-vs-reachable methods per service.
-        # Petstore's 5 unreached = the T1 unreachable-inventory classes +
-        # framework-invoked roots; inventory's 1 = SecurityConfig.filterChain.
-        # Staged common-library sources (wadi-libs/) count in NO denominator,
-        # and the library itself never gets an entry (§5.2.6).
+        # §5.4.3 analysis coverage, T4-widened: the only unreached petstore
+        # methods left are the genuinely dead T1 classes; inventory walks
+        # fully (filterChain is a `bean` root); sweeper's unreached method is
+        # its boilerplate main. Staged common-library sources (wadi-libs/)
+        # count in NO denominator, and the library never gets an entry.
         section = coverage["analysis_coverage"]
         per_service = {e["name"]: e for e in section["services"]}
-        assert set(per_service) == {"petstore", "inventory"}
-        assert per_service["petstore"]["production_methods"] == 44
-        assert per_service["petstore"]["reachable_methods"] == 39
-        assert per_service["inventory"]["production_methods"] == 9
-        assert per_service["inventory"]["reachable_methods"] == 8
-        assert section["production_methods"] == 53
-        assert section["reachable_methods"] == 47
-        assert section["coverage_percent"] == 88.7
+        assert set(per_service) == {"petstore", "inventory", "sweeper"}
+        assert per_service["petstore"]["production_methods"] == 53
+        assert per_service["petstore"]["reachable_methods"] == 50
+        assert per_service["inventory"]["production_methods"] == 10
+        assert per_service["inventory"]["reachable_methods"] == 10
+        assert per_service["sweeper"]["production_methods"] == 2
+        assert per_service["sweeper"]["reachable_methods"] == 1
+        assert section["production_methods"] == 65
+        assert section["reachable_methods"] == 61
+        assert section["coverage_percent"] == 93.8
 
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
@@ -218,7 +222,7 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         analyzed_edges = [e for e in outbound if e["target_kind"] == "analyzed"]
-        assert len(analyzed_edges) == 23
+        assert len(analyzed_edges) == 32
         # §5.2.6: the shared-module DTO resolved through the staged union — the
         # DI signature matched exactly and the call stitched to the inventory.
         summary_edge = next(
@@ -304,7 +308,25 @@ class TestTwoServiceSystem:
         inbound = (
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{inventory_id}/remote-edges")
         ).json()["inbound"]
-        assert len(inbound) == 23  # every analyzed idiom lands on inventory
+        assert len(inbound) == 33  # every analyzed idiom lands on inventory
+
+        # T4 (§5.4.2): the controller-less service is non-empty through its
+        # async root — a queryable boundary fact plus a stitched edge.
+        sweeper = by_name["sweeper"]
+        assert [r["kind"] for r in sweeper["async_roots"]] == ["scheduled"]
+        assert "ExpiredReservationSweeper" in sweeper["async_roots"][0]["method_signature"]
+        sweeper_out = (
+            await http.get(
+                f"/api/v1/snapshots/{snapshot_id}/services/{sweeper['service_id']}/remote-edges"
+            )
+        ).json()["outbound"]
+        assert [e["target_kind"] for e in sweeper_out] == ["analyzed"]
+        assert sweeper_out[0]["target_service_id"] == inventory_id
+        # Petstore's rooted probes also record their kinds on the boundary.
+        petstore_kinds = {r["kind"] for r in by_name["petstore"]["async_roots"]}
+        assert {"scheduled", "event-listener", "kafka-listener", "application-runner"} <= (
+            petstore_kinds
+        )
 
         # 6. Structured auth arrived on the wire (goal 9).
         inventory_endpoints = (
@@ -386,7 +408,7 @@ class TestTwoServiceSystem:
             CONTRACT_MODELS[record["kind"]].model_validate(record["artifact"])
         assert manifest.artifact_counts == dict(sorted(received.items()))
         # The bundle mirrors the API's own answers.
-        assert received["service_boundary"] == 3  # petstore + inventory + the library
+        assert received["service_boundary"] == 4  # petstore + inventory + sweeper + library
         assert received["endpoint"] == 20
         assert received["icfg"] == 20
         assert received["stitched_edge"] == coverage["totals"]["edges"]

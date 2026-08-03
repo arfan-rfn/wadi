@@ -87,8 +87,14 @@ class TestParseTag:
 class TestRegistry:
     def test_registered_namespaces(self) -> None:
         assert registered_namespaces() == frozenset(
-            {"endpoint", "sink", "model", "auth", "auth-rule", "token-propagation"}
+            {"endpoint", "sink", "model", "auth", "auth-rule", "token-propagation", "async-root"}
         )
+
+    def test_async_root_kinds(self) -> None:
+        assert parse_tag("async-root=scheduled").value == "scheduled"
+        assert parse_tag("async-root=framework-callback").namespace == "async-root"
+        with pytest.raises(TagValidationError, match="async-root"):
+            parse_tag("async-root=cron")
 
     def test_validate_tag_unknown_namespace_names_known_ones(self) -> None:
         with pytest.raises(TagValidationError, match="endpoint"):

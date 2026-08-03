@@ -15,3 +15,7 @@ services:
     build: ./inventory
     ports:
       - "8081:8081"
+  # T4 (§5.4.2): controller-less service — exists on the map only through its
+  # async root.
+  sweeper:
+    build: ./sweeper

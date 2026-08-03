@@ -191,6 +191,13 @@ export function Explorer() {
                     </p>
                     <p className="truncate font-mono text-[11px] text-muted-foreground">
                       {service.build_root}
+                      {(service.async_roots ?? []).length > 0 && (
+                        <span>
+                          {" · "}
+                          {(service.async_roots ?? []).length} async root
+                          {(service.async_roots ?? []).length === 1 ? "" : "s"}
+                        </span>
+                      )}
                     </p>
                   </div>
                   <span

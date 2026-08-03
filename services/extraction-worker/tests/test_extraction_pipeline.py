@@ -138,6 +138,13 @@ class TestExtractionPipeline:
         assert boundary.analysis_coverage is not None
         assert boundary.analysis_coverage.production_methods == 3
         assert boundary.analysis_coverage.reachable_methods == 2
+        # Async roots ride the boundary too (§5.4.2 T4), resolved to
+        # signature + anchor via the export's method table.
+        assert len(boundary.async_roots) == 1
+        root = boundary.async_roots[0]
+        assert root.kind == "scheduled"
+        assert "PetServiceImpl" in root.method_signature
+        assert root.anchor.file.endswith(".java")
 
         endpoints = await artifacts.list_endpoints(snapshot.id, boundary.service_id)
         assert [e.simplified_uri for e in endpoints] == ["/pets/{?}"]

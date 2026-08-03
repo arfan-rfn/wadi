@@ -6,6 +6,57 @@ All notable changes to wadi. One version spans the whole release set
 ## Unreleased
 
 ### Added
+- **T4 — reachability roots (§5.4.2, Phase 2.5 M7):** the reachable closure
+  is now rooted at **endpoints ∪ async roots** and traverses the four edge
+  classes the endpoint-only BFS missed (each grounded in an empirical
+  javasrc2cpg survey recorded in §5.4.2):
+  - **METHOD_REF targets** — lambdas (`<lambda>N`, LAMBDA modifier) and
+    method references (`this::x`) bind via METHOD_REF, not CALL;
+    `CompletableFuture.runAsync(() -> client.get(...))` was invisible.
+  - **Anonymous-class bodies and constructed classes behind external
+    supertypes** — an anonymous `new Runnable(){...}` resolves its `<init>`
+    as a call but the overrides dispatch through the external interface;
+    reaching a ctor enqueues the class's methods (all of them for anonymous
+    classes; the public/protected override surface for a named
+    `class PollThread extends Thread` — the upstream-TrainTicket wait-order
+    flow that call-edge BFS could never see).
+  - **Constructor/`<clinit>` bodies** — traversed via class-load/instance
+    semantics: if any method of a class runs, its static initializer ran and
+    an instance was constructed — which is what makes **DI-bean
+    constructors** reachable (Spring beans are never `new`ed in user code).
+  - **Non-endpoint roots** — a tagging pass (`async-root=<kind>`, tag
+    registry 1.3.0) marks `@Scheduled`/`@EventListener`/
+    `@KafkaListener`/`@RabbitListener`/`@JmsListener` methods,
+    `ApplicationRunner`/`CommandLineRunner.run`, `@Bean` factory methods,
+    and public methods of stereotype components implementing an external
+    supertype (`@Component implements feign.RequestInterceptor` — the
+    framework-callback case). Roots come from service-own sources only
+    (§5.2.6 duplication rationale). MQ semantics stay Phase 3.
+  Export 2.4.0 (`async_roots` section) → contracts 1.7.0
+  (`ServiceBoundary.async_roots`: kind + signature + anchor). **A
+  controller-less service is now non-empty** — the new `sweeper` fixture
+  module (P8) proves the whole story: 0 endpoints, 1 scheduled root, 1
+  stitched edge, honest 1/2 coverage (its `main` stays unreached). The
+  coverage denominator widens in lockstep: lambda bodies count as
+  production methods; constructors stay out (javasrc2cpg synthesizes a
+  default per class, indistinguishable from an explicit empty one) while
+  their bodies still feed the closure. The explorer service list shows an
+  async-root count so root-only services stop looking empty. The first
+  benchmark round also exposed a crasher class: the generated
+  `referencedMethod`/`referencedTypeDecl` accessors treat REF edges as
+  mandatory and THROW on unresolvable method refs (`Unknown::x`) — 34
+  benchmark services died on it; every REF traversal now uses the tolerant
+  `_refOut` spelling, and the fixture carries an unresolvable-method-ref
+  trap so the regression is structurally impossible. Measured before/after
+  (M1's instrument, †=identical commits): analysis coverage upstream
+  62.2%→87.1%, aitest 30.8%→50.9%, yas 29.0%→59.7% — with endpoints and
+  analyzed edges byte-stable (262/161, 365/167, 194/40). The upstream
+  unreachable inventory went 7→6: M1's "2 async-root entries" resolved to
+  one genuine T4 reclaim (`PollThread.doPreserve`, now honestly
+  `undetermined` — its URL authority is runtime data) and one hand-verified
+  dead method (`AsyncTask.sendAsyncCallToPaymentService` has no caller at
+  this revision — `@Async` is invoked by user code, not the framework, so
+  it is correctly NOT a root).
 - **Frontend workbench: coverage-first + endpoint end-to-end story (§5.3,
   Phase 2.5 M6):** the explorer gains a Coverage view (default landing:
   analysis-coverage stat tiles with "N of M" context, per-service bars,

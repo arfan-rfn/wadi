@@ -7,6 +7,7 @@ from pydantic import Field, field_validator, model_validator
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.enums import ServiceKind
 from wadi_contracts.source import SourceAnchor
+from wadi_contracts.tags import ASYNC_ROOT_KINDS
 
 KNOWN_CLIENT_LIBRARIES: frozenset[str] = frozenset(
     {
@@ -139,6 +140,28 @@ class AnalysisCoverage(WadiModel):
         return self
 
 
+class AsyncRoot(WadiModel):
+    """A non-endpoint reachability root (§5.4.2 T4, schema 1.7.0): a method
+    the framework invokes without an HTTP request — scheduled jobs, event and
+    message listeners, boot runners, ``@Bean`` factories, framework callbacks.
+    The reachable closure (and therefore coverage, sinks, and stitched edges)
+    is rooted at endpoints plus these; a controller-less service is non-empty
+    exactly through this list.
+    """
+
+    kind: str = Field(min_length=1, description="Registry kind, e.g. 'scheduled' (tags.py)")
+    method_signature: str = Field(min_length=1, description="Fully-qualified method signature")
+    anchor: SourceAnchor
+
+    @field_validator("kind")
+    @classmethod
+    def _known_kind(cls, value: str) -> str:
+        if value not in ASYNC_ROOT_KINDS:
+            allowed = " | ".join(sorted(ASYNC_ROOT_KINDS))
+            raise ValueError(f"async-root kind must be {allowed}, got {value!r}")
+        return value
+
+
 class ServiceBoundary(ArtifactEnvelope):
     """One discovered service within a snapshot.
 
@@ -185,6 +208,13 @@ class ServiceBoundary(ArtifactEnvelope):
         description=(
             "Analysis-coverage counts (§5.4.3). None = fact unavailable "
             "(library, extraction failed, or pre-1.5 snapshot) — never zero"
+        ),
+    )
+    async_roots: list[AsyncRoot] = Field(
+        default_factory=list[AsyncRoot],
+        description=(
+            "Non-endpoint reachability roots (§5.4.2 T4). Empty also for "
+            "pre-1.7 snapshots — absence of the fact, not proof of none"
         ),
     )
 

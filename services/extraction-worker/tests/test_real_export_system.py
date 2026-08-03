@@ -42,7 +42,7 @@ def inventory() -> ServiceExport:
 
 class TestPetstoreModule:
     def test_parses_under_schema_2(self, petstore: ServiceExport) -> None:
-        assert petstore.export_schema_version == "2.3.0"
+        assert petstore.export_schema_version == "2.4.0"
         assert petstore.compatible_with_reader()
 
     def test_analysis_coverage_matches_pinned_conformance(
@@ -51,11 +51,23 @@ class TestPetstoreModule:
         """§5.4.3: the counts pinned in PetstoreSystemConformanceTest arrive
         intact across the language boundary."""
         assert petstore.analysis_coverage is not None
-        assert petstore.analysis_coverage.production_methods == 44
-        assert petstore.analysis_coverage.reachable_production_methods == 39
+        assert petstore.analysis_coverage.production_methods == 53
+        assert petstore.analysis_coverage.reachable_production_methods == 50
         assert inventory.analysis_coverage is not None
-        assert inventory.analysis_coverage.production_methods == 9
-        assert inventory.analysis_coverage.reachable_production_methods == 8
+        assert inventory.analysis_coverage.production_methods == 10
+        assert inventory.analysis_coverage.reachable_production_methods == 10
+
+    def test_async_roots_arrive_with_registry_kinds(self, petstore: ServiceExport) -> None:
+        """§5.4.2 T4: roots cross the language boundary and their kinds are
+        registry vocabulary."""
+        from wadi_contracts.tags import ASYNC_ROOT_KINDS
+
+        assert petstore.async_roots, "the T4 fixtures must produce async roots"
+        kinds = {r.kind for r in petstore.async_roots}
+        assert kinds <= ASYNC_ROOT_KINDS
+        assert {"scheduled", "event-listener", "kafka-listener", "application-runner"} <= kinds
+        methods = {m.id for m in petstore.methods}
+        assert all(r.method_id in methods for r in petstore.async_roots)
 
     def test_config_key_candidate_assembles(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)

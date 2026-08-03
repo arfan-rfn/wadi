@@ -9,7 +9,8 @@ import io.shiftleft.semanticcpg.language.*
   *
   * Tags persist in the CPG; the exporter collects tags rather than
   * re-detecting. Only registry-governed vocabulary is emitted (§7):
-  * `endpoint=<METHOD> <path>`, `sink=db`, `sink=http-client`, `model=<Entity>`.
+  * `endpoint=<METHOD> <path>`, `sink=db`, `sink=http-client`, `model=<Entity>`,
+  * `async-root=<kind>` (T4 §5.4.2).
   */
 object SpringPacks {
 
@@ -18,6 +19,7 @@ object SpringPacks {
     */
   def applyAll(cpg: Cpg): Unit = {
     new SpringEndpointPass(cpg).createAndApply()
+    new SpringAsyncRootPass(cpg).createAndApply()
     new SpringHttpClientSinkPass(cpg).createAndApply()
     new SpringSecurityPack.SpringFeignSinkPass(cpg).createAndApply()
     new SpringSecurityPack.SpringHttpInterfaceSinkPass(cpg).createAndApply()
@@ -414,6 +416,96 @@ class SpringDataSinkPass(cpg: Cpg) extends CpgPass(cpg) {
 }
 
 /** Tags persisted entities: `model=<Entity>` on @Document / @Entity classes. */
+/** T4 (§5.4.2): non-endpoint reachability roots — methods the framework
+  * invokes without an HTTP request. The export roots the reachable closure at
+  * endpoints ∪ these, so scheduled jobs, listeners, and boot runners stop
+  * being invisible flows. Tag value is the root kind; MQ *semantics* of the
+  * listener kinds stay with the Phase 3 MQ packs — this tag only roots
+  * reachability.
+  */
+class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
+
+  private val AnnotationKinds: Map[String, String] = Map(
+    "Scheduled"                  -> "scheduled",
+    "Schedules"                  -> "scheduled",
+    "EventListener"              -> "event-listener",
+    "TransactionalEventListener" -> "event-listener",
+    "KafkaListener"              -> "kafka-listener",
+    "RabbitListener"             -> "rabbit-listener",
+    "JmsListener"                -> "jms-listener"
+  )
+
+  /** Both spellings: fully-qualified when javasrc2cpg resolves the import,
+    * bare when it cannot (the same fallback every sibling pass carries).
+    */
+  private val RunnerInterfaces = Set(
+    "org.springframework.boot.ApplicationRunner",
+    "org.springframework.boot.CommandLineRunner",
+    "ApplicationRunner",
+    "CommandLineRunner"
+  )
+
+  /** Stereotypes whose instances the container constructs and hands to
+    * framework machinery (the `framework-callback` rule below).
+    */
+  private val StereotypeAnnotations =
+    Set("Component", "Service", "Configuration", "Repository")
+
+  override def run(builder: DiffGraphBuilder): Unit = {
+    cpg.method.filterNot(_.isExternal).l.foreach { method =>
+      method.ast.isAnnotation.filter(_.astParent == method).l.foreach { annotation =>
+        AnnotationKinds.get(annotation.name).foreach { kind =>
+          Iterator(method).newTagNodePair("async-root", kind).store()(using builder)
+        }
+        // @Bean factory methods run at context startup (§5.4.2 T4).
+        if (annotation.name == "Bean") {
+          Iterator(method).newTagNodePair("async-root", "bean").store()(using builder)
+        }
+      }
+    }
+    cpg.typeDecl
+      .filterNot(_.isExternal)
+      .filter(_.inheritsFromTypeFullName.exists(RunnerInterfaces.contains))
+      .method
+      .nameExact("run")
+      .filterNot(_.isExternal)
+      .l
+      .foreach { method =>
+        Iterator(method).newTagNodePair("async-root", "application-runner").store()(using builder)
+      }
+    // A stereotype component implementing an EXTERNAL supertype is a framework
+    // callback: the container constructs it and invokes its overrides through
+    // an interface the CPG cannot see into (`@Component implements
+    // feign.RequestInterceptor`). Internal-interface dispatch stays with the
+    // DI pass; java.lang.Object is inherited by everything and proves nothing.
+    cpg.typeDecl
+      .filterNot(_.isExternal)
+      .filter { td =>
+        td.ast.isAnnotation
+          .filter(_.astParent == td)
+          .exists(a => StereotypeAnnotations.contains(a.name))
+      }
+      .filter { td =>
+        // `_refOut`, not `.referencedTypeDecl` — the strict accessor throws
+        // on a TYPE missing its mandatory REF edge (same failure class as
+        // unresolvable method refs; benchmark-proven).
+        td.inheritsFromOut.l
+          .flatMap(_._refOut.collectAll[TypeDecl])
+          .filterNot(_.fullName == "java.lang.Object")
+          .exists(_.isExternal)
+      }
+      .method
+      .filterNot(_.isExternal)
+      .filterNot(_.name.startsWith("<"))
+      .filterNot(_.modifier.modifierType.l.contains("STATIC"))
+      .filterNot(_.modifier.modifierType.l.contains("PRIVATE"))
+      .l
+      .foreach { method =>
+        Iterator(method).newTagNodePair("async-root", "framework-callback").store()(using builder)
+      }
+  }
+}
+
 class SpringModelPass(cpg: Cpg) extends CpgPass(cpg) {
 
   private val PersistenceAnnotations = Set("Document", "Entity")

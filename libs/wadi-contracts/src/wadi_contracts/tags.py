@@ -20,6 +20,11 @@ Grammar: ``<namespace>=<value>``. Registered namespaces and value grammars:
                         ``auth-rule=*|/admin/**|hasRole('ADMIN')``
 ``token-propagation``   ``authorization-header`` | ``feign-interceptor`` —
                         how auth crosses an outbound call site (§5.1)
+``async-root``          non-endpoint reachability root kind (§5.4.2 T4):
+                        ``scheduled`` | ``event-listener`` | ``kafka-listener``
+                        | ``rabbit-listener`` | ``jms-listener`` |
+                        ``application-runner`` | ``bean`` |
+                        ``framework-callback``
 ======================  ======================================================
 
 Additions are additive (minor ``TAG_REGISTRY_VERSION`` bump); removals or
@@ -38,6 +43,7 @@ from dataclasses import dataclass
 from wadi_contracts.version import TAG_REGISTRY_VERSION
 
 __all__ = [
+    "ASYNC_ROOT_KINDS",
     "TAG_REGISTRY_VERSION",
     "Tag",
     "TagValidationError",
@@ -56,6 +62,18 @@ _AUTH_RULE_VALUE = re.compile(
     r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|\*)\|[^|]+\|.+$", re.DOTALL
 )
 _TOKEN_PROPAGATION_VALUES = frozenset({"authorization-header", "feign-interceptor"})
+ASYNC_ROOT_KINDS = frozenset(
+    {
+        "scheduled",
+        "event-listener",
+        "kafka-listener",
+        "rabbit-listener",
+        "jms-listener",
+        "application-runner",
+        "bean",
+        "framework-callback",
+    }
+)
 
 
 class TagValidationError(ValueError):
@@ -119,6 +137,12 @@ def _validate_token_propagation(value: str) -> None:
         raise TagValidationError(f"token-propagation tag value must be {allowed}, got {value!r}")
 
 
+def _validate_async_root(value: str) -> None:
+    if value not in ASYNC_ROOT_KINDS:
+        allowed = " | ".join(sorted(ASYNC_ROOT_KINDS))
+        raise TagValidationError(f"async-root tag value must be {allowed}, got {value!r}")
+
+
 _VALIDATORS: dict[str, Callable[[str], None]] = {
     "endpoint": _validate_endpoint,
     "sink": _validate_sink,
@@ -126,6 +150,7 @@ _VALIDATORS: dict[str, Callable[[str], None]] = {
     "auth": _validate_auth,
     "auth-rule": _validate_auth_rule,
     "token-propagation": _validate_token_propagation,
+    "async-root": _validate_async_root,
 }
 
 

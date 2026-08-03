@@ -93,23 +93,25 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     bodyParams.map(p => (p("name").str, p("location").str)) shouldBe Seq(("payload", "body"))
   }
 
-  test("analysis coverage counts production vs reachable methods (§5.4.3)") {
+  test("analysis coverage counts production vs reachable methods (§5.4.3, T4-widened)") {
     val petstoreCoverage = petstore("analysis_coverage")
-    // The 5 unreached petstore methods are exactly the T1 unreachable-inventory
-    // fixture surface: AuditNotifier.target, OrphanedAuditNotifier.notifyAudit,
-    // LegacyPingProbe.ping (unwired classes), AuthForwardingInterceptor.apply
-    // and CurrentRequest.bearerToken (framework-invoked, a recorded T4 root
-    // class). Bodiless interface stubs count on neither side.
-    petstoreCoverage("production_methods").num.toInt shouldBe 44
-    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 39
+    // T4: the only unreached methods left are genuinely dead code —
+    // AuditNotifier.target, OrphanedAuditNotifier.notifyAudit, and
+    // LegacyPingProbe.ping (unwired classes). The formerly-unreached
+    // framework-invoked pair (AuthForwardingInterceptor.apply +
+    // CurrentRequest.bearerToken) is now rooted (`framework-callback`).
+    // The denominator grew by the T4 fixture methods AND the lambda body
+    // (`NightlySweepJob.<lambda>0` counts — real source; §5.4.3 refinement).
+    petstoreCoverage("production_methods").num.toInt shouldBe 53
+    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 50
 
     val inventoryCoverage = inventory("analysis_coverage")
-    // Inventory's one unreached method is SecurityConfig.filterChain — a @Bean
-    // framework-invoked at startup (a recorded T4 root class). The empty-bodied
-    // StockRepository.restock still counts on both sides: empty concrete
-    // methods are production code, only abstract stubs are excluded.
-    inventoryCoverage("production_methods").num.toInt shouldBe 9
-    inventoryCoverage("reachable_production_methods").num.toInt shouldBe 8
+    // SecurityConfig.filterChain is now rooted as a `bean` — inventory walks
+    // fully. The empty-bodied StockRepository.restock still counts on both
+    // sides: empty concrete methods are production code, only abstract stubs
+    // are excluded.
+    inventoryCoverage("production_methods").num.toInt shouldBe 10
+    inventoryCoverage("reachable_production_methods").num.toInt shouldBe 10
   }
 
   // --- provider-side wire shapes (§5.2.7, M5) ---------------------------------------
@@ -442,12 +444,12 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
   // the union path; these prove the fallbacks.
 
   test("shared-module DTO in the DI signature no longer drops the closure (§5.2.6)") {
-    // stockSummary(StockQuery) — the exact shape that lost 29 TrainTicket calls.
+    // stockSummary(StockQuery) — the exact shape that lost 29 TrainTicket
+    // calls. Exact-value match: the T4 probes add literal /stock/N siblings.
     val summary = httpSinks(petstore).filter(s =>
-      s("value").strOpt.exists(_.startsWith("http://inventory:8081/stock/"))
+      s("value").strOpt.contains("http://inventory:8081/stock/{?}")
     )
     summary should have size 1
-    summary.head("value").str shouldBe "http://inventory:8081/stock/{?}"
     summary.head("http_verb").str shouldBe "GET"
   }
 
@@ -458,6 +460,69 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     reports should have size 1
     reports.head("value").str shouldBe "https://audit.example.com/reports/{?}"
     reports.head("http_verb").str shouldBe "POST"
+  }
+
+  // --- T4 reachability roots (§5.4.2, M7) -------------------------------------------
+
+  private lazy val sweeper: ujson.Value = moduleExport("sweeper")
+
+  private def asyncRoots(doc: ujson.Value): Set[(String, String)] = {
+    val methods = doc("methods").arr.map(m => m("id").num -> m("full_name").str).toMap
+    doc("async_roots").arr.map(r => (r("kind").str, methods(r("method_id").num))).toSet
+  }
+
+  test("async roots are tagged per kind (T4)") {
+    val roots = asyncRoots(petstore)
+    roots should contain(("scheduled", "com.acme.petstore.NightlySweepJob.sweep:void()"))
+    roots.map(_._1) should contain allOf (
+      "scheduled", "event-listener", "kafka-listener", "application-runner", "framework-callback"
+    )
+    // The DI-registered Feign interceptor — framework-invoked through an
+    // external interface, the M1 coverage fixture's anticipated case.
+    roots.exists { case (kind, m) =>
+      kind == "framework-callback" && m.contains("AuthForwardingInterceptor.apply")
+    } shouldBe true
+    // @Bean factory methods root at startup (inventory's filterChain).
+    asyncRoots(inventory).exists { case (kind, m) =>
+      kind == "bean" && m.contains("SecurityConfig.filterChain")
+    } shouldBe true
+  }
+
+  test("each T4 traversal edge reaches its sink (T4)") {
+    val values = httpSinks(petstore).flatMap(_("value").strOpt).toSet
+    // One URL per construct (NightlySweepJob doc lists the mapping).
+    values should contain allOf (
+      "http://inventory:8081/stock/8", // DI-bean constructor body
+      "http://inventory:8081/stock/9", // the scheduled root itself
+      "http://inventory:8081/stock/10", // lambda body (METHOD_REF)
+      "http://inventory:8081/api/v1/inventory/reserved/3", // method reference
+      "http://inventory:8081/api/v1/inventory/audit/7", // anonymous class body
+      "http://inventory:8081/stock/11", // helper one hop below an event listener
+      "http://inventory:8081/stock/12", // kafka listener root
+      "http://inventory:8081/stock/13", // application runner root
+      "http://inventory:8081/stock/14" // named class behind external Thread
+    )
+  }
+
+  test("dead code stays dead: the orphaned sink remains inventoried (T4)") {
+    // T4 roots frameworks, not wishes — a class nothing invokes is still
+    // dead, and its sink stays in the unreachable inventory (§5.2.5).
+    val rows = petstore("unreachable_sinks").arr
+    rows.map(_("method_full_name").str).toSet shouldBe
+      Set("com.acme.petstore.OrphanedAuditNotifier.notifyAudit:void(java.lang.String)")
+  }
+
+  test("a controller-less service is non-empty through its async root (T4)") {
+    sweeper("endpoints").arr shouldBe empty
+    asyncRoots(sweeper) should contain(
+      ("scheduled", "com.acme.sweeper.ExpiredReservationSweeper.sweepExpired:void()")
+    )
+    httpSinks(sweeper).flatMap(_("value").strOpt) should contain(
+      "http://inventory:8081/api/v1/inventory/reserved/0"
+    )
+    sweeper("unreachable_sinks").arr shouldBe empty
+    val cov = sweeper("analysis_coverage")
+    cov("reachable_production_methods").num.toInt should be > 0
   }
 
   test("test sources never enter the CPG (§5.2.6 discovery hygiene)") {

@@ -11,7 +11,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EXPORT_SCHEMA_VERSION = "2.3.0"
+EXPORT_SCHEMA_VERSION = "2.4.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -241,6 +241,14 @@ class ExportAnalysisCoverage(ExportModelBase):
     reachable_production_methods: int = Field(ge=0)
 
 
+class ExportAsyncRoot(ExportModelBase):
+    """A non-endpoint reachability root (§5.4.2 T4): a method the framework
+    invokes without an HTTP request. One row per (method, kind)."""
+
+    method_id: int
+    kind: str
+
+
 class ServiceExport(ExportModelBase):
     """The complete per-(service x language) export document."""
 
@@ -249,6 +257,10 @@ class ServiceExport(ExportModelBase):
     methods: list[ExportMethod]
     cfgs: list[ExportCfg]
     endpoints: list[ExportEndpoint]
+    async_roots: list[ExportAsyncRoot] = Field(
+        default_factory=list[ExportAsyncRoot],
+        description="Empty also when the exporter predates 2.4.0 (T4)",
+    )
     sinks: list[ExportSink]
     unreachable_sinks: list[ExportUnreachableSink] = Field(
         default_factory=list[ExportUnreachableSink]

@@ -13,6 +13,31 @@ export type ProductionMethods = number
  * Numerator: methods in >=1 endpoint's reachable closure
  */
 export type ReachableMethods = number
+export type EndLine = number
+/**
+ * Path relative to the service build root
+ */
+export type File = string
+export type StartLine = number
+/**
+ * Whether an anchor refers to original repo text or a generated variant (§5.3).
+ *
+ * ``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) — the text
+ * that was actually analyzed, served by source-on-demand with a badge.
+ */
+export type SourceVariant = "original" | "generated"
+/**
+ * Registry kind, e.g. 'scheduled' (tags.py)
+ */
+export type Kind = string
+/**
+ * Fully-qualified method signature
+ */
+export type MethodSignature = string
+/**
+ * Non-endpoint reachability roots (§5.4.2 T4). Empty also for pre-1.7 snapshots — absence of the fact, not proof of none
+ */
+export type AsyncRoots = AsyncRoot[]
 /**
  * Path of the build root relative to the repo root ('.' = root)
  */
@@ -69,19 +94,6 @@ export type DiscoveryNames = string[]
  * Spring Cloud Gateway discovery locator: '/{service-name}/**' forwards to that service by its discovery name
  */
 export type GatewayDiscoveryLocator = boolean
-export type EndLine = number
-/**
- * Path relative to the service build root
- */
-export type File = string
-export type StartLine = number
-/**
- * Whether an anchor refers to original repo text or a generated variant (§5.3).
- *
- * ``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) — the text
- * that was actually analyzed, served by source-on-demand with a badge.
- */
-export type SourceVariant = "original" | "generated"
 /**
  * Matched prefix, e.g. '/api/v1/orders/**'
  */
@@ -127,6 +139,7 @@ export interface ServiceBoundary {
    * Analysis-coverage counts (§5.4.3). None = fact unavailable (library, extraction failed, or pre-1.5 snapshot) — never zero
    */
   analysis_coverage?: AnalysisCoverage | null
+  async_roots?: AsyncRoots
   build_root: BuildRoot
   build_system: BuildSystem
   client_libraries?: ClientLibraries
@@ -156,6 +169,32 @@ export interface ServiceBoundary {
 export interface AnalysisCoverage {
   production_methods: ProductionMethods
   reachable_methods: ReachableMethods
+}
+/**
+ * A non-endpoint reachability root (§5.4.2 T4, schema 1.7.0): a method
+ * the framework invokes without an HTTP request — scheduled jobs, event and
+ * message listeners, boot runners, ``@Bean`` factories, framework callbacks.
+ * The reachable closure (and therefore coverage, sinks, and stitched edges)
+ * is rooted at endpoints plus these; a controller-less service is non-empty
+ * exactly through this list.
+ */
+export interface AsyncRoot {
+  anchor: SourceAnchor
+  kind: Kind
+  method_signature: MethodSignature
+}
+/**
+ * A file + line range in the text that was actually analyzed.
+ *
+ * For preprocessed files (delombok) the anchor refers to the generated
+ * variant — source-on-demand serves that same text, so anchors and served
+ * source stay aligned by construction (§5.3).
+ */
+export interface SourceAnchor {
+  end_line: EndLine
+  file: File
+  start_line: StartLine
+  variant?: SourceVariant
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.
@@ -197,17 +236,4 @@ export interface GatewayRoute {
   route_id?: RouteId
   strip_prefix?: StripPrefix
   target_uri: TargetUri
-}
-/**
- * A file + line range in the text that was actually analyzed.
- *
- * For preprocessed files (delombok) the anchor refers to the generated
- * variant — source-on-demand serves that same text, so anchors and served
- * source stay aligned by construction (§5.3).
- */
-export interface SourceAnchor {
-  end_line: EndLine
-  file: File
-  start_line: StartLine
-  variant?: SourceVariant
 }

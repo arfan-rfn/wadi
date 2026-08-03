@@ -21,11 +21,13 @@ from typing import Protocol
 from wadi_config import WadiSettings
 from wadi_contracts import (
     AnalysisCoverage,
+    AsyncRoot,
     ExtractionJob,
     GatewayRoute,
     NetworkIdentity,
     ServiceBoundary,
     ServiceKind,
+    SourceAnchor,
     normalize_repo_source,
     service_id,
 )
@@ -186,6 +188,24 @@ class ExtractionPipeline:
                             )
                         }
                     )
+                # Async roots ride the boundary too (§5.4.2 T4): the recorded
+                # reason a controller-less service is non-empty.
+                if export.async_roots:
+                    methods_by_id = {m.id: m for m in export.methods}
+                    roots = [
+                        AsyncRoot(
+                            kind=root.kind,
+                            method_signature=method.full_name,
+                            anchor=SourceAnchor(
+                                file=method.filename,
+                                start_line=max(method.line, 1),
+                                end_line=max(method.line_end or method.line, 1),
+                            ),
+                        )
+                        for root in export.async_roots
+                        if (method := methods_by_id.get(root.method_id)) is not None
+                    ]
+                    boundary = boundary.model_copy(update={"async_roots": roots})
                 await self._artifacts.write_service_boundaries([boundary])
                 assembled = Assembler(
                     snapshot_id=snapshot.id,

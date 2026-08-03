@@ -24,6 +24,34 @@
       "title": "AnalysisCoverage",
       "type": "object"
     },
+    "AsyncRoot": {
+      "additionalProperties": false,
+      "description": "A non-endpoint reachability root (\u00a75.4.2 T4, schema 1.7.0): a method\nthe framework invokes without an HTTP request \u2014 scheduled jobs, event and\nmessage listeners, boot runners, ``@Bean`` factories, framework callbacks.\nThe reachable closure (and therefore coverage, sinks, and stitched edges)\nis rooted at endpoints plus these; a controller-less service is non-empty\nexactly through this list.",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "kind": {
+          "description": "Registry kind, e.g. 'scheduled' (tags.py)",
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "method_signature": {
+          "description": "Fully-qualified method signature",
+          "minLength": 1,
+          "title": "Method Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "method_signature",
+        "anchor"
+      ],
+      "title": "AsyncRoot",
+      "type": "object"
+    },
     "GatewayRoute": {
       "additionalProperties": false,
       "description": "One gateway routing rule extracted from config (\u00a75.4.1 phone-book input).\n\nOnly populated on services that ARE gateways (Spring Cloud Gateway routes\nin application.yml). The stitcher re-resolves ``target_uri`` through the\nphone book after applying the prefix rewrite.",
@@ -223,7 +251,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.6.0/service_boundary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.7.0/service_boundary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One discovered service within a snapshot.\n\nThe envelope's ``service_id`` is this service's own stable id\n(content-derived from repo + build root, \u00a77).",
@@ -239,6 +267,14 @@
       ],
       "default": null,
       "description": "Analysis-coverage counts (\u00a75.4.3). None = fact unavailable (library, extraction failed, or pre-1.5 snapshot) \u2014 never zero"
+    },
+    "async_roots": {
+      "description": "Non-endpoint reachability roots (\u00a75.4.2 T4). Empty also for pre-1.7 snapshots \u2014 absence of the fact, not proof of none",
+      "items": {
+        "$ref": "#/$defs/AsyncRoot"
+      },
+      "title": "Async Roots",
+      "type": "array"
     },
     "build_root": {
       "description": "Path of the build root relative to the repo root ('.' = root)",
@@ -315,7 +351,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.6.0",
+      "default": "1.7.0",
       "title": "Schema Version",
       "type": "string"
     },

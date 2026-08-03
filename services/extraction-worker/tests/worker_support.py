@@ -8,6 +8,7 @@ RestTemplate call with a recovered URL.
 from wadi_joern_client.export import (
     CfgNodeKind,
     ExportAnalysisCoverage,
+    ExportAsyncRoot,
     ExportCall,
     ExportCfg,
     ExportCfgEdge,
@@ -193,4 +194,6 @@ def petstore_like_export() -> ServiceExport:
         analysis_coverage=ExportAnalysisCoverage(
             production_methods=3, reachable_production_methods=2
         ),
+        # T4 (§5.4.2): one non-endpoint root so the boundary fact is exercised.
+        async_roots=[ExportAsyncRoot(method_id=SERVICE_IMPL, kind="scheduled")],
     )
