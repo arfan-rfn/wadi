@@ -13,6 +13,7 @@
     "service_boundary": "service_boundary.schema.json",
     "service_summary": "service_summary.schema.json",
     "snapshot": "snapshot.schema.json",
+    "source_view": "source_view.schema.json",
     "stitched_edge": "stitched_edge.schema.json",
     "system": "system.schema.json"
   },

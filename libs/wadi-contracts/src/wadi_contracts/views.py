@@ -10,7 +10,7 @@ from pydantic import Field
 
 from wadi_contracts.base import WadiModel
 from wadi_contracts.boundary import ServiceBoundary
-from wadi_contracts.enums import Confidence, HttpMethod, Provenance, TargetKind
+from wadi_contracts.enums import Confidence, HttpMethod, Provenance, SourceVariant, TargetKind
 
 
 class ServiceSummary(ServiceBoundary):
@@ -47,3 +47,15 @@ class RemoteEdgesView(WadiModel):
     service_id: str
     outbound: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
     inbound: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
+
+
+class SourceView(WadiModel):
+    """Source-on-demand response (§5.3): the exact analyzed text at the pinned
+    SHA — the delombok'd variant when preprocessing rewrote the file, flagged
+    so consumers can say so."""
+
+    file: str
+    start_line: int
+    end_line: int
+    variant: SourceVariant
+    content: str

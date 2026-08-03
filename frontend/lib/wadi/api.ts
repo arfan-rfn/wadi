@@ -1,10 +1,13 @@
 // Thin typed fetch layer over the orchestrator REST API (§14).
 // Types come from the generated contract schemas — never hand-written (§7).
 
+import type { CoverageReport } from "@/lib/generated/coverage_report.schema"
 import type { Endpoint } from "@/lib/generated/endpoint.schema"
 import type { Icfg } from "@/lib/generated/icfg.schema"
+import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import type { ServiceSummary } from "@/lib/generated/service_summary.schema"
 import type { Snapshot } from "@/lib/generated/snapshot.schema"
+import type { SourceView } from "@/lib/generated/source_view.schema"
 import type { System } from "@/lib/generated/system.schema"
 
 async function get<T>(path: string): Promise<T> {
@@ -34,6 +37,36 @@ export const wadiApi = {
     ),
   icfg: (snapshotId: string, endpointId: string) =>
     get<Icfg>(`/api/v1/snapshots/${snapshotId}/endpoints/${endpointId}/icfg`),
+  coverage: (snapshotId: string) =>
+    get<CoverageReport>(`/api/v1/snapshots/${snapshotId}/coverage`),
+  remoteEdges: (snapshotId: string, serviceId: string) =>
+    get<RemoteEdgesView>(
+      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/remote-edges`
+    ),
+  source: (
+    snapshotId: string,
+    serviceId: string,
+    file: string,
+    startLine: number,
+    endLine: number
+  ) =>
+    get<SourceView>(
+      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/source?` +
+        new URLSearchParams({
+          file,
+          start_line: String(startLine),
+          end_line: String(endLine),
+        }).toString()
+    ),
 }
 
-export type { Endpoint, Icfg, ServiceSummary, Snapshot, System }
+export type {
+  CoverageReport,
+  Endpoint,
+  Icfg,
+  RemoteEdgesView,
+  ServiceSummary,
+  Snapshot,
+  SourceView,
+  System,
+}

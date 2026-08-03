@@ -3,7 +3,7 @@
 import pytest
 from mcp_support import make_two_method_icfg
 
-from wadi_contracts import Icfg
+from wadi_contracts import Icfg, IcfgNodeKind
 from wadi_mcp.rollup import method_rollup, statement_detail
 from wadi_testing.builders import make_endpoint, make_service, make_snapshot, make_system
 
@@ -38,6 +38,22 @@ class TestMethodRollup:
         assert sinks == {"db", "http-client"}
         remote = next(c for c in service["calls"] if c.get("sink") == "http-client")
         assert remote["remote_call_id"].startswith("rc_")
+
+    def test_marker_on_return_statement_still_counts(self, icfg: Icfg) -> None:
+        # `return client.get(...)` coarsens to a RETURN node with no callee
+        # ref (the contract only allows callee on CALL) — its sink marker
+        # must still appear in the roll-up (P10).
+        nodes = [
+            n.model_copy(update={"kind": IcfgNodeKind.RETURN, "callee": None})
+            if n.id == "s-http"
+            else n
+            for n in icfg.nodes
+        ]
+        rollup = method_rollup(icfg.model_copy(update={"nodes": nodes}))
+        service = next(m for m in rollup["methods"] if "OrderService" in m["signature"])
+        remote = next(c for c in service["calls"] if c.get("sink") == "http-client")
+        assert remote["remote_call_id"].startswith("rc_")
+        assert "callee_id" not in remote
 
     def test_statement_counts_present(self, icfg: Icfg) -> None:
         rollup = method_rollup(icfg)

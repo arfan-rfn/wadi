@@ -270,7 +270,11 @@ class Assembler:
                 callee_ref = self._callee_ref(
                     cfg_node.call.callee_id, cfg_node.call.callee_full_name, methods
                 )
-            if site_sinks and kind is IcfgNodeKind.CALL:
+            # Sinks anchor to the coarsened statement, which is not always a
+            # CALL node — `return restTemplate.getForObject(...)` coarsens to
+            # RETURN, `if (client.get(...) != null)` to BRANCH. Gating on CALL
+            # would silently drop those markers from the ICFG (P10).
+            if site_sinks:
                 sink_kind = self._sink_kind(site_sinks[0].kind)
                 if sink_kind is SinkKind.HTTP_CLIENT:
                     for sink in site_sinks:

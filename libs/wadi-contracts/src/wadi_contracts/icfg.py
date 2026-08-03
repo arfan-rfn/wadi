@@ -106,10 +106,13 @@ class IcfgNode(WadiModel):
             raise ValueError(f"callee is only valid on call nodes, not {self.kind}")
         if self.method_info is not None and self.kind is not IcfgNodeKind.ENTRY:
             raise ValueError(f"method_info is only valid on entry nodes, not {self.kind}")
-        if (
-            self.remote_call_id or self.remote_call_ids or self.mq_interaction_id
-        ) and self.kind is not IcfgNodeKind.CALL:
-            raise ValueError("remote-call / MQ markers are only valid on call nodes")
+        # Markers anchor to the coarsened statement, which is not always a
+        # CALL node: `return client.get(...)` coarsens to RETURN and
+        # `if (client.get(...) != null)` to BRANCH. Only the synthetic
+        # entry/exit nodes can never carry a call site.
+        has_marker = bool(self.remote_call_id or self.remote_call_ids or self.mq_interaction_id)
+        if has_marker and self.kind in (IcfgNodeKind.ENTRY, IcfgNodeKind.EXIT):
+            raise ValueError("remote-call / MQ markers are not valid on entry/exit nodes")
         for rc_id in self.remote_call_ids:
             if not _RC_ID.match(rc_id):
                 raise ValueError(f"remote_call_ids entries must be rc_ ids, got {rc_id!r}")

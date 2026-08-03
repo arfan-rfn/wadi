@@ -81,6 +81,23 @@ class TestPetstoreAssembly:
         assert http_node.sink is SinkKind.HTTP_CLIENT
         assert http_node.remote_call_id is not None
 
+    def test_sink_marker_survives_non_call_statement_kinds(self, assembler: Assembler) -> None:
+        # `return restTemplate.getForObject(...)` coarsens to a RETURN
+        # statement, not CALL — the sink marker must still land on the ICFG
+        # node, or the endpoint page shows "no remote calls" for a
+        # call-rich endpoint (P10).
+        export = petstore_like_export()
+        cfg = next(c for c in export.cfgs if c.method_id == SERVICE_IMPL)
+        site = next(n for n in cfg.nodes if n.id == HTTP_CALLSITE)
+        site.kind = CfgNodeKind.RETURN
+        result = assembler.assemble(export)
+        marker = next(
+            n for n in result.icfgs[0].nodes if n.id == f"m{SERVICE_IMPL}:n{HTTP_CALLSITE}"
+        )
+        assert marker.kind is IcfgNodeKind.RETURN
+        assert marker.sink is SinkKind.HTTP_CLIENT
+        assert marker.remote_call_ids == [result.remote_calls[0].id]
+
     def test_remote_call_artifact_links_to_icfg_marker(self, assembler: Assembler) -> None:
         result = assembler.assemble(petstore_like_export())
         assert len(result.remote_calls) == 1

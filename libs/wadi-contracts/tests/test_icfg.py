@@ -183,7 +183,9 @@ class TestNodeKindPayloads:
         with pytest.raises(ValidationError, match="entry nodes"):
             _node("s1", IcfgNodeKind.STATEMENT, method, method_info=info)
 
-    def test_remote_call_marker_only_on_call(self, svc_id: str, method: MethodRef) -> None:
+    def test_remote_call_marker_valid_on_statement_kinds_only(
+        self, svc_id: str, method: MethodRef
+    ) -> None:
         rc_id = remote_call_id(svc_id, "src/A.java", 11, "http://svc-b/x")
         node = _node(
             "c1",
@@ -194,8 +196,13 @@ class TestNodeKindPayloads:
             remote_call_id=rc_id,
         )
         assert node.sink is SinkKind.HTTP_CLIENT
-        with pytest.raises(ValidationError, match="call nodes"):
-            _node("s1", IcfgNodeKind.STATEMENT, method, remote_call_id=rc_id)
+        # Statement coarsening puts call sites inside RETURN / BRANCH /
+        # STATEMENT nodes too (`return client.get(...)`), so markers are
+        # legal on every statement kind — only synthetic entry/exit forbid.
+        marker = _node("r1", IcfgNodeKind.RETURN, method, remote_call_id=rc_id)
+        assert marker.remote_call_id == rc_id
+        with pytest.raises(ValidationError, match="entry/exit"):
+            _node("e1", IcfgNodeKind.ENTRY, method, remote_call_id=rc_id, method_info=None)
 
     def test_anchor_line_range_validated(self, method: MethodRef) -> None:
         with pytest.raises(ValidationError, match="end_line"):

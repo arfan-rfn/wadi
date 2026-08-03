@@ -6,4 +6,14 @@ export const QUERY_KEYS = {
     ["endpoints", snapshotId, serviceId] as const,
   icfg: (snapshotId: string, endpointId: string) =>
     ["icfg", snapshotId, endpointId] as const,
+  coverage: (snapshotId: string) => ["coverage", snapshotId] as const,
+  remoteEdges: (snapshotId: string, serviceId: string) =>
+    ["remote-edges", snapshotId, serviceId] as const,
+  source: (
+    snapshotId: string,
+    serviceId: string,
+    file: string,
+    startLine: number,
+    endLine: number
+  ) => ["source", snapshotId, serviceId, file, startLine, endLine] as const,
 }

@@ -6,6 +6,38 @@ All notable changes to wadi. One version spans the whole release set
 ## Unreleased
 
 ### Added
+- **Frontend workbench: coverage-first + endpoint end-to-end story (§5.3,
+  Phase 2.5 M6):** the explorer gains a Coverage view (default landing:
+  analysis-coverage stat tiles with "N of M" context, per-service bars,
+  edges-by-target chips, the unresolved-call list with machine-readable
+  reason codes, placeholder/external inventories, unmodelled client
+  libraries, config conflicts — every unknown a rendered state, never a
+  blank) and an endpoint Overview tab telling one endpoint's whole story:
+  auth tri-state (required / open-evidenced / honest unknown), parameters,
+  request/response wire shapes (§5.2.7 TypeShape trees with Jackson wire
+  names and unresolved/cycle/truncated terminals), outbound calls in the
+  endpoint's flow (per-call verb, URL template, mechanism, target
+  resolution + confidence — a ternary fan-out shows both candidates on one
+  site), and downstream endpoints. Source is rendered on demand from
+  wadi's pinned-SHA store via the new `SourceView` contract (anchor-
+  highlighted, delombok'd variants flagged as the text analysis saw) —
+  never preloaded. UI patterns recorded from the M6 Mobbin/domain research
+  (stat-tile "N of M" context, API-reference field anatomy; method chips
+  stay the only saturated element). Vitest + testing-library cover the
+  honesty states.
+
+### Fixed
+- **ICFG call markers survive statement coarsening (P10):** sinks anchor to
+  the coarsened statement, which is not always a CALL node —
+  `return restTemplate.getForObject(...)` coarsens to RETURN,
+  `if (client.get(...) != null)` to BRANCH. The assembler gated marker
+  attachment on CALL and the `IcfgNode` contract enforced the same wrong
+  assumption, so such endpoints served ICFGs with zero `remote_call_ids` /
+  `sink` marks while their stitched edges existed — the endpoint page read
+  "no remote calls" for call-rich endpoints (found by the M6 browser
+  verification against the live fixture). Markers are now legal on every
+  statement kind (only synthetic entry/exit forbid), with regression tests
+  at both layers.
 - **Analysis-coverage metric (§5.4.3, Phase 2.5 M1):** the coverage report
   now answers "of the source code, how much did analysis actually walk" —
   per service and per snapshot, production methods (internal, non-synthetic,

@@ -38,12 +38,19 @@ def method_rollup(icfg: Icfg) -> dict[str, Any]:
                 # NOTE: method_info.signature is Joern's bare type signature
                 # (return + params, no name) — method.signature stays the
                 # display identity. Same trap as the frontend roll-up.
-        elif node.kind is IcfgNodeKind.CALL and node.callee is not None:
-            call: dict[str, Any] = {
-                "callee_id": node.callee.id,
-                "callee_signature": node.callee.signature,
-                "line": node.anchor.start_line,
-            }
+        elif (
+            node.callee is not None
+            or node.sink is not None
+            or node.remote_call_id is not None
+            or node.mq_interaction_id is not None
+        ):
+            # Not gated on CALL kind: sinks anchor to the coarsened statement,
+            # so `return client.get(...)` carries its marker on a RETURN node
+            # (callee is absent there — the contract only allows it on CALL).
+            call: dict[str, Any] = {"line": node.anchor.start_line}
+            if node.callee is not None:
+                call["callee_id"] = node.callee.id
+                call["callee_signature"] = node.callee.signature
             if node.sink is not None:
                 call["sink"] = node.sink.value
             if node.remote_call_id is not None:

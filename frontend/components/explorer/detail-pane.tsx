@@ -4,12 +4,13 @@
 // (the useful view) with raw JSON one tab away.
 import { ArrowRight, Database, Globe, MailWarning } from "lucide-react"
 
-import type { Endpoint, Icfg } from "@/lib/wadi/api"
+import type { Endpoint, Icfg, RemoteEdgesView } from "@/lib/wadi/api"
 import { rollupMethods, shortSignature } from "@/lib/wadi/rollup"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
+import { EndpointOverview } from "./endpoint-overview"
 import { MethodBadge } from "./method-badge"
 
 const SINK_META: Record<string, { label: string; icon: typeof Database }> = {
@@ -22,10 +23,18 @@ export function DetailPane({
   endpoint,
   icfg,
   isLoading,
+  remoteEdges,
+  edgesLoading,
+  snapshotId,
+  serviceId,
 }: {
   endpoint: Endpoint
   icfg: Icfg | undefined
   isLoading: boolean
+  remoteEdges: RemoteEdgesView | undefined
+  edgesLoading: boolean
+  snapshotId: string
+  serviceId: string
 }) {
   const methods = icfg ? rollupMethods(icfg) : []
 
@@ -71,11 +80,14 @@ export function DetailPane({
 
       {icfg ? (
         <Tabs
-          defaultValue="methods"
+          defaultValue="overview"
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
           <div className="shrink-0 border-b px-4 py-2">
             <TabsList className="h-8">
+              <TabsTrigger value="overview" className="text-xs">
+                Overview
+              </TabsTrigger>
               <TabsTrigger value="methods" className="text-xs">
                 Flow · methods
               </TabsTrigger>
@@ -84,6 +96,20 @@ export function DetailPane({
               </TabsTrigger>
             </TabsList>
           </div>
+
+          <TabsContent
+            value="overview"
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
+            <EndpointOverview
+              endpoint={endpoint}
+              icfg={icfg}
+              remoteEdges={remoteEdges}
+              edgesLoading={edgesLoading}
+              snapshotId={snapshotId}
+              serviceId={serviceId}
+            />
+          </TabsContent>
 
           <TabsContent
             value="methods"

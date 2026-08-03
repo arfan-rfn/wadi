@@ -87,7 +87,7 @@ from wadi_contracts.tags import (
 )
 from wadi_contracts.timeutil import UtcDatetime, ensure_utc, utc_now
 from wadi_contracts.version import SCHEMA_VERSION
-from wadi_contracts.views import RemoteEdgeItem, RemoteEdgesView, ServiceSummary
+from wadi_contracts.views import RemoteEdgeItem, RemoteEdgesView, ServiceSummary, SourceView
 
 __all__ = [
     "CONTRACT_MODELS",
@@ -150,6 +150,7 @@ __all__ = [
     "SnapshotStatus",
     "SourceAnchor",
     "SourceVariant",
+    "SourceView",
     "StitchedEdge",
     "System",
     "Tag",

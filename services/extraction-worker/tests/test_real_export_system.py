@@ -80,11 +80,14 @@ class TestPetstoreModule:
             "http://inventory:8081/events",
             "https://audit.example.com/events",
         }
+        event_ids = {c.id for c in event_calls}
         multi_nodes = [
-            node for icfg in result.icfgs for node in icfg.nodes if len(node.remote_call_ids) == 2
+            node
+            for icfg in result.icfgs
+            for node in icfg.nodes
+            if set(node.remote_call_ids) == event_ids
         ]
         assert multi_nodes, "the branch-dependent site must carry both candidates"
-        assert set(multi_nodes[0].remote_call_ids) == {c.id for c in event_calls}
 
     def test_runtime_only_target_is_honest_none(self, petstore: ServiceExport) -> None:
         result = Assembler(snapshot_id="snap_g", service_id="svc_" + "a" * 16).assemble(petstore)

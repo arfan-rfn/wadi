@@ -44,3 +44,47 @@ export function useIcfg(snapshotId: string | null, endpointId: string | null) {
     enabled: snapshotId !== null && endpointId !== null,
   })
 }
+
+export function useCoverage(snapshotId: string | null) {
+  return useQuery({
+    queryKey: QUERY_KEYS.coverage(snapshotId ?? ""),
+    queryFn: () => wadiApi.coverage(snapshotId as string),
+    enabled: snapshotId !== null,
+  })
+}
+
+export function useRemoteEdges(
+  snapshotId: string | null,
+  serviceId: string | null
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.remoteEdges(snapshotId ?? "", serviceId ?? ""),
+    queryFn: () =>
+      wadiApi.remoteEdges(snapshotId as string, serviceId as string),
+    enabled: snapshotId !== null && serviceId !== null,
+  })
+}
+
+/** Source-on-demand (§5.3): fetched only when a panel opens, never preloaded. */
+export function useSource(
+  enabled: boolean,
+  snapshotId: string,
+  serviceId: string,
+  file: string,
+  startLine: number,
+  endLine: number
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.source(
+      snapshotId,
+      serviceId,
+      file,
+      startLine,
+      endLine
+    ),
+    queryFn: () =>
+      wadiApi.source(snapshotId, serviceId, file, startLine, endLine),
+    enabled,
+    staleTime: Infinity, // pinned-SHA content never changes
+  })
+}

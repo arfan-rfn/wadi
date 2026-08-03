@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "SourceVariant": {
+      "description": "Whether an anchor refers to original repo text or a generated variant (\u00a75.3).\n\n``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) \u2014 the text\nthat was actually analyzed, served by source-on-demand with a badge.",
+      "enum": [
+        "original",
+        "generated"
+      ],
+      "title": "SourceVariant",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.6.0/source_view.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Source-on-demand response (\u00a75.3): the exact analyzed text at the pinned\nSHA \u2014 the delombok'd variant when preprocessing rewrote the file, flagged\nso consumers can say so.",
+  "properties": {
+    "content": {
+      "title": "Content",
+      "type": "string"
+    },
+    "end_line": {
+      "title": "End Line",
+      "type": "integer"
+    },
+    "file": {
+      "title": "File",
+      "type": "string"
+    },
+    "start_line": {
+      "title": "Start Line",
+      "type": "integer"
+    },
+    "variant": {
+      "$ref": "#/$defs/SourceVariant"
+    }
+  },
+  "required": [
+    "file",
+    "start_line",
+    "end_line",
+    "variant",
+    "content"
+  ],
+  "title": "SourceView",
+  "type": "object"
+}

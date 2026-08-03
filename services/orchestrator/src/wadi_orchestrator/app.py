@@ -33,6 +33,7 @@ from wadi_contracts import (
     Snapshot,
     SnapshotStatus,
     SourceVariant,
+    SourceView,
     System,
     normalize_repo_source,
 )
@@ -59,14 +60,6 @@ class CreateSystemRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     snapshot: Snapshot
     job_ids: list[str]
-
-
-class SourceResponse(BaseModel):
-    file: str
-    start_line: int
-    end_line: int
-    variant: SourceVariant
-    content: str
 
 
 class HealthResponse(BaseModel):
@@ -414,7 +407,7 @@ def create_app(
 
     @app.get(
         f"{API_PREFIX}/snapshots/{{snapshot_id}}/services/{{service_id}}/source",
-        response_model=SourceResponse,
+        response_model=SourceView,
         dependencies=[Depends(_require_auth)],
     )
     async def get_source(
@@ -424,7 +417,7 @@ def create_app(
         file: Annotated[str, Query(min_length=1)],
         start_line: Annotated[int, Query(ge=1)] = 1,
         end_line: Annotated[int | None, Query(ge=1)] = None,
-    ) -> SourceResponse:
+    ) -> SourceView:
         snapshot = await state.snapshots.get(snapshot_id)
         if snapshot is None:
             raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
@@ -453,7 +446,7 @@ def create_app(
         if last < start_line:
             raise HTTPException(status_code=400, detail="end_line must be >= start_line")
         selected = "".join(lines[start_line - 1 : last])
-        return SourceResponse(
+        return SourceView(
             file=file,
             start_line=start_line,
             end_line=min(last, len(lines)),

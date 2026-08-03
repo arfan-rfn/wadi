@@ -10,12 +10,14 @@ import { cn } from "@/lib/utils"
 import {
   useEndpoints,
   useIcfg,
+  useRemoteEdges,
   useServices,
   useSnapshots,
   useSystems,
 } from "@/lib/wadi/hooks"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { CoveragePane } from "@/components/coverage/coverage-pane"
 
 import { DetailPane } from "./detail-pane"
 import { MethodBadge } from "./method-badge"
@@ -28,12 +30,15 @@ export function Explorer() {
   const [endpointId, setEndpointId] = useState<string | null>(null)
   const [serviceFilter, setServiceFilter] = useState("")
   const [endpointFilter, setEndpointFilter] = useState("")
+  // Coverage is the landing view (§5.4: every consumer surfaces it FIRST).
+  const [view, setView] = useState<"coverage" | "explorer">("coverage")
 
   const systems = useSystems()
   const snapshots = useSnapshots(systemId)
   const services = useServices(snapshotId)
   const endpoints = useEndpoints(snapshotId, serviceId)
   const icfg = useIcfg(snapshotId, endpointId)
+  const remoteEdges = useRemoteEdges(snapshotId, serviceId)
 
   // Sensible defaults: first system, its newest succeeded snapshot.
   useEffect(() => {
@@ -118,119 +123,161 @@ export function Explorer() {
         </p>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 divide-x">
-        {/* Services */}
-        <section className="flex w-72 shrink-0 flex-col lg:w-80">
-          <PaneHeader
-            label="Services"
-            count={services.data?.length}
-            filter={serviceFilter}
-            onFilter={setServiceFilter}
-            placeholder="Filter services"
-          />
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {services.isPending && snapshotId ? <PaneSkeleton /> : null}
-            {!snapshotId ? <PaneEmpty>Select a system above</PaneEmpty> : null}
-            {filteredServices.map((service) => (
-              <button
-                key={service.service_id}
-                onClick={() => {
-                  setServiceId(service.service_id)
-                  setEndpointId(null)
-                  setEndpointFilter("")
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
-                  serviceId === service.service_id &&
-                    "border-primary bg-muted/60"
-                )}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{service.name}</p>
-                  <p className="truncate font-mono text-[11px] text-muted-foreground">
-                    {service.build_root}
-                  </p>
-                </div>
-                <span
+      <div className="flex shrink-0 items-center gap-1 border-b px-4 py-1.5">
+        {(
+          [
+            ["coverage", "Coverage"],
+            ["explorer", "Explorer"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setView(id)}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              view === id
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            aria-pressed={view === id}
+          >
+            {label}
+          </button>
+        ))}
+        {view === "coverage" ? (
+          <span className="ml-2 text-[11px] text-muted-foreground">
+            what the map knows it doesn&apos;t know — read this first
+          </span>
+        ) : null}
+      </div>
+
+      {view === "coverage" ? (
+        <div className="flex min-h-0 flex-1">
+          <CoveragePane snapshotId={snapshotId} />
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 divide-x">
+          {/* Services */}
+          <section className="flex w-72 shrink-0 flex-col lg:w-80">
+            <PaneHeader
+              label="Services"
+              count={services.data?.length}
+              filter={serviceFilter}
+              onFilter={setServiceFilter}
+              placeholder="Filter services"
+            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {services.isPending && snapshotId ? <PaneSkeleton /> : null}
+              {!snapshotId ? (
+                <PaneEmpty>Select a system above</PaneEmpty>
+              ) : null}
+              {filteredServices.map((service) => (
+                <button
+                  key={service.service_id}
+                  onClick={() => {
+                    setServiceId(service.service_id)
+                    setEndpointId(null)
+                    setEndpointFilter("")
+                  }}
                   className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px] tabular-nums",
-                    service.endpoint_count
-                      ? "bg-primary/10 text-primary"
-                      : "bg-muted text-muted-foreground"
+                    "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
+                    serviceId === service.service_id &&
+                      "border-primary bg-muted/60"
                   )}
                 >
-                  {service.endpoint_count ?? 0}
-                </span>
-              </button>
-            ))}
-            {services.data &&
-            filteredServices.length === 0 &&
-            services.data.length > 0 ? (
-              <PaneEmpty>No match for “{serviceFilter}”</PaneEmpty>
-            ) : null}
-          </div>
-        </section>
-
-        {/* Endpoints */}
-        <section className="flex w-[24rem] shrink-0 flex-col xl:w-[28rem]">
-          <PaneHeader
-            label="Endpoints"
-            count={endpoints.data?.length}
-            filter={endpointFilter}
-            onFilter={setEndpointFilter}
-            placeholder="Filter endpoints"
-            hint={selectedService?.name}
-          />
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {endpoints.isPending && serviceId ? <PaneSkeleton /> : null}
-            {!serviceId ? <PaneEmpty>Select a service</PaneEmpty> : null}
-            {endpoints.data?.length === 0 ? (
-              <PaneEmpty>No endpoints extracted for this service</PaneEmpty>
-            ) : null}
-            {filteredEndpoints.map((endpoint) => (
-              <button
-                key={endpoint.id}
-                onClick={() => setEndpointId(endpoint.id)}
-                className={cn(
-                  "flex w-full items-center gap-2.5 border-l-2 border-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
-                  endpointId === endpoint.id && "border-primary bg-muted/60"
-                )}
-              >
-                <MethodBadge method={endpoint.http_method} />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                  {endpoint.full_uri}
-                </span>
-              </button>
-            ))}
-            {endpoints.data &&
-            filteredEndpoints.length === 0 &&
-            endpoints.data.length > 0 ? (
-              <PaneEmpty>No match for “{endpointFilter}”</PaneEmpty>
-            ) : null}
-          </div>
-        </section>
-
-        {/* Detail */}
-        <section className="flex min-w-0 flex-1 flex-col">
-          {selectedEndpoint ? (
-            <DetailPane
-              endpoint={selectedEndpoint}
-              icfg={icfg.data}
-              isLoading={icfg.isPending}
-            />
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-              <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground/60">
-                wadi · ground truth
-              </p>
-              <p className="max-w-64 text-sm text-muted-foreground">
-                Pick an endpoint to inspect its flow down to every database and
-                remote call.
-              </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">
+                      {service.name}
+                    </p>
+                    <p className="truncate font-mono text-[11px] text-muted-foreground">
+                      {service.build_root}
+                    </p>
+                  </div>
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px] tabular-nums",
+                      service.endpoint_count
+                        ? "bg-primary/10 text-primary"
+                        : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {service.endpoint_count ?? 0}
+                  </span>
+                </button>
+              ))}
+              {services.data &&
+              filteredServices.length === 0 &&
+              services.data.length > 0 ? (
+                <PaneEmpty>No match for “{serviceFilter}”</PaneEmpty>
+              ) : null}
             </div>
-          )}
-        </section>
-      </div>
+          </section>
+
+          {/* Endpoints */}
+          <section className="flex w-[24rem] shrink-0 flex-col xl:w-[28rem]">
+            <PaneHeader
+              label="Endpoints"
+              count={endpoints.data?.length}
+              filter={endpointFilter}
+              onFilter={setEndpointFilter}
+              placeholder="Filter endpoints"
+              hint={selectedService?.name}
+            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {endpoints.isPending && serviceId ? <PaneSkeleton /> : null}
+              {!serviceId ? <PaneEmpty>Select a service</PaneEmpty> : null}
+              {endpoints.data?.length === 0 ? (
+                <PaneEmpty>No endpoints extracted for this service</PaneEmpty>
+              ) : null}
+              {filteredEndpoints.map((endpoint) => (
+                <button
+                  key={endpoint.id}
+                  onClick={() => setEndpointId(endpoint.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 border-l-2 border-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
+                    endpointId === endpoint.id && "border-primary bg-muted/60"
+                  )}
+                >
+                  <MethodBadge method={endpoint.http_method} />
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                    {endpoint.full_uri}
+                  </span>
+                </button>
+              ))}
+              {endpoints.data &&
+              filteredEndpoints.length === 0 &&
+              endpoints.data.length > 0 ? (
+                <PaneEmpty>No match for “{endpointFilter}”</PaneEmpty>
+              ) : null}
+            </div>
+          </section>
+
+          {/* Detail */}
+          <section className="flex min-w-0 flex-1 flex-col">
+            {selectedEndpoint ? (
+              <DetailPane
+                endpoint={selectedEndpoint}
+                icfg={icfg.data}
+                isLoading={icfg.isPending}
+                remoteEdges={remoteEdges.data}
+                edgesLoading={remoteEdges.isPending}
+                snapshotId={snapshotId as string}
+                serviceId={serviceId as string}
+              />
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+                <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground/60">
+                  wadi · ground truth
+                </p>
+                <p className="max-w-64 text-sm text-muted-foreground">
+                  Pick an endpoint to inspect its flow down to every database
+                  and remote call.
+                </p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   )
 }
