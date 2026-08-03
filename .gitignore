@@ -32,6 +32,10 @@ frontend/out/
 # Environment & secrets
 .env
 .env.local
+# Fixture env files are test DATA (the T3 compose bare pass-through resolves
+# from them), not secrets — without this negation the e2e passes locally
+# (file on disk, untracked) and fails in CI (absent from checkout).
+!joern-platform/fixtures/**/.env
 !.env.example
 
 # Editors / OS
