@@ -62,4 +62,26 @@ public class UrlIdiomsProbe {
     public Integer viaCtorParam(String id) {
         return restTemplate.getForObject(ctorBase + "/stock/" + id, Integer.class);
     }
+
+    /** T3: the key exists only as compose env (relaxed binding bridges it). */
+    @Value("${petstore.services.inventory}")
+    private String composeInventoryUrl;
+
+    public Integer viaComposeEnv(String id) {
+        return restTemplate.getForObject(composeInventoryUrl + "/stock/" + id, Integer.class);
+    }
+
+    /** T3: the key exists only in application-prod.yml (profile merge). */
+    @Value("${inventory.profile.url}")
+    private String profileInventoryUrl;
+
+    public Integer viaProfileConfig(String id) {
+        return restTemplate.getForObject(profileInventoryUrl + "/stock/" + id, Integer.class);
+    }
+
+    /** T3: K8s service-DNS spelling normalizes to the compose identity. */
+    public Integer viaK8sDns(String id) {
+        return restTemplate.getForObject(
+                "http://inventory.default.svc.cluster.local:8081/stock/" + id, Integer.class);
+    }
 }

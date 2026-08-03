@@ -107,6 +107,15 @@ def discover_services(repo_root: Path) -> list[DiscoveredService]:
         )
         if is_library:
             library_artifacts.add(artifact)
+        config = parse_app_config(
+            pom_path.parent,
+            active_profiles=identity.profiles if identity and identity.profiles else None,
+        )
+        if identity and identity.env:
+            # Compose env overrides application files (Spring precedence, T3);
+            # keys stay in their raw env-var spelling — the stitcher's relaxed-
+            # binding lookup bridges to ${dotted.keys}.
+            config = replace(config, env={**config.env, **identity.env})
         services.append(
             DiscoveredService(
                 name=artifact,
@@ -115,7 +124,7 @@ def discover_services(repo_root: Path) -> list[DiscoveredService]:
                 languages=["java"],
                 hostnames=identity.hostnames if identity else [],
                 ports=identity.ports if identity else [],
-                config=parse_app_config(pom_path.parent),
+                config=config,
                 kind="library" if is_library else "service",
                 client_libraries=_client_library_census(pom_path.parent),
             )
@@ -290,10 +299,51 @@ def _pom_namespace(root: ElementTree.Element) -> str:
 class _ComposeIdentity:
     hostnames: list[str]
     ports: list[int]
+    env: dict[str, str] = field(default_factory=dict[str, str])
+    profiles: list[str] = field(default_factory=list[str])
+
+
+# Compose env keys worth carrying onto the boundary (T3, §5.4.2): URL-shaped
+# values (the yas ${yas.services.*} closure), *_URL/*_URI/*_HOST/*_PORT names,
+# and the Spring identity/profile keys — never the whole environment (secrets
+# and infra noise stay out).
+_ENV_VALUE_SHAPES = ("http://", "https://", "lb://")
+_ENV_NAME_SUFFIXES = ("_URL", "_URI", "_HOST", "_PORT")
+_ENV_EXACT_NAMES = {"SERVER_PORT", "SPRING_APPLICATION_NAME", "SERVER_SERVLET_CONTEXT_PATH"}
+
+
+def _carry_env_entry(name: str, value: str) -> bool:
+    return (
+        value.startswith(_ENV_VALUE_SHAPES)
+        or name.upper().endswith(_ENV_NAME_SUFFIXES)
+        or name.upper() in _ENV_EXACT_NAMES
+    )
+
+
+def _parse_dotenv(path: Path) -> dict[str, str]:
+    """KEY=VALUE lines; compose loads `.env` for interpolation AND as the
+    default source for bare `environment:` pass-through entries (T3)."""
+    values: dict[str, str] = {}
+    try:
+        text = path.read_text()
+    except OSError:
+        return values
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
 
 
 def _parse_compose_identities(repo_root: Path) -> dict[str, _ComposeIdentity]:
     """Map compose build-context dirs AND compose service names to identities.
+
+    T3 (§5.4.2): the deployment env surface rides along — `environment:` (map
+    and list forms; bare names resolve from the repo `.env`, compose's own
+    semantics), `env_file:` files, network `aliases:`, `hostname:`,
+    `container_name:`, and the standard override file merged service-wise.
 
     Best-effort (P10): a malformed compose file degrades to no identities,
     never to a failed boundary scan.
@@ -305,23 +355,47 @@ def _parse_compose_identities(repo_root: Path) -> dict[str, _ComposeIdentity]:
             break
     else:
         return identities
-    try:
-        parsed: object = yaml.safe_load(compose_path.read_text())
-    except yaml.YAMLError:
-        logger.warning("unparseable compose file at %s — no network identities", compose_path)
+    services = _compose_services(compose_path)
+    if services is None:
         return identities
-    if not isinstance(parsed, dict):
-        return identities
-    services = cast(dict[object, object], parsed).get("services")
-    if not isinstance(services, dict):
-        return identities
+    # The standard override file merges service-wise (compose semantics).
+    for override_name in (
+        "docker-compose.override.yml",
+        "docker-compose.override.yaml",
+        "compose.override.yml",
+        "compose.override.yaml",
+    ):
+        override_path = repo_root / override_name
+        if override_path.exists():
+            extra = _compose_services(override_path)
+            if extra:
+                for name, spec in extra.items():
+                    if (
+                        name in services
+                        and isinstance(services[name], dict)
+                        and isinstance(spec, dict)
+                    ):
+                        merged = dict(cast(dict[str, object], services[name]))
+                        merged.update(cast(dict[str, object], spec))
+                        services[name] = merged
+                    else:
+                        services[name] = spec
+            break
+    dotenv = _parse_dotenv(repo_root / ".env")
 
-    for service_name, spec in cast(dict[object, object], services).items():
-        if not isinstance(spec, dict) or not isinstance(service_name, str):
+    for service_name, spec in services.items():
+        if not isinstance(spec, dict):
             continue
         typed_spec = cast(dict[str, object], spec)
         ports = _extract_container_ports(typed_spec)
-        identity = _ComposeIdentity(hostnames=[service_name], ports=ports)
+        env, profiles = _extract_environment(typed_spec, dotenv, compose_path.parent)
+        hostnames = [service_name]
+        for extra_host_key in ("hostname", "container_name"):
+            extra_host = typed_spec.get(extra_host_key)
+            if isinstance(extra_host, str) and extra_host.strip() and extra_host not in hostnames:
+                hostnames.append(extra_host.strip())
+        hostnames.extend(_network_aliases(typed_spec, hostnames))
+        identity = _ComposeIdentity(hostnames=hostnames, ports=ports, env=env, profiles=profiles)
         identities[service_name] = identity
         build = typed_spec.get("build")
         context: object = (
@@ -331,6 +405,81 @@ def _parse_compose_identities(repo_root: Path) -> dict[str, _ComposeIdentity]:
             normalized = context.removeprefix("./").rstrip("/") or "."
             identities[normalized] = identity
     return identities
+
+
+def _compose_services(compose_path: Path) -> dict[str, object] | None:
+    try:
+        parsed: object = yaml.safe_load(compose_path.read_text())
+    except yaml.YAMLError:
+        logger.warning("unparseable compose file at %s — no network identities", compose_path)
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    services = cast(dict[object, object], parsed).get("services")
+    if not isinstance(services, dict):
+        return None
+    return {str(k): v for k, v in cast(dict[object, object], services).items()}
+
+
+def _extract_environment(
+    spec: dict[str, object], dotenv: dict[str, str], compose_dir: Path
+) -> tuple[dict[str, str], list[str]]:
+    """The service's carried env (allowlisted) + its active Spring profiles."""
+    collected: dict[str, str] = {}
+    for env_file in _env_file_paths(spec, compose_dir):
+        collected.update(_parse_dotenv(env_file))
+    raw = spec.get("environment")
+    if isinstance(raw, dict):
+        for key, value in cast(dict[object, object], raw).items():
+            collected[str(key)] = str(value) if value is not None else dotenv.get(str(key), "")
+    elif isinstance(raw, list):
+        for entry in cast(list[object], raw):
+            text = str(entry)
+            if "=" in text:
+                key, value = text.split("=", 1)
+                collected[key.strip()] = value.strip()
+            else:
+                # Bare pass-through: compose resolves it from the caller env,
+                # which `.env` populates for local runs (the yas idiom).
+                name = text.strip()
+                if name in dotenv:
+                    collected[name] = dotenv[name]
+    profiles: list[str] = []
+    raw_profiles = collected.get("SPRING_PROFILES_ACTIVE", "")
+    if raw_profiles:
+        profiles = [p.strip() for p in raw_profiles.split(",") if p.strip()]
+    carried = {
+        name: value for name, value in sorted(collected.items()) if _carry_env_entry(name, value)
+    }
+    return carried, profiles
+
+
+def _env_file_paths(spec: dict[str, object], compose_dir: Path) -> list[Path]:
+    raw = spec.get("env_file")
+    entries: list[object]
+    if isinstance(raw, str):
+        entries = [raw]
+    elif isinstance(raw, list):
+        entries = cast(list[object], raw)
+    else:
+        return []
+    return [compose_dir / str(entry) for entry in entries]
+
+
+def _network_aliases(spec: dict[str, object], known: list[str]) -> list[str]:
+    aliases: list[str] = []
+    networks = spec.get("networks")
+    if isinstance(networks, dict):
+        for network_spec in cast(dict[object, object], networks).values():
+            if isinstance(network_spec, dict):
+                raw_aliases = cast(dict[str, object], network_spec).get("aliases")
+                if isinstance(raw_aliases, list):
+                    aliases.extend(
+                        str(a)
+                        for a in cast(list[object], raw_aliases)
+                        if str(a) not in known and str(a) not in aliases
+                    )
+    return aliases
 
 
 def _extract_container_ports(spec: dict[str, object]) -> list[int]:

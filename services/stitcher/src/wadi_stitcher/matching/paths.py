@@ -24,8 +24,20 @@ class ParsedUrl:
     path: str
 
 
+def _relaxed_env_name(key: str) -> str:
+    """Spring relaxed binding (T3): property ``yas.services.customer`` binds
+    from env var ``YAS_SERVICES_CUSTOMER`` — compose env is carried in its raw
+    spelling, so the lookup bridges the two."""
+    return key.upper().replace(".", "_").replace("-", "_")
+
+
 def expand_config_keys(url: str, env: dict[str, str]) -> tuple[str, bool]:
     """Substitute ``${key}`` template variables from the caller's config facts.
+
+    T3: lookups try the dotted key, then its relaxed-binding env-var spelling
+    (compose ``environment:`` facts keep their raw names); expansion is
+    multi-pass so nested placeholders (`${a}` -> `${b}/x`) resolve, bounded to
+    stay total on cycles.
 
     Returns the expanded URL and whether every key resolved (an unresolved key
     without a default survives as a literal ``${key}`` — honest, and it will
@@ -38,13 +50,22 @@ def expand_config_keys(url: str, env: dict[str, str]) -> tuple[str, bool]:
         key = match.group("key").strip()
         if key in env:
             return env[key]
+        relaxed = _relaxed_env_name(key)
+        if relaxed in env:
+            return env[relaxed]
         default = match.group("default")
         if default is not None:
             return default
         all_resolved = False
         return match.group(0)
 
-    return _CONFIG_KEY.sub(_substitute, url), all_resolved
+    expanded = url
+    for _ in range(4):  # nested-placeholder bound: total even on cycles
+        next_expanded = _CONFIG_KEY.sub(_substitute, expanded)
+        if next_expanded == expanded:
+            break
+        expanded = next_expanded
+    return expanded, all_resolved
 
 
 def parse_url(url: str) -> ParsedUrl | None:

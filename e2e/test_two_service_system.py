@@ -129,6 +129,15 @@ class TestTwoServiceSystem:
         # The staged source union is recorded on the dependent service.
         assert by_name["petstore"]["library_roots"] == ["common"]
         assert by_name["petstore"]["extraction_error"] is None
+        # T3: the compose env surface rides the boundary in raw spelling, and
+        # the active profile's merge is a queryable note.
+        petstore_env = by_name["petstore"]["network"]["env"]
+        assert petstore_env["PETSTORE_SERVICES_INVENTORY"] == "http://inventory:8081"
+        assert petstore_env["inventory.profile.url"] == "http://inventory:8081"
+        assert (
+            "config-profile-merged:application-prod.yml"
+            in by_name["petstore"]["network"]["config_notes"]
+        )
 
         # 3. Endpoint inventories diff against the fixture's expected JSON.
         for name, service in by_name.items():
@@ -160,8 +169,9 @@ class TestTwoServiceSystem:
         # T1 set + the full T2 idiom set: RestClient (x2 incl. base-bound),
         # UriComponentsBuilder, RequestEntity, feign inherited/method=/
         # constant-name/url=${key}, ternary, StringBuilder, join, MessageFormat,
-        # member map, ctor @Value
-        assert totals["analyzed"] == 20
+        # member map, ctor @Value — plus the T3 deployment probes: compose-env
+        # key (relaxed binding), profile-file key, K8s service DNS
+        assert totals["analyzed"] == 23
         # audit.example.com: branch candidate + the hierarchy-chain report sink
         assert totals["external"] == 3  # audit branch + hierarchy sink + @HttpExchange feed
         assert totals["undetermined"] == 3  # no-endpoint-match + getenv idiom + base-undetermined
@@ -193,13 +203,13 @@ class TestTwoServiceSystem:
         section = coverage["analysis_coverage"]
         per_service = {e["name"]: e for e in section["services"]}
         assert set(per_service) == {"petstore", "inventory"}
-        assert per_service["petstore"]["production_methods"] == 35
-        assert per_service["petstore"]["reachable_methods"] == 30
+        assert per_service["petstore"]["production_methods"] == 38
+        assert per_service["petstore"]["reachable_methods"] == 33
         assert per_service["inventory"]["production_methods"] == 9
         assert per_service["inventory"]["reachable_methods"] == 8
-        assert section["production_methods"] == 44
-        assert section["reachable_methods"] == 38
-        assert section["coverage_percent"] == 86.4
+        assert section["production_methods"] == 47
+        assert section["reachable_methods"] == 41
+        assert section["coverage_percent"] == 87.2
 
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
@@ -208,7 +218,7 @@ class TestTwoServiceSystem:
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/remote-edges")
         ).json()["outbound"]
         analyzed_edges = [e for e in outbound if e["target_kind"] == "analyzed"]
-        assert len(analyzed_edges) == 20
+        assert len(analyzed_edges) == 23
         # §5.2.6: the shared-module DTO resolved through the staged union — the
         # DI signature matched exactly and the call stitched to the inventory.
         summary_edge = next(
@@ -221,7 +231,12 @@ class TestTwoServiceSystem:
         assert rest_edge["target_simplified_uri"] == "/stock/{?}"
         assert rest_edge["confidence"] == "high"
         assert rest_edge["provenance"] == "config-resolved"
-        feign_edge = next(e for e in analyzed_edges if e["mechanism"] == "feign")
+        feign_edge = next(
+            e
+            for e in analyzed_edges
+            if e["mechanism"] == "feign"
+            and e["url"] == "http://inventory/api/v1/inventory/stock/{id}"
+        )
         assert feign_edge["target_simplified_uri"] == "/api/v1/inventory/stock/{?}"
         assert feign_edge["confidence"] == "high"
         # The service-registry idiom (DI interface -> constant map) stitched too.
@@ -273,11 +288,23 @@ class TestTwoServiceSystem:
         feed_edge = next(e for e in outbound if e["mechanism"] == "http-interface")
         assert feed_edge["target_kind"] == "external"
         assert feed_edge["external_host"] == "audit.example.com"
+        # T3: compose-env-only key resolves via relaxed binding (the yas idiom).
+        compose_edge = by_url["${petstore.services.inventory}/stock/{?}"]
+        assert compose_edge["target_simplified_uri"] == "/stock/{?}"
+        assert compose_edge["confidence"] == "high"
+        assert compose_edge["provenance"] == "config-resolved"
+        # T3: profile-file-only key resolves because application-prod.yml merged.
+        profile_edge = by_url["${inventory.profile.url}/stock/{?}"]
+        assert profile_edge["target_simplified_uri"] == "/stock/{?}"
+        # T3: the K8s DNS spelling normalizes to the compose identity.
+        k8s_edge = by_url["http://inventory.default.svc.cluster.local:8081/stock/{?}"]
+        assert k8s_edge["target_simplified_uri"] == "/stock/{?}"
+        assert k8s_edge["confidence"] == "high"
 
         inbound = (
             await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{inventory_id}/remote-edges")
         ).json()["inbound"]
-        assert len(inbound) == 20  # every analyzed idiom lands on inventory
+        assert len(inbound) == 23  # every analyzed idiom lands on inventory
 
         # 6. Structured auth arrived on the wire (goal 9).
         inventory_endpoints = (

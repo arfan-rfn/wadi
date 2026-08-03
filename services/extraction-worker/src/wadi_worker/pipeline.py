@@ -131,6 +131,7 @@ class ExtractionPipeline:
                         ports=service.ports,
                         env=service.config.env,
                         application_name=service.config.application_name,
+                        discovery_names=service.config.discovery_names,
                         server_port=service.config.server_port,
                         gateway_routes=[
                             GatewayRoute(

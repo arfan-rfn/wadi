@@ -32,6 +32,10 @@ public class AdminPetController {
         Integer ctor = urlIdiomsProbe.viaCtorParam("7");
         Integer bound = baseBoundClient.boundStock("7");
         String mystery = baseBoundClient.unresolvableBase("7");
-        return "ok:" + ternary + builder + joined + formatted + mapped + ctor + bound + mystery;
+        Integer composeEnv = urlIdiomsProbe.viaComposeEnv("7");
+        Integer profile = urlIdiomsProbe.viaProfileConfig("7");
+        Integer k8s = urlIdiomsProbe.viaK8sDns("7");
+        return "ok:" + ternary + builder + joined + formatted + mapped + ctor + bound + mystery
+                + composeEnv + profile + k8s;
     }
 }

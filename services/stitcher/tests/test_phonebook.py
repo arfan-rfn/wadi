@@ -264,3 +264,31 @@ class TestDeterminism:
         assert reference.conflicts == permuted.conflicts
         for host, port in (("a", None), ("svc-a", None), ("shared", None), ("localhost", 8082)):
             assert reference.resolve(host, port, "/x") == permuted.resolve(host, port, "/x")
+
+
+class TestK8sDns:
+    """T3: K8s service-DNS spellings resolve as the bare service name."""
+
+    def test_svc_suffixes_resolve_exactly(self) -> None:
+        inventory = _svc("services/inventory", hostnames=["inventory"])
+        book = PhoneBook.build([inventory])
+        for host in (
+            "inventory.default.svc",
+            "inventory.default.svc.cluster.local",
+            "inventory.svc",
+        ):
+            resolution = book.resolve(host, 8081, "/x")
+            assert resolution is not None, host
+            assert resolution.candidates[0].service_id == inventory.service_id
+            assert "k8s service DNS" in resolution.evidence
+            assert not resolution.indirect  # .svc spellings are unambiguous
+
+    def test_two_label_form_is_indirect_and_needs_a_known_base(self) -> None:
+        inventory = _svc("services/inventory", hostnames=["inventory"])
+        book = PhoneBook.build([inventory])
+        resolution = book.resolve("inventory.prod", None, "/x")
+        assert resolution is not None
+        assert resolution.indirect  # caps at HIGH in the matcher (P10)
+        # A real external domain never resolves through the k8s rule.
+        assert book.resolve("api.stripe.com", None, "/x") is None
+        assert book.resolve("orders.internal", None, "/x") is None

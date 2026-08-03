@@ -289,3 +289,92 @@ class TestClientLibraryCensus:
     def test_no_clients_no_census(self, tmp_path: Path) -> None:
         write_pom(tmp_path, "svc")
         assert discover_services(tmp_path)[0].client_libraries == []
+
+
+class TestComposeEnvSurface:
+    """T3 (§5.4.2): the deployment env surface — environment/env_file/.env,
+    aliases, hostname/container_name, override files."""
+
+    def _repo(self, tmp_path: Path) -> Path:
+        write_pom(tmp_path / "orders", "orders")
+        return tmp_path
+
+    def test_environment_list_bare_names_resolve_from_dotenv(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path)
+        (repo / ".env").write_text(
+            "YAS_SERVICES_CUSTOMER=http://customer/customer\nSECRET_TOKEN=hunter2\n"
+        )
+        (repo / "docker-compose.yml").write_text(
+            """
+services:
+  orders:
+    build: ./orders
+    environment:
+    - YAS_SERVICES_CUSTOMER
+    - SECRET_TOKEN
+    - SPRING_PROFILES_ACTIVE=prod
+"""
+        )
+        [service] = discover_services(repo)
+        # The yas idiom: bare pass-through resolved from the repo .env; the
+        # URL-shaped value carries, the secret does not (allowlist).
+        assert service.config.env["YAS_SERVICES_CUSTOMER"] == "http://customer/customer"
+        assert "SECRET_TOKEN" not in service.config.env
+
+    def test_environment_map_env_file_aliases_and_override(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path)
+        (repo / "orders.env").write_text("BILLING_URL=http://billing:9000\n")
+        (repo / "docker-compose.yml").write_text(
+            """
+services:
+  orders:
+    build: ./orders
+    hostname: orders-host
+    container_name: orders-container
+    env_file: orders.env
+    environment:
+      INVENTORY_URL: http://inventory:8081
+    networks:
+      internal:
+        aliases: [orders-alias]
+"""
+        )
+        (repo / "docker-compose.override.yml").write_text(
+            """
+services:
+  orders:
+    environment:
+      INVENTORY_URL: http://inventory:9999
+"""
+        )
+        [service] = discover_services(repo)
+        assert set(service.hostnames) >= {
+            "orders",
+            "orders-host",
+            "orders-container",
+            "orders-alias",
+        }
+        assert service.config.env["BILLING_URL"] == "http://billing:9000"
+        # The override file wins service-wise (compose semantics).
+        assert service.config.env["INVENTORY_URL"] == "http://inventory:9999"
+
+    def test_spring_profiles_active_selects_profile_config(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path)
+        resources = repo / "orders" / "src" / "main" / "resources"
+        resources.mkdir(parents=True, exist_ok=True)
+        (resources / "application.yml").write_text("server:\n  port: 8080\n")
+        (resources / "application-prod.yml").write_text("server:\n  port: 9090\n")
+        (resources / "application-dev.yml").write_text("server:\n  port: 7070\n")
+        (repo / "docker-compose.yml").write_text(
+            """
+services:
+  orders:
+    build: ./orders
+    environment:
+    - SPRING_PROFILES_ACTIVE=prod
+"""
+        )
+        [service] = discover_services(repo)
+        assert service.config.server_port == 9090
+        assert "config-profile-merged:application-prod.yml" in service.config.notes
+        assert "config-profile-merged-all" not in service.config.notes

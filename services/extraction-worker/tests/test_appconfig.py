@@ -162,32 +162,149 @@ server:
   port: 9090
 """,
         )
+        # Active set unknown -> the docker document MERGES with a note (T3);
+        # its server.port override wins (Spring profile precedence).
         facts = parse_app_config(tmp_path)
         assert facts.application_name == "petstore"
-        assert facts.server_port == 8080
-        assert "config-multi-doc-partial" in facts.notes
+        assert facts.server_port == 9090
+        assert "config-profile-doc-merged:docker" in facts.notes
+
+        # Known active set selects exactly the matching documents.
+        active = parse_app_config(tmp_path, active_profiles=["docker"])
+        assert active.server_port == 9090
+        assert "config-profile-doc-merged:docker" not in active.notes
+        inactive = parse_app_config(tmp_path, active_profiles=["prod"])
+        assert inactive.server_port == 8080
 
     def test_single_document_carries_no_note(self, tmp_path: Path) -> None:
         _write(tmp_path, "application.yml", "spring:\n  application:\n    name: petstore\n")
         assert parse_app_config(tmp_path).notes == []
 
 
-class TestProfileFileNotes:
-    """Profile-specific files are not merged (T3) — the skip is queryable, not silent."""
+class TestProfileFileMerge:
+    """T3: profile files MERGE — exactly the active set when known, else all
+    with an honest note (over-approximation beats dropping declared config)."""
 
-    def test_profile_files_are_recorded(self, tmp_path: Path) -> None:
+    def test_all_profiles_merge_when_active_set_unknown(self, tmp_path: Path) -> None:
         _write(tmp_path, "application.yml", "spring:\n  application:\n    name: petstore\n")
         _write(tmp_path, "application-docker.yml", "server:\n  port: 9090\n")
         _write(tmp_path, "application-prod.properties", "server.port=9091\n")
         facts = parse_app_config(tmp_path)
         assert facts.application_name == "petstore"
+        # Alphabetical merge order: prod (properties) lands last and wins.
+        assert facts.server_port == 9091
         assert facts.notes == [
-            "config-profile-files-skipped:application-docker.yml",
-            "config-profile-files-skipped:application-prod.properties",
+            "config-profile-merged-all",
+            "config-profile-merged:application-docker.yml",
+            "config-profile-merged:application-prod.properties",
         ]
 
-    def test_profile_files_recorded_even_without_base_config(self, tmp_path: Path) -> None:
+    def test_known_active_set_selects_exactly(self, tmp_path: Path) -> None:
+        _write(tmp_path, "application.yml", "server:\n  port: 8080\n")
+        _write(tmp_path, "application-docker.yml", "server:\n  port: 9090\n")
+        _write(tmp_path, "application-prod.yml", "server:\n  port: 9091\n")
+        facts = parse_app_config(tmp_path, active_profiles=["docker"])
+        assert facts.server_port == 9090
+        assert facts.notes == ["config-profile-merged:application-docker.yml"]
+
+    def test_profile_file_merges_even_without_base_config(self, tmp_path: Path) -> None:
         _write(tmp_path, "application-docker.yml", "server:\n  port: 9090\n")
         facts = parse_app_config(tmp_path)
-        assert facts.env == {}
-        assert facts.notes == ["config-profile-files-skipped:application-docker.yml"]
+        assert facts.server_port == 9090
+        assert "config-profile-merged:application-docker.yml" in facts.notes
+
+
+class TestT3GatewayDepth:
+    def test_zuul_routes_with_strip_default_true(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+zuul:
+  routes:
+    users:
+      path: /users/**
+      serviceId: user-service
+    ledger:
+      path: /ledger/**
+      url: http://ledger:9000
+      stripPrefix: false
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        by_id = {r.route_id: r for r in facts.gateway_routes}
+        assert by_id["users"].target_uri == "lb://user-service"
+        assert by_id["users"].strip_prefix == 1  # Zuul default: strip the prefix
+        assert by_id["ledger"].target_uri == "http://ledger:9000"
+        assert by_id["ledger"].strip_prefix == 0
+
+    def test_scg_expanded_map_form(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: orders
+          uri: lb://orders
+          predicates:
+            - name: Path
+              args:
+                patterns: /orders/**
+          filters:
+            - name: StripPrefix
+              args:
+                parts: 1
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        [route] = facts.gateway_routes
+        assert route.path_prefix == "/orders/**"
+        assert route.target_uri == "lb://orders"
+        assert route.strip_prefix == 1
+
+    def test_unmodelled_gateway_shapes_are_noted_never_dropped(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: rewrite
+          uri: lb://orders
+          predicates:
+            - Path=/api/**
+            - Host=**.orders.example.com
+          filters:
+            - RewritePath=/api/(?<segment>.*), /$\\{segment}
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert "gateway-filter-unmodelled:RewritePath" in facts.notes
+        assert "gateway-predicate-unmodelled:Host" in facts.notes
+        # The Path predicate itself still routes.
+        assert facts.gateway_routes[0].path_prefix == "/api/**"
+
+
+class TestT3DiscoveryNames:
+    def test_eureka_and_consul_registration_names(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+eureka:
+  instance:
+    appname: ts-order
+spring:
+  cloud:
+    consul:
+      discovery:
+        service-name: order-svc
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.discovery_names == ["ts-order", "order-svc"]

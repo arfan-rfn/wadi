@@ -418,3 +418,105 @@ class TestDeterminism:
         first = match_call(call, _context(snapshot, [caller, a, b], endpoints), MATCHERS)
         second = match_call(call, _context(snapshot, [b, caller, a], endpoints), MATCHERS)
         assert [e.id for e in first.edges] == [e.id for e in second.edges]
+
+
+class TestT3Resolution:
+    def _base(self) -> tuple[Snapshot, ServiceBoundary]:
+        snapshot = make_snapshot(make_system())
+        return snapshot, make_service(snapshot, "services/petstore")
+
+    def test_relaxed_binding_bridges_env_var_spelling(self) -> None:
+        """The yas closure: ${yas.services.customer} finds YAS_SERVICES_CUSTOMER."""
+        snapshot, caller = self._base()
+        caller = caller.model_copy(
+            update={"network": _network(env={"YAS_SERVICES_CUSTOMER": "http://customer/customer"})}
+        )
+        customer = make_service(snapshot, "services/customer").model_copy(
+            update={"network": _network(hostnames=["customer"])}
+        )
+        endpoint = make_endpoint(snapshot, customer, uri="/customer/storefront/profile")
+        call = make_remote_call(
+            snapshot,
+            caller,
+            url="${yas.services.customer}/storefront/profile",
+            confidence=Confidence.HIGH,
+        )
+        outcome = match_call(call, _context(snapshot, [caller, customer], [endpoint]), MATCHERS)
+        [edge] = outcome.edges
+        assert edge.target_kind is TargetKind.ANALYZED
+        assert edge.target_endpoint_id == endpoint.id
+        assert edge.provenance is Provenance.CONFIG_RESOLVED
+
+    def test_nested_placeholders_expand_multi_pass(self) -> None:
+        snapshot, caller = self._base()
+        caller = caller.model_copy(
+            update={
+                "network": _network(
+                    env={
+                        "gateway.url": "${base.url}/api",
+                        "base.url": "http://inventory",
+                    }
+                )
+            }
+        )
+        inventory = make_service(snapshot, "services/inventory").model_copy(
+            update={"network": _network(hostnames=["inventory"])}
+        )
+        endpoint = make_endpoint(snapshot, inventory, uri="/api/stock/{id}")
+        call = make_remote_call(
+            snapshot, caller, url="${gateway.url}/stock/5", confidence=Confidence.HIGH
+        )
+        outcome = match_call(call, _context(snapshot, [caller, inventory], [endpoint]), MATCHERS)
+        [edge] = outcome.edges
+        assert edge.target_kind is TargetKind.ANALYZED
+
+    def test_context_path_strips_before_endpoint_matching(self) -> None:
+        """T3: the target's servlet context-path prefixes every endpoint."""
+        snapshot, caller = self._base()
+        inventory = make_service(snapshot, "services/inventory").model_copy(
+            update={
+                "network": _network(
+                    hostnames=["inventory"],
+                    env={"server.servlet.context-path": "/inventory-api"},
+                )
+            }
+        )
+        endpoint = make_endpoint(snapshot, inventory, uri="/stock/{id}")
+        call = make_remote_call(
+            snapshot,
+            caller,
+            url="http://inventory/inventory-api/stock/5",
+            confidence=Confidence.EXACT,
+        )
+        outcome = match_call(call, _context(snapshot, [caller, inventory], [endpoint]), MATCHERS)
+        [edge] = outcome.edges
+        assert edge.target_kind is TargetKind.ANALYZED
+        assert edge.target_endpoint_id == endpoint.id
+
+    def test_k8s_two_label_resolution_caps_at_high(self) -> None:
+        snapshot, caller = self._base()
+        inventory = make_service(snapshot, "services/inventory").model_copy(
+            update={"network": _network(hostnames=["inventory"])}
+        )
+        endpoint = make_endpoint(snapshot, inventory, uri="/stock/{id}")
+        call = make_remote_call(
+            snapshot, caller, url="http://inventory.prod/stock/5", confidence=Confidence.EXACT
+        )
+        outcome = match_call(call, _context(snapshot, [caller, inventory], [endpoint]), MATCHERS)
+        [edge] = outcome.edges
+        assert edge.target_kind is TargetKind.ANALYZED
+        assert edge.confidence is Confidence.HIGH  # indirect resolution (P10)
+
+    def test_loopback_without_port_classifies_sanely(self) -> None:
+        snapshot, caller = self._base()
+        ctx = _context(snapshot, [caller], [])
+        localhost_call = make_remote_call(
+            snapshot, caller, url="http://localhost/health", confidence=Confidence.EXACT
+        )
+        [edge] = match_call(localhost_call, ctx, MATCHERS).edges
+        assert edge.target_kind is TargetKind.PLACEHOLDER  # named 'localhost'
+        ip_call = make_remote_call(
+            snapshot, caller, url="http://127.0.0.1/health", confidence=Confidence.EXACT
+        )
+        [edge] = match_call(ip_call, ctx, MATCHERS).edges
+        assert edge.target_kind is TargetKind.EXTERNAL

@@ -93,8 +93,8 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
     // LegacyPingProbe.ping (unwired classes), AuthForwardingInterceptor.apply
     // and CurrentRequest.bearerToken (framework-invoked, a recorded T4 root
     // class). Bodiless interface stubs count on neither side.
-    petstoreCoverage("production_methods").num.toInt shouldBe 35
-    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 30
+    petstoreCoverage("production_methods").num.toInt shouldBe 38
+    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 33
 
     val inventoryCoverage = inventory("analysis_coverage")
     // Inventory's one unreached method is SecurityConfig.filterChain — a @Bean
@@ -295,7 +295,12 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers {
 
   test("config_refs carries @Value keys AND the feign url=${key} attribute (T2)") {
     val refs = petstore("config_refs").arr
-    refs.map(_("key").str).toSet shouldBe Set("inventory.url", "inventory.api.url")
+    refs.map(_("key").str).toSet shouldBe Set(
+      "inventory.url",
+      "inventory.api.url",
+      "petstore.services.inventory", // T3: compose-env-only key
+      "inventory.profile.url"        // T3: profile-file-only key
+    )
     // The feign url attribute is a visible config reference now, anchored at
     // the interface (previously resolved by accident, invisible to coverage).
     refs.exists(r =>

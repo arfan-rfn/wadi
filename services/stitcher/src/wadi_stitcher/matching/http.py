@@ -160,6 +160,13 @@ class HttpMatcher:
                 )
                 continue
             effective_path = candidate.rewritten_path or path
+            # T3: the target's servlet context-path prefixes every endpoint it
+            # serves — strip it from the call path before matching.
+            context_path = self._context_path(ctx, candidate.service_id)
+            if context_path and effective_path.startswith(context_path + "/"):
+                effective_path = effective_path.removeprefix(context_path)
+            elif context_path and effective_path == context_path:
+                effective_path = "/"
             matches = match_endpoints(
                 effective_path,
                 call.http_verb,
@@ -298,7 +305,20 @@ class HttpMatcher:
     # --- tiers ----------------------------------------------------------------------
 
     @staticmethod
+    def _context_path(ctx: MatchContext, service_id: str) -> str:
+        boundary = ctx.boundaries_by_service.get(service_id)
+        if boundary is None:
+            return ""
+        env = boundary.network.env
+        raw = env.get("server.servlet.context-path", "") or env.get(
+            "SERVER_SERVLET_CONTEXT_PATH", ""
+        )
+        return raw.rstrip("/") if raw.startswith("/") else ""
+
+    @staticmethod
     def _resolution_tier(resolution: HostResolution) -> Confidence:
+        if resolution.indirect:
+            return Confidence.HIGH
         if resolution.ambiguous or resolution.kind is ResolutionKind.PORT_HEURISTIC:
             return Confidence.HEURISTIC
         if resolution.via_gateway or resolution.port_mismatch:

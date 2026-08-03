@@ -1,0 +1,3 @@
+inventory:
+  profile:
+    url: http://inventory:8081

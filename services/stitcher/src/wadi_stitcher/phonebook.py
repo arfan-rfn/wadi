@@ -64,6 +64,9 @@ class HostResolution:
     ambiguous: bool = False
     port_mismatch: bool = False
     via_gateway: bool = False
+    indirect: bool = False
+    """An inference step sat between the written host and the identity (T3:
+    the two-label `name.ns` K8s form) — resolution caps at HIGH (P10)."""
 
 
 @dataclass
@@ -148,6 +151,31 @@ class PhoneBook:
         key = host.strip().lower()
 
         direct = self._direct_lookup(key)
+        if direct is None:
+            # K8s service DNS (T3): name[.ns[.svc[.cluster.local]]] resolves as
+            # the bare service name. `.svc`-suffixed spellings are unambiguous;
+            # the two-label `name.ns` form only applies when the bare name is a
+            # KNOWN identity (never fabricates from real external domains) and
+            # its resolution reports k8s-dns evidence.
+            stripped = _k8s_base_name(key)
+            if stripped is not None:
+                direct = self._direct_lookup(stripped)
+                if direct is not None:
+                    claimants, kind = direct
+                    two_label = not any(key.endswith(suffix) for suffix in _K8S_SUFFIXES)
+                    return HostResolution(
+                        candidates=tuple(
+                            ResolvedTarget(service_id=b.service_id, logical_name=stripped)
+                            for b in claimants
+                        ),
+                        kind=kind,
+                        evidence=f"k8s service DNS {key!r} -> {stripped!r} = {kind.value} of "
+                        + ", ".join(sorted(b.name for b in claimants)),
+                        ambiguous=len(claimants) > 1,
+                        port_mismatch=self._port_mismatch(claimants, port),
+                        indirect=two_label,
+                    )
+                direct = None
         if direct is not None:
             claimants, kind = direct
             gateway = self._single_gateway(claimants)
@@ -167,6 +195,10 @@ class PhoneBook:
                 port_mismatch=port_mismatch,
             )
 
+        # Loopback WITH a port keeps the recorded port-heuristic (dev configs
+        # use localhost:PORT for the service owning that port); WITHOUT a port
+        # it falls through to the matcher's classification (T3: placeholder
+        # for `localhost`, external for raw IPs) — never a fabricated match.
         if port is not None and (key in ("localhost", "127.0.0.1", "0.0.0.0") or _is_ip(key)):
             owners = self._ns.ports.get(port, [])
             if len(owners) == 1:
@@ -334,3 +366,18 @@ def _strip_segments(path: str, count: int) -> str:
         return path
     segments = [s for s in path.split("/") if s]
     return "/" + "/".join(segments[count:])
+
+
+_K8S_SUFFIXES = (".svc.cluster.local", ".svc")
+
+
+def _k8s_base_name(key: str) -> str | None:
+    """The bare service name behind a K8s DNS spelling, or None."""
+    for suffix in _K8S_SUFFIXES:
+        if key.endswith(suffix):
+            remainder = key.removesuffix(suffix)
+            return remainder.split(".", 1)[0] if remainder else None
+    labels = key.split(".")
+    if len(labels) == 2 and all(labels):
+        return labels[0]  # name.namespace — applies only if the base is known
+    return None

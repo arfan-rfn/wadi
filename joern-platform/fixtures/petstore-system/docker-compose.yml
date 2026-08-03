@@ -1,10 +1,16 @@
 # Deployment identity for the conformance system (the stitcher's phone book
 # reads these service names — they match the caller URLs and application.yml).
+# T3 (§5.4.2): petstore also carries the deployment env surface — a bare
+# pass-through entry resolved from the repo .env (the yas idiom) and the
+# active-profile selector that makes application-prod.yml merge.
 services:
   petstore:
     build: ./petstore
     ports:
       - "8080:8080"
+    environment:
+      - PETSTORE_SERVICES_INVENTORY
+      - SPRING_PROFILES_ACTIVE=prod
   inventory:
     build: ./inventory
     ports:

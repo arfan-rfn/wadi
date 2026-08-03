@@ -51,8 +51,8 @@ class TestPetstoreModule:
         """§5.4.3: the counts pinned in PetstoreSystemConformanceTest arrive
         intact across the language boundary."""
         assert petstore.analysis_coverage is not None
-        assert petstore.analysis_coverage.production_methods == 35
-        assert petstore.analysis_coverage.reachable_production_methods == 30
+        assert petstore.analysis_coverage.production_methods == 38
+        assert petstore.analysis_coverage.reachable_production_methods == 33
         assert inventory.analysis_coverage is not None
         assert inventory.analysis_coverage.production_methods == 9
         assert inventory.analysis_coverage.reachable_production_methods == 8
@@ -95,8 +95,14 @@ class TestPetstoreModule:
     def test_config_refs_arrive(self, petstore: ServiceExport) -> None:
         keys = sorted(ref.key for ref in petstore.config_refs)
         # Five T2 probe classes @Value the api key; PetServiceImpl @Values the
-        # base key and the feign url=${key} attribute references it too.
-        assert keys == ["inventory.api.url"] * 5 + ["inventory.url"] * 2
+        # base key (the feign url=${key} attribute references it too); the T3
+        # probes reference the compose-env-only and profile-only keys.
+        assert keys == ["inventory.api.url"] * 5 + [
+            "inventory.profile.url",
+            "inventory.url",
+            "inventory.url",
+            "petstore.services.inventory",
+        ]
         by_key = {ref.key: ref for ref in petstore.config_refs}
         assert "PetServiceImpl.java" in by_key["inventory.url"].anchor.file
 

@@ -19,6 +19,24 @@ All notable changes to wadi. One version spans the whole release set
   will be measured as a before/after on this number.
 - `wadi coverage` human output also lists unmodelled client libraries
   (the §5.4.2 census was previously JSON-only).
+- **T3 deployment-model resolution (§5.4.2, Phase 2.5 M4):** the deployment
+  layer becomes phone-book input.
+  - **Compose env surface:** `environment:` (map/list, bare pass-through
+    resolved from the repo `.env` — the yas idiom), `env_file:`, network
+    aliases/hostname/container_name, override files; allowlisted onto the
+    boundary in raw spelling.
+  - **Spring relaxed binding + multi-pass expansion:**
+    `${yas.services.customer}` finds `YAS_SERVICES_CUSTOMER`; nested
+    placeholders resolve, cycle-bounded.
+  - **Profile merge:** `application-<profile>.*` + multi-doc YAML profile
+    documents merge over the base — exactly the compose-declared active set,
+    else all profiles with the honest `config-profile-merged-all` note.
+  - **K8s service DNS** (`.svc`/`.svc.cluster.local` exact; two-label form
+    known-identity-only and capped HIGH via the new `indirect` flag),
+    loopback classification, **Eureka/Consul `discovery_names`** (first
+    writer), **`server.servlet.context-path`** applied to matching, **Zuul**
+    routes and **SCG expanded map-form**; unmodelled gateway shapes emit
+    `gateway-*-unmodelled:<name>` notes (perceive-and-note).
 - **T2 client APIs + URL idioms, tranche 2 (§5.4.2, Phase 2.5 M3 — closes the milestone):**
   - **Feign completeness:** transitive interface inheritance (the shared-
     contract idiom previously produced NO sink), `@RequestMapping(method=…)`
