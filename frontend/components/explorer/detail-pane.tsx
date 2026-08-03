@@ -2,6 +2,7 @@
 
 // Endpoint detail: identity header, then the ICFG at method granularity
 // (the useful view) with raw JSON one tab away.
+import { useRef, useState } from "react"
 import { ArrowRight, Database, Globe, MailWarning } from "lucide-react"
 
 import type { Endpoint, Icfg, RemoteEdgesView } from "@/lib/wadi/api"
@@ -10,9 +11,10 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
+import { CallTree } from "./call-tree"
 import { EndpointOverview } from "./endpoint-overview"
 import { MethodBadge } from "./method-badge"
-import { SourcePane } from "./source-pane"
+import { SourcePane, type SourceFocus } from "./source-pane"
 
 const SINK_META: Record<string, { label: string; icon: typeof Database }> = {
   db: { label: "database", icon: Database },
@@ -43,6 +45,11 @@ export function DetailPane({
   onTabChange: (tab: string) => void
 }) {
   const methods = icfg ? rollupMethods(icfg) : []
+  // Flow-workspace selection (§11 Phase 2.7): shared by rail, source pane,
+  // and (M3) the canvas.
+  const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null)
+  const [sourceFocus, setSourceFocus] = useState<SourceFocus | null>(null)
+  const focusSeq = useRef(0)
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -121,15 +128,42 @@ export function DetailPane({
             />
           </TabsContent>
 
-          {/* §11 Phase 2.7: the Flow workspace — M1 ships the source map;
-              the call-tree rail (M2) and canvas (M3) join it here. */}
+          {/* §11 Phase 2.7: the Flow workspace — call-tree rail (M2) +
+              source map (M1); the canvas joins between them in M3. */}
           <TabsContent value="flow" className="min-h-0 flex-1">
-            <SourcePane
-              icfg={icfg}
-              snapshotId={snapshotId}
-              serviceId={serviceId}
-              active={tab === "flow"}
-            />
+            <div className="flex h-full min-h-0">
+              <aside className="flex w-60 shrink-0 flex-col border-r lg:w-72">
+                <div className="shrink-0 border-b px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Call tree
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <CallTree
+                    icfg={icfg}
+                    selectedMethodId={selectedMethodId}
+                    onSelect={(node) => {
+                      setSelectedMethodId(node.methodId)
+                      if (node.file && node.line) {
+                        focusSeq.current += 1
+                        setSourceFocus({
+                          file: node.file,
+                          line: node.line,
+                          seq: focusSeq.current,
+                        })
+                      }
+                    }}
+                  />
+                </div>
+              </aside>
+              <div className="min-w-0 flex-1">
+                <SourcePane
+                  icfg={icfg}
+                  snapshotId={snapshotId}
+                  serviceId={serviceId}
+                  active={tab === "flow"}
+                  focus={sourceFocus}
+                />
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent

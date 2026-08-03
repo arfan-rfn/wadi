@@ -5,7 +5,7 @@
 // dimmed but never hidden, call sites jumping to their callee's section.
 // Source is fetched lazily per file while the Flow tab is active (§5.3), and
 // a server-truncated window pages honestly ("load more", never silence).
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
@@ -132,29 +132,42 @@ function SourceLine({
   )
 }
 
+export interface SourceFocus {
+  file: string
+  line: number
+  seq: number
+}
+
 export function SourcePane({
   icfg,
   snapshotId,
   serviceId,
   active,
+  focus,
 }: {
   icfg: Icfg | undefined
   snapshotId: string
   serviceId: string
   active: boolean
+  /** External focus request (call tree / canvas selection, §11 Phase 2.7). */
+  focus?: SourceFocus | null
 }) {
   const sections = useMemo(() => (icfg ? buildSourceMap(icfg) : []), [icfg])
   const sectionRefs = useRef(new Map<string, HTMLDivElement>())
   const jumpSeq = useRef(0)
   const [jump, setJump] = useState<JumpTarget | null>(null)
 
-  const jumpTo = (file: string, line: number) => {
+  const jumpTo = useCallback((file: string, line: number) => {
     // Monotonic sequence so repeating the same jump still retriggers the
     // scroll effect (and keeps this handler pure for the compiler lint).
     jumpSeq.current += 1
     setJump({ file, line, at: jumpSeq.current })
     sectionRefs.current.get(file)?.scrollIntoView({ block: "start" })
-  }
+  }, [])
+
+  useEffect(() => {
+    if (focus) jumpTo(focus.file, focus.line)
+  }, [focus, jumpTo])
 
   if (!icfg) {
     return (
