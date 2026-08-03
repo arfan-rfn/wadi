@@ -49,6 +49,8 @@ export function Explorer() {
   const [tab, setTab] = useState<(typeof TABS)[number]>(
     constrain(initial.tab, TABS, "overview")
   )
+  // Flow-workspace method selection (§11 Phase 2.7 M3) — deep-linkable.
+  const [nodeId, setNodeId] = useState<string | null>(initial.node)
 
   useEffect(() => {
     writeUrlState({
@@ -58,9 +60,9 @@ export function Explorer() {
       endpoint: endpointId,
       view: view === "coverage" ? null : view,
       tab: tab === "overview" ? null : tab,
-      node: null,
+      node: nodeId,
     })
-  }, [systemId, snapshotId, serviceId, endpointId, view, tab])
+  }, [systemId, snapshotId, serviceId, endpointId, view, tab, nodeId])
 
   const systems = useSystems()
   const snapshots = useSnapshots(systemId)
@@ -303,6 +305,8 @@ export function Explorer() {
                 onTabChange={(next) =>
                   setTab(constrain(next, TABS, "overview"))
                 }
+                selectedMethodId={nodeId}
+                onSelectMethod={setNodeId}
               />
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">

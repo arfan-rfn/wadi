@@ -2,9 +2,17 @@
 
 // Endpoint detail: identity header, then the ICFG at method granularity
 // (the useful view) with raw JSON one tab away.
-import { useRef, useState } from "react"
-import { ArrowRight, Database, Globe, MailWarning } from "lucide-react"
+import { useCallback, useRef, useState } from "react"
+import {
+  ArrowRight,
+  Database,
+  Globe,
+  MailWarning,
+  PanelLeft,
+  PanelRight,
+} from "lucide-react"
 
+import { cn } from "@/lib/utils"
 import type { Endpoint, Icfg, RemoteEdgesView } from "@/lib/wadi/api"
 import { rollupMethods, shortSignature } from "@/lib/wadi/rollup"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 import { CallTree } from "./call-tree"
 import { EndpointOverview } from "./endpoint-overview"
+import { FlowCanvas } from "./flow-canvas"
 import { MethodBadge } from "./method-badge"
 import { SourcePane, type SourceFocus } from "./source-pane"
 
@@ -32,6 +41,8 @@ export function DetailPane({
   serviceId,
   tab,
   onTabChange,
+  selectedMethodId,
+  onSelectMethod,
 }: {
   endpoint: Endpoint
   icfg: Icfg | undefined
@@ -43,13 +54,19 @@ export function DetailPane({
   // Controlled (§11 Phase 2.7): the tab is deep-linkable URL state.
   tab: string
   onTabChange: (tab: string) => void
+  // Flow-workspace selection, lifted for the ?node deep link.
+  selectedMethodId: string | null
+  onSelectMethod: (methodId: string | null) => void
 }) {
   const methods = icfg ? rollupMethods(icfg) : []
-  // Flow-workspace selection (§11 Phase 2.7): shared by rail, source pane,
-  // and (M3) the canvas.
-  const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null)
   const [sourceFocus, setSourceFocus] = useState<SourceFocus | null>(null)
+  const [showRail, setShowRail] = useState(true)
+  const [showSource, setShowSource] = useState(true)
   const focusSeq = useRef(0)
+  const focusSource = useCallback((file: string, line: number) => {
+    focusSeq.current += 1
+    setSourceFocus({ file, line, seq: focusSeq.current })
+  }, [])
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -128,41 +145,76 @@ export function DetailPane({
             />
           </TabsContent>
 
-          {/* §11 Phase 2.7: the Flow workspace — call-tree rail (M2) +
-              source map (M1); the canvas joins between them in M3. */}
-          <TabsContent value="flow" className="min-h-0 flex-1">
+          {/* §11 Phase 2.7: the Flow workspace — call-tree rail (M2) |
+              semantic-zoom canvas (M3) | source map (M1), three-way synced.
+              Rail and source collapse so the canvas always has room. */}
+          <TabsContent value="flow" className="relative min-h-0 flex-1">
+            <div className="absolute right-2 top-2 z-10 flex gap-1">
+              <button
+                onClick={() => setShowRail((prev) => !prev)}
+                aria-pressed={showRail}
+                title={showRail ? "Hide call tree" : "Show call tree"}
+                className={cn(
+                  "rounded-md border bg-background/90 p-1 text-muted-foreground hover:text-foreground",
+                  showRail && "text-foreground"
+                )}
+              >
+                <PanelLeft className="size-3.5" />
+              </button>
+              <button
+                onClick={() => setShowSource((prev) => !prev)}
+                aria-pressed={showSource}
+                title={showSource ? "Hide source" : "Show source"}
+                className={cn(
+                  "rounded-md border bg-background/90 p-1 text-muted-foreground hover:text-foreground",
+                  showSource && "text-foreground"
+                )}
+              >
+                <PanelRight className="size-3.5" />
+              </button>
+            </div>
             <div className="flex h-full min-h-0">
-              <aside className="flex w-60 shrink-0 flex-col border-r lg:w-72">
-                <div className="shrink-0 border-b px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Call tree
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <CallTree
-                    icfg={icfg}
-                    selectedMethodId={selectedMethodId}
-                    onSelect={(node) => {
-                      setSelectedMethodId(node.methodId)
-                      if (node.file && node.line) {
-                        focusSeq.current += 1
-                        setSourceFocus({
-                          file: node.file,
-                          line: node.line,
-                          seq: focusSeq.current,
-                        })
-                      }
-                    }}
-                  />
-                </div>
-              </aside>
-              <div className="min-w-0 flex-1">
-                <SourcePane
+              {showRail ? (
+                <aside className="flex w-56 shrink-0 flex-col border-r xl:w-64">
+                  <div className="shrink-0 border-b px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Call tree
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    <CallTree
+                      icfg={icfg}
+                      selectedMethodId={selectedMethodId}
+                      onSelect={(node) => {
+                        onSelectMethod(node.methodId)
+                        if (node.file && node.line)
+                          focusSource(node.file, node.line)
+                      }}
+                    />
+                  </div>
+                </aside>
+              ) : null}
+              <div className="min-w-64 flex-1 border-r">
+                <FlowCanvas
                   icfg={icfg}
-                  snapshotId={snapshotId}
-                  serviceId={serviceId}
-                  active={tab === "flow"}
-                  focus={sourceFocus}
+                  remoteEdges={remoteEdges}
+                  selectedMethodId={selectedMethodId}
+                  onSelectMethod={onSelectMethod}
+                  onFocusSource={(file, line) => {
+                    setShowSource(true)
+                    focusSource(file, line)
+                  }}
                 />
               </div>
+              {showSource ? (
+                <div className="w-[36%] min-w-[22rem] shrink-0">
+                  <SourcePane
+                    icfg={icfg}
+                    snapshotId={snapshotId}
+                    serviceId={serviceId}
+                    active={tab === "flow"}
+                    focus={sourceFocus}
+                  />
+                </div>
+              ) : null}
             </div>
           </TabsContent>
 
