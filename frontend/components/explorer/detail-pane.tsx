@@ -27,6 +27,8 @@ export function DetailPane({
   edgesLoading,
   snapshotId,
   serviceId,
+  tab,
+  onTabChange,
 }: {
   endpoint: Endpoint
   icfg: Icfg | undefined
@@ -35,6 +37,9 @@ export function DetailPane({
   edgesLoading: boolean
   snapshotId: string
   serviceId: string
+  // Controlled (§11 Phase 2.7): the tab is deep-linkable URL state.
+  tab: string
+  onTabChange: (tab: string) => void
 }) {
   const methods = icfg ? rollupMethods(icfg) : []
 
@@ -80,7 +85,8 @@ export function DetailPane({
 
       {icfg ? (
         <Tabs
-          defaultValue="overview"
+          value={tab}
+          onValueChange={onTabChange}
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
           <div className="shrink-0 border-b px-4 py-2">

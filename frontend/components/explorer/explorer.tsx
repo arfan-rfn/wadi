@@ -3,7 +3,10 @@
 // The wadi workbench: scope switchers in the chrome (system / snapshot),
 // three fixed panes below — services, endpoints, endpoint detail. Panes never
 // collapse or squeeze; scope changes happen in dropdowns, not columns.
+// Deep links (§11 Phase 2.7): the URL is read ONCE on mount and mirrored on
+// every selection change — reload restores the exact workspace.
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -15,6 +18,7 @@ import {
   useSnapshots,
   useSystems,
 } from "@/lib/wadi/hooks"
+import { constrain, parseUrlState, writeUrlState } from "@/lib/wadi/url-state"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CoveragePane } from "@/components/coverage/coverage-pane"
@@ -23,15 +27,40 @@ import { DetailPane } from "./detail-pane"
 import { MethodBadge } from "./method-badge"
 import { ScopeBar } from "./scope-bar"
 
+const VIEWS = ["coverage", "explorer"] as const
+const TABS = ["overview", "methods", "json"] as const
+
 export function Explorer() {
-  const [systemId, setSystemId] = useState<string | null>(null)
-  const [snapshotId, setSnapshotId] = useState<string | null>(null)
-  const [serviceId, setServiceId] = useState<string | null>(null)
-  const [endpointId, setEndpointId] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  // Read once (lazy useState, never re-evaluated): after mount the URL is an
+  // output of state, never an input.
+  const [initial] = useState(() => parseUrlState(searchParams))
+
+  const [systemId, setSystemId] = useState<string | null>(initial.system)
+  const [snapshotId, setSnapshotId] = useState<string | null>(initial.snapshot)
+  const [serviceId, setServiceId] = useState<string | null>(initial.service)
+  const [endpointId, setEndpointId] = useState<string | null>(initial.endpoint)
   const [serviceFilter, setServiceFilter] = useState("")
   const [endpointFilter, setEndpointFilter] = useState("")
   // Coverage is the landing view (§5.4: every consumer surfaces it FIRST).
-  const [view, setView] = useState<"coverage" | "explorer">("coverage")
+  const [view, setView] = useState<(typeof VIEWS)[number]>(
+    constrain(initial.view, VIEWS, "coverage")
+  )
+  const [tab, setTab] = useState<(typeof TABS)[number]>(
+    constrain(initial.tab, TABS, "overview")
+  )
+
+  useEffect(() => {
+    writeUrlState({
+      system: systemId,
+      snapshot: snapshotId,
+      service: serviceId,
+      endpoint: endpointId,
+      view: view === "coverage" ? null : view,
+      tab: tab === "overview" ? null : tab,
+      node: null,
+    })
+  }, [systemId, snapshotId, serviceId, endpointId, view, tab])
 
   const systems = useSystems()
   const snapshots = useSnapshots(systemId)
@@ -270,6 +299,10 @@ export function Explorer() {
                 edgesLoading={remoteEdges.isPending}
                 snapshotId={snapshotId as string}
                 serviceId={serviceId as string}
+                tab={tab}
+                onTabChange={(next) =>
+                  setTab(constrain(next, TABS, "overview"))
+                }
               />
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
