@@ -153,6 +153,18 @@ class TestBaselineSnapshot:
                     f"{entry['production_methods']} ({entry['coverage_percent']}%)"
                 )
 
+        # §5.2.8 M2: the per-release CFG-fidelity number — anomaly totals per
+        # code plus who was never checked. "the weird code lives in real repos."
+        anomalies = coverage.get("cfg_anomalies")
+        if anomalies is None:
+            print("cfg_anomalies: unknown (report predates the invariants)")
+        else:
+            totals = anomalies["total_by_code"]
+            print(f"cfg_anomalies: {json.dumps(totals) if totals else 'none'}")
+            unchecked = [s["name"] for s in anomalies["services"] if not s["checked"]]
+            if unchecked:
+                print(f"  never checked: {', '.join(sorted(unchecked))}")
+
         # §5.2.7 spot-check: one recovered response schema, for hand-verification
         # against the target repo's source.
         def _shape_summary(shape: dict[str, Any], depth: int = 0) -> str:

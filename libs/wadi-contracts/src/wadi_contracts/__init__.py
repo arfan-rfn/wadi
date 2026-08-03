@@ -2,10 +2,12 @@
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
 from wadi_contracts.boundary import (
+    CFG_ANOMALY_CODES,
     KNOWN_CLIENT_LIBRARIES,
     MODELLED_CLIENT_LIBRARIES,
     AnalysisCoverage,
     AsyncRoot,
+    CfgAnomaly,
     GatewayRoute,
     NetworkIdentity,
     ServiceBoundary,
@@ -67,10 +69,12 @@ from wadi_contracts.registry import CONTRACT_MODELS
 from wadi_contracts.source import MethodRef, SourceAnchor
 from wadi_contracts.stitching import (
     AnalysisCoverageSection,
+    CfgAnomalySection,
     CoverageReport,
     CoverageTotals,
     ExternalApiEntry,
     PlaceholderEntry,
+    ServiceCfgAnomalyEntry,
     ServiceCoverageEntry,
     StitchedEdge,
     UnmodelledMechanismEntry,
@@ -91,6 +95,7 @@ from wadi_contracts.version import SCHEMA_VERSION
 from wadi_contracts.views import RemoteEdgeItem, RemoteEdgesView, ServiceSummary, SourceView
 
 __all__ = [
+    "CFG_ANOMALY_CODES",
     "CONTRACT_MODELS",
     "KNOWN_CLIENT_LIBRARIES",
     "MODELLED_CLIENT_LIBRARIES",
@@ -103,6 +108,8 @@ __all__ = [
     "AuthEvidence",
     "AuthEvidenceKind",
     "BranchCondition",
+    "CfgAnomaly",
+    "CfgAnomalySection",
     "Confidence",
     "CoverageReport",
     "CoverageTotals",
@@ -142,6 +149,7 @@ __all__ = [
     "RemoteEdgesView",
     "RepoSource",
     "ServiceBoundary",
+    "ServiceCfgAnomalyEntry",
     "ServiceCoverageEntry",
     "ServiceKind",
     "ServiceSummary",

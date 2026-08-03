@@ -206,12 +206,18 @@ class ExtractionPipeline:
                         if (method := methods_by_id.get(root.method_id)) is not None
                     ]
                     boundary = boundary.model_copy(update={"async_roots": roots})
-                await self._artifacts.write_service_boundaries([boundary])
                 assembled = Assembler(
                     snapshot_id=snapshot.id,
                     service_id=svc_id,
                     config_env=service.config.env,
                 ).assemble(export)
+                # §5.2.8 M2: the invariant check runs during assembly, so the
+                # boundary write moves after it — cfg_anomalies is a
+                # worker-owned per-service fact like analysis_coverage. [] =
+                # checked and clean; the failed-extraction path above keeps
+                # None (never checked).
+                boundary = boundary.model_copy(update={"cfg_anomalies": assembled.cfg_anomalies})
+                await self._artifacts.write_service_boundaries([boundary])
                 await self._artifacts.write_endpoints(assembled.endpoints)
                 for icfg in assembled.icfgs:
                     await self._artifacts.write_icfg(icfg)

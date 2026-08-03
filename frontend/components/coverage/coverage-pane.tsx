@@ -304,6 +304,39 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
         </section>
       )}
 
+      {report.cfg_anomalies &&
+        Object.keys(report.cfg_anomalies.total_by_code ?? {}).length > 0 && (
+          <section className="space-y-3">
+            <SectionHeading>CFG anomalies</SectionHeading>
+            <div className="rounded-lg border p-3">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Structural invariants the control-flow graph violated for this
+                code (§5.2.8) — where the graph itself says it can be trusted
+                less. Facts, never silent.
+              </p>
+              <ul className="space-y-1">
+                {Object.entries(report.cfg_anomalies.total_by_code ?? {}).map(
+                  ([code, count]) => (
+                    <li key={code} className="text-xs">
+                      <span className="font-mono">{code}</span>{" "}
+                      <span className="text-muted-foreground">×{count}</span>
+                    </li>
+                  )
+                )}
+              </ul>
+              {(report.cfg_anomalies.services ?? []).some((s) => !s.checked) && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Never checked:{" "}
+                  {(report.cfg_anomalies.services ?? [])
+                    .filter((s) => !s.checked)
+                    .map((s) => s.name)
+                    .join(", ")}
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
       {(report.phonebook_conflicts ?? []).length > 0 && (
         <section className="space-y-3">
           <SectionHeading>Config conflicts</SectionHeading>

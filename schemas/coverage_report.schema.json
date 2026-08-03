@@ -46,6 +46,61 @@
       "title": "AnalysisCoverageSection",
       "type": "object"
     },
+    "CfgAnomaly": {
+      "additionalProperties": false,
+      "description": "One structural-invariant violation family on a service's CFGs\n(\u00a75.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real\nrepos, and a violated invariant is a queryable fact about how much the\ngraph can be trusted (P10).",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "count": {
+          "description": "Occurrences across the service's methods",
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "sample_sites": {
+          "description": "Up to 5 example sites \u2014 examples, never the exhaustive list",
+          "items": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "maxItems": 5,
+          "title": "Sample Sites",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "title": "CfgAnomaly",
+      "type": "object"
+    },
+    "CfgAnomalySection": {
+      "additionalProperties": false,
+      "description": "Snapshot rollup of ICFG structural-invariant violations (\u00a75.2.8 M2).\n\nEvery snapshot is a continuous CFG test: a violation is a queryable fact\nabout how far the graph can be trusted for that code, never an error.",
+      "properties": {
+        "services": {
+          "description": "One entry per analyzed service (libraries excluded), sorted by name",
+          "items": {
+            "$ref": "#/$defs/ServiceCfgAnomalyEntry"
+          },
+          "title": "Services",
+          "type": "array"
+        },
+        "total_by_code": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Snapshot-wide counts per anomaly code (CFG_ANOMALY_CODES)",
+          "title": "Total By Code",
+          "type": "object"
+        }
+      },
+      "title": "CfgAnomalySection",
+      "type": "object"
+    },
     "CoverageTotals": {
       "additionalProperties": false,
       "description": "Aggregate counts for a snapshot's stitched graph.",
@@ -190,6 +245,43 @@
         "caller_service_ids"
       ],
       "title": "PlaceholderEntry",
+      "type": "object"
+    },
+    "ServiceCfgAnomalyEntry": {
+      "additionalProperties": false,
+      "description": "\u00a75.2.8 M2: one service's structural-invariant violations.\n\nServices that were never checked (extraction failed, pre-1.8 snapshot)\ncarry ``checked=False`` with no anomalies \u2014 unknown is never conflated\nwith clean (P10).",
+      "properties": {
+        "anomalies": {
+          "description": "Per-code counts with sample sites; empty when checked and clean",
+          "items": {
+            "$ref": "#/$defs/CfgAnomaly"
+          },
+          "title": "Anomalies",
+          "type": "array"
+        },
+        "checked": {
+          "description": "False = invariants never ran for this service",
+          "title": "Checked",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Service display name, denormalized for reads",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "service_id": {
+          "minLength": 1,
+          "title": "Service Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service_id",
+        "name",
+        "checked"
+      ],
+      "title": "ServiceCfgAnomalyEntry",
       "type": "object"
     },
     "ServiceCoverageEntry": {
@@ -389,6 +481,18 @@
       },
       "title": "Applied Hint Ids",
       "type": "array"
+    },
+    "cfg_anomalies": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CfgAnomalySection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "ICFG structural-invariant violations (\u00a75.2.8 M2, schema 1.8.0). None only on reports written before the invariants existed"
     },
     "created_at": {
       "format": "date-time",

@@ -33,6 +33,53 @@ export type Services = ServiceCoverageEntry[]
  * Reserved — stitching hints land in Phase 4
  */
 export type AppliedHintIds = string[]
+export type Code = string
+/**
+ * Occurrences across the service's methods
+ */
+export type Count = number
+/**
+ * Up to 5 example sites — examples, never the exhaustive list
+ *
+ * @maxItems 5
+ */
+export type SampleSites =
+  | []
+  | [SourceAnchor]
+  | [SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+export type EndLine = number
+/**
+ * Path relative to the service build root
+ */
+export type File = string
+export type StartLine = number
+/**
+ * Whether an anchor refers to original repo text or a generated variant (§5.3).
+ *
+ * ``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) — the text
+ * that was actually analyzed, served by source-on-demand with a badge.
+ */
+export type SourceVariant = "original" | "generated"
+/**
+ * Per-code counts with sample sites; empty when checked and clean
+ */
+export type Anomalies = CfgAnomaly[]
+/**
+ * False = invariants never ran for this service
+ */
+export type Checked = boolean
+/**
+ * Service display name, denormalized for reads
+ */
+export type Name1 = string
+export type ServiceId1 = string
+/**
+ * One entry per analyzed service (libraries excluded), sorted by name
+ */
+export type Services1 = ServiceCfgAnomalyEntry[]
 export type CreatedAt = string
 export type CallCount = number
 /**
@@ -60,7 +107,7 @@ export type CallerServiceIds1 = [string, ...string[]]
 /**
  * The config-resolved logical name
  */
-export type Name1 = string
+export type Name2 = string
 export type PlaceholderId = string
 /**
  * 'compose-service' | 'discovery-name' | 'gateway-route' | 'bare-hostname'
@@ -113,20 +160,7 @@ export type Reason = string
  */
 export type ReasonCode = string
 export type RemoteCallId = string
-export type ServiceId1 = string
-export type EndLine = number
-/**
- * Path relative to the service build root
- */
-export type File = string
-export type StartLine = number
-/**
- * Whether an anchor refers to original repo text or a generated variant (§5.3).
- *
- * ``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) — the text
- * that was actually analyzed, served by source-on-demand with a badge.
- */
-export type SourceVariant = "original" | "generated"
+export type ServiceId2 = string
 export type Unresolved = UnresolvedCallEntry[]
 
 /**
@@ -142,6 +176,10 @@ export interface CoverageReport {
    */
   analysis_coverage?: AnalysisCoverageSection | null
   applied_hint_ids?: AppliedHintIds
+  /**
+   * ICFG structural-invariant violations (§5.2.8 M2, schema 1.8.0). None only on reports written before the invariants existed
+   */
+  cfg_anomalies?: CfgAnomalySection | null
   created_at?: CreatedAt
   external_apis?: ExternalApis
   low_confidence_edge_ids?: LowConfidenceEdgeIds
@@ -182,6 +220,59 @@ export interface ServiceCoverageEntry {
   service_id: ServiceId
 }
 /**
+ * Snapshot rollup of ICFG structural-invariant violations (§5.2.8 M2).
+ *
+ * Every snapshot is a continuous CFG test: a violation is a queryable fact
+ * about how far the graph can be trusted for that code, never an error.
+ */
+export interface CfgAnomalySection {
+  services?: Services1
+  total_by_code?: TotalByCode
+}
+/**
+ * §5.2.8 M2: one service's structural-invariant violations.
+ *
+ * Services that were never checked (extraction failed, pre-1.8 snapshot)
+ * carry ``checked=False`` with no anomalies — unknown is never conflated
+ * with clean (P10).
+ */
+export interface ServiceCfgAnomalyEntry {
+  anomalies?: Anomalies
+  checked: Checked
+  name: Name1
+  service_id: ServiceId1
+}
+/**
+ * One structural-invariant violation family on a service's CFGs
+ * (§5.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real
+ * repos, and a violated invariant is a queryable fact about how much the
+ * graph can be trusted (P10).
+ */
+export interface CfgAnomaly {
+  code: Code
+  count: Count
+  sample_sites?: SampleSites
+}
+/**
+ * A file + line range in the text that was actually analyzed.
+ *
+ * For preprocessed files (delombok) the anchor refers to the generated
+ * variant — source-on-demand serves that same text, so anchors and served
+ * source stay aligned by construction (§5.3).
+ */
+export interface SourceAnchor {
+  end_line: EndLine
+  file: File
+  start_line: StartLine
+  variant?: SourceVariant
+}
+/**
+ * Snapshot-wide counts per anomaly code (CFG_ANOMALY_CODES)
+ */
+export interface TotalByCode {
+  [k: string]: number
+}
+/**
  * A real dependency on an address outside the analyzed system.
  */
 export interface ExternalApiEntry {
@@ -196,7 +287,7 @@ export interface ExternalApiEntry {
 export interface PlaceholderEntry {
   call_count: CallCount1
   caller_service_ids: CallerServiceIds1
-  name: Name1
+  name: Name2
   placeholder_id: PlaceholderId
   resolved_via: ResolvedVia
 }
@@ -243,19 +334,6 @@ export interface UnresolvedCallEntry {
   reason: Reason
   reason_code: ReasonCode
   remote_call_id: RemoteCallId
-  service_id: ServiceId1
+  service_id: ServiceId2
   site: SourceAnchor
-}
-/**
- * A file + line range in the text that was actually analyzed.
- *
- * For preprocessed files (delombok) the anchor refers to the generated
- * variant — source-on-demand serves that same text, so anchors and served
- * source stay aligned by construction (§5.3).
- */
-export interface SourceAnchor {
-  end_line: EndLine
-  file: File
-  start_line: StartLine
-  variant?: SourceVariant
 }

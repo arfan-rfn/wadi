@@ -140,6 +140,58 @@ class AnalysisCoverage(WadiModel):
         return self
 
 
+CFG_ANOMALY_CODES: frozenset[str] = frozenset(
+    {
+        # A node (beyond the method's entry statement) with no incoming raw
+        # edge: the assembler's synthetic patching would silently present it
+        # as a second entry point (§5.2.8 — the pre-M1 synchronized class).
+        "disconnected-node",
+        # An if node missing a true or false successor, or a switch node with
+        # no case/default arm edge — the branch cannot be read as a branch.
+        "branch-arity",
+        # A loop with body edges but no cycle-closing back edge. Suppressed
+        # for empty-body loops (recorded §5.2.8 non-representable).
+        "loop-no-back-edge",
+        # An edge endpoint that references no exported node.
+        "dangling-edge",
+        # No return statement and every node has a successor: flow can never
+        # leave the method (a pure cycle) — either dead code or a graph bug.
+        "exit-unreachable",
+    }
+)
+"""§5.2.8 M2 structural-invariant violation codes.
+
+Evaluated against the RAW exported CFG of every method on every snapshot —
+before the assembler's synthetic entry/exit patching, which would make
+reachability invariants vacuously true. Additive changes bump
+``SCHEMA_VERSION`` minor.
+"""
+
+
+class CfgAnomaly(WadiModel):
+    """One structural-invariant violation family on a service's CFGs
+    (§5.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real
+    repos, and a violated invariant is a queryable fact about how much the
+    graph can be trusted (P10).
+    """
+
+    code: str
+    count: int = Field(ge=1, description="Occurrences across the service's methods")
+    sample_sites: list[SourceAnchor] = Field(
+        default_factory=list[SourceAnchor],
+        max_length=5,
+        description="Up to 5 example sites — examples, never the exhaustive list",
+    )
+
+    @field_validator("code")
+    @classmethod
+    def _registered_code(cls, value: str) -> str:
+        if value not in CFG_ANOMALY_CODES:
+            allowed = " | ".join(sorted(CFG_ANOMALY_CODES))
+            raise ValueError(f"cfg-anomaly code must be {allowed}, got {value!r}")
+        return value
+
+
 class AsyncRoot(WadiModel):
     """A non-endpoint reachability root (§5.4.2 T4, schema 1.7.0): a method
     the framework invokes without an HTTP request — scheduled jobs, event and
@@ -215,6 +267,14 @@ class ServiceBoundary(ArtifactEnvelope):
         description=(
             "Non-endpoint reachability roots (§5.4.2 T4). Empty also for "
             "pre-1.7 snapshots — absence of the fact, not proof of none"
+        ),
+    )
+    cfg_anomalies: list[CfgAnomaly] | None = Field(
+        default=None,
+        description=(
+            "§5.2.8 M2 structural-invariant violations across this service's "
+            "method CFGs. None = never checked (library, extraction failed, "
+            "pre-1.8 snapshot); [] = checked and clean — never conflated (P10)"
         ),
     )
 

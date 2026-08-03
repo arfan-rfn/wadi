@@ -213,6 +213,16 @@ class TestTwoServiceSystem:
         assert per_service["sweeper"]["reachable_methods"] == 1
         assert section["production_methods"] == 65
         assert section["reachable_methods"] == 61
+        # §5.2.8 M2: the invariant check ran for every analyzed service, and
+        # the enriched coarsening leaves the fixture anomaly-free — a checked
+        # clean answer, structurally distinct from never-checked (P10).
+        anomalies = coverage["cfg_anomalies"]
+        assert {s["name"]: s["checked"] for s in anomalies["services"]} == {
+            "petstore": True,
+            "inventory": True,
+            "sweeper": True,
+        }
+        assert anomalies["total_by_code"] == {}
         assert section["coverage_percent"] == 93.8
 
         # 5. Stitched edges through the public API, with confidence + provenance.

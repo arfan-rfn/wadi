@@ -18,6 +18,7 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
+from wadi_contracts.boundary import CfgAnomaly
 from wadi_contracts.enums import Confidence, HttpMethod, Provenance, TargetKind
 from wadi_contracts.ids import remote_edge_id
 from wadi_contracts.source import SourceAnchor
@@ -360,6 +361,46 @@ class AnalysisCoverageSection(WadiModel):
     )
 
 
+class ServiceCfgAnomalyEntry(WadiModel):
+    """§5.2.8 M2: one service's structural-invariant violations.
+
+    Services that were never checked (extraction failed, pre-1.8 snapshot)
+    carry ``checked=False`` with no anomalies — unknown is never conflated
+    with clean (P10).
+    """
+
+    service_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, description="Service display name, denormalized for reads")
+    checked: bool = Field(description="False = invariants never ran for this service")
+    anomalies: list[CfgAnomaly] = Field(
+        default_factory=list[CfgAnomaly],
+        description="Per-code counts with sample sites; empty when checked and clean",
+    )
+
+    @model_validator(mode="after")
+    def _unchecked_carries_no_anomalies(self) -> Self:
+        if not self.checked and self.anomalies:
+            raise ValueError("an unchecked service cannot report anomalies")
+        return self
+
+
+class CfgAnomalySection(WadiModel):
+    """Snapshot rollup of ICFG structural-invariant violations (§5.2.8 M2).
+
+    Every snapshot is a continuous CFG test: a violation is a queryable fact
+    about how far the graph can be trusted for that code, never an error.
+    """
+
+    total_by_code: dict[str, int] = Field(
+        default_factory=dict,
+        description="Snapshot-wide counts per anomaly code (CFG_ANOMALY_CODES)",
+    )
+    services: list[ServiceCfgAnomalyEntry] = Field(
+        default_factory=list[ServiceCfgAnomalyEntry],
+        description="One entry per analyzed service (libraries excluded), sorted by name",
+    )
+
+
 class CoverageReport(SnapshotEnvelope):
     """What the map knows it doesn't know (§5.4) — surfaced FIRST everywhere.
 
@@ -392,6 +433,13 @@ class CoverageReport(SnapshotEnvelope):
         description=(
             "How much of the source the analysis walked (§5.4.3, schema "
             "1.5.0). None only on reports written before the metric existed"
+        ),
+    )
+    cfg_anomalies: CfgAnomalySection | None = Field(
+        default=None,
+        description=(
+            "ICFG structural-invariant violations (§5.2.8 M2, schema 1.8.0). "
+            "None only on reports written before the invariants existed"
         ),
     )
     applied_hint_ids: list[str] = Field(

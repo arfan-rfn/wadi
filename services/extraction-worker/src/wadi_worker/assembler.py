@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from wadi_contracts import (
     BranchCondition,
+    CfgAnomaly,
     Confidence,
     DataModel,
     DataModelField,
@@ -54,6 +55,7 @@ from wadi_joern_client.export import (
     SinkValueConfidence,
 )
 from wadi_worker.auth_merge import merge_endpoint_auth
+from wadi_worker.cfg_invariants import aggregate_anomalies, check_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,7 @@ class AssembledArtifacts:
     remote_calls: list[RemoteCall] = field(default_factory=list[RemoteCall])
     mq_interactions: list[MqInteraction] = field(default_factory=list[MqInteraction])
     data_models: list[DataModel] = field(default_factory=list[DataModel])
+    cfg_anomalies: list[CfgAnomaly] = field(default_factory=list[CfgAnomaly])
 
 
 class ExportIncompatibleError(RuntimeError):
@@ -125,6 +128,17 @@ class Assembler:
         artifacts.remote_calls = self._build_remote_calls(export, methods)
         artifacts.mq_interactions = self._build_mq_interactions(export, methods)
         artifacts.data_models = self._build_data_models(export)
+        # §5.2.8 M2: structural invariants over every RAW method CFG, once per
+        # method (an ICFG inlines a method into many endpoints; the invariant
+        # is a per-method fact). Pre-patch by construction — this runs on the
+        # export, before the synthetic entry/exit edges below exist.
+        findings = [
+            finding
+            for cfg in export.cfgs
+            if (cfg_method := methods.get(cfg.method_id)) is not None
+            for finding in check_cfg(cfg, cfg_method)
+        ]
+        artifacts.cfg_anomalies = aggregate_anomalies(findings)
 
         for export_endpoint in export.endpoints:
             handler = methods.get(export_endpoint.method_id)

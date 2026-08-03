@@ -2,6 +2,7 @@
 
 from wadi_contracts import (
     AnalysisCoverage,
+    CfgAnomaly,
     Confidence,
     Provenance,
     ServiceKind,
@@ -11,7 +12,11 @@ from wadi_contracts import (
     UnresolvedCallEntry,
     placeholder_service_id,
 )
-from wadi_stitcher.coverage import build_analysis_coverage, build_coverage_report
+from wadi_stitcher.coverage import (
+    build_analysis_coverage,
+    build_cfg_anomalies,
+    build_coverage_report,
+)
 from wadi_testing.builders import (
     make_analyzed_edge,
     make_endpoint,
@@ -286,3 +291,53 @@ def test_analysis_coverage_travels_on_the_report() -> None:
     )
     assert report.analysis_coverage is not None
     assert report.analysis_coverage.coverage_percent == 66.7
+
+
+def test_cfg_anomalies_rollup_and_unchecked_services() -> None:
+    """§5.2.8 M2: per-code totals sum across services; a service whose
+    boundary carries None was never checked and stays distinct from clean."""
+    snapshot = make_snapshot(make_system())
+    anchor = SourceAnchor(file="src/A.java", start_line=5, end_line=5)
+    noisy = make_service(snapshot, "services/noisy").model_copy(
+        update={
+            "cfg_anomalies": [
+                CfgAnomaly(code="disconnected-node", count=3, sample_sites=[anchor]),
+                CfgAnomaly(code="branch-arity", count=1),
+            ]
+        }
+    )
+    clean = make_service(snapshot, "services/clean").model_copy(update={"cfg_anomalies": []})
+    failed = make_service(snapshot, "services/failed").model_copy(
+        update={"extraction_error": "RuntimeError: parse failed"}
+    )
+
+    section = build_cfg_anomalies([noisy, clean, failed])
+    assert section.total_by_code == {"branch-arity": 1, "disconnected-node": 3}
+    by_name = {entry.name: entry for entry in section.services}
+    assert by_name["clean"].checked
+    assert by_name["clean"].anomalies == []
+    assert not by_name["failed"].checked
+    assert by_name["noisy"].checked
+    assert {a.code for a in by_name["noisy"].anomalies} == {
+        "branch-arity",
+        "disconnected-node",
+    }
+
+
+def test_cfg_anomalies_excludes_libraries_and_travels_on_the_report() -> None:
+    snapshot = make_snapshot(make_system())
+    service = make_service(snapshot, "services/app").model_copy(update={"cfg_anomalies": []})
+    library = make_service(snapshot, "libs/common").model_copy(update={"kind": ServiceKind.LIBRARY})
+    section = build_cfg_anomalies([service, library])
+    assert [entry.name for entry in section.services] == ["app"]
+    report = build_coverage_report(
+        snapshot.id,
+        remote_calls=[],
+        edges=[],
+        unresolved=[],
+        phonebook_conflicts=[],
+        placeholder_names={},
+        cfg_anomalies=section,
+    )
+    assert report.cfg_anomalies is not None
+    assert report.cfg_anomalies.total_by_code == {}

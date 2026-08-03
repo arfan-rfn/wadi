@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from wadi_contracts import (
     MODELLED_CLIENT_LIBRARIES,
     AnalysisCoverageSection,
+    CfgAnomalySection,
     Confidence,
     CoverageReport,
     CoverageTotals,
@@ -16,6 +17,7 @@ from wadi_contracts import (
     PlaceholderEntry,
     RemoteCall,
     ServiceBoundary,
+    ServiceCfgAnomalyEntry,
     ServiceCoverageEntry,
     ServiceKind,
     StitchedEdge,
@@ -88,6 +90,31 @@ def build_analysis_coverage(boundaries: Sequence[ServiceBoundary]) -> AnalysisCo
     )
 
 
+def build_cfg_anomalies(boundaries: Sequence[ServiceBoundary]) -> CfgAnomalySection:
+    """§5.2.8 M2: per-service structural-invariant violations + rollup.
+
+    A service whose boundary carries ``cfg_anomalies=None`` was never checked
+    (extraction failed, pre-1.8 snapshot) and appears with ``checked=False``
+    — unknown stays distinct from clean (P10).
+    """
+    entries: list[ServiceCfgAnomalyEntry] = []
+    total_by_code: dict[str, int] = {}
+    services = [b for b in boundaries if b.kind is ServiceKind.SERVICE]
+    for boundary in sorted(services, key=lambda b: (b.name, b.service_id)):
+        anomalies = boundary.cfg_anomalies
+        entries.append(
+            ServiceCfgAnomalyEntry(
+                service_id=boundary.service_id,
+                name=boundary.name,
+                checked=anomalies is not None,
+                anomalies=anomalies or [],
+            )
+        )
+        for anomaly in anomalies or []:
+            total_by_code[anomaly.code] = total_by_code.get(anomaly.code, 0) + anomaly.count
+    return CfgAnomalySection(total_by_code=dict(sorted(total_by_code.items())), services=entries)
+
+
 def build_coverage_report(
     snapshot_id: str,
     *,
@@ -98,6 +125,7 @@ def build_coverage_report(
     placeholder_names: dict[str, tuple[str, str]],
     unmodelled_mechanisms: Sequence[UnmodelledMechanismEntry] = (),
     analysis_coverage: AnalysisCoverageSection | None = None,
+    cfg_anomalies: CfgAnomalySection | None = None,
 ) -> CoverageReport:
     by_kind: dict[TargetKind, list[StitchedEdge]] = {kind: [] for kind in TargetKind}
     by_confidence: dict[str, int] = {}
@@ -169,4 +197,5 @@ def build_coverage_report(
         phonebook_conflicts=list(phonebook_conflicts),
         unmodelled_mechanisms=list(unmodelled_mechanisms),
         analysis_coverage=analysis_coverage,
+        cfg_anomalies=cfg_anomalies,
     )

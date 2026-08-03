@@ -47,6 +47,27 @@ export type BuildRoot = string
  */
 export type BuildSystem = string
 /**
+ * §5.2.8 M2 structural-invariant violations across this service's method CFGs. None = never checked (library, extraction failed, pre-1.8 snapshot); [] = checked and clean — never conflated (P10)
+ */
+export type CfgAnomalies = CfgAnomaly[] | null
+export type Code = string
+/**
+ * Occurrences across the service's methods
+ */
+export type Count = number
+/**
+ * Up to 5 example sites — examples, never the exhaustive list
+ *
+ * @maxItems 5
+ */
+export type SampleSites =
+  | []
+  | [SourceAnchor]
+  | [SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+/**
  * HTTP client libraries detected by import scan (§5.4.2 census, KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an import is not a call (P10)
  */
 export type ClientLibraries = string[]
@@ -142,6 +163,7 @@ export interface ServiceBoundary {
   async_roots?: AsyncRoots
   build_root: BuildRoot
   build_system: BuildSystem
+  cfg_anomalies?: CfgAnomalies
   client_libraries?: ClientLibraries
   created_at?: CreatedAt
   extraction_error?: ExtractionError
@@ -195,6 +217,17 @@ export interface SourceAnchor {
   file: File
   start_line: StartLine
   variant?: SourceVariant
+}
+/**
+ * One structural-invariant violation family on a service's CFGs
+ * (§5.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real
+ * repos, and a violated invariant is a queryable fact about how much the
+ * graph can be trusted (P10).
+ */
+export interface CfgAnomaly {
+  code: Code
+  count: Count
+  sample_sites?: SampleSites
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.

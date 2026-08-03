@@ -405,6 +405,19 @@ def coverage(snapshot_id: str, output_json: JsonFlag = False) -> None:
         )
         for mechanism in report.unmodelled_mechanisms:
             console.print(f"  - {mechanism.mechanism} in {len(mechanism.service_ids)} service(s)")
+    if report.cfg_anomalies is not None:
+        if report.cfg_anomalies.total_by_code:
+            console.print(
+                "\n[bold yellow]CFG anomalies[/bold yellow] "
+                "(structural invariants violated — §5.2.8; facts, not errors):"
+            )
+            for code, count in report.cfg_anomalies.total_by_code.items():
+                console.print(f"  - {code}: {count}")
+            unchecked = [s.name for s in report.cfg_anomalies.services if not s.checked]
+            if unchecked:
+                console.print(f"  - never checked: {', '.join(unchecked)}")
+        else:
+            console.print("\n[bold]CFG anomalies[/bold]: none (all invariants hold)")
     if report.placeholders:
         console.print("\n[bold]Placeholder services[/bold] (grant access to analyze them):")
         for placeholder in report.placeholders:
