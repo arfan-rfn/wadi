@@ -1209,7 +1209,7 @@ wheels = [
 
 [[package]]
 name = "wadi-config"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "libs/wadi-config" }
 dependencies = [
     { name = "pydantic" },
@@ -1224,7 +1224,7 @@ requires-dist = [
 
 [[package]]
 name = "wadi-contracts"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "libs/wadi-contracts" }
 dependencies = [
     { name = "pydantic" },
@@ -1235,7 +1235,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.10" }]
 
 [[package]]
 name = "wadi-extraction-worker"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "services/extraction-worker" }
 dependencies = [
     { name = "networkx" },
@@ -1268,7 +1268,7 @@ dev = [{ name = "types-pyyaml" }]
 
 [[package]]
 name = "wadi-joern-client"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "libs/wadi-joern-client" }
 dependencies = [
     { name = "httpx" },
@@ -1283,7 +1283,7 @@ requires-dist = [
 
 [[package]]
 name = "wadi-mcp-server"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "services/mcp-server" }
 dependencies = [
     { name = "mcp" },
@@ -1302,7 +1302,7 @@ requires-dist = [
 
 [[package]]
 name = "wadi-orchestrator"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "services/orchestrator" }
 dependencies = [
     { name = "fastapi" },
@@ -1333,7 +1333,7 @@ dev = [{ name = "httpx", specifier = ">=0.28" }]
 
 [[package]]
 name = "wadi-repo"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "libs/wadi-repo" }
 dependencies = [
     { name = "wadi-contracts" },
@@ -1344,7 +1344,7 @@ requires-dist = [{ name = "wadi-contracts", editable = "libs/wadi-contracts" }]
 
 [[package]]
 name = "wadi-sh"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "cli" }
 dependencies = [
     { name = "httpx" },
@@ -1365,7 +1365,7 @@ requires-dist = [
 
 [[package]]
 name = "wadi-stitcher"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "services/stitcher" }
 dependencies = [
     { name = "wadi-config" },
@@ -1382,7 +1382,7 @@ requires-dist = [
 
 [[package]]
 name = "wadi-storage"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "libs/wadi-storage" }
 dependencies = [
     { name = "neo4j" },
@@ -1401,7 +1401,7 @@ requires-dist = [
 
 [[package]]
 name = "wadi-testing"
-version = "0.2.5"
+version = "0.3.0"
 source = { editable = "libs/wadi-testing" }
 dependencies = [
     { name = "pytest" },

@@ -3,7 +3,7 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
-## Unreleased
+## 0.3.0 — 2026-08-03 (Phase 2.6: control-flow fidelity)
 
 ### Added — Phase 2.6: control-flow fidelity (§5.2.8)
 - **M1 — the construct matrix (survey → record → fix → pin).** New
