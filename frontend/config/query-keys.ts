@@ -9,6 +9,7 @@ export const QUERY_KEYS = {
   coverage: (snapshotId: string) => ["coverage", snapshotId] as const,
   remoteEdges: (snapshotId: string, serviceId: string) =>
     ["remote-edges", snapshotId, serviceId] as const,
+  systemGraph: (snapshotId: string) => ["system-graph", snapshotId] as const,
   sourceFile: (
     snapshotId: string,
     serviceId: string,

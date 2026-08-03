@@ -364,3 +364,42 @@ class TestAuth:
             assert wrong.status_code == 401
             right = await http.get("/api/v1/systems", headers={"Authorization": "Bearer s3cret"})
             assert right.status_code == 200
+
+
+class TestSystemGraph:
+    async def test_prestitch_graph_lists_services_with_honest_stitched_flag(
+        self, client: AsyncClient, app_state: AppState, sample_repo: Path
+    ) -> None:
+        """§11 Phase 2.7 M4: before stitching, services render and the empty
+        edge list is 'not yet' (stitched=False), never 'none'."""
+        from wadi_contracts import ServiceBoundary, normalize_repo_source, service_id
+
+        system_id = await _register_system(client, sample_repo)
+        analyze = await client.post(f"/api/v1/systems/{system_id}/analyze")
+        snapshot_id = analyze.json()["snapshot"]["id"]
+        boundary = ServiceBoundary(
+            snapshot_id=snapshot_id,
+            service_id=service_id(str(sample_repo), "."),
+            name="sample",
+            repo=normalize_repo_source(str(sample_repo)),
+            build_root=".",
+            languages=["java"],
+            build_system="maven",
+        )
+        await app_state.artifacts.write_service_boundaries([boundary])
+
+        response = await client.get(f"/api/v1/snapshots/{snapshot_id}/graph")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["stitched"] is False
+        assert body["edges"] == []
+        assert [s["name"] for s in body["services"]] == ["sample"]
+        service = body["services"][0]
+        assert service["endpoint_count"] == 0
+        assert service["gateway"] is False
+        # cfg_anomalies=None on the boundary → unknown, never zero (P10).
+        assert service["cfg_anomaly_count"] is None
+
+    async def test_missing_snapshot_404(self, client: AsyncClient) -> None:
+        missing = "snap_" + "0" * 32
+        assert (await client.get(f"/api/v1/snapshots/{missing}/graph")).status_code == 404

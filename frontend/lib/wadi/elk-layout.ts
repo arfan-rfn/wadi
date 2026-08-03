@@ -31,8 +31,9 @@ export function nodeSize(node: FlowGraphNode): {
   }
 }
 
-export async function layoutFlowGraph(
-  graph: FlowGraph
+export async function layoutGeneric(
+  children: Array<{ id: string; width: number; height: number }>,
+  edges: Array<{ id: string; source: string; target: string }>
 ): Promise<Map<string, LayoutedNode>> {
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js")
   const elk = new ELK()
@@ -45,15 +46,12 @@ export async function layoutFlowGraph(
       "elk.spacing.nodeNode": "28",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
     },
-    children: graph.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),
-    edges: graph.edges
-      // Back edges would fight the layering; route them after layout instead.
-      .filter((edge) => !edge.back)
-      .map((edge) => ({
-        id: edge.id,
-        sources: [edge.source],
-        targets: [edge.target],
-      })),
+    children,
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target],
+    })),
   })
   const positions = new Map<string, LayoutedNode>()
   for (const child of result.children ?? []) {
@@ -66,4 +64,14 @@ export async function layoutFlowGraph(
     })
   }
   return positions
+}
+
+export async function layoutFlowGraph(
+  graph: FlowGraph
+): Promise<Map<string, LayoutedNode>> {
+  return layoutGeneric(
+    graph.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),
+    // Back edges would fight the layering; route them after layout instead.
+    graph.edges.filter((edge) => !edge.back)
+  )
 }

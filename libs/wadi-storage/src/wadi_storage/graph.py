@@ -347,6 +347,13 @@ class GraphRepository:
             inbound=[self._edge_item(row) for row in inbound],
         )
 
+    async def all_edges(self, snapshot_id: str) -> list[RemoteEdgeItem]:
+        """Every stitched edge in the snapshot — the system map's read
+        (§11 Phase 2.7 M4). Same denormalized shape as ``remote_edges``,
+        one row per edge (no per-service duplication)."""
+        rows = await self._run(self._EDGE_MATCH + self._EDGE_RETURN, {"snapshot_id": snapshot_id})
+        return [self._edge_item(row) for row in rows]
+
     async def resolve_call_targets(
         self, snapshot_id: str, remote_call_ids: Sequence[str]
     ) -> list[RemoteEdgeItem]:

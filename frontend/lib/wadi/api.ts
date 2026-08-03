@@ -8,6 +8,7 @@ import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import type { ServiceSummary } from "@/lib/generated/service_summary.schema"
 import type { Snapshot } from "@/lib/generated/snapshot.schema"
 import type { SourceView } from "@/lib/generated/source_view.schema"
+import type { SystemGraphView } from "@/lib/generated/system_graph.schema"
 import type { System } from "@/lib/generated/system.schema"
 
 async function get<T>(path: string): Promise<T> {
@@ -39,6 +40,8 @@ export const wadiApi = {
     get<Icfg>(`/api/v1/snapshots/${snapshotId}/endpoints/${endpointId}/icfg`),
   coverage: (snapshotId: string) =>
     get<CoverageReport>(`/api/v1/snapshots/${snapshotId}/coverage`),
+  systemGraph: (snapshotId: string) =>
+    get<SystemGraphView>(`/api/v1/snapshots/${snapshotId}/graph`),
   remoteEdges: (snapshotId: string, serviceId: string) =>
     get<RemoteEdgesView>(
       `/api/v1/snapshots/${snapshotId}/services/${serviceId}/remote-edges`
@@ -84,4 +87,5 @@ export type {
   Snapshot,
   SourceView,
   System,
+  SystemGraphView,
 }

@@ -245,6 +245,22 @@ class TestTwoServiceSystem:
         assert tree.status_code == 400
         assert "not a file" in tree.json()["detail"]
 
+        # 4c. The system map read (§11 Phase 2.7 M4): every service + every
+        # stitched edge in one response, unknowns first-class.
+        graph = await http.get(f"/api/v1/snapshots/{snapshot_id}/graph")
+        assert graph.status_code == 200, graph.text
+        graph_body = graph.json()
+        assert graph_body["stitched"] is True
+        graph_names = {s["name"] for s in graph_body["services"]}
+        assert {"petstore", "inventory", "sweeper"} <= graph_names
+        petstore_node = next(s for s in graph_body["services"] if s["name"] == "petstore")
+        assert petstore_node["endpoint_count"] > 0
+        assert petstore_node["cfg_anomaly_count"] == 0  # checked and clean
+        graph_kinds = {e["target_kind"] for e in graph_body["edges"]}
+        assert {"analyzed", "external", "placeholder", "undetermined"} <= graph_kinds
+        # One row per edge — the count matches the coverage totals.
+        assert len(graph_body["edges"]) == coverage["totals"]["edges"]
+
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
         inventory_id = by_name["inventory"]["service_id"]

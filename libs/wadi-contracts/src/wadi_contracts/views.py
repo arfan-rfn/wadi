@@ -10,7 +10,14 @@ from pydantic import Field
 
 from wadi_contracts.base import WadiModel
 from wadi_contracts.boundary import ServiceBoundary
-from wadi_contracts.enums import Confidence, HttpMethod, Provenance, SourceVariant, TargetKind
+from wadi_contracts.enums import (
+    Confidence,
+    HttpMethod,
+    Provenance,
+    ServiceKind,
+    SourceVariant,
+    TargetKind,
+)
 
 
 class ServiceSummary(ServiceBoundary):
@@ -47,6 +54,41 @@ class RemoteEdgesView(WadiModel):
     service_id: str
     outbound: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
     inbound: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
+
+
+class SystemGraphService(WadiModel):
+    """One service node on the system map (§11 Phase 2.7 M4)."""
+
+    service_id: str
+    name: str
+    kind: ServiceKind
+    endpoint_count: int = Field(ge=0)
+    async_root_count: int = Field(ge=0)
+    gateway: bool = Field(
+        description="Has gateway routes or a discovery locator (drawn distinctly)"
+    )
+    extraction_error: str | None = Field(
+        default=None,
+        description="Extraction failed — the node renders as a stated-cause hole (P10)",
+    )
+    cfg_anomaly_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="Total §5.2.8 anomalies; None = never checked (never conflated with 0)",
+    )
+
+
+class SystemGraphView(WadiModel):
+    """The whole snapshot's service graph in one read (§11 Phase 2.7 M4).
+
+    ``stitched=False`` means the stitcher has not run: services render,
+    and the empty edge list is 'not yet', never 'none' (P10).
+    """
+
+    snapshot_id: str
+    stitched: bool
+    services: list[SystemGraphService] = Field(default_factory=list[SystemGraphService])
+    edges: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
 
 
 class SourceView(WadiModel):

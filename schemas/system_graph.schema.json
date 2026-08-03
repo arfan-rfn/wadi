@@ -198,6 +198,87 @@
       "title": "RemoteEdgeItem",
       "type": "object"
     },
+    "ServiceKind": {
+      "description": "v1: service | library. Reserved for Phase 9 (\u00a77): function, edge-worker, firmware.\n\n``library`` (\u00a75.2.6): an in-repo module other services depend on \u2014 never\nanalyzed as a service (no endpoints, no own CPG); its sources join each\ndependent service's staged parse. Recorded so classification is queryable.",
+      "enum": [
+        "service",
+        "library",
+        "function",
+        "edge-worker",
+        "firmware"
+      ],
+      "title": "ServiceKind",
+      "type": "string"
+    },
+    "SystemGraphService": {
+      "additionalProperties": false,
+      "description": "One service node on the system map (\u00a711 Phase 2.7 M4).",
+      "properties": {
+        "async_root_count": {
+          "minimum": 0,
+          "title": "Async Root Count",
+          "type": "integer"
+        },
+        "cfg_anomaly_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Total \u00a75.2.8 anomalies; None = never checked (never conflated with 0)",
+          "title": "Cfg Anomaly Count"
+        },
+        "endpoint_count": {
+          "minimum": 0,
+          "title": "Endpoint Count",
+          "type": "integer"
+        },
+        "extraction_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Extraction failed \u2014 the node renders as a stated-cause hole (P10)",
+          "title": "Extraction Error"
+        },
+        "gateway": {
+          "description": "Has gateway routes or a discovery locator (drawn distinctly)",
+          "title": "Gateway",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/ServiceKind"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "service_id": {
+          "title": "Service Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service_id",
+        "name",
+        "kind",
+        "endpoint_count",
+        "async_root_count",
+        "gateway"
+      ],
+      "title": "SystemGraphService",
+      "type": "object"
+    },
     "TargetKind": {
       "description": "What a stitched edge lands on (\u00a75.4.2) \u2014 the three target kinds that\nkeep partial coverage honest, plus the explicit undetermined fact (P10).",
       "enum": [
@@ -210,33 +291,38 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.10.0/remote_edges_view.schema.json",
+  "$id": "https://trywadi.com/schemas/1.10.0/system_graph.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Who a service calls and who calls it (\u00a78 ``remote_edges``).",
+  "description": "The whole snapshot's service graph in one read (\u00a711 Phase 2.7 M4).\n\n``stitched=False`` means the stitcher has not run: services render,\nand the empty edge list is 'not yet', never 'none' (P10).",
   "properties": {
-    "inbound": {
+    "edges": {
       "items": {
         "$ref": "#/$defs/RemoteEdgeItem"
       },
-      "title": "Inbound",
+      "title": "Edges",
       "type": "array"
     },
-    "outbound": {
+    "services": {
       "items": {
-        "$ref": "#/$defs/RemoteEdgeItem"
+        "$ref": "#/$defs/SystemGraphService"
       },
-      "title": "Outbound",
+      "title": "Services",
       "type": "array"
     },
-    "service_id": {
-      "title": "Service Id",
+    "snapshot_id": {
+      "title": "Snapshot Id",
       "type": "string"
+    },
+    "stitched": {
+      "title": "Stitched",
+      "type": "boolean"
     }
   },
   "required": [
-    "service_id"
+    "snapshot_id",
+    "stitched"
   ],
-  "title": "RemoteEdgesView",
+  "title": "SystemGraphView",
   "type": "object"
 }

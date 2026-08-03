@@ -315,7 +315,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.9.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.10.0/endpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One REST endpoint of one service within a snapshot.",
@@ -389,7 +389,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.9.0",
+      "default": "1.10.0",
       "title": "Schema Version",
       "type": "string"
     },

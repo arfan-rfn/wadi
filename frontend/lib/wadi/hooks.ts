@@ -65,6 +65,15 @@ export function useRemoteEdges(
   })
 }
 
+/** The snapshot-wide service graph (§11 Phase 2.7 M4). */
+export function useSystemGraph(enabled: boolean, snapshotId: string | null) {
+  return useQuery({
+    queryKey: QUERY_KEYS.systemGraph(snapshotId ?? "none"),
+    queryFn: () => wadiApi.systemGraph(snapshotId as string),
+    enabled: enabled && snapshotId !== null,
+  })
+}
+
 /** Whole-file source-on-demand (§11 Phase 2.7): fetched only while the Flow
  * tab is active, never preloaded; the server caps the window and says so. */
 export function useSourceFile(

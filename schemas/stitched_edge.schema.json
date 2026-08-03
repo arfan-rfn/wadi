@@ -50,7 +50,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.9.0/stitched_edge.schema.json",
+  "$id": "https://trywadi.com/schemas/1.10.0/stitched_edge.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One resolved (or explicitly unresolved) cross-service call edge.\n\nThe envelope ``service_id`` is the CALLER's service id \u2014 an edge belongs\nto the service whose call site it resolves. One ``RemoteCall`` fact can\nyield N edges (ambiguous resolution, multi-candidate URLs); each is its\nown row with its own content-derived id (\u00a75.2 over-approximation).",
@@ -123,7 +123,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.9.0",
+      "default": "1.10.0",
       "title": "Schema Version",
       "type": "string"
     },

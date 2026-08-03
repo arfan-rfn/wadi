@@ -22,12 +22,13 @@ import { constrain, parseUrlState, writeUrlState } from "@/lib/wadi/url-state"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CoveragePane } from "@/components/coverage/coverage-pane"
+import { SystemMapPane } from "@/components/map/system-map"
 
 import { DetailPane } from "./detail-pane"
 import { MethodBadge } from "./method-badge"
 import { ScopeBar } from "./scope-bar"
 
-const VIEWS = ["coverage", "explorer"] as const
+const VIEWS = ["coverage", "map", "explorer"] as const
 const TABS = ["overview", "flow", "methods", "json"] as const
 
 export function Explorer() {
@@ -158,6 +159,7 @@ export function Explorer() {
         {(
           [
             ["coverage", "Coverage"],
+            ["map", "Map"],
             ["explorer", "Explorer"],
           ] as const
         ).map(([id, label]) => (
@@ -185,6 +187,18 @@ export function Explorer() {
       {view === "coverage" ? (
         <div className="flex min-h-0 flex-1">
           <CoveragePane snapshotId={snapshotId} />
+        </div>
+      ) : view === "map" ? (
+        <div className="flex min-h-0 flex-1">
+          <SystemMapPane
+            snapshotId={snapshotId}
+            active={view === "map"}
+            onOpenService={(id) => {
+              setServiceId(id)
+              setEndpointId(null)
+              setView("explorer")
+            }}
+          />
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 divide-x">

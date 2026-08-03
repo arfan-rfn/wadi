@@ -92,7 +92,14 @@ from wadi_contracts.tags import (
 )
 from wadi_contracts.timeutil import UtcDatetime, ensure_utc, utc_now
 from wadi_contracts.version import SCHEMA_VERSION
-from wadi_contracts.views import RemoteEdgeItem, RemoteEdgesView, ServiceSummary, SourceView
+from wadi_contracts.views import (
+    RemoteEdgeItem,
+    RemoteEdgesView,
+    ServiceSummary,
+    SourceView,
+    SystemGraphService,
+    SystemGraphView,
+)
 
 __all__ = [
     "CFG_ANOMALY_CODES",
@@ -163,6 +170,8 @@ __all__ = [
     "SourceView",
     "StitchedEdge",
     "System",
+    "SystemGraphService",
+    "SystemGraphView",
     "Tag",
     "TagValidationError",
     "TargetKind",

@@ -11,7 +11,12 @@ from wadi_contracts.icfg import Icfg
 from wadi_contracts.jobs import ExtractionJob
 from wadi_contracts.stitching import CoverageReport, StitchedEdge
 from wadi_contracts.system import Snapshot, System
-from wadi_contracts.views import RemoteEdgesView, ServiceSummary, SourceView
+from wadi_contracts.views import (
+    RemoteEdgesView,
+    ServiceSummary,
+    SourceView,
+    SystemGraphView,
+)
 
 CONTRACT_MODELS: dict[str, type[BaseModel]] = {
     "system": System,
@@ -29,6 +34,7 @@ CONTRACT_MODELS: dict[str, type[BaseModel]] = {
     "service_summary": ServiceSummary,
     "remote_edges_view": RemoteEdgesView,
     "source_view": SourceView,
+    "system_graph": SystemGraphView,
     # Export-bundle trailer (derived at export time, never stored — §14):
     "export_manifest": ExportManifest,
 }

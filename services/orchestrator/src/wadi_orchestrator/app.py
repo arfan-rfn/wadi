@@ -27,6 +27,7 @@ from wadi_contracts import (
     Icfg,
     JobStatus,
     JobType,
+    RemoteEdgeItem,
     RemoteEdgesView,
     RepoSource,
     ServiceSummary,
@@ -35,6 +36,9 @@ from wadi_contracts import (
     SourceVariant,
     SourceView,
     System,
+    SystemGraphService,
+    SystemGraphView,
+    TargetKind,
     normalize_repo_source,
 )
 from wadi_orchestrator.export import export_stream
@@ -407,6 +411,69 @@ def create_app(
                 detail=f"no ICFG for endpoint {endpoint_id} in snapshot {snapshot_id}",
             )
         return icfg
+
+    # --- system graph (§11 Phase 2.7 M4) ----------------------------------------------
+
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/graph",
+        response_model=SystemGraphView,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def system_graph(snapshot_id: str, state: StateDep) -> SystemGraphView:
+        snapshot = await state.snapshots.get(snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
+        boundaries = await state.artifacts.list_service_boundaries(snapshot_id)
+        counts = await state.artifacts.count_endpoints_by_service(snapshot_id)
+        # Pre-stitch the edge set is 'not yet', never 'none' (P10) — services
+        # render, stitched=False says why edges are absent, and Neo4j is not
+        # touched at all.
+        stitched = await state.stitch.get_coverage_report(snapshot_id) is not None
+        edges: list[RemoteEdgeItem] = []
+        if stitched:
+            edges = await state.graph.all_edges(snapshot_id)
+            # UNDETERMINED facts are deliberately edge-less in Neo4j (a
+            # RemoteCall with no INVOKES_REMOTE — §6 schema); the map must
+            # still show them, so they join from the Tier-1 stitched set.
+            names = {b.service_id: b.name for b in boundaries}
+            edges.extend(
+                RemoteEdgeItem(
+                    edge_id=edge.id,
+                    remote_call_id=edge.remote_call_id,
+                    caller_service_id=edge.service_id,
+                    caller_service_name=names.get(edge.service_id),
+                    mechanism=edge.mechanism,
+                    http_verb=edge.http_verb,
+                    url=edge.url,
+                    target_kind=edge.target_kind,
+                    confidence=edge.confidence,
+                    provenance=edge.provenance,
+                    evidence=edge.evidence,
+                )
+                for edge in await state.stitch.list_stitched_edges(snapshot_id)
+                if edge.target_kind is TargetKind.UNDETERMINED
+            )
+        services = [
+            SystemGraphService(
+                service_id=boundary.service_id,
+                name=boundary.name,
+                kind=boundary.kind,
+                endpoint_count=counts.get(boundary.service_id, 0),
+                async_root_count=len(boundary.async_roots),
+                gateway=bool(boundary.network.gateway_routes)
+                or boundary.network.gateway_discovery_locator,
+                extraction_error=boundary.extraction_error,
+                cfg_anomaly_count=(
+                    sum(anomaly.count for anomaly in boundary.cfg_anomalies)
+                    if boundary.cfg_anomalies is not None
+                    else None
+                ),
+            )
+            for boundary in boundaries
+        ]
+        return SystemGraphView(
+            snapshot_id=snapshot_id, stitched=stitched, services=services, edges=edges
+        )
 
     # --- source-on-demand (§5.3) -------------------------------------------------------
 
