@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import httpx
 import pytest
+from support import plain
 from typer.testing import CliRunner
 
 import wadi_cli.main as cli_main
@@ -39,7 +40,7 @@ class TestSystemsCommand:
         mock_api(httpx.MockTransport(handler))
         result = runner.invoke(app, ["systems"])
         assert result.exit_code == 0, result.output
-        assert "shop" in result.output
+        assert "shop" in plain(result.output)
 
     def test_json_output(self, mock_api: Callable[[httpx.MockTransport], None]) -> None:
         system = make_system("shop")
@@ -108,8 +109,8 @@ class TestAnalyzeCommand:
         mock_api(self._transport([SnapshotStatus.RUNNING]))
         result = runner.invoke(app, ["analyze", str(target)])
         assert result.exit_code == 0, result.output
-        assert "registered system" in result.output
-        assert "snapshot" in result.output
+        assert "registered system" in plain(result.output)
+        assert "snapshot" in plain(result.output)
 
     def test_analyze_wait_success(
         self,
@@ -122,7 +123,7 @@ class TestAnalyzeCommand:
         mock_api(self._transport([SnapshotStatus.RUNNING, SnapshotStatus.SUCCEEDED]))
         result = runner.invoke(app, ["analyze", str(target), "--wait"])
         assert result.exit_code == 0, result.output
-        assert "succeeded" in result.output
+        assert "succeeded" in plain(result.output)
 
     def test_analyze_wait_failure_exit_code_1(
         self,
@@ -156,7 +157,7 @@ class TestAnalyzeCommand:
         assert first.exit_code == 0
         second = runner.invoke(app, ["analyze", str(target), "--name", "proj"])
         assert second.exit_code == 0
-        assert "using existing system" in second.output
+        assert "using existing system" in plain(second.output)
 
 
 def _poll_now(client: WadiApiClient, snapshot_id: str, poll_seconds: float = 0.0) -> Snapshot:

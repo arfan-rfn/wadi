@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 import pytest
+from support import plain
 from typer.testing import CliRunner
 
 from wadi_cli import main as cli_main
@@ -107,7 +108,7 @@ class TestExportCommand:
         # Deterministic layout: empty collections still get their (empty) files.
         assert json.loads((target / "mq_interactions.json").read_text()) == []
         assert json.loads((target / "data_models.json").read_text()) == []
-        assert "exported 8 artifacts" in result.output
+        assert "exported 8 artifacts" in plain(result.output)
 
     def test_json_output(
         self, mock_api: Callable[[httpx.MockTransport], None], tmp_path: Path
@@ -130,7 +131,7 @@ class TestExportCommand:
         target = tmp_path / "out"
         result = runner.invoke(app, ["export", snapshot_id, "--dir", str(target)])
         assert result.exit_code == 1
-        assert "truncated" in result.output
+        assert "truncated" in plain(result.output)
         assert not target.exists()
 
     def test_count_mismatch_fails(
@@ -141,7 +142,7 @@ class TestExportCommand:
         target = tmp_path / "out"
         result = runner.invoke(app, ["export", snapshot_id, "--dir", str(target)])
         assert result.exit_code == 1
-        assert "incomplete export" in result.output
+        assert "incomplete export" in plain(result.output)
         assert not target.exists()
 
     def test_refuses_non_empty_dir_without_force(
@@ -155,7 +156,7 @@ class TestExportCommand:
 
         refused = runner.invoke(app, ["export", snapshot_id, "--dir", str(target)])
         assert refused.exit_code == 2
-        assert "--force" in refused.output
+        assert "--force" in plain(refused.output)
 
         forced = runner.invoke(app, ["export", snapshot_id, "--dir", str(target), "--force"])
         assert forced.exit_code == 0, forced.output
@@ -170,7 +171,7 @@ class TestExportCommand:
         mock_api(httpx.MockTransport(handler))
         result = runner.invoke(app, ["export", "snap_x", "--dir", str(tmp_path / "out")])
         assert result.exit_code == 1
-        assert "only succeeded" in result.output
+        assert "only succeeded" in plain(result.output)
 
     def test_unreachable_maps_to_exit_3(
         self, mock_api: Callable[[httpx.MockTransport], None], tmp_path: Path

@@ -3,6 +3,7 @@
 import webbrowser
 
 import pytest
+from support import plain
 from typer.testing import CliRunner
 
 import wadi_cli.main as cli_main
@@ -51,7 +52,7 @@ class TestUiCommand:
             {"action": ["up", "--detach", "--wait"], "profiles": ["frontend"], "expose_db": False}
         ]
         assert opened == ["http://127.0.0.1:9235"]
-        assert "http://127.0.0.1:9235" in result.output
+        assert "http://127.0.0.1:9235" in plain(result.output)
 
     def test_no_open_skips_browser(
         self, compose_calls: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
@@ -73,7 +74,7 @@ class TestUiCommand:
         monkeypatch.setenv("WADI_UI_PORT", "9333")
         result = runner.invoke(app, ["ui", "--no-open"])
         assert result.exit_code == 0
-        assert "http://127.0.0.1:9333" in result.output
+        assert "http://127.0.0.1:9333" in plain(result.output)
 
     def test_no_runtime_exits_3(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(compose, "container_runtime_available", lambda: False)

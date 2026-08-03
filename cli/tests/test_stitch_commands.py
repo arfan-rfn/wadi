@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import httpx
 import pytest
+from support import plain
 from typer.testing import CliRunner
 
 import wadi_cli.main as cli_main
@@ -82,12 +83,12 @@ class TestCoverageCommand:
         mock_api(httpx.MockTransport(handler))
         result = runner.invoke(app, ["coverage", snapshot.id])
         assert result.exit_code == 0, result.output
-        assert "Placeholder services" in result.output
-        assert "billing" in result.output
+        assert "Placeholder services" in plain(result.output)
+        assert "billing" in plain(result.output)
         # Analysis coverage (§5.4.3): rollup + per-service, unknown never zero.
-        assert "Analysis coverage" in result.output
-        assert "19/24 (79.2%)" in result.output
-        assert "legacy: unknown (no coverage fact)" in result.output
+        assert "Analysis coverage" in plain(result.output)
+        assert "19/24 (79.2%)" in plain(result.output)
+        assert "legacy: unknown (no coverage fact)" in plain(result.output)
 
     def test_json_output(self, mock_api: Callable[[httpx.MockTransport], None]) -> None:
         snapshot = make_snapshot(make_system())
@@ -129,7 +130,7 @@ class TestRestitchCommand:
         mock_api(httpx.MockTransport(handler))
         result = runner.invoke(app, ["restitch", snapshot.id])
         assert result.exit_code == 0, result.output
-        assert "running" in result.output
+        assert "running" in plain(result.output)
 
     def test_restitch_wait_reports_failure(
         self, mock_api: Callable[[httpx.MockTransport], None]
@@ -149,7 +150,7 @@ class TestRestitchCommand:
         mock_api(httpx.MockTransport(handler))
         result = runner.invoke(app, ["restitch", running.id, "--wait"])
         assert result.exit_code == 1
-        assert "boom" in result.output
+        assert "boom" in plain(result.output)
 
     def test_conflict_surfaces_detail(
         self, mock_api: Callable[[httpx.MockTransport], None]
@@ -160,4 +161,4 @@ class TestRestitchCommand:
         mock_api(httpx.MockTransport(handler))
         result = runner.invoke(app, ["restitch", "snap_busy"])
         assert result.exit_code == 1
-        assert "active jobs" in result.output
+        assert "active jobs" in plain(result.output)
