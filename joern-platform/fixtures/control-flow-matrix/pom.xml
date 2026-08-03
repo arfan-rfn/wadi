@@ -9,6 +9,11 @@
          and branch shapes are javac-version-sensitive. Must match the CI JDK
          and the wadi-joern image (temurin 21). -->
     <maven.compiler.release>21</maven.compiler.release>
+    <!-- Spring Boot 3 resolves @PathVariable names via reflection; without
+         -parameters every parameterized endpoint 500s at runtime (found by
+         the M4 dynamic layer — exactly the class of truth only execution
+         catches). No effect on branch shapes, so the M3 oracle is unmoved. -->
+    <maven.compiler.parameters>true</maven.compiler.parameters>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <dependencies>

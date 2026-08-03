@@ -127,6 +127,18 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      # JDK 21 + Maven for the §5.2.8 M4 dynamic layer (the matrix fixture
+      # boots under the JaCoCo agent inside this job).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Cache Maven repository (matrix-fixture package, §5.2.8 M4)
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-e2e-${{ runner.os }}-${{ hashFiles('joern-platform/fixtures/control-flow-matrix/pom.xml') }}
+          restore-keys: m2-e2e-${{ runner.os }}-
       - uses: docker/setup-buildx-action@v3
       - name: Read VERSION (the e2e image tag must match the compose pin)
         id: version

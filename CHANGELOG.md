@@ -5,6 +5,70 @@ All notable changes to wadi. One version spans the whole release set
 
 ## Unreleased
 
+### Added — Phase 2.6: control-flow fidelity (§5.2.8)
+- **M1 — the construct matrix (survey → record → fix → pin).** New
+  `control-flow-matrix` fixture (compilable + runnable Spring Boot module,
+  one handler per Java control construct) surveyed empirically BEFORE any
+  fix; findings recorded per construct in the new §5.2.8. The coarsening
+  then learned to tell the truth: every CFG node carries `construct_kind`
+  (if/switch/switch-arrow/for/foreach/while/do-while/try/catch/finally/
+  throw/break/continue/goto) and a real `line_end` extent; a switch is a
+  `branch` node keeping its selector, with labeled `case` (+ values) /
+  `default` edges, explicit `fallthrough` (the old projection rendered
+  fallthrough as a fake loop), and the infeasible switch→join edge removed
+  when a default exists; loops label body/exit `true`/`false` plus a `back`
+  flag on cycle-closing edges; if-without-else emits its `false` join edge;
+  try/catch/finally are routing nodes with `exception` edges into handlers
+  (the schema's dormant kind finally has a writer); the projection walks
+  through statement-less CFG nodes, restoring `synchronized` bodies and
+  labeled jumps (labeled `break` redirected to the loop's exit — upstream
+  re-enters at the labeled statement, wrong for break); **sinks inside
+  branch conditions, throws, and for-headers now produce sink rows,
+  RemoteCalls, and closure widening** (previously invisible end to end).
+  Export 2.5.0, contracts 1.8.0, both additive. 29 per-construct golden CFG
+  shapes pinned (`expected/cfg/`, full node/edge structure). Recorded
+  upstream limits: javasrc2cpg drops the catch parameter (typed
+  throw→handler linkage deliberately absent, never guessed); empty-body
+  loops carry no back edge (statement-level self-loops unrepresentable).
+- **M2 — always-on structural invariants.** Every snapshot is now a CFG
+  test: the worker checks every method's RAW exported CFG (pre-patching,
+  where reachability is still falsifiable) and aggregates violations as
+  `ServiceBoundary.cfg_anomalies` → `CoverageReport.cfg_anomalies`
+  (per-service `checked` flag: None/unchecked ≠ clean — P10), rendered by
+  `wadi coverage`, the coverage pane, and the baseline harness. Codes:
+  `disconnected-node`, `branch-arity`, `loop-no-back-edge`, `dangling-edge`,
+  `exit-unreachable` (registered vocabulary, validator-enforced).
+- **M3 — the bytecode oracle.** `BytecodeOracleTest` diffs javac's own
+  branch/switch/back-jump counts (ASM over the compiled matrix fixture,
+  `--release 21`) against the graph: **29 methods, 25 exact, 4 whitelisted
+  javac desugarings (short-circuit, ternary, switch-on-string,
+  yield-lowering), 0 unexplained** — and the up-front whitelist SHRANK on
+  measurement (enhanced-for, try-with-resources, labeled jumps, lambdas all
+  exact). Phantom branches (graph > bytecode) and missed loops are never
+  whitelisted. Counts pinned; runs in CI on every commit.
+- **M4 — dynamic trace inclusion.** The matrix fixture boots under the
+  JaCoCo agent, every endpoint is driven through both branch outcomes over
+  HTTP, and the recorded coverage is diffed against a fresh wadi analysis:
+  every executed handler line maps to an ICFG node, every both-ways branch
+  sits on a node the graph renders as branching (attribution artifacts —
+  closing braces, chain continuations, `synchronized` headers — classified
+  structurally and recorded in §5.2.8). The layer promptly caught a real
+  runtime-only bug: the fixture compiled without `-parameters`, so every
+  parameterized endpoint 500'd under Spring Boot 3 — exactly the class of
+  truth only execution catches.
+- **The trust boundary (exit criterion)** is recorded in §5.2.8: what the
+  ICFG guarantees (enumerated constructs with discriminators, labeled
+  outcomes, invariant-checked snapshots, oracle- and trace-verified
+  fixtures) vs. what it deliberately does not (path feasibility, implicit
+  exception edges, typed throw→handler, expression-level flow, context
+  sensitivity). Phase 3+ layers cite it.
+
+### Fixed
+- The ICFG explorer's flow tab shows loop counts and construct chips; the
+  method rollup no longer conflates branches and loops.
+
+## 0.2.5 — 2026-08-03 (Phase 2.5: accuracy & visibility)
+
 ### Added
 - **T4 — reachability roots (§5.4.2, Phase 2.5 M7):** the reachable closure
   is now rooted at **endpoints ∪ async roots** and traverses the four edge
