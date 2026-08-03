@@ -10,6 +10,7 @@ import { AlertTriangle, ExternalLink, HelpCircle } from "lucide-react"
 import type { CoverageReport } from "@/lib/wadi/api"
 import { useCoverage } from "@/lib/wadi/hooks"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SourceBlock } from "@/components/explorer/source-block"
 
 function StatTile({
   label,
@@ -217,11 +218,14 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                     <AlertTriangle className="size-3" aria-hidden />
                     {entry.reason_code}
                   </span>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {entry.site.file}:{entry.site.start_line}
-                  </span>
                 </div>
                 <p className="text-xs text-muted-foreground">{entry.reason}</p>
+                {/* §11 Phase 2.7 M5: every anchor drills into source-on-demand. */}
+                <SourceBlock
+                  snapshotId={snapshotId as string}
+                  serviceId={entry.service_id}
+                  anchor={entry.site}
+                />
               </div>
             ))}
           </div>
@@ -324,6 +328,30 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                   )
                 )}
               </ul>
+              {/* §11 Phase 2.7 M5: sample sites drill into source-on-demand. */}
+              <div className="mt-2 space-y-1.5">
+                {(report.cfg_anomalies.services ?? [])
+                  .filter((service) => (service.anomalies ?? []).length > 0)
+                  .map((service) => (
+                    <div key={service.service_id} className="space-y-1">
+                      <p className="font-mono text-[11px] text-muted-foreground">
+                        {service.name}
+                      </p>
+                      {(service.anomalies ?? []).flatMap((anomaly) =>
+                        (anomaly.sample_sites ?? [])
+                          .slice(0, 2)
+                          .map((site, index) => (
+                            <SourceBlock
+                              key={`${anomaly.code}-${index}`}
+                              snapshotId={snapshotId as string}
+                              serviceId={service.service_id}
+                              anchor={site}
+                            />
+                          ))
+                      )}
+                    </div>
+                  ))}
+              </div>
               {(report.cfg_anomalies.services ?? []).some(
                 (s) => !s.checked
               ) && (

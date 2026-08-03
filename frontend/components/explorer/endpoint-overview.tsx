@@ -9,10 +9,16 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
+  Split,
 } from "lucide-react"
 
 import type { RemoteEdgeItem } from "@/lib/generated/remote_edges_view.schema"
 import type { Endpoint, Icfg, RemoteEdgesView } from "@/lib/wadi/api"
+import {
+  conditionLabel,
+  governingConditions,
+  type GoverningCondition,
+} from "@/lib/wadi/conditions"
 import { Skeleton } from "@/components/ui/skeleton"
 
 import { MethodBadge } from "./method-badge"
@@ -109,11 +115,13 @@ const TARGET_LABEL: Record<string, string> = {
 function CallRow({
   edges,
   anchor,
+  conditions,
   snapshotId,
   serviceId,
 }: {
   edges: RemoteEdgeItem[]
   anchor: { file: string; start_line: number; end_line: number } | null
+  conditions: GoverningCondition[]
   snapshotId: string
   serviceId: string
 }) {
@@ -135,6 +143,20 @@ function CallRow({
           {first.mechanism}
         </span>
       </div>
+      {conditions.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 pl-16">
+          {conditions.map((condition) => (
+            <span
+              key={conditionLabel(condition)}
+              className="inline-flex max-w-full items-center gap-1 rounded border border-amber-500/40 bg-amber-500/5 px-1.5 py-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-400"
+              title="Nearest governing branch (§11 heuristic — nearest branch, not full dominance)"
+            >
+              <Split className="size-2.5 shrink-0" />
+              <span className="truncate">{conditionLabel(condition)}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-16 text-[11px] text-muted-foreground">
         {edges.map((edge) => (
           <span key={edge.edge_id} className="inline-flex items-center gap-1">
@@ -199,11 +221,19 @@ export function EndpointOverview({
     string,
     { file: string; start_line: number; end_line: number }
   >()
+  const callNodeIds = new Map<string, string>()
   for (const node of icfg?.nodes ?? []) {
     for (const callId of node.remote_call_ids ?? []) {
-      if (!callAnchors.has(callId)) callAnchors.set(callId, node.anchor)
+      if (!callAnchors.has(callId)) {
+        callAnchors.set(callId, node.anchor)
+        callNodeIds.set(callId, node.id)
+      }
     }
   }
+  // §11 Phase 2.7 M5: under which branch does each outbound call run?
+  const conditionsByNode = icfg
+    ? governingConditions(icfg)
+    : new Map<string, GoverningCondition[]>()
   const outbound = (remoteEdges?.outbound ?? []).filter((edge) =>
     callAnchors.has(edge.remote_call_id)
   )
@@ -303,6 +333,9 @@ export function EndpointOverview({
                 key={callId}
                 edges={edges}
                 anchor={callAnchors.get(callId) ?? null}
+                conditions={
+                  conditionsByNode.get(callNodeIds.get(callId) ?? "") ?? []
+                }
                 snapshotId={snapshotId}
                 serviceId={serviceId}
               />

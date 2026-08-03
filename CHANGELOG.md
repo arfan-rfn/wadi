@@ -3,6 +3,49 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.4.0 — 2026-08-03 (Phase 2.7: the visual map)
+
+### Added
+- **The Flow workspace** — the endpoint's whole story in one three-pane,
+  three-way-synced view (`?tab=flow`, deep-linkable incl. `?node=`):
+  - **Endpoint source map (M1):** every file the endpoint touches as
+    navigable sections, whole-file fetched lazily per file (§5.3 — never
+    preloaded), executed extents highlighted from ICFG anchors, untouched
+    code dimmed but never hidden, construct/sink gutter marks, and call-site
+    lines jumping to their callee's section. Shiki highlighting with
+    per-language lazy grammars (polyglot-ready). Backend hardening
+    (contracts 1.9.0): `SourceView.total_lines`/`truncated`, a 2000-line
+    window cap that pages honestly, and tree paths rejected with 400.
+  - **Call tree (M2):** handler-rooted hierarchy from the ICFG's call
+    edges — callees at their call sites, recursion as a cycle chip,
+    per-row sink/construct badges.
+  - **Semantic-zoom canvas (M3):** Level 0 draws method cards + call edges
+    with remote/DB/MQ targets lifted up as ghost stubs; expanding a method
+    reveals its statement subgraph (condition text on branches, labeled
+    `true`/`false`/`case v1,v2`/`default`/`fallthrough`/`exception` edges,
+    animated back-edges); linear statement runs condense into expandable
+    "*n statements*" nodes. React Flow + deterministic ELK layout.
+- **The system Map view (M4):** a new read-only
+  `GET /snapshots/{id}/graph` (`SystemGraphView`, contracts 1.10.0) serves
+  the whole snapshot in one read; the Map draws services (gateway icons,
+  anomaly badges, extraction-failure holes) with edges aggregated per
+  caller→target, styled by confidence — and the unknowns are FIRST-CLASS:
+  external hosts, placeholders, and per-caller `unresolved` sinks
+  (undetermined facts are edge-less in Neo4j by design and now join the
+  map from the Tier-1 stitched set — an omission the new e2e caught).
+  Edge click opens the call sites with slicer/gateway evidence; service
+  click scopes the Explorer. Pre-stitch, `stitched=false` says why edges
+  are absent (never an empty lie).
+- **Story & trust (M5):** outbound calls carry their governing branch
+  ("calls ts-preserve-service *when `order.getStatus() == NOTPAID …`*")
+  from an interprocedural nearest-branch walk (recorded heuristic);
+  unresolved calls and CFG-anomaly sample sites drill into
+  source-on-demand in place; deep links restore the entire workspace.
+
+### Changed
+- Explorer selection state (system/snapshot/service/endpoint/view/tab/node)
+  mirrors into the URL — any view is shareable and reload-stable.
+
 ## 0.3.0 — 2026-08-03 (Phase 2.6: control-flow fidelity)
 
 ### Added — Phase 2.6: control-flow fidelity (§5.2.8)
