@@ -10,10 +10,10 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.8.0/source_view.schema.json",
+  "$id": "https://trywadi.com/schemas/1.9.0/source_view.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Source-on-demand response (\u00a75.3): the exact analyzed text at the pinned\nSHA \u2014 the delombok'd variant when preprocessing rewrote the file, flagged\nso consumers can say so.",
+  "description": "Source-on-demand response (\u00a75.3): the exact analyzed text at the pinned\nSHA \u2014 the delombok'd variant when preprocessing rewrote the file, flagged\nso consumers can say so.\n\n1.9.0 (\u00a711 Phase 2.7): ``total_lines`` (whole-file length, so clients can\nrender \"showing 1-2000 of 4200\" and fetch the next window) and\n``truncated`` (the served window hit the server's line cap \u2014 an honest\npartial, never a silent one).",
   "properties": {
     "content": {
       "title": "Content",
@@ -30,6 +30,26 @@
     "start_line": {
       "title": "Start Line",
       "type": "integer"
+    },
+    "total_lines": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Total lines in the file at the pinned SHA; None = pre-1.9 response",
+      "title": "Total Lines"
+    },
+    "truncated": {
+      "default": false,
+      "description": "True when the requested window exceeded the server cap and was cut",
+      "title": "Truncated",
+      "type": "boolean"
     },
     "variant": {
       "$ref": "#/$defs/SourceVariant"

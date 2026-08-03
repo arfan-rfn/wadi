@@ -10,6 +10,14 @@ export type EndLine = number
 export type File = string
 export type StartLine = number
 /**
+ * Total lines in the file at the pinned SHA; None = pre-1.9 response
+ */
+export type TotalLines = number | null
+/**
+ * True when the requested window exceeded the server cap and was cut
+ */
+export type Truncated = boolean
+/**
  * Whether an anchor refers to original repo text or a generated variant (§5.3).
  *
  * ``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) — the text
@@ -21,11 +29,18 @@ export type SourceVariant = "original" | "generated"
  * Source-on-demand response (§5.3): the exact analyzed text at the pinned
  * SHA — the delombok'd variant when preprocessing rewrote the file, flagged
  * so consumers can say so.
+ *
+ * 1.9.0 (§11 Phase 2.7): ``total_lines`` (whole-file length, so clients can
+ * render "showing 1-2000 of 4200" and fetch the next window) and
+ * ``truncated`` (the served window hit the server's line cap — an honest
+ * partial, never a silent one).
  */
 export interface SourceView {
   content: Content
   end_line: EndLine
   file: File
   start_line: StartLine
+  total_lines?: TotalLines
+  truncated?: Truncated
   variant: SourceVariant
 }

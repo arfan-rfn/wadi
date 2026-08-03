@@ -52,10 +52,24 @@ class RemoteEdgesView(WadiModel):
 class SourceView(WadiModel):
     """Source-on-demand response (§5.3): the exact analyzed text at the pinned
     SHA — the delombok'd variant when preprocessing rewrote the file, flagged
-    so consumers can say so."""
+    so consumers can say so.
+
+    1.9.0 (§11 Phase 2.7): ``total_lines`` (whole-file length, so clients can
+    render "showing 1-2000 of 4200" and fetch the next window) and
+    ``truncated`` (the served window hit the server's line cap — an honest
+    partial, never a silent one)."""
 
     file: str
     start_line: int
     end_line: int
     variant: SourceVariant
     content: str
+    total_lines: int | None = Field(
+        default=None,
+        ge=0,
+        description="Total lines in the file at the pinned SHA; None = pre-1.9 response",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when the requested window exceeded the server cap and was cut",
+    )

@@ -407,7 +407,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.8.0/icfg.schema.json",
+  "$id": "https://trywadi.com/schemas/1.9.0/icfg.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The assembled ICFG of one endpoint (statement-granularity, coarsened).\n\nThe root is *explicit* (``entry_node_id``), never inferred from topology:\na recursive flow back into the handler would give the root incoming\nedges, so \"the entry with no incoming edges\" is not a sound definition.",
@@ -444,7 +444,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.8.0",
+      "default": "1.9.0",
       "title": "Schema Version",
       "type": "string"
     },

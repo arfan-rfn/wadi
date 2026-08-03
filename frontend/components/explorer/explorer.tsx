@@ -28,7 +28,7 @@ import { MethodBadge } from "./method-badge"
 import { ScopeBar } from "./scope-bar"
 
 const VIEWS = ["coverage", "explorer"] as const
-const TABS = ["overview", "methods", "json"] as const
+const TABS = ["overview", "flow", "methods", "json"] as const
 
 export function Explorer() {
   const searchParams = useSearchParams()

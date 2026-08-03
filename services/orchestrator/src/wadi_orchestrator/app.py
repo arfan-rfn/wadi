@@ -44,6 +44,11 @@ from wadi_repo import GitError, RefNotFoundError
 from wadi_storage import DuplicateSystemNameError, WadiDatabase, create_client
 
 API_PREFIX = "/api/v1"
+
+# §11 Phase 2.7: the source route serves whole files on demand but never more
+# than this many lines per response — larger windows return truncated=True
+# with total_lines so clients page honestly.
+SOURCE_MAX_LINES = 2000
 # Single source: the installed package's own version (pyproject.toml, kept in
 # lockstep with the release tag) — surfaced via /healthz and the OpenAPI spec.
 ORCHESTRATOR_VERSION = metadata_version("wadi-orchestrator")
@@ -434,6 +439,16 @@ def create_app(
             )
         repo_path = file if boundary.build_root == "." else f"{boundary.build_root}/{file}"
         try:
+            kind = await asyncio.to_thread(
+                state.repo_cache.object_kind, boundary.repo, sha, repo_path
+            )
+        except GitError as exc:
+            raise HTTPException(
+                status_code=404, detail=f"file {file!r} not found at pinned commit"
+            ) from exc
+        if kind != "blob":
+            raise HTTPException(status_code=400, detail=f"{file!r} is a {kind}, not a file")
+        try:
             content = await asyncio.to_thread(
                 state.repo_cache.read_file, boundary.repo, sha, repo_path
             )
@@ -445,13 +460,19 @@ def create_app(
         last = end_line if end_line is not None else len(lines)
         if last < start_line:
             raise HTTPException(status_code=400, detail="end_line must be >= start_line")
-        selected = "".join(lines[start_line - 1 : last])
+        # §11 Phase 2.7: whole-file serving stays on-demand AND bounded — a
+        # window larger than the cap is cut and SAID to be cut (truncated),
+        # with total_lines so the client fetches the next window.
+        capped_last = min(last, len(lines), start_line + SOURCE_MAX_LINES - 1)
+        selected = "".join(lines[start_line - 1 : capped_last])
         return SourceView(
             file=file,
             start_line=start_line,
-            end_line=min(last, len(lines)),
+            end_line=capped_last,
             variant=SourceVariant.ORIGINAL,
             content=selected,
+            total_lines=len(lines),
+            truncated=capped_last < min(last, len(lines)),
         )
 
     return app

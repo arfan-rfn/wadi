@@ -156,3 +156,10 @@ class RepoCache:
         """Exact pinned-SHA file content — the source-on-demand primitive (§5.3)."""
         mirror = self.mirror_path(source)
         return _run_git(["--git-dir", str(mirror), "show", f"{sha}:{path}"])
+
+    def object_kind(self, source: str, sha: str, path: str) -> str:
+        """Git object type at the pinned SHA ('blob' for a file, 'tree' for a
+        directory) — lets the source route reject non-files with a clean 400
+        instead of serving a tree listing as content (§11 Phase 2.7)."""
+        mirror = self.mirror_path(source)
+        return _run_git(["--git-dir", str(mirror), "cat-file", "-t", f"{sha}:{path}"]).strip()

@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 import { EndpointOverview } from "./endpoint-overview"
 import { MethodBadge } from "./method-badge"
+import { SourcePane } from "./source-pane"
 
 const SINK_META: Record<string, { label: string; icon: typeof Database }> = {
   db: { label: "database", icon: Database },
@@ -94,8 +95,11 @@ export function DetailPane({
               <TabsTrigger value="overview" className="text-xs">
                 Overview
               </TabsTrigger>
+              <TabsTrigger value="flow" className="text-xs">
+                Flow
+              </TabsTrigger>
               <TabsTrigger value="methods" className="text-xs">
-                Flow · methods
+                Methods
               </TabsTrigger>
               <TabsTrigger value="json" className="text-xs">
                 Raw ICFG
@@ -114,6 +118,17 @@ export function DetailPane({
               edgesLoading={edgesLoading}
               snapshotId={snapshotId}
               serviceId={serviceId}
+            />
+          </TabsContent>
+
+          {/* §11 Phase 2.7: the Flow workspace — M1 ships the source map;
+              the call-tree rail (M2) and canvas (M3) join it here. */}
+          <TabsContent value="flow" className="min-h-0 flex-1">
+            <SourcePane
+              icfg={icfg}
+              snapshotId={snapshotId}
+              serviceId={serviceId}
+              active={tab === "flow"}
             />
           </TabsContent>
 

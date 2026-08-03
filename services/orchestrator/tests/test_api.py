@@ -213,6 +213,78 @@ class TestSourceOnDemand:
         )
         assert response.status_code == 404
 
+    async def _seed_boundary(
+        self, client: AsyncClient, app_state: AppState, sample_repo: Path
+    ) -> tuple[str, str]:
+        from wadi_contracts import ServiceBoundary, normalize_repo_source, service_id
+
+        system_id = await _register_system(client, sample_repo)
+        analyze = await client.post(f"/api/v1/systems/{system_id}/analyze")
+        snapshot_id = analyze.json()["snapshot"]["id"]
+        boundary = ServiceBoundary(
+            snapshot_id=snapshot_id,
+            service_id=service_id(str(sample_repo), "."),
+            name="sample",
+            repo=normalize_repo_source(str(sample_repo)),
+            build_root=".",
+            languages=["java"],
+            build_system="maven",
+        )
+        await app_state.artifacts.write_service_boundaries([boundary])
+        return snapshot_id, boundary.service_id
+
+    async def test_whole_file_when_end_line_omitted(
+        self, client: AsyncClient, app_state: AppState, sample_repo: Path
+    ) -> None:
+        """§11 Phase 2.7: on-demand whole-file serving with an honest length."""
+        snapshot_id, svc_id = await self._seed_boundary(client, app_state, sample_repo)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot_id}/services/{svc_id}/source",
+            params={"file": "src/App.java"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["content"] == "class App {\n  int x;\n  int y;\n}\n"
+        assert body["start_line"] == 1
+        assert body["end_line"] == 4
+        assert body["total_lines"] == 4
+        assert body["truncated"] is False
+
+    async def test_window_beyond_cap_is_truncated_honestly(
+        self,
+        client: AsyncClient,
+        app_state: AppState,
+        sample_repo: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A window larger than the server cap is cut and SAID to be cut."""
+        import wadi_orchestrator.app as app_module
+
+        monkeypatch.setattr(app_module, "SOURCE_MAX_LINES", 2)
+        snapshot_id, svc_id = await self._seed_boundary(client, app_state, sample_repo)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot_id}/services/{svc_id}/source",
+            params={"file": "src/App.java"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["content"] == "class App {\n  int x;\n"
+        assert body["end_line"] == 2
+        assert body["total_lines"] == 4
+        assert body["truncated"] is True
+
+    async def test_directory_path_is_400_not_content(
+        self, client: AsyncClient, app_state: AppState, sample_repo: Path
+    ) -> None:
+        """A tree path must never be served as file content."""
+        snapshot_id, svc_id = await self._seed_boundary(client, app_state, sample_repo)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot_id}/services/{svc_id}/source",
+            params={"file": "src"},
+        )
+        assert response.status_code == 400
+        assert "not a file" in response.json()["detail"]
+
 
 class TestMonitor:
     async def test_full_lifecycle_via_monitor_ticks(

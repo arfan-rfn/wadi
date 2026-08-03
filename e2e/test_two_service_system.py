@@ -225,6 +225,26 @@ class TestTwoServiceSystem:
         assert anomalies["total_by_code"] == {}
         assert section["coverage_percent"] == 93.8
 
+        # 4b. Source-on-demand hardening (§11 Phase 2.7 M1): whole-file
+        # serving with an honest length, and a tree path is a clean 400.
+        petstore_svc = by_name["petstore"]["service_id"]
+        whole = await http.get(
+            f"/api/v1/snapshots/{snapshot_id}/services/{petstore_svc}/source",
+            params={"file": "src/main/java/com/acme/petstore/PetController.java"},
+        )
+        assert whole.status_code == 200, whole.text
+        whole_body = whole.json()
+        assert whole_body["start_line"] == 1
+        assert whole_body["total_lines"] == whole_body["end_line"]
+        assert whole_body["truncated"] is False
+        assert "class PetController" in whole_body["content"]
+        tree = await http.get(
+            f"/api/v1/snapshots/{snapshot_id}/services/{petstore_svc}/source",
+            params={"file": "src/main/java"},
+        )
+        assert tree.status_code == 400
+        assert "not a file" in tree.json()["detail"]
+
         # 5. Stitched edges through the public API, with confidence + provenance.
         petstore_id = by_name["petstore"]["service_id"]
         inventory_id = by_name["inventory"]["service_id"]

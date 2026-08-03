@@ -65,6 +65,23 @@ export function useRemoteEdges(
   })
 }
 
+/** Whole-file source-on-demand (§11 Phase 2.7): fetched only while the Flow
+ * tab is active, never preloaded; the server caps the window and says so. */
+export function useSourceFile(
+  enabled: boolean,
+  snapshotId: string,
+  serviceId: string,
+  file: string,
+  startLine = 1
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.sourceFile(snapshotId, serviceId, file, startLine),
+    queryFn: () => wadiApi.sourceFile(snapshotId, serviceId, file, startLine),
+    enabled,
+    staleTime: Infinity, // pinned-SHA content never changes
+  })
+}
+
 /** Source-on-demand (§5.3): fetched only when a panel opens, never preloaded. */
 export function useSource(
   enabled: boolean,

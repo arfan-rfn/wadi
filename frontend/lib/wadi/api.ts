@@ -58,6 +58,21 @@ export const wadiApi = {
           end_line: String(endLine),
         }).toString()
     ),
+  // Whole-file window (§11 Phase 2.7): end_line omitted — the server returns
+  // up to its cap with total_lines + truncated so the client pages honestly.
+  sourceFile: (
+    snapshotId: string,
+    serviceId: string,
+    file: string,
+    startLine = 1
+  ) =>
+    get<SourceView>(
+      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/source?` +
+        new URLSearchParams({
+          file,
+          start_line: String(startLine),
+        }).toString()
+    ),
 }
 
 export type {
