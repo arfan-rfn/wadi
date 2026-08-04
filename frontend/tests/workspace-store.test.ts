@@ -60,6 +60,41 @@ describe("workspace store (§11 Phase 2.8)", () => {
     )
   })
 
+  test("selecting a node lands on the code, not on a facts panel", () => {
+    // The graph→source link IS the click: the source viewer already highlights
+    // and scrolls to the selection, so the inspector must not park a facts tab
+    // in front of it.
+    const store = createWorkspaceStore(
+      parseWorkspaceParams(new URLSearchParams("tab=selection"))
+    )
+    store.getState().selectNode("stmt:n9")
+    expect(store.getState().inspectorTab).toBe("source")
+    store.getState().selectNode("method:m_1")
+    expect(store.getState().inspectorTab).toBe("source")
+    store.getState().selectNode("run:n3")
+    expect(store.getState().inspectorTab).toBe("source")
+  })
+
+  test("ghost targets keep the Selection tab — they have no source of their own", () => {
+    // P10: a ghost stands for a call leaving the system. Its resolution,
+    // confidence, and provenance are stated nowhere else, and pointing the
+    // source panel at it would show code that is not the answer.
+    const store = createWorkspaceStore(
+      parseWorkspaceParams(new URLSearchParams())
+    )
+    store.getState().selectNode("ghost:svc_orders")
+    expect(store.getState().inspectorTab).toBe("selection")
+  })
+
+  test("clearing the selection leaves the reader's tab alone", () => {
+    const store = createWorkspaceStore(
+      parseWorkspaceParams(new URLSearchParams("tab=endpoint"))
+    )
+    store.getState().selectNode(null)
+    expect(store.getState().inspectorTab).toBe("endpoint")
+    expect(store.getState().selectedNodeId).toBeNull()
+  })
+
   test("applyUrlParams moves the UI on back/forward, not just the URL", () => {
     const store = createWorkspaceStore(
       parseWorkspaceParams(new URLSearchParams())

@@ -92,7 +92,25 @@ export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
     search: "",
     traceEnabled: false,
 
-    selectNode: (id) => set({ selectedNodeId: id }),
+    // Selecting anything lands on the CODE. The source viewer already
+    // highlights and scrolls to whatever is selected (workspace-interior's
+    // `sourceSelection`), so a click on the graph IS the graph→source link —
+    // no facts panel in between, no "open in source" step. Ghosts are the one
+    // exception: they stand for a call leaving the system and have no source
+    // of their own, so they keep the Selection tab, the only place their
+    // target resolution, confidence, and provenance are stated (P10).
+    // The policy lives here, not in the canvas, so the call tree, the canvas,
+    // and call links inside source all behave the same way.
+    selectNode: (id) =>
+      set((state) => ({
+        selectedNodeId: id,
+        inspectorTab:
+          id === null
+            ? state.inspectorTab
+            : id.startsWith("ghost:")
+              ? ("selection" as const)
+              : ("source" as const),
+      })),
     hoverNode: (id) => set({ hoveredNodeId: id }),
     toggleMethod: (id, resolvedExpanded) =>
       set(() => {
