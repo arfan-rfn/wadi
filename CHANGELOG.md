@@ -3,7 +3,7 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
-## Unreleased
+## 0.5.3 — 2026-08-04
 
 Local-stack reliability. The stack could take itself down while idling, and
 could not be fully torn down or cleaned up once it had. No contract, schema, or
