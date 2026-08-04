@@ -1,0 +1,51 @@
+{
+  "nodes": [
+    {
+      "key": "statement@89",
+      "kind": "statement",
+      "code": "try",
+      "line": 89,
+      "line_end": 92,
+      "construct_kind": "try"
+    },
+    {
+      "key": "statement@91",
+      "kind": "statement",
+      "code": "catch",
+      "line": 91,
+      "line_end": 92,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@92",
+      "kind": "return",
+      "code": "return \"caught:\" + n;",
+      "line": 92,
+      "line_end": 92
+    },
+    {
+      "key": "return@94",
+      "kind": "return",
+      "code": "return \"done:\" + hits;",
+      "line": 94,
+      "line_end": 94
+    }
+  ],
+  "edges": [
+    {
+      "source": "statement@89",
+      "target": "return@94",
+      "label": "flow"
+    },
+    {
+      "source": "statement@89",
+      "target": "statement@91",
+      "label": "exception"
+    },
+    {
+      "source": "statement@91",
+      "target": "return@92",
+      "label": "flow"
+    }
+  ]
+}

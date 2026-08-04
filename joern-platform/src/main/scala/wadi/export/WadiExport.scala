@@ -68,7 +68,13 @@ object WadiExport {
     *
     * 2.6.0: (additive, §5.4.2 T5) a call binding to no method in the export
     * carries `unbound_reason`, so a consumer can tell a Lombok-generated
-    * accessor (no source exists) from a hole in the map.
+    * accessor (no source exists) from a hole in the map; and (§5.2.8 T3, a
+    * semantics change within the existing label vocabulary) an `if` whose arm
+    * holds no statements labels its join edge for that arm instead of
+    * dropping to `flow`, a TRY enters through its BODY's first statement
+    * rather than the lowest-numbered statement anywhere in its subtree, and
+    * an empty try body routes its handlers (`exception`) and its normal
+    * completion explicitly.
     */
   val ExportSchemaVersion = "2.6.0"
 
@@ -601,18 +607,28 @@ object WadiExport {
     private def interiorIn(roots: List[AstNode]): Set[Long] =
       roots.flatMap(r => r.ast.filter(n => statementIds.contains(n.id)).map(_.id)).toSet
 
-    /** IF successors: arm-entry edges labeled per arm; without an `else`, the
-      * join edge IS where control goes on false — labeled `false` (§5.2.8).
+    /** IF successors labeled by the set of arms that REACH each target, not by
+      * statement containment alone (§5.2.8 T3). A target inside one arm takes
+      * that arm's label. The residual (join) edge takes the label of whichever
+      * arm is empty — an arm written only to say nothing happens (`//do
+      * nothing`) still carries control, and claiming edges by an empty arm's
+      * statement ids claims none of them. When BOTH arms are empty-or-absent
+      * the residual is genuinely both paths and stays `flow`: one
+      * statement-level edge cannot carry two labels (a recorded
+      * non-representable, alongside empty-body loop self-edges).
       */
     def labelIfEdges(): Unit =
       controlStructures(Set("IF")).foreach { ifS =>
-        val trueIds  = interiorIn(ifS.whenTrue.l)
-        val falseIds = interiorIn(ifS.whenFalse.l)
-        val hasElse  = ifS.whenFalse.nonEmpty
+        val trueIds    = interiorIn(ifS.whenTrue.l)
+        val falseIds   = interiorIn(ifS.whenFalse.l)
+        val trueEmpty  = trueIds.isEmpty
+        val falseEmpty = ifS.whenFalse.isEmpty || falseIds.isEmpty
         edges.filter(_._1 == ifS.id).foreach { edge =>
           if (trueIds.contains(edge._2)) labels(edge) = "true"
           else if (falseIds.contains(edge._2)) labels(edge) = "false"
-          else if (!hasElse) labels(edge) = "false"
+          else if (trueEmpty && falseEmpty) () // convergent — leave `flow`
+          else if (falseEmpty) labels(edge) = "false"
+          else if (trueEmpty) labels(edge) = "true"
         }
       }
 
@@ -651,14 +667,21 @@ object WadiExport {
         .sortBy(cs => -astDepth(cs))
       containers.foreach { container =>
         val interior = interiorOf(container)
-        if (interior.nonEmpty) {
-          val entry = interior.minBy { id =>
-            val s = statementById(id)
-            (lineOf(s.lineNumber), id)
-          }
+        // A TRY's normal entry is its BODY block's first statement, never a
+        // handler. Taking the whole subtree's minimum line worked only
+        // because a non-empty body holds the lowest number; a body that is
+        // entirely commented out made the container wire itself straight to
+        // its own CATCH and present the handler as normal flow (§5.2.8 T3).
+        val entryScope =
+          if (container.controlStructureType == "TRY") bodyInteriorOf(container) else interior
+        val entry = entryScope.minByOption { id =>
+          val s = statementById(id)
+          (lineOf(s.lineNumber), id)
+        }
+        entry.foreach { entryId =>
           val isCatch = container.controlStructureType == "CATCH"
           val incoming = edges.toList.filter { case (s, t) =>
-            t == entry && s != container.id && !interior.contains(s)
+            t == entryId && s != container.id && !interior.contains(s)
           }
           incoming.foreach { edge =>
             val viaContainer = (edge._1, container.id)
@@ -671,12 +694,65 @@ object WadiExport {
           // Always connect container→entry — a try that opens the method has
           // no incoming edge to reroute, and an unconnected container would be
           // entry-patched straight to exit downstream.
-          val toEntry = (container.id, entry)
+          val toEntry = (container.id, entryId)
           edges += toEntry
           labels.getOrElseUpdate(toEntry, "flow")
         }
+        if (entry.isEmpty && container.controlStructureType == "TRY")
+          routeEmptyTryBody(container)
       }
     }
+
+    /** An empty try body has no tail for javasrc2cpg's try-tail→handler
+      * approximation to start from and no interior to enter, so the whole
+      * construct projects edge-less: the handler is unreachable and the
+      * statement AFTER the try is orphaned into a false second entry point.
+      * Wire both paths explicitly (§5.2.8 T3) — handlers exceptionally,
+      * normal completion into the finally when there is one and otherwise
+      * into the try's next sibling statement.
+      */
+    private def routeEmptyTryBody(tryS: ControlStructure): Unit = {
+      val handlers = tryS.astChildren.l.collect {
+        case cs: ControlStructure
+            if HandlerStructureTypes.contains(cs.controlStructureType) &&
+              statementIds.contains(cs.id) =>
+          cs
+      }
+      handlers.filter(_.controlStructureType == "CATCH").foreach { handler =>
+        val edge = (tryS.id, handler.id)
+        edges += edge
+        labels(edge) = "exception"
+      }
+      val normalTarget = handlers
+        .find(_.controlStructureType == "FINALLY")
+        .map(_.id)
+        .orElse(nextSiblingStatement(tryS))
+      normalTarget.foreach { target =>
+        val edge = (tryS.id, target)
+        edges += edge
+        labels.getOrElseUpdate(edge, "flow")
+      }
+    }
+
+    /** Statement ids in a container's BODY block — the last block child, since
+      * a TRY's handlers are siblings of the body in its AST.
+      */
+    private def bodyInteriorOf(container: ControlStructure): Set[Long] =
+      container.astChildren.isBlock.headOption.map(interiorOf).getOrElse(Set.empty)
+
+    /** The first statement of the statement following `node` in its enclosing
+      * block — where control goes when `node` completes normally.
+      */
+    private def nextSiblingStatement(node: AstNode): Option[Long] =
+      Option(node.astParent).flatMap { parent =>
+        parent.astChildren.l
+          .filter(_.order > node.order)
+          .sortBy(_.order)
+          .iterator
+          .flatMap(sibling => sibling.ast.l)
+          .flatMap(n => enclosing.get(n.id))
+          .find(id => statementIds.contains(id) && id != node.id)
+      }
 
     /** Labeled jumps inherit javasrc2cpg's approximation: the label's
       * JUMP_TARGET re-enters at the labeled statement's start — for

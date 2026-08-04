@@ -10,8 +10,10 @@ from worker_support import (
 )
 
 from wadi_contracts import (
+    CalleeUnboundReason,
     Confidence,
     IcfgEdgeKind,
+    IcfgNode,
     IcfgNodeKind,
     SinkKind,
 )
@@ -19,12 +21,17 @@ from wadi_joern_client.export import (
     CfgNodeKind,
     ExportCall,
     ExportCfg,
+    ExportCfgEdge,
+    ExportCfgEdgeLabel,
     ExportCfgNode,
     ExportEndpoint,
     ExportMethod,
     ExportSink,
     ServiceExport,
     SinkValueConfidence,
+)
+from wadi_joern_client.export import (
+    UnboundReason as ExportUnboundReason,
 )
 from wadi_worker.assembler import Assembler, ExportIncompatibleError
 
@@ -316,3 +323,167 @@ class TestEdgeCases:
         for icfg in result.icfgs:
             assert any(n.id == "m3:entry" for n in icfg.nodes)
             icfg.root_entry()  # unique root in each
+
+
+class TestUnboundCalleeReason:
+    """§5.4.2 T5 — an unopenable call node must carry WHY it is unopenable.
+
+    The node is never dropped: `order.setId(x)` runs at runtime whether or not
+    Lombok left a body to read. What the graph owes the reader is the reason,
+    so "no source to analyse" is a stated fact rather than an unexplained
+    dead end (P10).
+    """
+
+    def _assemble(self, reason: ExportUnboundReason | None) -> IcfgNode:
+        export = petstore_like_export()
+        for cfg in export.cfgs:
+            for node in cfg.nodes:
+                if node.id == REPO_CALLSITE and node.call is not None:
+                    node.call.unbound_reason = reason
+        icfg = Assembler(snapshot_id="snap_x", service_id="svc_x").assemble(export).icfgs[0]
+        return next(n for n in icfg.nodes if n.id.endswith(f":n{REPO_CALLSITE}"))
+
+    def test_reason_reaches_the_contract(self) -> None:
+        node = self._assemble(ExportUnboundReason.INHERITED_EXTERNAL)
+        assert node.callee_unbound_reason is CalleeUnboundReason.INHERITED_EXTERNAL
+        # The node itself survives — losing it is what would make the map lie.
+        assert node.callee is not None
+
+    def test_pre_2_6_0_export_leaves_the_reason_unknown(self) -> None:
+        """Absent upstream is 'unknown', never 'it bound' — older exports are
+        replayed as-is (§7 artifacts are never rewritten in place)."""
+        assert self._assemble(None).callee_unbound_reason is None
+
+    def test_a_call_resolved_into_the_closure_is_never_labelled(self) -> None:
+        """The export is service-wide, the closure endpoint-scoped: a call can
+        be unbound in one and present in the other. Labelling a node the user
+        can actually open would be a lie in the opposite direction.
+        """
+        export = petstore_like_export()
+        for cfg in export.cfgs:
+            for node in cfg.nodes:
+                # The controller's call into the service impl DOES resolve.
+                if node.call is not None and node.call.callee_id == SERVICE_IMPL:
+                    node.call.unbound_reason = ExportUnboundReason.THIRD_PARTY
+        icfg = Assembler(snapshot_id="snap_x", service_id="svc_x").assemble(export).icfgs[0]
+        resolved = [
+            n
+            for n in icfg.nodes
+            if n.callee is not None and "PetServiceImpl.findPet" in n.callee.signature
+        ]
+        assert resolved, "expected the DI-resolved call node"
+        assert all(n.callee_unbound_reason is None for n in resolved)
+
+
+class TestArmsLeavingTheMethod:
+    """§5.2.8 T3 — the arm not taken, when there is nothing left to take it to.
+
+    A construct that ends its method has no successor statement for the untaken
+    arm, and the export is deliberately exit-free, so the raw CFG goes silent
+    exactly where the graph should say "on false, the method returns". The exit
+    node belongs to the assembler, so arity completes here.
+    """
+
+    def _icfg_edges(
+        self, nodes: list[ExportCfgNode], edges: list[ExportCfgEdge]
+    ) -> set[tuple[str, str, IcfgEdgeKind]]:
+        export = ServiceExport(
+            language="java",
+            methods=[_minimal_method(1, "handler")],
+            cfgs=[ExportCfg(method_id=1, nodes=nodes, edges=edges)],
+            endpoints=[ExportEndpoint(method_id=1, http_method="GET", uri="/t")],
+            sinks=[],
+        )
+        icfg = Assembler(snapshot_id=SNAP, service_id=SVC).assemble(export).icfgs[0]
+        return {(e.source, e.target, e.kind) for e in icfg.edges}
+
+    def _node(
+        self,
+        nid: int,
+        kind: CfgNodeKind = CfgNodeKind.STATEMENT,
+        construct_kind: str | None = None,
+    ) -> ExportCfgNode:
+        return ExportCfgNode(
+            id=nid,
+            kind=kind,
+            code=f"s{nid}",
+            line=nid,
+            line_end=nid,
+            construct_kind=construct_kind,
+        )
+
+    def test_trailing_if_gains_its_false_arm(self) -> None:
+        # `void h(int n) { if (n > 0) { hits += n; } }` — before T3 the false
+        # path was absent from the assembled graph too: the exit patch keys on
+        # has-any-out-edge, and a branch with one arm looks connected.
+        edges = self._icfg_edges(
+            [self._node(1, CfgNodeKind.BRANCH, "if"), self._node(2)],
+            [ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.TRUE)],
+        )
+        assert ("m1:n1", "m1:exit", IcfgEdgeKind.FALSE_BRANCH) in edges
+        assert ("m1:n1", "m1:n2", IcfgEdgeKind.TRUE_BRANCH) in edges
+
+    def test_trailing_loop_gains_its_exit_arm_but_never_a_body(self) -> None:
+        edges = self._icfg_edges(
+            [self._node(1, CfgNodeKind.LOOP, "for"), self._node(2)],
+            [
+                ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.TRUE),
+                ExportCfgEdge(source=2, target=1, label=ExportCfgEdgeLabel.FLOW, back=True),
+            ],
+        )
+        assert ("m1:n1", "m1:exit", IcfgEdgeKind.FALSE_BRANCH) in edges
+        assert ("m1:n1", "m1:exit", IcfgEdgeKind.TRUE_BRANCH) not in edges
+
+    def test_empty_body_loop_is_never_given_a_body(self) -> None:
+        # The body arm is missing because there IS no body (a recorded
+        # non-representable). Completing it would assert a body that does not
+        # exist AND claim that body exits the method.
+        edges = self._icfg_edges(
+            [self._node(1, CfgNodeKind.LOOP, "while"), self._node(2, CfgNodeKind.RETURN)],
+            [ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.FALSE)],
+        )
+        assert ("m1:n1", "m1:exit", IcfgEdgeKind.TRUE_BRANCH) not in edges
+
+    def test_default_less_trailing_switch_gains_its_no_match_path(self) -> None:
+        edges = self._icfg_edges(
+            [self._node(1, CfgNodeKind.BRANCH, "switch"), self._node(2), self._node(3)],
+            [
+                ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.CASE, case_values=["0"]),
+                ExportCfgEdge(source=1, target=3, label=ExportCfgEdgeLabel.CASE, case_values=["1"]),
+            ],
+        )
+        assert ("m1:n1", "m1:exit", IcfgEdgeKind.DEFAULT) in edges
+
+    def test_convergent_branch_is_not_given_a_second_way_out(self) -> None:
+        # `if (c) { }` with no else: both outcomes reach the same statement, so
+        # the single unlabeled edge already IS the arm. An exit edge on top
+        # would assert a path out of the method that the source does not have.
+        edges = self._icfg_edges(
+            [self._node(1, CfgNodeKind.BRANCH, "if"), self._node(2, CfgNodeKind.RETURN)],
+            [ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.FLOW)],
+        )
+        assert not [e for e in edges if e[0] == "m1:n1" and e[1] == "m1:exit"]
+
+    def test_node_whose_only_successor_is_a_handler_completes_normally(self) -> None:
+        # An empty try body: the handler is reachable exceptionally, and normal
+        # completion left the method.
+        edges = self._icfg_edges(
+            [self._node(1, CfgNodeKind.STATEMENT, "try"), self._node(2, construct_kind="catch")],
+            [ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.EXCEPTION)],
+        )
+        assert ("m1:n1", "m1:exit", IcfgEdgeKind.FLOW) in edges
+
+    def test_a_complete_branch_gains_nothing(self) -> None:
+        edges = self._icfg_edges(
+            [
+                self._node(1, CfgNodeKind.BRANCH, "if"),
+                self._node(2),
+                self._node(3, CfgNodeKind.RETURN),
+            ],
+            [
+                ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.TRUE),
+                ExportCfgEdge(source=1, target=3, label=ExportCfgEdgeLabel.FALSE),
+                ExportCfgEdge(source=2, target=3, label=ExportCfgEdgeLabel.FLOW),
+            ],
+        )
+        assert not [e for e in edges if e[0] == "m1:n1" and e[1] == "m1:exit"]

@@ -1,0 +1,39 @@
+{
+  "nodes": [
+    {
+      "key": "statement@47",
+      "kind": "statement",
+      "code": "String out = \"unchanged\"",
+      "line": 47,
+      "line_end": 47
+    },
+    {
+      "key": "branch@48",
+      "kind": "branch",
+      "code": "if (n < 0)",
+      "line": 48,
+      "line_end": 48,
+      "construct_kind": "if",
+      "condition_code": "n < 0"
+    },
+    {
+      "key": "return@51",
+      "kind": "return",
+      "code": "return out;",
+      "line": 51,
+      "line_end": 51
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@48",
+      "target": "return@51",
+      "label": "flow"
+    },
+    {
+      "source": "statement@47",
+      "target": "branch@48",
+      "label": "flow"
+    }
+  ]
+}

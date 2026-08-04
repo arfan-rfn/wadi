@@ -59,7 +59,7 @@ from wadi_joern_client.export import (
     UnboundReason as ExportUnboundReason,
 )
 from wadi_worker.auth_merge import merge_endpoint_auth
-from wadi_worker.cfg_invariants import aggregate_anomalies, check_cfg
+from wadi_worker.cfg_invariants import aggregate_anomalies, arms_leaving_method, check_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -383,8 +383,10 @@ class Assembler:
         local = {c.id for c in cfg_nodes}
         has_incoming = {e.target for e in cfg_edges if e.source in local}
         has_outgoing = {e.source for e in cfg_edges if e.target in local}
+        outgoing_labels: dict[int, set[ExportCfgEdgeLabel]] = {}
         for edge in cfg_edges:
             if edge.source in local and edge.target in local:
+                outgoing_labels.setdefault(edge.source, set()).add(edge.label)
                 edges.append(
                     IcfgEdge(
                         source=f"m{method.id}:n{edge.source}",
@@ -396,22 +398,28 @@ class Assembler:
                 )
         if cfg_nodes:
             for cfg_node in cfg_nodes:
+                node_id = f"m{method.id}:n{cfg_node.id}"
                 if cfg_node.id not in has_incoming:
-                    edges.append(
-                        IcfgEdge(
-                            source=entry_id,
-                            target=f"m{method.id}:n{cfg_node.id}",
-                            kind=IcfgEdgeKind.FLOW,
-                        )
-                    )
+                    edges.append(IcfgEdge(source=entry_id, target=node_id, kind=IcfgEdgeKind.FLOW))
+                to_exit: list[IcfgEdgeKind] = []
                 if cfg_node.id not in has_outgoing or cfg_node.kind is CfgNodeKind.RETURN:
-                    edges.append(
-                        IcfgEdge(
-                            source=f"m{method.id}:n{cfg_node.id}",
-                            target=exit_id,
-                            kind=IcfgEdgeKind.FLOW,
-                        )
+                    to_exit.append(IcfgEdgeKind.FLOW)
+                # §5.2.8 T3: an arm whose control leaves the method has no
+                # target in an exit-free export, so the graph would otherwise
+                # go silent where it should say "on false, the method
+                # returns". The exit node is the assembler's to own, so arity
+                # completes here — against the same predicate the invariants
+                # use, so the two can never disagree. Keyed off the
+                # intra-method successors rather than `has_outgoing`, which
+                # also counts dangling edges.
+                if (labels := outgoing_labels.get(cfg_node.id)) is not None:
+                    to_exit.extend(
+                        kind
+                        for label in arms_leaving_method(cfg_node, labels)
+                        if (kind := _EDGE_LABEL_TO_KIND[label]) not in to_exit
                     )
+                for kind in to_exit:
+                    edges.append(IcfgEdge(source=node_id, target=exit_id, kind=kind))
         else:
             edges.append(IcfgEdge(source=entry_id, target=exit_id, kind=IcfgEdgeKind.FLOW))
 

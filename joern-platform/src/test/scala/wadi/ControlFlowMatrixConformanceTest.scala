@@ -130,8 +130,8 @@ class ControlFlowMatrixConformanceTest extends AnyFunSuite with Matchers with Fi
     stale shouldBe empty
   }
 
-  test("the export declares schema 2.5.0") {
-    exportJson("export_schema_version").str shouldBe "2.5.0"
+  test("the export declares schema 2.6.0") {
+    exportJson("export_schema_version").str shouldBe "2.6.0"
   }
 
   test("§5.2.8 cross-cutting: enriched vocabulary is present in the fixture") {
@@ -148,6 +148,53 @@ class ControlFlowMatrixConformanceTest extends AnyFunSuite with Matchers with Fi
       .toSet
     constructs should contain allOf ("if", "switch", "switch-arrow", "for", "foreach", "while",
       "do-while", "try", "catch", "finally", "throw", "break", "continue")
+  }
+
+  /** Out-edge labels of every node of `kind` in a handler's CFG. */
+  private def armLabels(handler: String, kind: String): Set[String] = {
+    val cfg = handlerCfgs(handler)
+    val ids = cfg("nodes").arr.filter(_("kind").str == kind).map(_("id").num.toLong).toSet
+    cfg("edges").arr.filter(e => ids.contains(e("source").num.toLong)).map(_("label").str).toSet
+  }
+
+  test("§5.2.8 T3: an if arm holding no statements still labels its edge") {
+    // An arm written only to say nothing happens (`//do nothing`) claims no
+    // statement ids, so labeling by containment alone dropped its edge to
+    // `flow` — the graph then could not say which way control went.
+    armLabels("DegenerateController.emptyThenArm", "branch") shouldBe Set("true", "false")
+    armLabels("DegenerateController.emptyElseArm", "branch") shouldBe Set("true", "false")
+    // Recorded non-representable: with the only arm empty and no `else`, both
+    // outcomes reach the SAME statement and one edge cannot carry two labels.
+    armLabels("DegenerateController.emptyThenNoElse", "branch") shouldBe Set("flow")
+  }
+
+  test("§5.2.8 T3: a construct that ends its method leaves its exit arm to the assembler") {
+    // The export is deliberately exit-free, so the untaken arm has no target
+    // here. What must NOT happen is a fabricated successor.
+    armLabels("DegenerateController.trailingIf", "branch") shouldBe Set("true")
+    armLabels("DegenerateController.trailingLoop", "loop") shouldBe Set("true")
+    armLabels("DegenerateController.trailingSwitch", "branch") shouldBe Set("case")
+  }
+
+  test("§5.2.8 T3: an empty try body still reaches its handler and its successor") {
+    val cfg   = handlerCfgs("DegenerateController.emptyTryBody")
+    val nodes = cfg("nodes").arr.map(n => n("id").num.toLong -> n).toMap
+    def construct(id: Long): Option[String] = nodes(id).obj.get("construct_kind").map(_.str)
+
+    val fromTry = cfg("edges").arr.filter(e => construct(e("source").num.toLong).contains("try"))
+    // The handler is an EXCEPTION path, never normal flow — presenting a catch
+    // as `flow` is what made the commented-out body read as the happy path.
+    val handlerEdges = fromTry.filter(e => construct(e("target").num.toLong).contains("catch"))
+    handlerEdges.map(_("label").str).toSet shouldBe Set("exception")
+    // ...and normal completion reaches the statement after the try, which was
+    // otherwise orphaned into a false second entry point.
+    val normal = fromTry.filter(e => e("label").str == "flow")
+    normal.map(e => nodes(e("target").num.toLong)("code").str).toSet shouldBe
+      Set("return \"done:\" + hits;")
+
+    val targets = cfg("edges").arr.map(_("target").num.toLong).toSet
+    val entries = cfg("nodes").arr.map(_("id").num.toLong).filterNot(targets.contains)
+    entries.size shouldBe 1
   }
 
   test("sinks inside conditions and throws produce sink rows (§5.2.8)") {

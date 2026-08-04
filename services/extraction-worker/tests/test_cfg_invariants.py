@@ -85,16 +85,85 @@ class TestCheckCfg:
         codes = [code for code, _ in check_cfg(cfg, _method())]
         assert codes == ["disconnected-node"]
 
-    def test_branch_missing_false_successor(self) -> None:
+    def test_arm_that_leaves_the_method_is_not_an_anomaly(self) -> None:
+        # §5.2.8 T3: `if (c) { … }` as the method's LAST statement. The false
+        # arm has no successor statement because control leaves the method,
+        # which an exit-free export cannot express and the assembler completes
+        # against its synthetic exit. Reporting it would alarm on a shape the
+        # assembled graph carries correctly.
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.BRANCH, construct_kind="if"),
+                _node(2),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_loop_exit_arm_that_leaves_the_method_is_not_an_anomaly(self) -> None:
+        # Same shape for a trailing loop — the arm labels of loops were never
+        # checked at all before T3, so this direction had no coverage either.
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.LOOP, construct_kind="for"),
+                _node(2),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(2, 1, back=True)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_branch_with_no_successor_at_all(self) -> None:
+        # Naming NO outcome is still a defect: the branch is a dead end.
+        cfg = _cfg(
+            [
+                _node(1),
+                _node(2, CfgNodeKind.BRANCH, construct_kind="if"),
+                _node(3, CfgNodeKind.RETURN),
+            ],
+            [_edge(1, 2), _edge(1, 3)],
+        )
+        codes = [code for code, _ in check_cfg(cfg, _method())]
+        assert codes == ["branch-arity"]
+
+    def test_unlabeled_arm_among_several_successors(self) -> None:
+        # The pre-T3 empty-arm bug's signature: one arm named, the other gone
+        # out as plain `flow` — the coarsening could not say which way control
+        # went, and that is exactly what the invariant should still catch.
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.BRANCH, construct_kind="if"),
+                _node(2),
+                _node(3, CfgNodeKind.RETURN),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(1, 3), _edge(2, 3)],
+        )
+        codes = [code for code, _ in check_cfg(cfg, _method())]
+        assert codes == ["unlabeled-arm"]
+
+    def test_convergent_branch_with_one_flow_edge_is_clean(self) -> None:
+        # `if (c) { }` with no else: both outcomes reach the same statement, so
+        # a statement-level edge set keyed on (source, target) cannot carry two
+        # labels. Recorded as a non-representable (§5.2.8 T3), not an anomaly.
         cfg = _cfg(
             [
                 _node(1, CfgNodeKind.BRANCH, construct_kind="if"),
                 _node(2, CfgNodeKind.RETURN),
             ],
-            [_edge(1, 2, ExportCfgEdgeLabel.TRUE)],
+            [_edge(1, 2)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_loop_with_unlabeled_arm(self) -> None:
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.LOOP, construct_kind="while"),
+                _node(2),
+                _node(3, CfgNodeKind.RETURN),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(1, 3), _edge(2, 1, back=True)],
         )
         codes = [code for code, _ in check_cfg(cfg, _method())]
-        assert codes == ["branch-arity"]
+        assert codes == ["unlabeled-arm"]
 
     def test_switch_without_any_arm_edge(self) -> None:
         cfg = _cfg(

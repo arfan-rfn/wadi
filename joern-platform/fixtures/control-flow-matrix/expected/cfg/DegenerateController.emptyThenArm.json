@@ -1,0 +1,56 @@
+{
+  "nodes": [
+    {
+      "key": "statement@23",
+      "kind": "statement",
+      "code": "String out = \"unchanged\"",
+      "line": 23,
+      "line_end": 23
+    },
+    {
+      "key": "branch@24",
+      "kind": "branch",
+      "code": "if (n < 0)",
+      "line": 24,
+      "line_end": 27,
+      "construct_kind": "if",
+      "condition_code": "n < 0"
+    },
+    {
+      "key": "statement@27",
+      "kind": "statement",
+      "code": "out = \"non-negative\"",
+      "line": 27,
+      "line_end": 27
+    },
+    {
+      "key": "return@29",
+      "kind": "return",
+      "code": "return out;",
+      "line": 29,
+      "line_end": 29
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@24",
+      "target": "return@29",
+      "label": "true"
+    },
+    {
+      "source": "branch@24",
+      "target": "statement@27",
+      "label": "false"
+    },
+    {
+      "source": "statement@23",
+      "target": "branch@24",
+      "label": "flow"
+    },
+    {
+      "source": "statement@27",
+      "target": "return@29",
+      "label": "flow"
+    }
+  ]
+}

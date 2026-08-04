@@ -1,0 +1,45 @@
+{
+  "nodes": [
+    {
+      "key": "statement@66",
+      "kind": "statement",
+      "code": "int i = 0",
+      "line": 66,
+      "line_end": 66
+    },
+    {
+      "key": "loop@66",
+      "kind": "loop",
+      "code": "for (int i = 0; i < n; i++)",
+      "line": 66,
+      "line_end": 67,
+      "construct_kind": "for",
+      "condition_code": "i < n"
+    },
+    {
+      "key": "statement@67",
+      "kind": "statement",
+      "code": "hits++",
+      "line": 67,
+      "line_end": 67
+    }
+  ],
+  "edges": [
+    {
+      "source": "loop@66",
+      "target": "statement@67",
+      "label": "true"
+    },
+    {
+      "source": "statement@66",
+      "target": "loop@66",
+      "label": "flow"
+    },
+    {
+      "source": "statement@67",
+      "target": "loop@66",
+      "label": "flow",
+      "back": true
+    }
+  ]
+}
