@@ -18,6 +18,7 @@ import {
 
 import { cn } from "@/lib/utils"
 import { shortSignature } from "@/lib/wadi/rollup"
+import { useWorkspaceStore } from "@/components/endpoint/workspace-store"
 
 import { NodeShell, useFlowActions } from "../flow-chrome"
 
@@ -108,24 +109,55 @@ export interface LaneNodeDatum extends Record<string, unknown> {
 export type LaneNodeType = Node<LaneNodeDatum, "lane">
 
 /** The expanded-method container: header + bounds; statements render above
- * it as independent nodes. */
+ * it as independent nodes.
+ *
+ * A lane carries its own SELECTED state. The ring in NodeShell keys on a
+ * canvas node id, and an expanded method draws no card to hold one — so
+ * selecting a method from the call tree or a call link inside source used to
+ * change the URL and highlight the source region while the canvas showed
+ * nothing. Same rule as everywhere else on this surface: a selection must be
+ * visible. */
 export const LaneNode = memo(function LaneNode({
   data,
 }: NodeProps<LaneNodeType>) {
   const actions = useFlowActions()
+  // A boolean selector, so a selection change elsewhere re-renders only the
+  // lane whose selectedness actually flipped.
+  const selected = useWorkspaceStore(
+    (s) => s.selectedNodeId === `method:${data.methodId}`
+  )
   return (
     <div
       className={cn(
         "pointer-events-none rounded-lg border border-dashed bg-muted/20",
-        data.isRoot && "border-primary/40"
+        data.isRoot && "border-primary/40",
+        // `ring` is the canvas's selection colour (NodeShell uses it for
+        // cards); `primary` stays the handler's, so the two never blur.
+        selected && "border-solid border-ring bg-ring/[0.04]"
       )}
       style={{ width: data.width, height: data.height }}
     >
-      <div className="pointer-events-auto flex h-9 items-center gap-1.5 border-b border-dashed px-2.5">
+      {/* The header is the lane's clickable body: clicking it selects the
+          method, mirroring a click on the collapsed card it replaces. */}
+      <div
+        role="button"
+        tabIndex={-1}
+        aria-current={selected ? "true" : undefined}
+        onClick={() => actions.selectNode(`method:${data.methodId}`)}
+        className={cn(
+          "pointer-events-auto flex h-9 cursor-pointer items-center gap-1.5 border-b border-dashed px-2.5",
+          selected && "border-solid border-ring/50 bg-ring/10"
+        )}
+      >
         <button
           className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="Collapse to a method card"
-          onClick={() => actions.toggleMethod(data.methodId)}
+          onClick={(event) => {
+            // The header selects; the buttons do their own thing. Both firing
+            // would select a method and immediately collapse it away.
+            event.stopPropagation()
+            actions.toggleMethod(data.methodId)
+          }}
         >
           <ChevronDown className="size-3.5" aria-hidden />
         </button>
@@ -140,7 +172,10 @@ export const LaneNode = memo(function LaneNode({
         <button
           className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="Focus on this method and its callees"
-          onClick={() => actions.focusMethod(data.methodId)}
+          onClick={(event) => {
+            event.stopPropagation()
+            actions.focusMethod(data.methodId)
+          }}
         >
           <Crosshair className="size-3.5" aria-hidden />
         </button>

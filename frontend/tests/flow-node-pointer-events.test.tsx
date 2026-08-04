@@ -65,9 +65,13 @@ function noopActions(overrides: Partial<FlowActions> = {}): FlowActions {
 
 /** Mount nodes on a real ReactFlow canvas configured exactly as the workspace
  * configures it — non-selectable, non-draggable, no node mouse handlers. */
-function renderCanvas(nodes: Node[], actions: FlowActions = noopActions()) {
+function renderCanvas(
+  nodes: Node[],
+  actions: FlowActions = noopActions(),
+  search = ""
+) {
   const store = createWorkspaceStore(
-    parseWorkspaceParams(new URLSearchParams())
+    parseWorkspaceParams(new URLSearchParams(search))
   )
   return render(
     <WorkspaceStoreContext.Provider value={store}>
@@ -259,5 +263,74 @@ describe("per-method expansion is wired to the node's own control", () => {
     expect(
       collapsed.mode === "explicit" ? [...collapsed.ids].sort() : []
     ).toEqual(["m_2", "m_3"])
+  })
+})
+
+// An expanded method draws no card, so it has no NodeShell to carry the ring.
+// Selecting it from the call tree or a call link inside source would otherwise
+// move the URL and highlight the source region while the canvas showed nothing.
+describe("an expanded lane shows that its method is selected", () => {
+  const LANE: Node = {
+    ...BASE,
+    id: "lane:m_1",
+    type: "lane",
+    data: {
+      methodId: "m_1",
+      signature: "PetService.getPet(String)",
+      isRoot: false,
+      width: 300,
+      height: 200,
+    },
+  }
+
+  function laneHeader(container: HTMLElement) {
+    const header = container.querySelector<HTMLElement>(
+      ".react-flow__node > div > div"
+    )
+    if (!header) throw new Error("lane header not rendered")
+    return header
+  }
+
+  it("marks the lane when its method is the selection", () => {
+    const { container } = renderCanvas([LANE], noopActions(), "node=method:m_1")
+    const header = laneHeader(container)
+    expect(header.getAttribute("aria-current")).toBe("true")
+    const lane = container.querySelector<HTMLElement>(".react-flow__node > div")
+    expect(lane?.className).toContain("border-ring")
+  })
+
+  it("leaves other lanes unmarked", () => {
+    const { container } = renderCanvas(
+      [LANE],
+      noopActions(),
+      "node=method:m_OTHER"
+    )
+    const header = laneHeader(container)
+    expect(header.getAttribute("aria-current")).toBeNull()
+    const lane = container.querySelector<HTMLElement>(".react-flow__node > div")
+    expect(lane?.className).not.toContain("border-ring")
+  })
+
+  it("selects the method when the header is clicked", () => {
+    const selectNode = vi.fn()
+    const { container } = renderCanvas([LANE], noopActions({ selectNode }))
+    fireEvent.click(laneHeader(container))
+    expect(selectNode).toHaveBeenCalledWith("method:m_1")
+  })
+
+  it("does not select when the collapse or focus button is clicked", () => {
+    // Both firing would select a method and immediately collapse it away.
+    const selectNode = vi.fn()
+    const toggleMethod = vi.fn()
+    const focusMethod = vi.fn()
+    renderCanvas([LANE], noopActions({ selectNode, toggleMethod, focusMethod }))
+
+    fireEvent.click(screen.getByTitle("Collapse to a method card"))
+    expect(toggleMethod).toHaveBeenCalledWith("m_1")
+    expect(selectNode).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTitle("Focus on this method and its callees"))
+    expect(focusMethod).toHaveBeenCalledWith("m_1")
+    expect(selectNode).not.toHaveBeenCalled()
   })
 })
