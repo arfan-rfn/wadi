@@ -838,7 +838,7 @@ wadi analyze .             # register cwd (or repo URLs) as a system, run a snap
 wadi ui                    # start the frontend profile + open the browser (shipped in Phase 2 by user decision — no phase was assigned in the roadmap)
 wadi mcp                   # run the MCP server over stdio (for coding agents)
 wadi mcp install           # write the MCP config snippet for Claude Code etc.
-wadi status / down / upgrade
+wadi status / down / upgrade / prune
 ```
 
 Host requirement: a compose-compatible container runtime (Docker Desktop, Podman, OrbStack; native Docker Engine on Linux). Everything else — JVM for Joern, Mongo, Neo4j, service runtimes — ships inside images, pinned and tested together. **Machines that only run the CLI in remote/client mode (CI runners, developers pointed at a team server) need no container runtime at all** — just the CLI (§14, §15).
@@ -878,9 +878,18 @@ The weight lives in three components, so the design lever is lifecycle, not orch
 
 Plus: compose logging capped with size-rotated json-file (`max-size`), so long-running stacks never grow unbounded logs. Target idle footprint for `wadi up`: **~1–1.5GB** (core four + capped DBs), with the multi-GB Joern cost existing only for the minutes an analysis batch runs.
 
+### Local-state hygiene (recorded 2026-08-04, binding)
+
+**Decision: nothing the stack creates for its own convenience may accumulate without a bound.** A laptop product that silently grows is a product users delete. Four rules, each from a defect found in 0.5.2:
+
+1. **A health probe reads; it never evaluates.** The `wadi-joern` probe used to `POST /query {"query":"1"}` — but the CPGQL server's `/query` is a *REPL submission*: each one permanently binds a `resN` val plus its compiled wrapper class in the shared Scala interpreter, and a probe never collects the result. Every 10s that leaked ~0.9MiB (measured: 452MiB → 981MiB over ~650 probes, reaching `res646`), exhausting the heap within hours of *idling* and killing the server mid-analysis — surfacing as `container wadi-wadi-joern-1 is unhealthy` on `wadi up`/`wadi ui`, and as every service failing with "Connection reset by peer". The probe is now `GET /result/<fixed-uuid>`: a full round-trip through the server's router with zero interpreter involvement, and still a valid *readiness* signal because the HTTP port only binds after the REPL is constructed. **Generalized rule: a probe against a stateful evaluator must exercise the transport, not the evaluator.** *Rejected: raising the probe interval (postpones the leak, doesn't remove it); restarting Joern periodically (hides a leak behind a supervisor).*
+2. **A JVM in a container gets a heap sized to that container.** Joern ran on the ergonomic default — 25% of `mem_limit`, i.e. 1.5g of 6g — so the memory the compose file reserves was mostly unusable. `JAVA_OPTS: -XX:MaxRAMPercentage=75.0` (the launcher honors `JAVA_OPTS` at lowest precedence, composing with its own `-J` flags).
+3. **Build scratch dies with the job that made it.** The worker's `/workspace/<snapshot_id>` (repo checkout + staged parse roots + the Joern→worker export files) is entirely derived and fully consumed by the end of extraction — the checkout is a disposable clone of the `wadi-repo` bare mirror, and source-on-demand serves from that mirror, never from here. It is now removed in a `finally`, so a failed snapshot cleans up too. Left behind it cost ~148MB per snapshot (43 directories / 3.3GB observed) and — because `/workspace` doubles as the Joern console's project root — made every past snapshot a bogus project that Joern rescanned and stack-traced over on each boot (3,183 log lines on a cold start). *Known remaining smell, not yet worth an image change: the worker's scratch and Joern's project root are the same directory. Cleanup makes the collision harmless; separating them would need a `WORKDIR` change in the joern image.*
+4. **Cleanup never touches Tier 1.** Every release publishes a full image set (§13 release artifacts), so upgrades accumulate multi-GB copies — 21 stale images across 5 superseded versions observed on a single developer machine. `wadi upgrade`/`wadi prune` remove images under `ghcr.io/wadi-sh/*` and rendered compose files from other versions, and **nothing else**: the analyzed artifacts live in the `wadi_*` volumes and no cleanup path may discard them as a side effect. Image removal deliberately never passes `--force`, so an image backing a running container is reported rather than yanked out from under it.
+
 ### Ports & network isolation (no collisions with other local stacks)
 
-1. **No database ports are published to the host.** Services reach Mongo/Neo4j by service name on the compose network; `wadi mcp` joins the same network (`docker run -i --network wadi`). Wadi therefore never claims 27017/7474/7687 — it coexists with any other stack's or natively installed databases, and no unauthenticated DB listens on the host. Debug access is opt-in: `wadi up --expose-db` enables a profile publishing them on loopback (for Compass / Neo4j Browser).
+1. **No database ports are published to the host.** Services reach Mongo/Neo4j by service name on the compose network; `wadi mcp` joins the same network (`docker run -i --network wadi_default`), which makes it the one container compose does not own — see the labeling rule in §15. Wadi therefore never claims 27017/7474/7687 — it coexists with any other stack's or natively installed databases, and no unauthenticated DB listens on the host. Debug access is opt-in: `wadi up --expose-db` enables a profile publishing them on loopback (for Compass / Neo4j Browser).
 2. **Only the orchestrator API and frontend are published:** bound to `127.0.0.1` (never `0.0.0.0`). **Default ports — the WADI keypad block (W-A-D-I → 9-2-3-4):**
 
    | Port | What | Open when |
@@ -1005,7 +1014,9 @@ wadi --context team analyze .    # explicit
 
 ### `wadi mcp`
 
-Container passthrough: `wadi mcp` execs `docker run -i --network wadi ghcr.io/wadi-sh/mcp:<pinned>` with stdio attached. Keeps the CLI thin (no pymongo/neo4j/FastMCP deps) and **guarantees the MCP server version matches the stack that wrote the artifacts** (§13's compatibility property). `wadi mcp install` writes the MCP config snippet for coding agents, pointing at `wadi mcp`. *Rejected: importing mcp-server in-process — drags the full DB-driver dependency tree into every CLI install.*
+Container passthrough: `wadi mcp` execs `docker run -i --network wadi_default ghcr.io/wadi-sh/mcp:<pinned>` with stdio attached. Keeps the CLI thin (no pymongo/neo4j/FastMCP deps) and **guarantees the MCP server version matches the stack that wrote the artifacts** (§13's compatibility property). `wadi mcp install` writes the MCP config snippet for coding agents, pointing at `wadi mcp`. *Rejected: importing mcp-server in-process — drags the full DB-driver dependency tree into every CLI install.*
+
+**Decision (2026-08-04): the passthrough container is named and labeled `sh.wadi.managed=true`, and `wadi down` reaps by that label before calling compose.** It is the only container attached to the compose network that compose did not create, and compose tears down only its own — so an unreaped one both stranded an MCP server on a stack whose databases were being removed *and* blocked the network teardown (`Network wadi_default Resource is still in use`, leaving the next `wadi up` on a half-torn-down stack). Reaping is unconditional and reported by name: an MCP server whose Mongo and Neo4j are going away has nothing left to answer, so there is no live session worth preserving. Three layers keep the container reapable — normal exit, a SIGTERM/SIGHUP handler that converts termination into a normal unwind so `finally` still runs (Python's default disposition skips cleanup, which is exactly how containers were orphaned when an agent stopped its server), and the label sweep in `wadi down` for anything that escaped both. *Rejected: `docker run --rm` alone (self-cleans only on a clean container exit); faking compose's own labels so `down --remove-orphans` would collect it (verified against compose v5.3.0 — it still ignores containers compose did not create); tying reaping to a recorded parent PID (can't survive a reboot, and can't see a parent on another machine).*
 
 ### Scripting & CI surface
 
@@ -1018,11 +1029,12 @@ Container passthrough: `wadi mcp` execs `docker run -i --network wadi ghcr.io/wa
 - One version spans the release set: CLI `1.4.2` embeds compose with images tagged `1.4.2`.
 - Every API call carries the CLI version; the orchestrator returns its own; mismatch beyond the compatibility policy → loud warning (matters in remote mode, where someone else upgrades the server).
 - `wadi upgrade` = upgrade the CLI package (bringing new pinned tags) → `compose pull` → restart. Data migrations, if ever needed, run as orchestrator startup tasks — never CLI logic.
+- **Implemented 2026-08-04.** `wadi upgrade` resolves the latest `wadi-sh` release from PyPI (the canonical channel, §13), stops the running stack, upgrades through **whichever channel installed it** — detected, never configured, so a Homebrew user is not handed a `uv tool` line that would silently create a second shadowing install — then prunes the superseded version's images and tells the user to run `wadi up`. An undetectable channel prints the command to run rather than guessing. `--check` reports only; `--no-prune` skips cleanup. **The prune keeps the version being upgraded *to*, not the running process's own `CLI_VERSION`** — the new tags are exactly what `wadi up` is about to pull. `wadi prune` exposes the same cleanup standalone, which is the case that actually matters day to day: users sit on the current version with several superseded image sets behind them. Both obey §13's rule that cleanup never touches volumes. *Rejected: re-exec'ing the upgraded binary to finish the job in-process (the running CLI is stale by definition; a printed `wadi up` is honest and interruptible); pruning by "everything not currently running" (would delete images a stopped-but-current stack still needs).*
 
 ### Phase 1 command set
 
 ```
-wadi up / down / status / upgrade                 # lifecycle (local context only)
+wadi up / down / status / upgrade / prune         # lifecycle (local context only)
 wadi analyze <path|--repo URL>... [--wait] [--output json]
 wadi systems / snapshots / services / endpoints   # reads, table or JSON
 wadi coverage <snapshot-id>                       # Phase 2 — the coverage report (§5.4), first thing to check

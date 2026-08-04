@@ -59,6 +59,38 @@ class TestComposeCommand:
         assert {p.strip() for p in declared} == set(compose.ALL_PROFILES)
 
 
+class TestJoernServiceDefinition:
+    """Guards on the wadi-joern service — both invariants here were live bugs."""
+
+    def _joern_block(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+        monkeypatch.setattr(compose, "data_dir", lambda: tmp_path)
+        content = compose.render_compose_file().read_text()
+        start = content.index("  wadi-joern:")
+        return content[start : content.index("\n  orchestrator:", start)]
+
+    def test_healthcheck_never_submits_a_query(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """POST /query is a REPL *evaluation*: it permanently binds a `resN` val
+        and its compiled wrapper class in the shared interpreter. As a probe
+        running every 10s it leaked ~0.9MiB a shot, exhausted the heap within
+        hours, and killed the server mid-analysis. A probe must only read.
+        """
+        block = self._joern_block(monkeypatch, tmp_path)
+        # The probe command itself, not the prose around it.
+        (probe,) = [line for line in block.splitlines() if line.strip().startswith("test:")]
+        assert "/query" not in probe
+        assert "/result/" in probe
+
+    def test_heap_is_sized_against_the_container_limit(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Without this the JVM takes its ergonomic default — 25% of mem_limit,
+        1.5g of 6g — which is far too little for a multi-service CPG."""
+        block = self._joern_block(monkeypatch, tmp_path)
+        assert "MaxRAMPercentage" in block
+
+
 class TestRenderComposeFile:
     def test_embedded_definition_rendered(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

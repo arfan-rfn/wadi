@@ -6,14 +6,18 @@ Exit codes (stable, documented): 0 success · 1 analysis/job failed ·
 
 import json
 import os
+import signal
 import subprocess
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from wadi_cli import compose
+from wadi_cli import upgrade as upgrade_support
 from wadi_cli.client import (
     CLI_VERSION,
     ApiError,
@@ -119,11 +123,37 @@ def up(
     console.print(f"[green]wadi is up[/green] — API at http://127.0.0.1:{api_port}")
 
 
+def _tear_down_stack() -> None:
+    """Stop everything wadi started and release the network.
+
+    Shared by `wadi down` and `wadi upgrade` — an upgrade that left the old
+    stack half-standing would pin the very images it is about to prune.
+    """
+    # Reap first: a `wadi mcp` container is attached to the compose network but
+    # invisible to compose, so leaving it up both strands an MCP server on a
+    # stack whose databases are being removed and blocks the network teardown
+    # with "Resource is still in use" (§13).
+    reaped = compose.reap_managed_containers()
+    for name in reaped:
+        console.print(f"stopped MCP server [cyan]{name}[/cyan] — its databases are going down")
+    compose.run_compose(["down", "--remove-orphans"], profiles=compose.ALL_PROFILES)
+    # Second layer: containers left by a release that predates the label — the
+    # state an upgrading user is in — still hold the network open.
+    stragglers, foreign = compose.finish_network_teardown()
+    for name in stragglers:
+        console.print(f"removed leftover wadi container [cyan]{name}[/cyan]")
+    if foreign:
+        error_console.print(
+            f"[yellow]{compose.NETWORK_NAME} is still in use by containers wadi does not "
+            f"own ({', '.join(foreign)}) — left running, so the network remains.[/yellow]"
+        )
+
+
 @app.command()
 def down() -> None:
     """Stop the local wadi stack (including profile services like the UI)."""
     try:
-        compose.run_compose(["down"], profiles=compose.ALL_PROFILES)
+        _tear_down_stack()
     except compose.ComposeError as exc:
         error_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(EXIT_UNREACHABLE) from exc
@@ -178,6 +208,137 @@ def _wait_for_ui(url: str, timeout_seconds: float = 60.0) -> bool:
             return True
         time.sleep(1.0)
     return False
+
+
+def _prune_old_versions(*, keep_version: str, assume_yes: bool) -> None:
+    """Remove wadi images and rendered compose files from other versions.
+
+    Images and files only — **never volumes**. The analyzed artifacts are Tier 1
+    (§6) and live in the `wadi_*` volumes; no cleanup path may discard them as a
+    side effect of a version bump.
+    """
+    try:
+        images = compose.wadi_images(exclude_version=keep_version)
+    except compose.ComposeError as exc:
+        error_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(EXIT_UNREACHABLE) from exc
+    files = compose.stale_compose_files()
+    if not images and not files:
+        console.print(f"nothing to prune — only {keep_version} artifacts are present")
+        return
+
+    for reference, size in images:
+        console.print(f"  {reference}  [dim]{size}[/dim]")
+    for path in files:
+        console.print(f"  {path}  [dim]compose file[/dim]")
+    if not assume_yes and not typer.confirm(
+        f"remove {len(images)} image(s) and {len(files)} file(s)? (volumes are never touched)"
+    ):
+        console.print("nothing removed")
+        return
+
+    removed, kept = compose.remove_images([reference for reference, _ in images])
+    for path in files:
+        path.unlink(missing_ok=True)
+    console.print(f"[green]removed {len(removed)} image(s), {len(files)} file(s)[/green]")
+    if kept:
+        # Almost always "still used by a running container" — worth saying out
+        # loud rather than forcing, so a live stack is never pulled apart.
+        console.print(f"[yellow]kept {len(kept)} image(s) still in use: {', '.join(kept)}[/yellow]")
+
+
+@app.command()
+def prune(
+    assume_yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Don't ask for confirmation")
+    ] = False,
+) -> None:
+    """Remove images and compose files left behind by older wadi versions.
+
+    Every release publishes a full image set, so upgrades accumulate multi-GB
+    copies of images nothing references any more. Analysis data is never
+    touched: it lives in the `wadi_*` volumes, which this command does not
+    consider.
+    """
+    if not compose.container_runtime_available():
+        error_console.print(
+            "[red]No usable container runtime found — install/start Docker Desktop, "
+            "Podman, or OrbStack.[/red]"
+        )
+        raise typer.Exit(EXIT_UNREACHABLE)
+    _prune_old_versions(keep_version=CLI_VERSION, assume_yes=assume_yes)
+
+
+@app.command()
+def upgrade(
+    check: Annotated[
+        bool, typer.Option("--check", help="Only report whether a newer version exists")
+    ] = False,
+    prune_old: Annotated[
+        bool,
+        typer.Option("--prune/--no-prune", help="Also remove the old version's images"),
+    ] = True,
+    assume_yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Don't ask for confirmation")
+    ] = False,
+) -> None:
+    """Upgrade wadi to the latest release and clean up the old version.
+
+    One version spans the release set (§15), so this upgrades the CLI package
+    through whichever channel installed it — which brings the new pinned image
+    tags — then prunes the images the previous version left behind. Run
+    `wadi up` afterwards to pull and start the new stack.
+    """
+    try:
+        latest = upgrade_support.latest_released_version()
+    except upgrade_support.UpgradeError as exc:
+        error_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(EXIT_UNREACHABLE) from exc
+
+    if not upgrade_support.is_newer(latest, CLI_VERSION):
+        console.print(f"[green]wadi {CLI_VERSION} is up to date[/green]")
+        if prune_old and not check:
+            _prune_old_versions(keep_version=CLI_VERSION, assume_yes=assume_yes)
+        return
+
+    console.print(f"wadi [cyan]{CLI_VERSION}[/cyan] → [green]{latest}[/green] available")
+    if check:
+        return
+
+    command = upgrade_support.upgrade_command()
+    if command is None:
+        error_console.print(
+            "[yellow]Could not tell how wadi was installed — upgrade it with your "
+            f"installer (e.g. `uv tool upgrade {upgrade_support.PACKAGE_NAME}`), "
+            "then run `wadi up`.[/yellow]"
+        )
+        raise typer.Exit(EXIT_UNREACHABLE)
+
+    if not assume_yes and not typer.confirm(f"stop the stack and run `{' '.join(command)}`?"):
+        console.print("upgrade cancelled")
+        return
+
+    # Stop the old stack before swapping versions: its containers pin the old
+    # images (blocking the prune) and would otherwise keep serving artifacts to
+    # a CLI that now expects the new contracts. A stack that won't stop is a
+    # warning, not a failure — the package upgrade itself is still worth doing.
+    if compose.container_runtime_available():
+        try:
+            _tear_down_stack()
+        except compose.ComposeError as exc:
+            error_console.print(f"[yellow]could not stop the stack: {exc}[/yellow]")
+
+    try:
+        upgrade_support.run_upgrade(command)
+    except upgrade_support.UpgradeError as exc:
+        error_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(EXIT_UNREACHABLE) from exc
+
+    if prune_old and compose.container_runtime_available():
+        # Keep the version we just upgraded *to*, not this process's stale
+        # CLI_VERSION — the new tags are what `wadi up` is about to pull.
+        _prune_old_versions(keep_version=latest, assume_yes=assume_yes)
+    console.print(f"[green]upgraded to {latest}[/green] — run `wadi up` to start the new stack")
 
 
 @app.command()
@@ -507,13 +668,62 @@ def restitch(
 # --- mcp -----------------------------------------------------------------------
 
 
+@contextmanager
+def _unwind_on_termination() -> Generator[None]:
+    """Turn SIGTERM/SIGHUP into a normal unwind so `finally` blocks still run.
+
+    Python's default SIGTERM disposition kills the process outright, skipping
+    cleanup — which is exactly how MCP containers were being orphaned when an
+    agent stopped its server.
+    """
+
+    def _unwind(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    previous: dict[int, object] = {}
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            previous[sig] = signal.signal(sig, _unwind)
+        except (ValueError, OSError):  # non-main thread, or unsupported platform
+            continue
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)  # type: ignore[arg-type]
+
+
 @mcp_app.callback()
 def mcp(ctx: typer.Context) -> None:
     """Run the MCP server over stdio (container passthrough, §15)."""
     if ctx.invoked_subcommand is not None:
         return
-    command = ["docker", "run", "-i", "--rm", "--network", "wadi_default", MCP_IMAGE]
-    raise typer.Exit(subprocess.run(command, check=False).returncode)
+    # Named and labeled so the container is always reapable. `docker run --rm`
+    # cleans up only when the container exits on its own; when this process is
+    # killed instead, the container is left attached to the compose network,
+    # where it survives `wadi down` and blocks the network from being removed.
+    # Three layers cover that: normal exit, the signal unwind below, and
+    # `wadi down` reaping by label.
+    container = f"wadi-mcp-{os.getpid()}"
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--network",
+        compose.NETWORK_NAME,
+        "--name",
+        container,
+        "--label",
+        f"{compose.MANAGED_LABEL}=true",
+        MCP_IMAGE,
+    ]
+    with _unwind_on_termination():
+        try:
+            code = subprocess.run(command, check=False).returncode
+        finally:
+            compose.force_remove_container(container)
+    raise typer.Exit(code)
 
 
 @mcp_app.command("install")

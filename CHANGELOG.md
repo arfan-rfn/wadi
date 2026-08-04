@@ -3,6 +3,51 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.5.3 — 2026-08-04
+
+Local-stack reliability. The stack could take itself down while idling, and
+could not be fully torn down or cleaned up once it had. No contract, schema, or
+analysis change — nothing needs re-analysis.
+
+### Fixed
+- **The Joern health probe no longer kills Joern.** It submitted
+  `POST /query {"query":"1"}` every 10s — but that endpoint is a REPL
+  *evaluation*, permanently binding a `resN` val and its compiled wrapper class
+  in the shared interpreter, and the probe never collected the result. Measured
+  ~0.9MiB leaked per probe (452MiB → 981MiB over ~650 probes, reaching
+  `res646`), exhausting the heap within hours of *idling* — which is why
+  `wadi up`/`wadi ui` began failing with `container wadi-wadi-joern-1 is
+  unhealthy`, and why an analysis could fail with every service reporting
+  `CPGQL server unreachable: Connection reset by peer`. The probe is now
+  `GET /result/<fixed-uuid>`: a full round-trip through the server's router that
+  touches no interpreter state.
+- **Joern gets the memory the compose file reserves for it.** The JVM was
+  running on its ergonomic default heap — 25% of `mem_limit`, 1.5g of 6g. Now
+  `-XX:MaxRAMPercentage=75.0` (~4.5g).
+- **`wadi down` tears the stack all the way down.** `wadi mcp` starts the one
+  container compose does not own, so compose left it running and then could not
+  remove the network it held open (`Network wadi_default Resource is still in
+  use`). The container is now named and labeled, cleaned up when the CLI exits
+  or is terminated, and swept by label at the start of `wadi down` — which
+  reports each one it stops. `down` also passes `--remove-orphans`.
+- **Extraction no longer leaves its build scratch behind.** `/workspace/<snapshot>`
+  (repo checkout, staged parse roots, Joern export files — all derived, all
+  already consumed into Mongo) is removed when the job ends, success or failure.
+  It had reached 43 directories / 3.3GB, and because `/workspace` doubles as
+  Joern's project root, every stale directory became a bogus project that Joern
+  rescanned and stack-traced over on each boot (3,183 log lines on a cold start).
+
+### Added
+- **`wadi upgrade`** — promised in §15 since Phase 1, now implemented. Resolves
+  the latest release from PyPI, stops the stack, upgrades through whichever
+  channel installed the CLI (uv / pipx / Homebrew — detected, not configured),
+  then prunes the superseded version's images. `--check` reports only.
+- **`wadi prune`** — removes images and rendered compose files from older
+  versions. Every release publishes a full image set, so upgrades accumulate
+  multi-GB copies (21 stale images across 5 versions on one machine). Analysis
+  data is never touched: it lives in the `wadi_*` volumes, which no cleanup path
+  considers.
+
 ## 0.5.2 — 2026-08-04
 
 The endpoint workspace stops losing track of what you selected. Every change

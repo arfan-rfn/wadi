@@ -58,24 +58,40 @@ services:
       retries: 24
 
   wadi-joern:
-    image: ghcr.io/wadi-sh/joern:0.5.2
+    image: ghcr.io/wadi-sh/joern:0.5.3
     build:
       context: ../joern-platform
     # Stateless and disposable (P5); heavy only while analyses run.
     volumes:
       - workspace:/workspace
       - cpg-cache:/cpg-cache
+    environment:
+      # The JVM's ergonomic default heap is 25% of the container limit — 1.5g of
+      # the 6g below, far short of what a multi-service CPG needs. The launcher
+      # (joern-cli/bin/repl-bridge) honors JAVA_OPTS at lowest precedence, so this
+      # composes with the -J flags the `joern` script already passes.
+      JAVA_OPTS: -XX:MaxRAMPercentage=75.0
     mem_limit: 6g
     logging: *default-logging
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf -X POST http://localhost:8080/query -H 'Content-Type: application/json' -d '{\"query\":\"1\"}' > /dev/null || exit 1"]
+      # A liveness probe MUST NOT evaluate anything. The CPGQL server's /query is a
+      # REPL submission: each one permanently binds a `resN` val plus its compiled
+      # wrapper class in the shared Scala interpreter, and a polling probe never
+      # collects the result — so the old `POST /query {"query":"1"}` probe leaked
+      # ~0.9 MiB per run (measured), exhausted the heap within hours of idling, and
+      # took the server down mid-analysis (every service then failing with
+      # "Connection reset by peer"). GET /result/<uuid> is a full round-trip through
+      # the server's router — 200 + JSON body for an unknown uuid — with zero
+      # interpreter involvement. It is a valid readiness signal too: the HTTP port
+      # only binds after the REPL is constructed (ReplServer.startHttpServer).
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/result/00000000-0000-0000-0000-000000000000 > /dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 60s
 
   orchestrator:
-    image: ghcr.io/wadi-sh/orchestrator:0.5.2
+    image: ghcr.io/wadi-sh/orchestrator:0.5.3
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -99,7 +115,7 @@ services:
       retries: 12
 
   extraction-worker:
-    image: ghcr.io/wadi-sh/worker:0.5.2
+    image: ghcr.io/wadi-sh/worker:0.5.3
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -117,7 +133,7 @@ services:
     logging: *default-logging
 
   stitcher:
-    image: ghcr.io/wadi-sh/stitcher:0.5.2
+    image: ghcr.io/wadi-sh/stitcher:0.5.3
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -132,7 +148,7 @@ services:
     logging: *default-logging
 
   mcp:
-    image: ghcr.io/wadi-sh/mcp:0.5.2
+    image: ghcr.io/wadi-sh/mcp:0.5.3
     build:
       context: ..
       dockerfile: services/Dockerfile.python
@@ -149,7 +165,7 @@ services:
     logging: *default-logging
 
   frontend:
-    image: ghcr.io/wadi-sh/frontend:0.5.2
+    image: ghcr.io/wadi-sh/frontend:0.5.3
     build:
       context: ../frontend
     environment:

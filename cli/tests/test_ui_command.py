@@ -83,9 +83,17 @@ class TestUiCommand:
 
 
 class TestDownIncludesProfiles:
-    def test_down_passes_all_profiles(self, compose_calls: list[dict[str, object]]) -> None:
+    def test_down_passes_all_profiles(
+        self, compose_calls: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Reaping shells out to docker; stub it so this stays a unit test.
+        monkeypatch.setattr(compose, "reap_managed_containers", list)
         result = runner.invoke(app, ["down"])
         assert result.exit_code == 0
         assert compose_calls == [
-            {"action": ["down"], "profiles": compose.ALL_PROFILES, "expose_db": False}
+            {
+                "action": ["down", "--remove-orphans"],
+                "profiles": compose.ALL_PROFILES,
+                "expose_db": False,
+            }
         ]

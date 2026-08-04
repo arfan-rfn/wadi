@@ -27,7 +27,9 @@ from wadi_contracts import (
     NetworkIdentity,
     ServiceBoundary,
     ServiceKind,
+    Snapshot,
     SourceAnchor,
+    System,
     normalize_repo_source,
     service_id,
 )
@@ -99,6 +101,12 @@ class ExtractionPipeline:
             raise RuntimeError(f"system {snapshot.system_id} not found")
 
         workspace = self._settings.workspace_dir / snapshot.id
+        try:
+            await self._extract_services(snapshot, system, workspace)
+        finally:
+            await asyncio.to_thread(_discard_workspace, workspace)
+
+    async def _extract_services(self, snapshot: Snapshot, system: System, workspace: Path) -> None:
         endpoint_count = 0
         service_count = 0
         extracted_count = 0
@@ -270,3 +278,26 @@ class ExtractionPipeline:
 
 def _path_slug(normalized_source: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", normalized_source).strip("-")[-80:]
+
+
+def _discard_workspace(workspace: Path) -> None:
+    """Drop a snapshot's build scratch once extraction has finished with it.
+
+    Everything under it is derived and already consumed: the repo tree is a
+    disposable clone of the `wadi-repo` bare mirror at the pinned SHA (source
+    on demand serves from that mirror, never from here), `stage/` holds parse
+    roots assembled for Joern, and `exports/` holds the Joern→worker handoff
+    files the assembler has already written into Mongo.
+
+    Keeping them cost ~148MB per snapshot with no reader, and — because
+    `/workspace` doubles as the Joern console's project root — made every past
+    snapshot directory a bogus project that Joern rescanned and stack-traced
+    over on each boot. Cleanup is best-effort: a snapshot that analyzed
+    correctly must not fail because its scratch could not be removed.
+    """
+    if not workspace.exists():
+        return
+    try:
+        shutil.rmtree(workspace)
+    except OSError:
+        logger.warning("could not remove workspace %s", workspace, exc_info=True)
