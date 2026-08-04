@@ -304,3 +304,61 @@ export async function layoutLanes(
     height: Math.max(totalHeight, lastBottom),
   }
 }
+
+export interface FramingRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface FramingViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+/** The minimum zoom a framing move settles at — below this a statement card's
+ * source text is unreadable, so bringing it "into frame" would not help. */
+export const FRAMING_MIN_ZOOM = 0.85
+
+/**
+ * Where to centre the canvas so `node` sits WHOLLY inside the pane — or null
+ * when it already does and the viewport should be left alone.
+ *
+ * Source scrolls to the selection every time, so the graph owes the same
+ * guarantee in reverse. Testing only the node's centre (as this once did)
+ * reported a card as visible while half of it sat past the edge: the reader
+ * clicked a line in source, the graph did not move, and the node they were
+ * sent to was cut off or absent.
+ *
+ * Re-centring when it IS wholly visible is equally wrong — that yanks the
+ * canvas out from under someone who can already see what they selected.
+ */
+export function framingFor(
+  node: FramingRect,
+  viewport: FramingViewport,
+  pane: { width: number; height: number },
+  margin = 40
+): { x: number; y: number; zoom: number } | null {
+  if (pane.width <= 0 || pane.height <= 0) return null
+  const left = node.x * viewport.zoom + viewport.x
+  const top = node.y * viewport.zoom + viewport.y
+  const right = (node.x + node.width) * viewport.zoom + viewport.x
+  const bottom = (node.y + node.height) * viewport.zoom + viewport.y
+  if (
+    left >= margin &&
+    top >= margin &&
+    right <= pane.width - margin &&
+    bottom <= pane.height - margin
+  )
+    return null
+
+  const zoom = Math.max(viewport.zoom, FRAMING_MIN_ZOOM)
+  // Something taller than the pane (a long lane) can never be framed whole.
+  // Frame its TOP — the header carries the identity — rather than its middle,
+  // which could be a hundred statements in.
+  const usableHeight = (pane.height - margin * 2) / zoom
+  const framedHeight = Math.min(node.height, Math.max(usableHeight, 1))
+  return { x: node.x + node.width / 2, y: node.y + framedHeight / 2, zoom }
+}

@@ -3,6 +3,8 @@ import { describe, expect, test } from "vitest"
 import { buildFlowGraph } from "@/lib/wadi/flow-graph"
 import {
   DEFAULT_EXPAND_STATEMENT_BUDGET,
+  FRAMING_MIN_ZOOM,
+  framingFor,
   GUTTER_WIDTH,
   laneOrder,
   layoutLanes,
@@ -145,5 +147,98 @@ describe("layoutLanes", () => {
     expect(
       [...layout.positions.keys()].some((id) => id.startsWith("ghost:"))
     ).toBe(true)
+  })
+})
+
+describe("framingFor — the graph owes source the same guarantee", () => {
+  const PANE = { width: 800, height: 600 }
+  const CARD = { x: 100, y: 100, width: 240, height: 72 }
+  const AT_ORIGIN = { x: 0, y: 0, zoom: 1 }
+
+  test("leaves the viewport alone when the node is wholly in frame", () => {
+    expect(framingFor(CARD, AT_ORIGIN, PANE)).toBeNull()
+  })
+
+  test("frames a node that is entirely off screen", () => {
+    const framing = framingFor(
+      { x: 100, y: 4000, width: 240, height: 72 },
+      AT_ORIGIN,
+      PANE
+    )
+    expect(framing).toEqual({ x: 220, y: 4036, zoom: 1 })
+  })
+
+  test("frames a node that is only PARTIALLY cut off", () => {
+    // The regression: the old rule tested the node's CENTRE, so a tall lane
+    // whose middle sat inside the pane counted as visible while 100px of it
+    // hung past the bottom. Click a line in source, the graph does not move,
+    // and the node you were sent to is cut off.
+    const laneHangingBelow = { x: 100, y: 300, width: 400, height: 400 }
+    const centre = laneHangingBelow.y + laneHangingBelow.height / 2
+    expect(centre).toBeLessThan(PANE.height - 40) // old rule: "visible"
+    expect(laneHangingBelow.y + laneHangingBelow.height).toBeGreaterThan(
+      PANE.height
+    ) // but 100px is off screen
+    expect(framingFor(laneHangingBelow, AT_ORIGIN, PANE)).not.toBeNull()
+  })
+
+  test("frames a lane whose header has scrolled above the pane", () => {
+    // Same failure at the other edge: the identity is in the header, and the
+    // header is what has gone off screen.
+    const headerAbove = { x: 100, y: -100, width: 400, height: 400 }
+    const centre = headerAbove.y + headerAbove.height / 2
+    expect(centre).toBeGreaterThan(40) // old rule: "visible"
+    expect(framingFor(headerAbove, AT_ORIGIN, PANE)).not.toBeNull()
+  })
+
+  test("respects the pane's margin at every edge", () => {
+    for (const node of [
+      { x: 10, y: 300, width: 240, height: 72 }, // clipped left
+      { x: 100, y: 10, width: 240, height: 72 }, // clipped top
+      { x: 700, y: 300, width: 240, height: 72 }, // clipped right
+      { x: 100, y: 580, width: 240, height: 72 }, // clipped bottom
+    ]) {
+      expect(framingFor(node, AT_ORIGIN, PANE)).not.toBeNull()
+    }
+  })
+
+  test("accounts for pan and zoom, not just raw coordinates", () => {
+    // Same node, same pane — visible only because the viewport is panned to it.
+    const far = { x: 2000, y: 2000, width: 240, height: 72 }
+    expect(framingFor(far, AT_ORIGIN, PANE)).not.toBeNull()
+    expect(framingFor(far, { x: -1900, y: -1900, zoom: 1 }, PANE)).toBeNull()
+  })
+
+  test("never zooms further out than the readable floor", () => {
+    const framing = framingFor(
+      { x: 100, y: 4000, width: 240, height: 72 },
+      { x: 0, y: 0, zoom: 0.2 },
+      PANE
+    )
+    expect(framing?.zoom).toBe(FRAMING_MIN_ZOOM)
+  })
+
+  test("keeps a zoomed-in view zoomed in", () => {
+    const framing = framingFor(
+      { x: 100, y: 4000, width: 240, height: 72 },
+      { x: 0, y: 0, zoom: 1.5 },
+      PANE
+    )
+    expect(framing?.zoom).toBe(1.5)
+  })
+
+  test("frames the TOP of something taller than the pane", () => {
+    // A long lane can never be framed whole; its header carries the identity,
+    // so centring on its middle would land a hundred statements in.
+    const lane = { x: 100, y: 1000, width: 400, height: 4000 }
+    const framing = framingFor(lane, AT_ORIGIN, PANE)
+    expect(framing).not.toBeNull()
+    // Centred on the first pane-height of the lane, not on y + 2000.
+    expect(framing!.y).toBeLessThan(lane.y + PANE.height)
+    expect(framing!.y).toBeGreaterThan(lane.y)
+  })
+
+  test("does nothing while the pane has no size (pre-layout)", () => {
+    expect(framingFor(CARD, AT_ORIGIN, { width: 0, height: 0 })).toBeNull()
   })
 })
