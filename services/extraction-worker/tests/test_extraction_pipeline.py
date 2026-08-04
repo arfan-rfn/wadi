@@ -235,6 +235,62 @@ class TestExtractionPipeline:
         with pytest.raises(RuntimeError, match="not found"):
             await pipeline.run(job)
 
+    async def test_workspace_is_discarded_after_a_successful_run(
+        self, database: WadiDatabase, repo_with_service: Path, tmp_path: Path
+    ) -> None:
+        """Build scratch does not outlive the job that made it.
+
+        The checkout, staged parse roots and Joern export files are all derived
+        and already consumed into Mongo by this point; left behind they leaked
+        ~148MB per snapshot and turned every past snapshot directory into a
+        bogus project that Joern rescanned on boot.
+        """
+        settings, _, snapshot, job = await _seed(database, repo_with_service, tmp_path)
+        artifacts = ArtifactRepository(database)
+        extractor = FakeExtractor()
+        pipeline = ExtractionPipeline(
+            settings=settings,
+            systems=SystemRepository(database),
+            snapshots=SnapshotRepository(database),
+            artifacts=artifacts,
+            repo_cache=RepoCache(settings.repo_cache_dir),
+            extractor=extractor,
+        )
+        await pipeline.run(job)
+
+        # The extractor really did work out of the workspace...
+        assert str(settings.workspace_dir) in str(extractor.calls[0][0])
+        # ...and nothing of it survives the run.
+        assert not (settings.workspace_dir / snapshot.id).exists()
+        # The artifacts it produced are unaffected — they live in Mongo.
+        boundaries = await artifacts.list_service_boundaries(snapshot.id)
+        assert len(await artifacts.list_endpoints(snapshot.id, boundaries[0].service_id)) == 1
+
+    async def test_workspace_is_discarded_when_every_service_fails(
+        self, database: WadiDatabase, repo_with_service: Path, tmp_path: Path
+    ) -> None:
+        """A failed snapshot must not strand its scratch either — failures are
+        exactly the case that used to repeat and accumulate."""
+
+        class ExplodingExtractor(FakeExtractor):
+            def extract(
+                self, source_path: Path, export_dir: Path, project_name: str
+            ) -> ServiceExport:
+                raise RuntimeError("joern is down")
+
+        settings, _, snapshot, job = await _seed(database, repo_with_service, tmp_path)
+        pipeline = ExtractionPipeline(
+            settings=settings,
+            systems=SystemRepository(database),
+            snapshots=SnapshotRepository(database),
+            artifacts=ArtifactRepository(database),
+            repo_cache=RepoCache(settings.repo_cache_dir),
+            extractor=ExplodingExtractor(),
+        )
+        with pytest.raises(RuntimeError, match="extraction failed for all"):
+            await pipeline.run(job)
+        assert not (settings.workspace_dir / snapshot.id).exists()
+
 
 class TestCpgqlExtractor:
     def test_reads_export_written_to_shared_volume(self, tmp_path: Path) -> None:
