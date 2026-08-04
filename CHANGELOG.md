@@ -3,7 +3,7 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
-## Unreleased (Phase 2.8: the endpoint workspace)
+## 0.5.0 — 2026-08-04 (Phase 2.8: the endpoint workspace)
 
 The 0.4.0 Flow workspace put the call tree, canvas, and source in one
 fixed-width three-pane tab; at real scale (234 nodes on the aitest cancel
