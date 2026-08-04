@@ -9,6 +9,8 @@
 
 import type { Icfg } from "@/lib/generated/icfg.schema"
 
+import type { FlowGraph } from "./flow-graph"
+
 export interface GoverningCondition {
   /** The condition expression text. */
   expression: string
@@ -111,4 +113,32 @@ export function conditionLabel(condition: GoverningCondition): string {
       : `default of ${condition.expression}`
   }
   return `${condition.polarity} ${condition.expression}`
+}
+
+/**
+ * Governing conditions for a ghost target: the union over every call site that
+ * reaches it, deduped by label.
+ *
+ * A ghost stands for one remote target, and several call sites commonly sit
+ * under the SAME governing branch. Undeduped, the display budget spends every
+ * slot on one repeated condition — and React sees two children with the same
+ * key. Dedupe must happen BEFORE any cap for the budget to show distinct
+ * conditions, which is why the union lives here and not at the call site.
+ */
+export function ghostConditions(
+  graph: FlowGraph,
+  conditionsByNode: ReadonlyMap<string, GoverningCondition[]>,
+  ghostNodeId: string
+): GoverningCondition[] {
+  const byLabel = new Map<string, GoverningCondition>()
+  for (const edge of graph.edges) {
+    if (edge.kind !== "remote" || edge.target !== ghostNodeId) continue
+    const source = graph.nodes.find((node) => node.id === edge.source)
+    if (source?.type !== "statement") continue
+    for (const condition of conditionsByNode.get(source.icfgNode.id) ?? []) {
+      const label = conditionLabel(condition)
+      if (!byLabel.has(label)) byLabel.set(label, condition)
+    }
+  }
+  return [...byLabel.values()]
 }
