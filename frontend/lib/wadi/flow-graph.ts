@@ -357,3 +357,45 @@ export function exitArms(icfg: Icfg): Map<string, IcfgEdge["kind"][]> {
   }
   return arms
 }
+
+/** What must be opened for a selection to become visible on the canvas. */
+export type Reveal =
+  { kind: "method"; id: string } | { kind: "run"; id: string }
+
+/**
+ * What must be drawn OPEN for `selectedNodeId` to appear on the canvas — or
+ * null when the selection is already drawn under its own id.
+ *
+ * A selection can arrive from outside the canvas: a click on a line in the
+ * source panel, a deep link, browser Back. Two things can hide it, and both
+ * read to the user as a dead click — the URL says `stmt:…`, source highlights
+ * the line, and nothing on the graph is ringed:
+ *
+ *  - the owning METHOD is collapsed to a summary card, so no statement of it
+ *    is drawn at all;
+ *  - the statement is inside a condensed RUN, which is drawn under the run's
+ *    id. The selection ring keys on node id, so a member's id matches nothing.
+ *
+ * Resolution is one step at a time and converges: opening the method rebuilds
+ * the graph, which may then reveal a run to open, which draws the statement.
+ */
+export function revealFor(
+  graph: FlowGraph,
+  icfg: Icfg,
+  selectedNodeId: string | null | undefined
+): Reveal | null {
+  if (!selectedNodeId) return null
+  const prefix = ["stmt:", "run:"].find((p) => selectedNodeId.startsWith(p))
+  if (!prefix) return null
+  const icfgId = selectedNodeId.slice(prefix.length)
+  for (const node of graph.nodes) {
+    if (node.type === "statement" && node.icfgNode.id === icfgId) return null
+    if (node.type === "condensed" && node.memberIds.includes(icfgId)) {
+      // Selecting the run node itself is a real selection of a drawn node;
+      // only a member hiding inside it needs the run opened.
+      return node.id === selectedNodeId ? null : { kind: "run", id: node.id }
+    }
+  }
+  const methodId = icfg.nodes.find((n) => n.id === icfgId)?.method.id
+  return methodId ? { kind: "method", id: methodId } : null
+}

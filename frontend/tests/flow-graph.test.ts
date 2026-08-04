@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 
 import type { Icfg } from "@/lib/generated/icfg.schema"
 import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
-import { buildFlowGraph } from "@/lib/wadi/flow-graph"
+import { buildFlowGraph, revealFor } from "@/lib/wadi/flow-graph"
 
 const FILE = "src/A.java"
 
@@ -235,5 +235,84 @@ describe("buildFlowGraph (§11 Phase 2.7 M3)", () => {
         (edge) => edge.kind === "call" && edge.target === "stmt:m2:s1"
       )
     ).toBe(true)
+  })
+})
+
+describe("revealFor — a selection must be drawn", () => {
+  test("opens the owning method when the statement is collapsed into a card", () => {
+    // The reported case: everything collapsed, a click on a line in the source
+    // panel selects `stmt:…`, and the canvas draws only summary cards — so
+    // nothing is ringed and the click reads as dead.
+    const graph = buildFlowGraph(icfg, remoteEdges, new Set(), new Set())
+    expect(revealFor(graph, icfg, "stmt:m1:b1")).toEqual({
+      kind: "method",
+      id: "m_1",
+    })
+    expect(revealFor(graph, icfg, "stmt:m2:s1")).toEqual({
+      kind: "method",
+      id: "m_2",
+    })
+  })
+
+  test("stays put when the statement is already drawn", () => {
+    const graph = buildFlowGraph(icfg, remoteEdges, new Set(["m_1"]), new Set())
+    expect(revealFor(graph, icfg, "stmt:m1:b1")).toBeNull()
+    // Its sibling method is still collapsed, so that one does open.
+    expect(revealFor(graph, icfg, "stmt:m2:s1")).toEqual({
+      kind: "method",
+      id: "m_2",
+    })
+  })
+
+  test("opens the condensed run hiding the statement", () => {
+    // The ring keys on node id: a run is drawn as `run:…`, so selecting a
+    // member `stmt:…` inside it matches nothing on screen.
+    const graph = buildFlowGraph(icfg, remoteEdges, new Set(["m_1"]), new Set())
+    expect(graph.nodes.some((node) => node.type === "condensed")).toBe(true)
+    expect(revealFor(graph, icfg, "stmt:m1:s2")).toEqual({
+      kind: "run",
+      id: "run:m1:s1",
+    })
+  })
+
+  test("selecting the run node itself does not force it open", () => {
+    const graph = buildFlowGraph(icfg, remoteEdges, new Set(["m_1"]), new Set())
+    expect(revealFor(graph, icfg, "run:m1:s1")).toBeNull()
+  })
+
+  test("converges: method first, then the run inside it", () => {
+    // Two steps, because runs only exist once the method is expanded.
+    const collapsed = buildFlowGraph(icfg, remoteEdges, new Set(), new Set())
+    const first = revealFor(collapsed, icfg, "stmt:m1:s2")
+    expect(first).toEqual({ kind: "method", id: "m_1" })
+
+    const expanded = buildFlowGraph(
+      icfg,
+      remoteEdges,
+      new Set(["m_1"]),
+      new Set()
+    )
+    const second = revealFor(expanded, icfg, "stmt:m1:s2")
+    expect(second).toEqual({ kind: "run", id: "run:m1:s1" })
+
+    const opened = buildFlowGraph(
+      icfg,
+      remoteEdges,
+      new Set(["m_1"]),
+      new Set(["run:m1:s1"])
+    )
+    expect(revealFor(opened, icfg, "stmt:m1:s2")).toBeNull()
+  })
+
+  test("ignores selections that are not statements", () => {
+    const graph = buildFlowGraph(icfg, remoteEdges, new Set(), new Set())
+    expect(revealFor(graph, icfg, "method:m_1")).toBeNull()
+    expect(revealFor(graph, icfg, "ghost:svc_x")).toBeNull()
+    expect(revealFor(graph, icfg, null)).toBeNull()
+  })
+
+  test("an unknown node id asks for nothing rather than guessing", () => {
+    const graph = buildFlowGraph(icfg, remoteEdges, new Set(), new Set())
+    expect(revealFor(graph, icfg, "stmt:does-not-exist")).toBeNull()
   })
 })
