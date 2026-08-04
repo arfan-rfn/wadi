@@ -3,6 +3,69 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.5.2 — 2026-08-04
+
+The endpoint workspace stops losing track of what you selected. Every change
+here is UI over unchanged data — no contract, schema, or analysis change, and
+nothing needs re-analysis.
+
+### Added
+- **The source panel shows whole methods, not whole files.** It rendered every
+  line of every touched file — 389 lines to show the 27 an endpoint runs, of
+  which ~7% carry a graph node. The unit of disclosure is now the method,
+  matching what the rest of the workspace already reasons in. Everything
+  between methods folds into a `⋯ N lines · a–b` strip that opens on click, and
+  the file header counts what is folded, so hidden is never silent (P10). A
+  method spans annotation through closing brace, joined from the entry and exit
+  node anchors: the assembler already anchors the exit node at Joern's
+  `method.lineNumberEnd`, so the real extent was in every existing artifact one
+  node away.
+- **Soft wrap, a filterable file index, a pinned method name, and marked
+  clickable lines** in the source panel. Wrap is a per-user preference in
+  localStorage, never the URL — how you read code is not what a shared link is
+  about. The file chips filter instead of scrolling, and yield automatically if
+  a selection targets a hidden file.
+- **Selecting a method shows on the canvas.** An expanded method draws no card,
+  so it had no selection ring: choosing one from the call tree or a call link
+  in source moved the URL and highlighted the source region while the graph
+  showed nothing. Lanes now carry their own selected state, and a lane header
+  click selects its method.
+
+### Changed
+- **Clicking a node opens the code, not a facts panel.** Selection landed on
+  the inspector's Selection tab, hiding the source panel that was already
+  tracking the selection. Every selection path — canvas, call tree, call links
+  inside source — now lands on Source, with one rule in the store rather than
+  one per caller. Remote-target ghosts keep the Selection tab: they have no
+  source of their own, and their resolution, confidence, and provenance are
+  stated nowhere else (P10).
+
+### Fixed
+- **A selection could point at something the canvas was not drawing.** Clicking
+  a line in source, following a deep link, or pressing Back selected a
+  statement whose method was collapsed — the URL said `stmt:…`, source
+  highlighted the line, and nothing on the graph was ringed. The canvas now
+  opens whatever hides the selection: the owning method, or the condensed run
+  holding it (runs are drawn under their own id, so a member's id matched
+  nothing). Resolution is one step at a time and converges.
+- **The graph did not always bring a selection into frame.** The rule tested a
+  node's centre point, so a lane with its middle on screen counted as visible
+  while its header sat above the pane. It now frames the node's full extent,
+  leaves the viewport alone when the node is already whole on screen, and
+  frames the top of anything taller than the pane.
+- **Duplicate governing-condition chips on remote targets.** A ghost unions
+  conditions across every call site reaching it, and several sites commonly sit
+  under the same branch. Undeduped, the two-chip budget spent both slots on one
+  condition and React saw two children with the same key. Deduping before the
+  cap also recovers a second, genuinely different condition the map was
+  dropping.
+- **A method beyond a truncated source window rendered the wrong code under its
+  name.** The orchestrator caps a source response at 2000 lines; a region
+  starting past that window is now dropped rather than clamped onto the last
+  loaded line.
+- **`scrollIntoView` is guarded as an optional call**, so an environment
+  without it cannot abort the render pass that opens a fold.
+
 ## 0.5.1 — 2026-08-04
 
 ### Fixed

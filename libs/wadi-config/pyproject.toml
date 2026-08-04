@@ -1,6 +1,6 @@
 [project]
 name = "wadi-config"
-version = "0.5.1"
+version = "0.5.2"
 description = "Wadi settings: the ONLY way services receive config (architecture.md §13)"
 requires-python = ">=3.12"
 dependencies = [
