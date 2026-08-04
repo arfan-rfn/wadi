@@ -1,4 +1,4 @@
-import { fireEvent, within } from "@testing-library/react"
+import { cleanup, fireEvent, within } from "@testing-library/react"
 import { afterEach, describe, expect, test, vi } from "vitest"
 
 import type { Icfg } from "@/lib/generated/icfg.schema"
@@ -20,7 +20,7 @@ const icfg = {
       kind: "entry",
       source_text: "<entry>",
       method: { id: "m_1", signature: "com.acme.FlowController.go" },
-      anchor: { file: FILE, start_line: 5, end_line: 5, variant: "original" },
+      anchor: { file: FILE, start_line: 1, end_line: 1, variant: "original" },
     },
     {
       id: "m1:n1",
@@ -30,6 +30,16 @@ const icfg = {
       source_text: "if (n < 0)",
       method: { id: "m_1", signature: "com.acme.FlowController.go" },
       anchor: { file: FILE, start_line: 2, end_line: 2, variant: "original" },
+    },
+    {
+      // The exit node carries the method's real last line — which is what lets
+      // the panel show a WHOLE method instead of stopping at the last executed
+      // statement.
+      id: "m1:exit",
+      kind: "exit",
+      source_text: "<exit>",
+      method: { id: "m_1", signature: "com.acme.FlowController.go" },
+      anchor: { file: FILE, start_line: 3, end_line: 3, variant: "original" },
     },
   ],
   edges: [],
@@ -47,6 +57,9 @@ function stubFetch(body: unknown, ok = true, status = 200) {
 }
 
 afterEach(() => {
+  // vitest runs without `globals`, so testing-library's auto-cleanup is off:
+  // without this every case searches the DOM of every case before it.
+  cleanup()
   vi.unstubAllGlobals()
 })
 
@@ -80,7 +93,8 @@ describe("SourceViewer honesty states (§11 Phase 2.8)", () => {
       <SourceViewer icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
     )
     expect(getAllByText(/FlowController\.java/).length).toBeGreaterThan(0)
-    expect(await findByText(/1 file touched/)).toBeInTheDocument()
+    // The chips filter now; "all N files" is the unfiltered state.
+    expect(await findByText(/all 1 file/)).toBeInTheDocument()
     // Shiki may split the line into token spans — match on textContent.
     const codeLines = await findAllByText(
       (_, element) =>
@@ -191,5 +205,119 @@ describe("SourceSnippet (drill-in peek)", () => {
         (element?.textContent?.includes("if (n < 0)") ?? false)
     )
     expect(highlighted.length).toBeGreaterThan(0)
+  })
+})
+
+// A 40-line file with one 5-line method: the panel exists to show the method,
+// not the 35 lines of imports and unrelated code around it.
+const LONG_FILE = "src/main/java/com/acme/Big.java"
+
+function longNode(id: string, kind: string, line: number) {
+  return {
+    id,
+    kind,
+    source_text: id,
+    method: { id: "m_1", signature: "com.acme.Big.handle" },
+    anchor: {
+      file: LONG_FILE,
+      start_line: line,
+      end_line: line,
+      variant: "original",
+    },
+  }
+}
+
+const longIcfg = {
+  schema_version: "1.11.0",
+  snapshot_id: "snap_1",
+  service_id: "svc_1",
+  endpoint_id: "ep_" + "0".repeat(16),
+  entry_node_id: "m1:entry",
+  nodes: [
+    longNode("m1:entry", "entry", 20),
+    longNode("m1:n1", "call", 22),
+    longNode("m1:exit", "exit", 24),
+  ],
+  edges: [],
+} as unknown as Icfg
+
+const longContent =
+  Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n") + "\n"
+
+/** Shiki tokenizes asynchronously and splits a line into token spans, so a
+ * plain string matcher races the highlighter. Match the CODE element itself —
+ * the same workaround the file's earlier cases use. */
+const codeLine = (text: string) => (_: string, element: Element | null) =>
+  element?.tagName === "CODE" && element.textContent === text
+
+describe("the source panel shows methods, not whole files", () => {
+  const stubLong = () =>
+    stubFetch({
+      file: LONG_FILE,
+      start_line: 1,
+      end_line: 40,
+      variant: "original",
+      content: longContent,
+      total_lines: 40,
+      truncated: false,
+    })
+
+  const renderLong = (selection?: {
+    file: string
+    startLine: number
+    endLine: number
+    focusLine: number
+  }) => {
+    stubLong()
+    return renderWithQuery(
+      <SourceViewer
+        icfg={longIcfg}
+        snapshotId="snap_1"
+        serviceId="svc_1"
+        active
+        selection={selection}
+      />
+    )
+  }
+
+  test("renders the whole method and folds everything else", async () => {
+    const { findByText, queryByText } = renderLong()
+    // The method, complete: declaration (20) through closing brace (24) — the
+    // exit anchor, not the last executed statement (22).
+    expect(await findByText(codeLine("line 20"))).toBeInTheDocument()
+    expect(await findByText(codeLine("line 24"))).toBeInTheDocument()
+    // …and nothing outside it.
+    expect(queryByText(codeLine("line 19"))).toBeNull()
+    expect(queryByText(codeLine("line 25"))).toBeNull()
+  })
+
+  test("the folds say exactly what they are hiding", async () => {
+    const { findByText } = renderLong()
+    expect(await findByText(/19 lines · 1–19/)).toBeInTheDocument()
+    expect(await findByText(/16 lines · 25–40/)).toBeInTheDocument()
+  })
+
+  test("clicking a fold shows the code it was hiding", async () => {
+    const { findByText, queryByText } = renderLong()
+    expect(queryByText(codeLine("line 5"))).toBeNull()
+    fireEvent.click(await findByText(/19 lines · 1–19/))
+    expect(await findByText(codeLine("line 5"))).toBeInTheDocument()
+    // The other fold stays shut — expanding is per-fold, not all-or-nothing.
+    expect(queryByText(codeLine("line 40"))).toBeNull()
+  })
+
+  test("a selection inside a fold opens it — never an unreachable line", async () => {
+    const { findByText } = renderLong({
+      file: LONG_FILE,
+      startLine: 33,
+      endLine: 33,
+      focusLine: 33,
+    })
+    expect(await findByText(codeLine("line 33"))).toBeInTheDocument()
+  })
+
+  test("names the enclosing method above its code", async () => {
+    const { findAllByText } = renderLong()
+    expect((await findAllByText(/Big\.handle/)).length).toBeGreaterThan(0)
   })
 })

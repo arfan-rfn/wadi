@@ -1,12 +1,15 @@
 "use client"
 
 // The one source renderer (§11 Phase 2.8): `SourceViewer` is the full-width
-// Source lens (every touched file, one scroller, sticky file headers) and
+// Source lens (one scroller, sticky file headers, a filterable file index) and
 // `SourceSnippet` is the anchor peek used by drill-ins — both share the same
 // shiki pipeline and line rendering, so code looks identical everywhere.
 // Source is fetched lazily on demand (§5.3); server-truncated windows page
-// honestly ("load more", never silence); untouched code is dimmed, never
-// hidden; generated variants are flagged.
+// honestly ("load more", never silence); generated variants are flagged.
+// The unit of disclosure is the METHOD (§11 M8): whole methods render,
+// everything between them folds into a strip that states its own line count
+// and opens on click — code is hidden, never silently (the file header counts
+// what is folded, and any selection landing inside a fold opens it).
 import {
   useCallback,
   useEffect,
@@ -21,10 +24,12 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   CornerDownRight,
   Database,
   Globe,
   MailWarning,
+  WrapText,
 } from "lucide-react"
 import { useTheme } from "next-themes"
 
@@ -45,9 +50,19 @@ import {
   type SourceFileSection,
   type SourceSelection,
 } from "@/lib/wadi/source-map"
+import {
+  buildSourceRows,
+  foldContaining,
+  readWrapPreference,
+  rowIndexForLine,
+  writeWrapPreference,
+  type SourceRow,
+} from "@/lib/wadi/source-rows"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const LINE_HEIGHT = 21
+/** Fold strips and method headers are one line tall plus their border. */
+const FOLD_HEIGHT = 22
 // Small files render every line in flow (cheap DOM, sticky headers for free);
 // only long files pay for virtualization.
 const VIRTUALIZE_THRESHOLD = 400
@@ -100,16 +115,21 @@ function useLineTokens(content: string, file: string) {
 function TokenLine({
   tokens,
   fallback,
+  wrap = false,
 }: {
   tokens: HighlightToken[] | undefined
   fallback: string
+  /** Wrapped code must be allowed to shrink; unwrapped code must not. */
+  wrap?: boolean
 }) {
   return (
-    // `shrink-0`, so the element sizes to its content and the row genuinely
-    // becomes wider than the column — that is what gives the code body
-    // something to scroll. `flex-1` would squeeze it back to the panel width
-    // and silently clip every long line instead.
-    <code className="shrink-0">
+    // Unwrapped: `shrink-0`, so the element sizes to its content and the row
+    // genuinely becomes wider than the column — that is what gives the code
+    // body something to scroll. `flex-1` would squeeze it back to the panel
+    // width and silently clip every long line instead.
+    // Wrapped: the opposite is required — it must shrink to the column so the
+    // text can break, and `min-w-0` is what lets a flex child do that at all.
+    <code className={wrap ? "min-w-0 flex-1" : "shrink-0"}>
       {tokens
         ? tokens.map((token, i) => (
             <span key={i} style={{ color: token.color }}>
@@ -262,6 +282,11 @@ export function SourceViewer({
   const onLayoutShift = useCallback(() => setLayoutRevision((r) => r + 1), [])
   const jumpSeq = useRef(0)
   const [jump, setJump] = useState<JumpTarget | null>(null)
+  // View preferences: remembered per user, not per URL — how you like to READ
+  // code is not part of what a shared link is about.
+  const [wrap, setWrap] = useState(() => readWrapPreference())
+  useEffect(() => writeWrapPreference(wrap), [wrap])
+  const [onlyFile, setOnlyFile] = useState<string | null>(null)
 
   const jumpTo = useCallback((file: string, line: number) => {
     jumpSeq.current += 1
@@ -271,6 +296,19 @@ export function SourceViewer({
   useEffect(() => {
     if (focus) jumpTo(focus.file, focus.line)
   }, [focus, jumpTo])
+
+  // A filter must never swallow a selection: if the graph sends the reader to
+  // a file the filter is hiding, the filter yields. Anything else reproduces
+  // the dead-click class this workspace has spent its life removing.
+  const targetFile = jump?.file ?? selection?.file ?? null
+  useEffect(() => {
+    if (targetFile && onlyFile && targetFile !== onlyFile) setOnlyFile(null)
+  }, [targetFile, onlyFile])
+
+  const visibleSections = useMemo(
+    () => (onlyFile ? sections.filter((s) => s.file === onlyFile) : sections),
+    [sections, onlyFile]
+  )
 
   // A new selection scrolls its code into view. Keyed on the region itself,
   // so re-selecting the same node does not yank the scroll position back.
@@ -305,19 +343,52 @@ export function SourceViewer({
     // the tab bar and file index off-screen with it.
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <nav className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
-        <span className="mr-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {sections.length} file{sections.length === 1 ? "" : "s"} touched
-        </span>
+        {/* The chips FILTER rather than scroll. Four files concatenated into
+            one column is what made this panel feel like a document dump; being
+            able to say "just this file" is the cheapest way out of it. */}
+        <button
+          onClick={() => setOnlyFile(null)}
+          className={cn(
+            "rounded-md border px-2 py-0.5 text-2xs transition-colors",
+            onlyFile === null
+              ? "border-primary/40 bg-primary/10 text-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          all {sections.length} file{sections.length === 1 ? "" : "s"}
+        </button>
         {sections.map((section) => (
           <button
             key={section.file}
-            onClick={() => jumpTo(section.file, section.touched[0]?.[0] ?? 1)}
-            className="rounded-md border px-2 py-0.5 font-mono text-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            onClick={() => {
+              setOnlyFile(section.file)
+              jumpTo(section.file, section.shown[0]?.[0] ?? 1)
+            }}
+            className={cn(
+              "rounded-md border px-2 py-0.5 font-mono text-2xs transition-colors",
+              onlyFile === section.file
+                ? "border-primary/40 bg-primary/10 text-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
             title={section.file}
           >
             {fileBasename(section.file)}
           </button>
         ))}
+        <button
+          onClick={() => setWrap((v) => !v)}
+          aria-pressed={wrap}
+          className={cn(
+            "ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-2xs transition-colors",
+            wrap
+              ? "border-primary/40 bg-primary/10 text-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+          title="Wrap long lines instead of scrolling sideways"
+        >
+          <WrapText className="size-3" aria-hidden />
+          wrap
+        </button>
       </nav>
       {/* ONE scroller for every file — sticky headers live in normal flow, so
           there is no nested scrolling anywhere in the lens. */}
@@ -325,7 +396,7 @@ export function SourceViewer({
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
       >
-        {sections.map((section) => (
+        {visibleSections.map((section) => (
           <SourceFileView
             key={section.file}
             section={section}
@@ -334,6 +405,7 @@ export function SourceViewer({
             active={active}
             jump={jump?.file === section.file ? jump : null}
             selection={selection?.file === section.file ? selection : null}
+            wrap={wrap}
             onJump={jumpTo}
             onJumpNode={onJumpNode}
             onSelectNode={onSelectNode}
@@ -354,6 +426,7 @@ function SourceFileView({
   active,
   jump,
   selection,
+  wrap,
   onJump,
   onJumpNode,
   onSelectNode,
@@ -367,6 +440,7 @@ function SourceFileView({
   active: boolean
   jump: JumpTarget | null
   selection: SourceSelection | null
+  wrap: boolean
   onJump: (file: string, line: number) => void
   onJumpNode?: (methodId: string) => void
   onSelectNode?: (icfgNodeId: string) => void
@@ -376,6 +450,7 @@ function SourceFileView({
 }) {
   const queryClient = useQueryClient()
   const sectionRef = useRef<HTMLElement>(null)
+  const headerRef = useRef<HTMLElement>(null)
   // Every touched file used to fetch AND shiki-tokenize on mount, so opening a
   // 20-file endpoint paid 20 whole-file requests and 20 synchronous
   // tokenizations before the reader looked at one of them — against §5.3,
@@ -433,9 +508,36 @@ function SourceFileView({
     : 0
   const tokens = useLineTokens(content, section.file)
 
-  // Offset of this section's body within the shared scroller — the
-  // virtualizer's scrollMargin. Re-measured whenever any sibling grows.
   const [scrollMargin, setScrollMargin] = useState(0)
+
+  // --- folding ---------------------------------------------------------------------
+  const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const rowModel = useMemo(
+    () =>
+      buildSourceRows(
+        lines.length,
+        section.shown,
+        expandedFolds,
+        section.methods
+      ),
+    [lines.length, section.shown, expandedFolds, section.methods]
+  )
+  const expandFold = useCallback((id: string) => {
+    setExpandedFolds((prev) => {
+      if (prev.has(id)) return prev
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+  }, [])
+
+  // Offset of this section's body within the shared scroller — the
+  // virtualizer's scrollMargin. Re-measured whenever this section or any
+  // sibling changes height, which now includes OPENING A FOLD: a fold is worth
+  // dozens of lines, and a stale margin puts every virtualized row in the
+  // sections below it at the wrong offset.
   useLayoutEffect(() => {
     const body = bodyRef.current
     const scroller = scrollRef.current
@@ -445,18 +547,33 @@ function SourceFileView({
         scroller.getBoundingClientRect().top +
         scroller.scrollTop
     )
-  }, [layoutRevision, lines.length, scrollRef])
+  }, [layoutRevision, rowModel.rows.length, scrollRef])
 
-  // Growing (source loaded, window appended) shifts every later section.
+  // Growing (source loaded, window appended, fold opened) shifts every later
+  // section.
   useEffect(() => {
     onLayoutShift()
-  }, [lines.length, onLayoutShift])
+  }, [rowModel.rows.length, onLayoutShift])
 
-  const virtualize = lines.length > VIRTUALIZE_THRESHOLD
+  // A folded line is not an unreachable one: whatever the graph selects, or a
+  // jump asks for, opens its fold. Same rule the canvas follows for a
+  // selection inside a collapsed method (§11 Phase 2.8).
+  const wantedLine = jump?.line ?? selection?.focusLine ?? null
+  useEffect(() => {
+    if (wantedLine === null) return
+    const fold = foldContaining(rowModel.rows, wantedLine)
+    if (fold) expandFold(fold.id)
+  }, [wantedLine, rowModel, expandFold])
+
+  // Wrapping makes row heights variable, which a fixed-size virtualizer cannot
+  // model — and folding already cuts most files below the threshold, so the
+  // two rarely meet. Correctness over cleverness: wrap turns virtualization off.
+  const virtualize = !wrap && rowModel.rows.length > VIRTUALIZE_THRESHOLD
   const virtualizer = useVirtualizer({
-    count: virtualize ? lines.length : 0,
+    count: virtualize ? rowModel.rows.length : 0,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => LINE_HEIGHT,
+    estimateSize: (index) =>
+      rowModel.rows[index]?.kind === "line" ? LINE_HEIGHT : FOLD_HEIGHT,
     overscan: 30,
     scrollMargin,
     initialRect: { width: 800, height: 600 },
@@ -464,23 +581,28 @@ function SourceFileView({
 
   useEffect(() => {
     if (jump && lines.length > 0) {
-      if (virtualize) {
-        virtualizer.scrollToIndex(Math.max(jump.line - 1, 0), {
-          align: "center",
-        })
-      } else {
-        bodyRef.current?.children[Math.max(jump.line - 1, 0)]?.scrollIntoView({
-          block: "center",
-          // Never sideways: a line wider than the panel would otherwise drag
-          // the whole column — tab bar, gutter and all — out of view.
-          inline: "nearest",
-        })
+      // Rows stopped being lines when folding landed: never index by line.
+      const row = rowIndexForLine(rowModel, jump.line)
+      if (row !== null) {
+        if (virtualize) {
+          virtualizer.scrollToIndex(row, { align: "center" })
+        } else {
+          // Optional CALL, not just optional access: jsdom implements no
+          // `scrollIntoView`, and an exception here would abort the render
+          // pass that opens the fold this jump is aiming at.
+          bodyRef.current?.children[row]?.scrollIntoView?.({
+            block: "center",
+            // Never sideways: a line wider than the panel would otherwise drag
+            // the whole column — tab bar, gutter and all — out of view.
+            inline: "nearest",
+          })
+        }
       }
       setFlashLine(jump.line)
       const timer = setTimeout(() => setFlashLine(null), 1600)
       return () => clearTimeout(timer)
     }
-  }, [jump, lines.length, virtualize, virtualizer])
+  }, [jump, lines.length, virtualize, virtualizer, rowModel])
 
   const [loadMoreError, setLoadMoreError] = useState<Error | null>(null)
   const loadMore = async () => {
@@ -511,6 +633,45 @@ function SourceFileView({
     }
   }
 
+  // Which method is under the panel's top edge — the pinned label in the file
+  // header. Read from the DOM rather than from scroll arithmetic: rows can be
+  // virtualized, folded, or wrapped, and only the DOM knows their real heights.
+  const [currentMethod, setCurrentMethod] = useState<string | null>(null)
+  useEffect(() => {
+    const scroller = scrollRef.current
+    const body = bodyRef.current
+    if (!scroller || !body) return
+    let frame = 0
+    const update = () => {
+      frame = 0
+      // Measured, not assumed: the header wraps at narrow widths, and a stale
+      // constant would name the wrong method near every boundary.
+      const top =
+        scroller.getBoundingClientRect().top +
+        (headerRef.current?.offsetHeight ?? 0)
+      let seen: string | null = null
+      for (const header of body.querySelectorAll<HTMLElement>(
+        "[data-method-start]"
+      )) {
+        if (header.getBoundingClientRect().top > top) break
+        seen = header.dataset.methodStart ?? null
+      }
+      const line = seen === null ? null : Number(seen)
+      setCurrentMethod(
+        section.methods.find((m) => m.startLine === line)?.signature ?? null
+      )
+    }
+    const onScroll = () => {
+      if (frame === 0) frame = requestAnimationFrame(update)
+    }
+    update()
+    scroller.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      scroller.removeEventListener("scroll", onScroll)
+      if (frame !== 0) cancelAnimationFrame(frame)
+    }
+  }, [scrollRef, section.methods, rowModel])
+
   const callLinksByLine = useMemo(() => {
     const map = new Map<number, CallLink[]>()
     for (const link of section.callLinks) {
@@ -525,14 +686,30 @@ function SourceFileView({
     <section ref={sectionRef} className="min-w-0 border-b last:border-b-0">
       {/* Sticky within the ONE scroller — the current file stays named while
           its code scrolls (context is never lost). */}
-      <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b bg-background/95 px-3 py-1.5 backdrop-blur">
-        <span className="truncate font-mono text-xs">{section.file}</span>
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b bg-background/95 px-3 py-1.5 backdrop-blur"
+      >
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate font-mono text-xs">{section.file}</span>
+          {currentMethod ? (
+            // The enclosing method, pinned: scrolling into the middle of a file
+            // must never leave the reader asking which method they are in.
+            <span className="shrink-0 truncate font-mono text-2xs text-muted-foreground">
+              › {shortSignature(currentMethod)}
+            </span>
+          ) : null}
+        </span>
         <span className="shrink-0 font-mono text-2xs text-muted-foreground">
           {section.methods.length} method
           {section.methods.length === 1 ? "" : "s"} · {section.touched.length}{" "}
           executed region
           {section.touched.length === 1 ? "" : "s"}
           {totalLines ? ` · ${totalLines} lines` : ""}
+          {/* Say what is NOT on screen. The panel shows whole methods, so a
+              header reporting only the file's length reads as a claim to be
+              showing all of it (P10). */}
+          {rowModel.foldedCount > 0 ? ` · ${rowModel.foldedCount} folded` : ""}
         </span>
       </header>
 
@@ -573,40 +750,48 @@ function SourceFileView({
           }
         >
           {virtualize
-            ? virtualizer.getVirtualItems().map((row) => (
+            ? virtualizer.getVirtualItems().map((item) => (
                 <div
-                  key={row.key}
+                  key={item.key}
                   className="absolute left-0 w-full"
                   style={{
                     top: 0,
-                    transform: `translateY(${row.start - scrollMargin}px)`,
-                    height: row.size,
+                    transform: `translateY(${item.start - scrollMargin}px)`,
+                    height: item.size,
                   }}
                 >
-                  <SourceLine
-                    index={row.index}
+                  <SourceRowView
+                    row={rowModel.rows[item.index]}
                     section={section}
                     lines={lines}
                     tokens={tokens}
                     callLinksByLine={callLinksByLine}
                     flashLine={flashLine}
                     selection={selection}
+                    wrap={wrap}
+                    onExpandFold={expandFold}
                     onJump={onJump}
                     onJumpNode={onJumpNode}
                     onSelectNode={onSelectNode}
                   />
                 </div>
               ))
-            : lines.map((_, index) => (
-                <SourceLine
-                  key={index}
-                  index={index}
+            : rowModel.rows.map((row) => (
+                <SourceRowView
+                  key={
+                    row.kind === "line"
+                      ? `l${row.line}`
+                      : `${row.kind}${row.id}`
+                  }
+                  row={row}
                   section={section}
                   lines={lines}
                   tokens={tokens}
                   callLinksByLine={callLinksByLine}
                   flashLine={flashLine}
                   selection={selection}
+                  wrap={wrap}
+                  onExpandFold={expandFold}
                   onJump={onJump}
                   onJumpNode={onJumpNode}
                   onSelectNode={onSelectNode}
@@ -644,30 +829,112 @@ function SourceFileView({
   )
 }
 
-function SourceLine({
-  index,
+/** One rendered row: a line, a collapsed fold, or a method header. */
+function SourceRowView({
+  row,
   section,
   lines,
   tokens,
   callLinksByLine,
   flashLine,
   selection,
+  wrap,
+  onExpandFold,
   onJump,
   onJumpNode,
   onSelectNode,
 }: {
-  index: number
+  row: SourceRow | undefined
   section: SourceFileSection
   lines: string[]
   tokens: HighlightToken[][] | null
   callLinksByLine: Map<number, CallLink[]>
   flashLine: number | null
   selection: SourceSelection | null
+  wrap: boolean
+  onExpandFold: (id: string) => void
   onJump: (file: string, line: number) => void
   onJumpNode?: (methodId: string) => void
   onSelectNode?: (icfgNodeId: string) => void
 }) {
-  const lineNo = index + 1
+  if (!row) return null
+
+  if (row.kind === "fold") {
+    const count = row.endLine - row.startLine + 1
+    return (
+      <button
+        onClick={() => onExpandFold(row.id)}
+        className="flex h-[22px] w-full items-center gap-2 border-y border-dashed border-border/60 bg-muted/20 px-2 text-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+        title={`Show lines ${row.startLine}–${row.endLine}`}
+      >
+        <ChevronsUpDown className="size-3 shrink-0" aria-hidden />
+        <span className="font-mono">
+          {count} line{count === 1 ? "" : "s"} · {row.startLine}–{row.endLine}
+        </span>
+      </button>
+    )
+  }
+
+  if (row.kind === "method") {
+    return (
+      // NOT sticky: the code body sets `overflow-x`, which makes it its own
+      // scroll container, so a sticky child pins to the body rather than to the
+      // panel and ends up overlapping its own first line. The pinned copy lives
+      // in the file header instead, which sits outside that container.
+      <div
+        data-method-start={row.startLine}
+        className="flex h-[22px] items-center gap-1.5 border-t bg-muted/30 px-2"
+      >
+        <span className="truncate font-mono text-2xs font-medium text-foreground/80">
+          {shortSignature(row.signature)}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <SourceLine
+      lineNo={row.line}
+      section={section}
+      lines={lines}
+      tokens={tokens}
+      callLinksByLine={callLinksByLine}
+      flashLine={flashLine}
+      selection={selection}
+      wrap={wrap}
+      onJump={onJump}
+      onJumpNode={onJumpNode}
+      onSelectNode={onSelectNode}
+    />
+  )
+}
+
+function SourceLine({
+  lineNo,
+  section,
+  lines,
+  tokens,
+  callLinksByLine,
+  flashLine,
+  selection,
+  wrap,
+  onJump,
+  onJumpNode,
+  onSelectNode,
+}: {
+  lineNo: number
+  section: SourceFileSection
+  lines: string[]
+  tokens: HighlightToken[][] | null
+  callLinksByLine: Map<number, CallLink[]>
+  flashLine: number | null
+  selection: SourceSelection | null
+  wrap: boolean
+  onJump: (file: string, line: number) => void
+  onJumpNode?: (methodId: string) => void
+  onSelectNode?: (icfgNodeId: string) => void
+}) {
+  const index = lineNo - 1
   const touched = isTouched(section, lineNo)
   const marks = section.marks.get(lineNo)
   const links = callLinksByLine.get(lineNo)
@@ -703,7 +970,12 @@ function SourceLine({
           : undefined
       }
       className={cn(
-        "group flex h-[21px] w-max min-w-full items-center whitespace-pre pr-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+        "group flex w-max min-w-full pr-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+        // Wrapping trades the fixed row height for readability: no line is cut
+        // off at the right edge, and nothing has to be scrolled sideways.
+        wrap
+          ? "w-full whitespace-pre-wrap break-words"
+          : "h-[21px] items-center whitespace-pre",
         touched ? "bg-primary/[0.04]" : "opacity-50",
         inSelection && "bg-primary/10",
         isAnchor && "bg-primary/20",
@@ -731,15 +1003,21 @@ function SourceLine({
       >
         {lineNo}
       </span>
+      {/* The mark strip doubles as the "this line is on the graph" tell: only
+          ~7% of a file carries an ICFG node, and without a visible difference a
+          click on any other line reads as broken rather than as inert. */}
       <span
         className={cn(
-          "mr-2 h-full w-[3px] shrink-0 rounded-full",
-          marks ? markClass(marks) : "bg-transparent"
+          "mr-2 w-[3px] shrink-0 rounded-full",
+          wrap ? "h-[21px] self-start" : "h-full",
+          marks ? markClass(marks) : "bg-transparent",
+          selectable && "ring-1 ring-inset ring-foreground/20"
         )}
       />
       <TokenLine
         tokens={tokens?.[index] ?? undefined}
         fallback={lines[index]}
+        wrap={wrap}
       />
       {SinkIcon ? (
         <SinkIcon className="ml-1 size-3 shrink-0 text-red-500/80" />

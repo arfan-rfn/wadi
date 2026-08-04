@@ -41,6 +41,15 @@ export interface SourceFileSection {
   methods: MethodSpan[]
   /** Merged, sorted [start, end] line intervals the endpoint executes. */
   touched: Array<[number, number]>
+  /**
+   * Merged line intervals the panel renders by default: every method in the
+   * closure, WHOLE — annotations through closing brace — not just the lines
+   * that execute. A method cut off at its last executed statement loses its
+   * signature's closing brace and reads as broken code; the endpoint's story
+   * is told in methods, so methods are the unit of disclosure. Everything
+   * outside these intervals collapses into an expandable strip.
+   */
+  shown: Array<[number, number]>
   /** Marks keyed by anchor start line. */
   marks: Map<number, LineMark[]>
   callLinks: CallLink[]
@@ -71,6 +80,11 @@ export function buildSourceMap(icfg: Icfg): SourceFileSection[] {
   const nodeById = new Map<string, IcfgNode>()
   const spansByFile = new Map<string, Array<[number, number]>>()
   const methodEnd = new Map<string, number>()
+  // A method's real last line. The assembler anchors the EXIT node at the
+  // method's `line_end` (Joern's `method.lineNumberEnd`) while the ENTRY node
+  // gets the declaration line alone — so the closing brace is already in every
+  // artifact, one node away from where anyone thought to look.
+  const methodClose = new Map<string, number>()
 
   const sectionFor = (file: string): SourceFileSection => {
     let section = byFile.get(file)
@@ -80,6 +94,7 @@ export function buildSourceMap(icfg: Icfg): SourceFileSection[] {
         order: byFile.size,
         methods: [],
         touched: [],
+        shown: [],
         marks: new Map(),
         callLinks: [],
       }
@@ -90,7 +105,17 @@ export function buildSourceMap(icfg: Icfg): SourceFileSection[] {
 
   for (const node of icfg.nodes) {
     nodeById.set(node.id, node)
-    if (node.kind === "exit") continue
+    if (node.kind === "exit") {
+      methodClose.set(
+        node.method.id,
+        Math.max(
+          methodClose.get(node.method.id) ?? 0,
+          node.anchor.end_line,
+          node.anchor.start_line
+        )
+      )
+      continue
+    }
     const file = node.anchor.file
     const section = sectionFor(file)
     const start = node.anchor.start_line
@@ -152,9 +177,19 @@ export function buildSourceMap(icfg: Icfg): SourceFileSection[] {
     section.methods = section.methods
       .map((m) => ({
         ...m,
-        endLine: Math.max(m.endLine, methodEnd.get(m.id) ?? m.endLine),
+        // The exit anchor when there is one; otherwise the furthest statement,
+        // which is all an abstract or interface method (no body, no exit node)
+        // ever has. Never guess past what the artifact states (P10).
+        endLine: Math.max(
+          m.endLine,
+          methodEnd.get(m.id) ?? m.endLine,
+          methodClose.get(m.id) ?? m.endLine
+        ),
       }))
       .sort((a, b) => a.startLine - b.startLine)
+    section.shown = mergeIntervals(
+      section.methods.map((m) => [m.startLine, m.endLine])
+    )
     section.callLinks.sort((a, b) => a.line - b.line)
   }
 
