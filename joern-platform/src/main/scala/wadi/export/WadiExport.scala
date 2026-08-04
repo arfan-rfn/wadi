@@ -65,8 +65,12 @@ object WadiExport {
     * flag on cycle-closing loop edges; if-without-else emits an explicit
     * `false` join edge; catch/finally handlers are graph nodes; sinks inside
     * conditions/throws/for-headers attach to their statement.
+    *
+    * 2.6.0: (additive, §5.4.2 T5) a call binding to no method in the export
+    * carries `unbound_reason`, so a consumer can tell a Lombok-generated
+    * accessor (no source exists) from a hole in the map.
     */
-  val ExportSchemaVersion = "2.5.0"
+  val ExportSchemaVersion = "2.6.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -472,7 +476,7 @@ object WadiExport {
     val enclosing = nearestEnclosingStatement(method, statementIds)
 
     val nodeObjs = statements.map { statement =>
-      val (kind, construct, callInfo) = classify(statement, exportedMethodIds, enclosing)
+      val (kind, construct, callInfo) = classify(cpg, statement, exportedMethodIds, enclosing)
       callInfo.flatMap(_.sinkTag).foreach { case (sinkKind, sinkCall) =>
         sinkRows ++= sinkRowsFor(cpg, statement.id, method.id, sinkKind, sinkCall)
       }
@@ -489,7 +493,8 @@ object WadiExport {
           "callee_full_name" -> info.calleeFullName,
           "callee_id"        -> info.calleeId.map(id => ujson.Num(id.toDouble)).getOrElse(ujson.Null),
           "resolved"         -> info.resolved,
-          "via_di"           -> info.viaDi
+          "via_di"           -> info.viaDi,
+          "unbound_reason"   -> info.unboundReason.map(ujson.Str.apply).getOrElse(ujson.Null)
         )
       }
       statement match {
@@ -895,8 +900,111 @@ object WadiExport {
     calleeId: Option[Long],
     resolved: Boolean,
     viaDi: Boolean,
-    sinkTag: Option[(String, Call)]
+    sinkTag: Option[(String, Call)],
+    unboundReason: Option[String]
   )
+
+  /** Why a call binds to no method in this export (§5.4.2 T5, export 2.6.0).
+    *
+    * P10: an unresolved call is a legitimate, common outcome — 92.9% of them
+    * on the train-ticket benchmark are Lombok accessors that HAVE no source —
+    * but a consumer that is only told "unresolved" cannot tell a generated
+    * accessor from a hole in the map. The reason travels with the call so a
+    * dead-end node can say why it dead-ends.
+    */
+  private object UnboundReason {
+    /** Accessor/constructor synthesized by Lombok. Analysis runs on ORIGINAL
+      * source (`--delombok-mode types-only`, §5.3) so anchors stay on
+      * committed text — which means these bodies do not exist to show. */
+    val LombokGenerated = "lombok-generated"
+
+    /** Declared by an external supertype (Spring Data `CrudRepository.save`,
+      * etc.); the first-party interface only inherits it. */
+    val InheritedExternal = "inherited-external"
+
+    /** `values`/`valueOf` on an enum — emitted by javac, absent from source. */
+    val CompilerGenerated = "compiler-generated"
+
+    /** The declaring type is not in this CPG at all (JDK, framework, or a
+      * type no staged source root provides). */
+    val ThirdParty = "third-party"
+
+    /** The declaring type IS first-party and declares this name, but the
+      * receiver type could not be bound to one overload — never guessed. */
+    val AmbiguousOverload = "ambiguous-overload"
+
+    /** First-party type in the CPG that declares no such method: a
+      * static-import attributed to the importing class, or a receiver type
+      * javasrc2cpg could not bind. */
+    val UnresolvedReceiver = "unresolved-receiver"
+  }
+
+  /** Class-level Lombok annotations, grouped by what each generates. */
+  private val LombokAccessorAnnotations =
+    Set("Data", "Getter", "Setter", "Value")
+  private val LombokConstructorAnnotations =
+    Set("Data", "Value", "Builder", "AllArgsConstructor", "NoArgsConstructor", "RequiredArgsConstructor")
+  private val LombokObjectMethodAnnotations =
+    Set("Data", "Value", "EqualsAndHashCode", "ToString")
+  private val ObjectMethodNames = Set("toString", "equals", "hashCode", "canEqual")
+
+  /** Split `com.foo.Bar.baz:java.lang.Object()` into its declaring type and
+    * method name. javasrc2cpg renders unresolved callees the same way, with
+    * `<unresolvedSignature>` in place of the parameter list.
+    */
+  private def splitCalleeName(fullName: String): Option[(String, String)] = {
+    val beforeSignature = fullName.indexOf(':') match {
+      case -1 => fullName
+      case i  => fullName.substring(0, i)
+    }
+    beforeSignature.lastIndexOf('.') match {
+      case -1 => None
+      case i  => Some((beforeSignature.substring(0, i), beforeSignature.substring(i + 1)))
+    }
+  }
+
+  private def classLevelAnnotations(td: TypeDecl): Set[String] =
+    td.ast.isAnnotation.filter(_.astParent == td).name.toSet
+
+  /** A Java enum is a TypeDecl inheriting `java.lang.Enum` — javasrc2cpg
+    * exposes no `isEnum` flag, and `values`/`valueOf` exist only in bytecode.
+    */
+  private def isEnumTypeDecl(td: TypeDecl): Boolean =
+    td.inheritsFromTypeFullName.exists(_.startsWith("java.lang.Enum"))
+
+  /** Would Lombok have generated `methodName` for this type, given its
+    * class-level annotations? Deliberately conservative: a name that does not
+    * match a generated shape falls through to the other reasons.
+    */
+  private def isLombokGenerated(td: TypeDecl, methodName: String): Boolean = {
+    val annotations = classLevelAnnotations(td)
+    def has(group: Set[String]) = annotations.exists(group.contains)
+    val isAccessor =
+      (methodName.startsWith("get") || methodName.startsWith("set") ||
+        methodName.startsWith("is")) && methodName.length > 2
+    if (isAccessor && has(LombokAccessorAnnotations)) true
+    else if (methodName == "<init>" && has(LombokConstructorAnnotations)) true
+    else if (ObjectMethodNames.contains(methodName) && has(LombokObjectMethodAnnotations)) true
+    else if ((methodName == "builder" || methodName == "build") && annotations.contains("Builder")) true
+    else false
+  }
+
+  /** Classify a call that resolved to no internal method (§5.4.2 T5). */
+  private def unboundReasonOf(cpg: Cpg, call: Call): Option[String] =
+    splitCalleeName(call.methodFullName).map { case (typeName, methodName) =>
+      cpg.typeDecl.fullNameExact(typeName).filterNot(_.isExternal).headOption match {
+        case None => UnboundReason.ThirdParty
+        case Some(td) =>
+          val declared = td.method.nameExact(methodName).l
+          if (declared.sizeIs > 1) UnboundReason.AmbiguousOverload
+          else if (declared.nonEmpty) UnboundReason.UnresolvedReceiver
+          else if (isLombokGenerated(td, methodName)) UnboundReason.LombokGenerated
+          else if (isEnumTypeDecl(td) && (methodName == "values" || methodName == "valueOf"))
+            UnboundReason.CompilerGenerated
+          else if (inheritsExternalSupertype(td)) UnboundReason.InheritedExternal
+          else UnboundReason.UnresolvedReceiver
+      }
+    }
 
   private def constructOf(cs: ControlStructure): String = cs.controlStructureType match {
     case "IF"       => "if"
@@ -916,6 +1024,7 @@ object WadiExport {
   }
 
   private def classify(
+    cpg: Cpg,
     statement: AstNode,
     exportedMethodIds: Set[Long],
     enclosing: mutable.Map[Long, Long]
@@ -930,11 +1039,11 @@ object WadiExport {
         // Calls the node itself owns (condition, for-header, throw argument —
         // never body statements, which claim their own): sinks inside
         // conditions and throws finally produce sink rows (§5.2.8).
-        (kind, Some(constructOf(cs)), primaryCallOf(statement, exportedMethodIds, enclosing))
+        (kind, Some(constructOf(cs)), primaryCallOf(cpg, statement, exportedMethodIds, enclosing))
       case _ if statement.label == "RETURN" =>
-        ("return", None, primaryCallOf(statement, exportedMethodIds, enclosing))
+        ("return", None, primaryCallOf(cpg, statement, exportedMethodIds, enclosing))
       case _ =>
-        primaryCallOf(statement, exportedMethodIds, enclosing) match {
+        primaryCallOf(cpg, statement, exportedMethodIds, enclosing) match {
           case some @ Some(_) => ("call", None, some)
           case None           => ("statement", None, None)
         }
@@ -945,6 +1054,7 @@ object WadiExport {
     * double-claim their statements' calls).
     */
   private def primaryCallOf(
+    cpg: Cpg,
     statement: AstNode,
     exportedMethodIds: Set[Long],
     enclosing: mutable.Map[Long, Long]
@@ -968,12 +1078,16 @@ object WadiExport {
         .orElse(internalCallees.headOption)
       val viaDi = call.tag.nameExact("wadi-di").nonEmpty
       val sink  = call.tag.nameExact("sink").value.headOption.map(kind => (kind, call))
+      val calleeId = concrete.map(_.id).filter(exportedMethodIds.contains)
       CallInfo(
         calleeFullName = concrete.map(_.fullName).getOrElse(call.methodFullName),
-        calleeId = concrete.map(_.id).filter(exportedMethodIds.contains),
+        calleeId = calleeId,
         resolved = internalCallees.nonEmpty,
         viaDi = viaDi,
-        sinkTag = sink
+        sinkTag = sink,
+        // Classify only what actually dead-ends for a consumer: an internal
+        // callee the export still carries needs no excuse (§5.4.2 T5).
+        unboundReason = if (calleeId.isEmpty) unboundReasonOf(cpg, call) else None
       )
     }
   }

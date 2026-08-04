@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from wadi_contracts import (
     BranchCondition,
+    CalleeUnboundReason,
     CfgAnomaly,
     Confidence,
     DataModel,
@@ -54,6 +55,9 @@ from wadi_joern_client.export import (
     ServiceExport,
     SinkValueConfidence,
 )
+from wadi_joern_client.export import (
+    UnboundReason as ExportUnboundReason,
+)
 from wadi_worker.auth_merge import merge_endpoint_auth
 from wadi_worker.cfg_invariants import aggregate_anomalies, check_cfg
 
@@ -65,6 +69,19 @@ _CFG_KIND_TO_ICFG = {
     CfgNodeKind.LOOP: IcfgNodeKind.LOOP,
     CfgNodeKind.CALL: IcfgNodeKind.CALL,
     CfgNodeKind.RETURN: IcfgNodeKind.RETURN,
+}
+
+# §5.4.2 T5: the export's vocabulary is the contract's vocabulary. Mapped
+# explicitly rather than by value coercion so a new reason code added upstream
+# fails a test here instead of silently reaching the UI unlabelled.
+_UNBOUND_REASON = {
+    ExportUnboundReason.LOMBOK_GENERATED: CalleeUnboundReason.LOMBOK_GENERATED,
+    ExportUnboundReason.INHERITED_EXTERNAL: CalleeUnboundReason.INHERITED_EXTERNAL,
+    ExportUnboundReason.COMPILER_GENERATED: CalleeUnboundReason.COMPILER_GENERATED,
+    ExportUnboundReason.THIRD_PARTY: CalleeUnboundReason.THIRD_PARTY,
+    ExportUnboundReason.AMBIGUOUS_OVERLOAD: CalleeUnboundReason.AMBIGUOUS_OVERLOAD,
+    ExportUnboundReason.UNRESOLVED_RECEIVER: CalleeUnboundReason.UNRESOLVED_RECEIVER,
+    None: None,
 }
 
 _EDGE_LABEL_TO_KIND = {
@@ -281,6 +298,7 @@ class Assembler:
             site_sinks = sinks_by_node.get(cfg_node.id, [])
             kind = _CFG_KIND_TO_ICFG[cfg_node.kind]
             callee_ref: MethodRef | None = None
+            unbound_reason: CalleeUnboundReason | None = None
             remote_ids: list[str] = []
             mq_id: str | None = None
             sink_kind: SinkKind | None = None
@@ -292,6 +310,13 @@ class Assembler:
                 callee_ref = self._callee_ref(
                     cfg_node.call.callee_id, cfg_node.call.callee_full_name, methods
                 )
+                # 1.12.0 (§5.4.2 T5): only carry the reason where the callee is
+                # genuinely absent from THIS graph. A call can be unbound in the
+                # export yet land inside the endpoint closure anyway (the export
+                # is service-wide, the closure is endpoint-scoped), and labelling
+                # a node whose interior the user can open would be a lie.
+                if cfg_node.call.callee_id not in closure_set:
+                    unbound_reason = _UNBOUND_REASON.get(cfg_node.call.unbound_reason)
             # Sinks anchor to the coarsened statement, which is not always a
             # CALL node — `return restTemplate.getForObject(...)` coarsens to
             # RETURN, `if (client.get(...) != null)` to BRANCH. Gating on CALL
@@ -334,6 +359,7 @@ class Assembler:
                         else None
                     ),
                     callee=callee_ref,
+                    callee_unbound_reason=unbound_reason if callee_ref is not None else None,
                     sink=sink_kind,
                     remote_call_id=remote_ids[0] if remote_ids else None,
                     remote_call_ids=remote_ids,
