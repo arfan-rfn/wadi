@@ -82,3 +82,16 @@ class StitchRepository:
         if doc is None:
             return None
         return from_doc(CoverageReport, doc)
+
+    async def coverage_report_exists(self, snapshot_id: str) -> bool:
+        """Has the stitcher run for this snapshot?
+
+        Separate from :meth:`get_coverage_report` because the report carries
+        unbounded lists — placeholders, unresolved sites, cfg anomalies — and
+        reading the whole document just to compare it against None deserializes
+        thousands of nested models to answer a yes/no question.
+        """
+        doc = await self._db.collection(COVERAGE_REPORTS).find_one(
+            {"snapshot_id": snapshot_id}, projection={"_id": 1}
+        )
+        return doc is not None

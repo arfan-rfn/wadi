@@ -683,7 +683,7 @@
   "$id": "https://trywadi.com/schemas/1.12.0/endpoint_detail.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Everything the endpoint workspace needs in one read (\u00a711 Phase 2.8).\n\n1.11.0 (additive): replaces the client-side compose of endpoint +\nservice-wide remote edges. The ICFG stays its own fetch (it is large) and\nsource stays on demand (\u00a75.3) \u2014 ``touched_files`` carries names, never\ncontent. ``stitched=False`` means the stitcher has not run: the empty\n``outbound`` is 'not yet', never 'none'; ``icfg_available=False`` states\nthat no flow graph exists for this endpoint (P10).",
+  "description": "Everything the endpoint workspace needs in one read (\u00a711 Phase 2.8).\n\n1.11.0 (additive): replaces the client-side compose of endpoint +\nservice-wide remote edges. The ICFG stays its own fetch (it is large) and\nsource stays on demand (\u00a75.3) \u2014 ``touched_files`` carries names, never\ncontent.\n\n**Reading the empty lists.** Each one has a flag that says whether empty\nmeans 'none' or 'not known', because on their own they cannot be told\napart (P10):\n\n* ``outbound`` \u2014 ``stitched=False`` means the stitcher has not run, so\n  empty is 'not yet'.\n* ``touched_files`` and ``unopenable_calls`` \u2014 both are DERIVED from the\n  ICFG, so ``icfg_available=False`` makes empty 'not known'. Without that\n  reading, an endpoint with no flow graph reports the same shape as one\n  whose every call opens cleanly.",
   "properties": {
     "endpoint": {
       "$ref": "#/$defs/Endpoint"
@@ -691,6 +691,19 @@
     "icfg_available": {
       "title": "Icfg Available",
       "type": "boolean"
+    },
+    "icfg_schema_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "1.12.0: the schema version of the ICFG `touched_files` and `unopenable_calls` were derived from; None when no ICFG exists. Reason codes arrived in 1.12.0, so an older graph yields an empty `unopenable_calls` that means 'not recorded', not 'none' (P10).",
+      "title": "Icfg Schema Version"
     },
     "outbound": {
       "items": {
@@ -727,7 +740,7 @@
       "type": "array"
     },
     "unopenable_calls": {
-      "description": "1.12.0 (\u00a75.4.2 T5): how many call sites in this endpoint's flow have no interior to open, by reason. This is the endpoint-level honesty surface \u2014 `analysis_coverage` sizes reachability system-wide and the coverage report's unresolved counts cover only cross-service edges, so intra-service unopenable calls were counted NOWHERE per endpoint. Empty means every call in the flow opens, or the ICFG predates 1.12.0.",
+      "description": "1.12.0 (\u00a75.4.2 T5): how many call sites in this endpoint's flow have no interior to open, by reason. This is the endpoint-level honesty surface \u2014 `analysis_coverage` sizes reachability system-wide and the coverage report's unresolved counts cover only cross-service edges, so intra-service unopenable calls were counted NOWHERE per endpoint. Derived from the ICFG, so read it with `icfg_available`: empty with a graph present means every call opens; empty WITHOUT one means not known. `icfg_schema_version` distinguishes a pre-1.12.0 graph, which carried no reasons to count.",
       "items": {
         "$ref": "#/$defs/UnopenableCallCount"
       },

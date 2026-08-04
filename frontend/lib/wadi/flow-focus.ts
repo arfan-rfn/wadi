@@ -62,12 +62,19 @@ export function hiddenNodeIds(
     if (node.type === "ghost") continue
     if (!visibleMethods.has(node.methodId)) hidden.add(node.id)
   }
+  // Index the remote edges once: scanning the full edge list per ghost is
+  // O(ghosts x edges), and this runs on every focus change.
+  const callersByGhost = new Map<string, string[]>()
+  for (const edge of graph.edges) {
+    if (edge.kind !== "remote") continue
+    const sources = callersByGhost.get(edge.target)
+    if (sources) sources.push(edge.source)
+    else callersByGhost.set(edge.target, [edge.source])
+  }
   for (const node of graph.nodes) {
     if (node.type !== "ghost") continue
-    const callers = graph.edges.filter(
-      (edge) => edge.kind === "remote" && edge.target === node.id
-    )
-    if (callers.length > 0 && callers.every((edge) => hidden.has(edge.source)))
+    const callers = callersByGhost.get(node.id)
+    if (callers && callers.every((source) => hidden.has(source)))
       hidden.add(node.id)
   }
   return hidden

@@ -48,7 +48,9 @@ export function CallTree({
     )
   }
   return (
-    <div className="overflow-y-auto py-1">
+    // No scroller here — the rail that mounts this owns the one scroll
+    // container; a second one nested inside it traps the wheel.
+    <div className="py-1">
       <TreeRow
         node={root}
         depth={0}

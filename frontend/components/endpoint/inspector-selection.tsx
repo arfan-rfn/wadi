@@ -55,7 +55,7 @@ function ResolutionLine({ edge }: { edge: OutboundEdge }) {
         <Chip variant="mono">{edge.provenance}</Chip>
       </div>
       {edge.evidence ? (
-        <p className="font-mono text-[10px] text-muted-foreground">
+        <p className="break-all font-mono text-2xs text-muted-foreground">
           {edge.evidence}
         </p>
       ) : null}
@@ -227,7 +227,9 @@ export function InspectorSelection({
       {icfgNode.condition?.expression ? (
         <p className="flex items-start gap-1.5 text-2xs text-muted-foreground">
           <Split className="mt-0.5 size-3 shrink-0" aria-hidden />
-          <span>
+          {/* `min-w-0 break-all`: the inspector body clips overflow, so an
+              expression with no space in it would be silently cut off. */}
+          <span className="min-w-0 break-all">
             branches on{" "}
             <code className="font-mono">{icfgNode.condition.expression}</code>
           </span>

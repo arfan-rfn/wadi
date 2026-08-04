@@ -17,7 +17,6 @@ const chipVariants = cva(
   {
     variants: {
       variant: {
-        neutral: "border-transparent bg-muted text-muted-foreground",
         outline: "text-muted-foreground",
         unknown: "border-dashed border-destructive/60 text-destructive",
         condition:
@@ -45,4 +44,4 @@ function Chip({
   )
 }
 
-export { Chip, chipVariants }
+export { Chip }

@@ -133,6 +133,14 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
             />
             <div className="min-h-0 flex-1 overflow-y-auto">
               {services.isPending ? <ListSkeleton /> : null}
+              {/* Without this the pane renders BLANK on a failed fetch: every
+                  empty state below is guarded on `.data`, which is undefined,
+                  and `isPending` is already false. */}
+              {services.isError ? (
+                <EmptyState>
+                  Could not load services — {(services.error as Error).message}
+                </EmptyState>
+              ) : null}
               {filteredServices.map((service) => (
                 <button
                   key={service.service_id}
@@ -194,6 +202,12 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
             />
             <div className="min-h-0 flex-1 overflow-y-auto">
               {endpoints.isPending && serviceId ? <ListSkeleton /> : null}
+              {endpoints.isError ? (
+                <EmptyState>
+                  Could not load endpoints —{" "}
+                  {(endpoints.error as Error).message}
+                </EmptyState>
+              ) : null}
               {!serviceId ? (
                 <EmptyState>
                   Select a service to browse its endpoints — open one for the

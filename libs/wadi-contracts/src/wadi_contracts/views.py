@@ -119,9 +119,18 @@ class EndpointDetailView(WadiModel):
     1.11.0 (additive): replaces the client-side compose of endpoint +
     service-wide remote edges. The ICFG stays its own fetch (it is large) and
     source stays on demand (§5.3) — ``touched_files`` carries names, never
-    content. ``stitched=False`` means the stitcher has not run: the empty
-    ``outbound`` is 'not yet', never 'none'; ``icfg_available=False`` states
-    that no flow graph exists for this endpoint (P10).
+    content.
+
+    **Reading the empty lists.** Each one has a flag that says whether empty
+    means 'none' or 'not known', because on their own they cannot be told
+    apart (P10):
+
+    * ``outbound`` — ``stitched=False`` means the stitcher has not run, so
+      empty is 'not yet'.
+    * ``touched_files`` and ``unopenable_calls`` — both are DERIVED from the
+      ICFG, so ``icfg_available=False`` makes empty 'not known'. Without that
+      reading, an endpoint with no flow graph reports the same shape as one
+      whose every call opens cleanly.
     """
 
     snapshot_id: str
@@ -141,8 +150,20 @@ class EndpointDetailView(WadiModel):
             "honesty surface — `analysis_coverage` sizes reachability system-"
             "wide and the coverage report's unresolved counts cover only "
             "cross-service edges, so intra-service unopenable calls were "
-            "counted NOWHERE per endpoint. Empty means every call in the flow "
-            "opens, or the ICFG predates 1.12.0."
+            "counted NOWHERE per endpoint. Derived from the ICFG, so read it "
+            "with `icfg_available`: empty with a graph present means every "
+            "call opens; empty WITHOUT one means not known. "
+            "`icfg_schema_version` distinguishes a pre-1.12.0 graph, which "
+            "carried no reasons to count."
+        ),
+    )
+    icfg_schema_version: str | None = Field(
+        default=None,
+        description=(
+            "1.12.0: the schema version of the ICFG `touched_files` and "
+            "`unopenable_calls` were derived from; None when no ICFG exists. "
+            "Reason codes arrived in 1.12.0, so an older graph yields an empty "
+            "`unopenable_calls` that means 'not recorded', not 'none' (P10)."
         ),
     )
 

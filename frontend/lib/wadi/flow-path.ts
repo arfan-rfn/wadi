@@ -25,8 +25,10 @@ export function pathToEntry(icfg: Icfg, fromNodeId: string): FlowPath {
   const previous = new Map<string, string>()
   const queue = [fromNodeId]
   const seen = new Set([fromNodeId])
-  while (queue.length > 0) {
-    const current = queue.shift() as string
+  // Cursor rather than `shift()`: dequeuing off the front of a growing array
+  // is O(n), which would make the trace quadratic in closure size.
+  for (let head = 0; head < queue.length; head++) {
+    const current = queue[head]
     if (current === icfg.entry_node_id) break
     for (const { source } of incoming.get(current) ?? []) {
       if (seen.has(source)) continue

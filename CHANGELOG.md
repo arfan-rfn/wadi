@@ -39,10 +39,17 @@ rebuilds the canvas around execution order (architecture.md §11 Phase 2.8).
   source) and Endpoint (auth evidence, params, request/response shapes,
   outbound calls).
 - **`GET /snapshots/{id}/endpoints/{eid}/detail`** → `EndpointDetailView`
-  (contracts 1.11.0, additive, read-only): the endpoint plus its outbound
+  (**contracts 1.12.0**, additive, read-only): the endpoint plus its outbound
   edges filtered server-side to that endpoint's call sites, the touched-file
   list, and honest `icfg_available` / `stitched` flags. Source stays fetched
   on demand.
+- **Contracts 1.12.0 — the honesty fields (§5.4.2 T5).** `IcfgNode` gains an
+  optional `callee_unbound_reason`, and `EndpointDetailView` gains
+  `unopenable_calls` (per-reason counts for this endpoint's flow) and
+  `icfg_schema_version`. All additive and absent-means-unknown: on an ICFG
+  written before 1.12.0 a null reason and an empty `unopenable_calls` mean
+  "not recorded", never "this call opens fine" — which is why the view states
+  the graph's version rather than leaving the empty list to be misread.
 
 ### Changed
 - The main UI is now a **snapshot overview home** (`/s/{snapshot}`) —
@@ -58,7 +65,6 @@ rebuilds the canvas around execution order (architecture.md §11 Phase 2.8).
   the nodes that subscribe to it, and expanding one method re-lays out only
   that lane.
 
-### Changed
 - **The source panel is now the workspace's default surface, not a
   destination.** The inspector opens on `Source`, and whatever is selected on
   the canvas or in the call tree is highlighted in it immediately — no "open in
@@ -157,6 +163,23 @@ rebuilds the canvas around execution order (architecture.md §11 Phase 2.8).
   walking a declaring type's whole AST once per call site — on the benchmark
   that is 1,881 call sites over 617 distinct callees, 92.9% of them taking the
   annotation-scanning path.
+- **Failures no longer read as analysis results (P10).** An unreachable API
+  rendered "No systems yet — run `wadi analyze .`" on the landing page and a
+  blank pane in the services browser; a failed ICFG fetch rendered "no flow
+  graph was extracted for this endpoint — the handler could not be resolved",
+  blaming the analysis for a network error. An ELK rejection left a silent
+  blank canvas, and a failed "load more lines" reset its spinner and showed
+  nothing, so the file appeared to end. Each now says what actually happened.
+- **The MCP roll-up carries `callee_unbound_reason`.** REST and the frontend
+  got the T5 reasons; the agent-facing surface did not, and an agent has less
+  recourse than a human — it cannot go and look.
+- Endpoint-workspace load no longer fetches and syntax-highlights every
+  touched file up front (§5.3 says on demand; it was doing all of them), and
+  the `/detail` aggregate parallelizes its four independent reads and tests for
+  the coverage report's existence instead of deserializing it whole.
+- `Cmd+F`/`Ctrl+F` no longer re-roots the canvas while you reach for Find, the
+  canvas shows a focus ring for the keymap it owns, and a line of code is
+  reachable by keyboard as well as by click.
 
 ### Removed
 - The single-route explorer, its detail pane, the second (unhighlighted)

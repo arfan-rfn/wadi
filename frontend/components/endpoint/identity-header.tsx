@@ -14,7 +14,11 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import type { EndpointDetailView, Icfg } from "@/lib/wadi/api"
+import {
+  wadiApiPaths,
+  type EndpointDetailView,
+  type Icfg,
+} from "@/lib/wadi/api"
 import { rollupMethods, shortSignature } from "@/lib/wadi/rollup"
 import { LENSES, snapshotPath, type Lens } from "@/lib/wadi/routes"
 import { Chip } from "@/components/ui/chip"
@@ -124,7 +128,7 @@ export function IdentityHeader({
           ))}
         </div>
         <a
-          href={`/api/v1/snapshots/${snapshotId}/endpoints/${endpointId}/icfg`}
+          href={wadiApiPaths.icfg(snapshotId, endpointId)}
           download={`${endpointId}-icfg.json`}
           className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title="Download the raw ICFG artifact"

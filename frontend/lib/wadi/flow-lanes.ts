@@ -17,22 +17,26 @@ import { layoutGeneric, type LayoutedNode } from "./elk-layout"
 import type { FlowGraph, FlowGraphNode } from "./flow-graph"
 import { rollupMethods } from "./rollup"
 
-// Column geometry (canvas coordinates).
+// Column geometry (canvas coordinates). Only GUTTER_WIDTH escapes the module
+// — the canvas draws the call gutter against it.
 export const GUTTER_WIDTH = 64
-export const LANE_X = GUTTER_WIDTH + 16
-export const LANE_PADDING = 16
-export const LANE_HEADER_HEIGHT = 36
-export const LANE_GAP = 48
-export const LANE_MIN_WIDTH = 280
-export const RAIL_GAP = 96
-export const GHOST_HEIGHT = 44
-export const GHOST_GAP = 16
+const LANE_X = GUTTER_WIDTH + 16
+const LANE_PADDING = 16
+const LANE_HEADER_HEIGHT = 36
+const LANE_GAP = 48
+const LANE_MIN_WIDTH = 280
+const RAIL_GAP = 96
+const GHOST_HEIGHT = 44
+const GHOST_GAP = 16
 
 /** Above this many drawn statements the default state falls back to
  * fully-collapsed (budget honesty over dogma). */
 export const DEFAULT_EXPAND_STATEMENT_BUDGET = 60
 
-export function nodeSize(node: FlowGraphNode): {
+// Keep in step with the node components' fixed box classes (method-lane.tsx
+// `h-[72px] w-[240px]`, statement-node, condensed-node, ghost-node): ELK lays
+// out against these numbers, so a divergence lays out to the wrong boxes.
+function nodeSize(node: FlowGraphNode): {
   width: number
   height: number
 } {

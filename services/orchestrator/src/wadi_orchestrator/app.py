@@ -451,19 +451,27 @@ def create_app(
         list derived from ICFG anchors. The ICFG itself and source content
         stay separate on-demand fetches (§5.3).
         """
-        endpoint = await state.artifacts.get_endpoint(snapshot_id, endpoint_id)
+        # Four reads that take no input from each other, so they go together:
+        # this is the workspace's one blocking fetch and the latency is the
+        # reader's. `endpoint.service_id` is the only value anything downstream
+        # depends on, which is why the boundary and the graph read follow.
+        # 404s are raised after the gather, in the same order as before.
+        endpoint, snapshot, icfg, stitched = await asyncio.gather(
+            state.artifacts.get_endpoint(snapshot_id, endpoint_id),
+            state.snapshots.get(snapshot_id),
+            state.artifacts.get_icfg(snapshot_id, endpoint_id),
+            state.stitch.coverage_report_exists(snapshot_id),
+        )
         if endpoint is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"endpoint {endpoint_id} not found in snapshot {snapshot_id}",
             )
-        snapshot = await state.snapshots.get(snapshot_id)
         if snapshot is None:
             raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
         boundary = await state.artifacts.get_service_boundary(snapshot_id, endpoint.service_id)
         service_name = boundary.name if boundary is not None else endpoint.service_id
 
-        icfg = await state.artifacts.get_icfg(snapshot_id, endpoint_id)
         remote_call_ids: set[str] = set()
         touched: dict[tuple[str, SourceVariant], int] = {}
         unopenable: Counter[CalleeUnboundReason] = Counter()
@@ -487,8 +495,7 @@ def create_app(
                 touched[key] = touched.get(key, 0) + 1
 
         # Pre-stitch, outbound is 'not yet', never 'none' (P10) — same rule as
-        # the system graph.
-        stitched = await state.stitch.get_coverage_report(snapshot_id) is not None
+        # the system graph. (`stitched` came back from the gather above.)
         outbound: list[RemoteEdgeItem] = []
         if stitched and remote_call_ids:
             edges_view = await state.graph.remote_edges(snapshot_id, endpoint.service_id)
@@ -515,6 +522,9 @@ def create_app(
                 UnopenableCallCount(reason=reason, call_count=count)
                 for reason, count in unopenable.most_common()
             ],
+            # Lets a consumer tell "every call opens" from "this graph predates
+            # the accounting", which the empty list alone cannot say (P10).
+            icfg_schema_version=icfg.schema_version if icfg is not None else None,
         )
 
     # --- system graph (§11 Phase 2.7 M4) ----------------------------------------------

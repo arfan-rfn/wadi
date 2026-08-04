@@ -60,8 +60,11 @@ export function CanvasToolbar({
   const overBudget = projectedFullCount > NODE_BUDGET
 
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="relative">
+    // `min-w-0` + `flex-wrap`: the centre panel resizes down to 26%, and a
+    // nowrap row of nine controls would otherwise spill across the separator
+    // into the inspector — the same class as the long-code-line blowout.
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <div className="relative min-w-0 flex-1 basis-32">
         <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
         <Input
           value={search}
@@ -72,10 +75,10 @@ export function CanvasToolbar({
           }}
           placeholder="Search flow ( / )"
           data-flow-search
-          className="h-7 w-48 border-none bg-muted/50 pl-7 text-xs shadow-none focus-visible:ring-1"
+          className="h-7 w-full min-w-0 max-w-48 border-none bg-muted/50 pl-7 text-xs shadow-none focus-visible:ring-1"
         />
         {search.trim().length >= 2 ? (
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-2xs tabular-nums text-muted-foreground">
             {matches.length === 0
               ? "0/0"
               : `${activeMatch + 1}/${matches.length}`}

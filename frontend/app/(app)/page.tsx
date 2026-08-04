@@ -46,6 +46,20 @@ function RootResolver() {
     router.replace(snapshotPath(target.id))
   }, [legacySnapshot, legacyEndpoint, target, router])
 
+  // A failed fetch is not an answer about the data. Rendering "no systems yet"
+  // when the orchestrator is unreachable states an analysis result nobody
+  // obtained, on the page every visitor lands on first (P10).
+  const failure = requestedSystem
+    ? ((scoped.error ?? null) as Error | null)
+    : global.error
+  if (!legacySnapshot && failure) {
+    return (
+      <EmptyState className="p-8">
+        Could not reach the wadi API — {failure.message}. This says nothing
+        about whether snapshots exist; retry once it is back.
+      </EmptyState>
+    )
+  }
   if (global.noSystems) {
     return (
       <EmptyState className="p-8">

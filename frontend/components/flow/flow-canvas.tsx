@@ -141,11 +141,23 @@ function FlowCanvasInner({
     graph: FlowGraph
     layout: FlowLayout
   } | null>(null)
+  const [layoutError, setLayoutError] = useState<Error | null>(null)
   useEffect(() => {
     let cancelled = false
-    void layoutLanes(graph, icfg).then((layout) => {
-      if (!cancelled) setLayoutState({ graph, layout })
-    })
+    setLayoutError(null)
+    layoutLanes(graph, icfg).then(
+      (layout) => {
+        if (!cancelled) setLayoutState({ graph, layout })
+      },
+      // ELK is a lazily-imported chunk, so this rejects on a chunk-load
+      // failure after a deploy as well as on a malformed graph. Unhandled,
+      // layoutState stays null, every node list comes back empty, and the
+      // reader gets a blank canvas that reports nothing — the worst possible
+      // failure mode for a surface whose claim is that it maps the code.
+      (cause: unknown) => {
+        if (!cancelled) setLayoutError(cause as Error)
+      }
+    )
     return () => {
       cancelled = true
     }
@@ -332,7 +344,6 @@ function FlowCanvasInner({
             : { sourceHandle: "s-bottom", targetHandle: "t-top" }
       const bothHot =
         traceNodes !== null &&
-        traceNodes !== undefined &&
         traceNodes.has(edge.source) &&
         traceNodes.has(edge.target)
       return {
@@ -518,6 +529,9 @@ function FlowCanvasInner({
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       const state = storeApi.getState()
+      // Never shadow a browser or OS shortcut: unguarded, Cmd+F / Ctrl+F
+      // silently re-rooted the canvas while the user was reaching for Find.
+      if (event.metaKey || event.ctrlKey || event.altKey) return
       if (
         event.key === "/" &&
         !(event.target as HTMLElement).closest("input")
@@ -610,11 +624,20 @@ function FlowCanvasInner({
             />
           ) : null}
         </div>
+        {layoutError ? (
+          <p className="border-b bg-destructive/5 px-4 py-2 text-sm text-destructive">
+            Could not lay the graph out — {layoutError.message}. The flow was
+            extracted; only its drawing failed. Source view still works.
+          </p>
+        ) : null}
         <div
           ref={wrapperRef}
           tabIndex={0}
           onKeyDown={onKeyDown}
-          className="relative min-h-0 flex-1 outline-none"
+          // The canvas owns the keymap (arrows step nodes, Enter expands, `f`
+          // focuses, `/` searches), so a keyboard user has to be able to see
+          // that it holds focus — hence a ring rather than a bare outline-none.
+          className="relative min-h-0 flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <ReactFlow
             nodes={rfNodes}

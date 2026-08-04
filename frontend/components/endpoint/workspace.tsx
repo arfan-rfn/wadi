@@ -95,10 +95,14 @@ export function EndpointWorkspace({
           </p>
         ) : null}
         <WorkspaceInterior
-          snapshotId={snapshotId}
           detail={detail.data}
           icfg={icfg.data}
           icfgLoading={detail.data?.icfg_available !== false && icfg.isPending}
+          // A failed fetch is not an extraction result. Without this the
+          // canvas falls through to "no flow graph was extracted for this
+          // endpoint — the handler could not be resolved into an ICFG", which
+          // blames the analysis for a network error (P10).
+          icfgError={icfg.isError ? (icfg.error as Error) : null}
         />
       </div>
     </WorkspaceStoreContext.Provider>

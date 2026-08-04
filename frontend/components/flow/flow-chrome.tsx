@@ -36,7 +36,7 @@ const HIDDEN_HANDLE = {
 
 /** Invisible anchor handles: top/bottom for intra-method flow, left for the
  * call gutter, right for the ghost rail and back-edge loops. */
-export function NodeAnchors() {
+function NodeAnchors() {
   return (
     <>
       <Handle
@@ -94,9 +94,13 @@ export const NodeShell = memo(function NodeShell({
 }) {
   const selected = useWorkspaceStore((s) => s.selectedNodeId === id)
   return (
+    // No `role="button"`: the shell wraps real <button> children (expand,
+    // focus, drill-in), and an interactive control inside a role=button is
+    // invalid ARIA. Keyboard reaches nodes through the canvas keymap; what the
+    // shell owes assistive tech is its SELECTED state, which the ring alone
+    // conveys only visually.
     <div
-      role="button"
-      tabIndex={-1}
+      aria-current={selected ? "true" : undefined}
       onClick={onClick}
       className={cn(
         "relative rounded-md border bg-card text-card-foreground transition-[box-shadow,opacity]",

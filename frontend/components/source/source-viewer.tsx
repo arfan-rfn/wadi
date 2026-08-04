@@ -375,7 +375,37 @@ function SourceFileView({
   onLayoutShift: () => void
 }) {
   const queryClient = useQueryClient()
-  const first = useSourceFile(active, snapshotId, serviceId, section.file)
+  const sectionRef = useRef<HTMLElement>(null)
+  // Every touched file used to fetch AND shiki-tokenize on mount, so opening a
+  // 20-file endpoint paid 20 whole-file requests and 20 synchronous
+  // tokenizations before the reader looked at one of them — against §5.3,
+  // which says source is fetched on demand. Sticky once seen: scrolling back
+  // must not re-fetch.
+  const [seen, setSeen] = useState(false)
+  useEffect(() => {
+    if (seen || !active) return
+    const node = sectionRef.current
+    if (!node) return
+    // No IntersectionObserver (jsdom, very old browsers): load eagerly. The
+    // laziness is an optimisation; never showing the code is not an option.
+    if (typeof IntersectionObserver === "undefined") {
+      setSeen(true)
+      return
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setSeen(true)
+      },
+      // A screen of lead time, so the code is there before it is scrolled to.
+      { root: scrollRef.current ?? null, rootMargin: "600px 0px" }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [seen, active, scrollRef])
+  // A jump or a selection targets THIS file, so it is wanted whether or not it
+  // has been scrolled near — that is the click that asked for it.
+  const wanted = active && (seen || jump !== null || selection !== null)
+  const first = useSourceFile(wanted, snapshotId, serviceId, section.file)
   const [extra, setExtra] = useState<SourceView[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -397,6 +427,10 @@ function SourceFileView({
   const lastWindow = windows[windows.length - 1]
   const totalLines = lastWindow?.total_lines ?? lines.length
   const hasMore = lastWindow?.truncated === true
+  // The server's own window size, read back off the window it sent.
+  const windowSize = lastWindow
+    ? lastWindow.end_line - lastWindow.start_line + 1
+    : 0
   const tokens = useLineTokens(content, section.file)
 
   // Offset of this section's body within the shared scroller — the
@@ -448,9 +482,11 @@ function SourceFileView({
     }
   }, [jump, lines.length, virtualize, virtualizer])
 
+  const [loadMoreError, setLoadMoreError] = useState<Error | null>(null)
   const loadMore = async () => {
     if (!lastWindow) return
     setLoadingMore(true)
+    setLoadMoreError(null)
     try {
       const nextStart = lastWindow.end_line + 1
       const next = await queryClient.fetchQuery({
@@ -465,6 +501,11 @@ function SourceFileView({
         staleTime: Infinity,
       })
       setExtra((prev) => [...prev, next])
+    } catch (cause) {
+      // Swallowed, this just resets the spinner and shows nothing — and the
+      // reader concludes the file ends there. Every other fetch in this file
+      // reports its failure; so does this one.
+      setLoadMoreError(cause as Error)
     } finally {
       setLoadingMore(false)
     }
@@ -481,7 +522,7 @@ function SourceFileView({
   }, [section.callLinks])
 
   return (
-    <section className="min-w-0 border-b last:border-b-0">
+    <section ref={sectionRef} className="min-w-0 border-b last:border-b-0">
       {/* Sticky within the ONE scroller — the current file stays named while
           its code scrolls (context is never lost). */}
       <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b bg-background/95 px-3 py-1.5 backdrop-blur">
@@ -502,8 +543,10 @@ function SourceFileView({
         </p>
       ) : null}
 
-      {first.isPending && active ? (
-        <div className="space-y-1.5 p-3">
+      {/* Reserves height for a file not yet fetched, so the sections below it
+          do not all pile into the viewport at once and defeat the laziness. */}
+      {(first.isPending && wanted) || (active && !wanted) ? (
+        <div className="min-h-60 space-y-1.5 p-3">
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-5/6" />
           <Skeleton className="h-4 w-2/3" />
@@ -582,11 +625,19 @@ function SourceFileView({
             <ArrowUpRight className="size-3" />
             {loadingMore
               ? "Loading…"
-              : `Load lines ${(lastWindow?.end_line ?? 0) + 1}–${Math.min(
-                  (lastWindow?.end_line ?? 0) + 2000,
+              : // Window size comes from the window the server actually sent,
+                // not a client-side copy of its cap — a copy would make this
+                // label lie the moment the cap moved.
+                `Load lines ${(lastWindow?.end_line ?? 0) + 1}–${Math.min(
+                  (lastWindow?.end_line ?? 0) + windowSize,
                   totalLines ?? Infinity
                 )} of ${totalLines}`}
           </button>
+          {loadMoreError ? (
+            <p className="text-2xs text-destructive">
+              Could not load more — {loadMoreError.message}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -633,10 +684,26 @@ function SourceLine({
   const isAnchor = inSelection && selection.focusLine === lineNo
   const selectable = onSelectNode != null && marks != null && marks.length > 0
   return (
+    // Clicking a line selects its node — the reverse half of the 1:1 mapping.
+    // The graph→source direction is keyboard-reachable through the canvas
+    // keymap, so this direction needs a keyboard path too, and the selected
+    // region needs to be announced rather than conveyed only by a tint.
     <div
+      role={selectable ? "button" : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      aria-pressed={selectable ? inSelection : undefined}
       onClick={selectable ? () => onSelectNode(marks[0].nodeId) : undefined}
+      onKeyDown={
+        selectable
+          ? (event) => {
+              if (event.key !== "Enter" && event.key !== " ") return
+              event.preventDefault()
+              onSelectNode(marks[0].nodeId)
+            }
+          : undefined
+      }
       className={cn(
-        "group flex h-[21px] w-max min-w-full items-center whitespace-pre pr-2",
+        "group flex h-[21px] w-max min-w-full items-center whitespace-pre pr-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
         touched ? "bg-primary/[0.04]" : "opacity-50",
         inSelection && "bg-primary/10",
         isAnchor && "bg-primary/20",

@@ -51,11 +51,12 @@ export function WorkspaceInterior({
   detail,
   icfg,
   icfgLoading,
+  icfgError,
 }: {
-  snapshotId: string
   detail: EndpointDetailView | undefined
   icfg: Icfg | undefined
   icfgLoading: boolean
+  icfgError: Error | null
 }) {
   const storeApi = useWorkspaceStoreApi()
   const lens = useWorkspaceStore((s) => s.lens)
@@ -161,6 +162,8 @@ export function WorkspaceInterior({
         className="flex min-h-0 min-w-0 flex-col"
       >
         <PanelHeader label="Call tree" />
+        {/* One scroller only — CallTree used to declare its own, which nested
+            a scroll container inside this one. */}
         {icfg ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <CallTree
@@ -189,6 +192,13 @@ export function WorkspaceInterior({
           sourcePane
         ) : icfg && remoteEdgesView ? (
           <FlowCanvas icfg={icfg} remoteEdges={remoteEdgesView} />
+        ) : icfgError ? (
+          // "Not fetched" and "not extracted" are different facts, and only
+          // one of them is about the code (P10).
+          <EmptyState className="p-6">
+            Could not load the flow graph — {icfgError.message}. This says
+            nothing about whether one was extracted; retry to find out.
+          </EmptyState>
         ) : (
           <EmptyState className="p-6">
             No flow graph was extracted for this endpoint — the handler could

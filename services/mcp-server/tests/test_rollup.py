@@ -3,7 +3,7 @@
 import pytest
 from mcp_support import make_two_method_icfg
 
-from wadi_contracts import Icfg, IcfgNodeKind
+from wadi_contracts import CalleeUnboundReason, Icfg, IcfgNodeKind
 from wadi_mcp.rollup import method_rollup, statement_detail
 from wadi_testing.builders import make_endpoint, make_service, make_snapshot, make_system
 
@@ -54,6 +54,32 @@ class TestMethodRollup:
         remote = next(c for c in service["calls"] if c.get("sink") == "http-client")
         assert remote["remote_call_id"].startswith("rc_")
         assert "callee_id" not in remote
+
+    def test_an_unopenable_callee_says_why(self, icfg: Icfg) -> None:
+        """§5.4.2 T5 — a `callee_id` with no entry in `methods` is a dead end.
+
+        An agent reading over MCP cannot go and look at the canvas, so a
+        target it cannot open has to state its reason here or it is
+        indistinguishable from a hole in the map (P10).
+        """
+        nodes = [
+            n.model_copy(update={"callee_unbound_reason": CalleeUnboundReason.LOMBOK_GENERATED})
+            if n.callee is not None
+            else n
+            for n in icfg.nodes
+        ]
+        rollup = method_rollup(icfg.model_copy(update={"nodes": nodes}))
+        labelled = [
+            call for method in rollup["methods"] for call in method["calls"] if "callee_id" in call
+        ]
+        assert labelled, "expected at least one call with a callee"
+        assert all(c["callee_unbound_reason"] == "lombok-generated" for c in labelled)
+
+    def test_a_callee_that_opens_carries_no_reason(self, icfg: Icfg) -> None:
+        rollup = method_rollup(icfg)
+        for method in rollup["methods"]:
+            for call in method["calls"]:
+                assert "callee_unbound_reason" not in call
 
     def test_statement_counts_present(self, icfg: Icfg) -> None:
         rollup = method_rollup(icfg)

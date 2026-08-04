@@ -28,7 +28,11 @@ export function useSnapshots(systemId: string | null) {
  * no snapshots and six others do.
  *
  * `pending` stays true until every system has reported, so the caller never
- * renders an empty state over a half-loaded fan-out.
+ * renders an empty state over a half-loaded fan-out. A system whose snapshot
+ * list FAILED has also not reported, and it is surfaced rather than dropped:
+ * routing off the survivors would silently forward past the very system the
+ * user was looking for, and answering "no snapshots" because the API is down
+ * states an analysis result that was never obtained (P10).
  */
 export function useNewestSnapshot() {
   const systems = useSystems()
@@ -40,13 +44,14 @@ export function useNewestSnapshot() {
     })),
   })
 
-  const pending =
-    systems.isPending || results.some((r) => r.isPending && !r.isError)
+  const pending = systems.isPending || results.some((r) => r.isPending)
+  const error = systems.error ?? results.find((r) => r.isError)?.error ?? null
   const snapshots = results.flatMap((r) => r.data ?? [])
   return {
     pending,
-    noSystems: !systems.isPending && systemIds.length === 0,
-    snapshot: pending ? null : newestSucceeded(snapshots),
+    error: error as Error | null,
+    noSystems: !systems.isPending && !systems.isError && systemIds.length === 0,
+    snapshot: pending || error ? null : newestSucceeded(snapshots),
   }
 }
 
