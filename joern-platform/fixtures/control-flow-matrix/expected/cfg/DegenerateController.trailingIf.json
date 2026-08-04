@@ -1,0 +1,27 @@
+{
+  "nodes": [
+    {
+      "key": "branch@58",
+      "kind": "branch",
+      "code": "if (n > 0)",
+      "line": 58,
+      "line_end": 59,
+      "construct_kind": "if",
+      "condition_code": "n > 0"
+    },
+    {
+      "key": "statement@59",
+      "kind": "statement",
+      "code": "this.hits += n",
+      "line": 59,
+      "line_end": 59
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@58",
+      "target": "statement@59",
+      "label": "true"
+    }
+  ]
+}

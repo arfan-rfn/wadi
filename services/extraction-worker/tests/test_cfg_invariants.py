@@ -23,12 +23,23 @@ def _method(method_id: int = 1) -> ExportMethod:
     )
 
 
+_UNSET = "<unset>"
+"""Distinguishes 'the caller said nothing' from an explicit `None`, which for a
+loop is the meaningful value: `for (;;)` states no condition."""
+
+
 def _node(
     node_id: int,
     kind: CfgNodeKind = CfgNodeKind.STATEMENT,
     line: int = 0,
     construct_kind: str | None = None,
+    condition_code: str | None = _UNSET,
 ) -> ExportCfgNode:
+    # A real export always states a loop's condition unless the source has
+    # none (`for (;;)`), which is how an unconditional loop is told apart from
+    # a trailing one — so a conditional loop node here must carry one too.
+    if condition_code == _UNSET:
+        condition_code = "i < n" if construct_kind in {"for", "while", "do-while"} else None
     return ExportCfgNode(
         id=node_id,
         kind=kind,
@@ -36,6 +47,7 @@ def _node(
         line=line or node_id,
         line_end=line or node_id,
         construct_kind=construct_kind,
+        condition_code=condition_code,
     )
 
 
@@ -85,16 +97,118 @@ class TestCheckCfg:
         codes = [code for code, _ in check_cfg(cfg, _method())]
         assert codes == ["disconnected-node"]
 
-    def test_branch_missing_false_successor(self) -> None:
+    def test_arm_that_leaves_the_method_is_not_an_anomaly(self) -> None:
+        # §5.2.8 T3: `if (c) { … }` as the method's LAST statement. The false
+        # arm has no successor statement because control leaves the method,
+        # which an exit-free export cannot express and the assembler completes
+        # against its synthetic exit. Reporting it would alarm on a shape the
+        # assembled graph carries correctly.
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.BRANCH, construct_kind="if"),
+                _node(2),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_loop_exit_arm_that_leaves_the_method_is_not_an_anomaly(self) -> None:
+        # Same shape for a trailing loop — the arm labels of loops were never
+        # checked at all before T3, so this direction had no coverage either.
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.LOOP, construct_kind="for"),
+                _node(2),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(2, 1, back=True)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_an_unconditional_loop_keeps_exit_unreachable_live(self) -> None:
+        """`void h() { while (true) { hits++; } }` — §5.2.8 T3.
+
+        The label set is identical to a trailing loop's, so completing an exit
+        arm here would assert the method can return past a loop it can never
+        leave. Suppressing the arm ALSO has to leave `exit-unreachable`
+        reporting: that method's exit really is unreachable, and the whole
+        point of the invariant layer is that such a fact stays counted.
+        """
+        for construct, condition in (("while", "true"), ("do-while", "true"), ("for", None)):
+            cfg = _cfg(
+                [
+                    _node(1, CfgNodeKind.LOOP, construct_kind=construct, condition_code=condition),
+                    _node(2),
+                ],
+                [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(2, 1, back=True)],
+            )
+            codes = [code for code, _ in check_cfg(cfg, _method())]
+            assert codes == ["exit-unreachable"], f"{construct} {condition!r} -> {codes}"
+
+    def test_a_conditional_for_is_still_a_trailing_loop(self) -> None:
+        """The discriminator is the condition, not the construct: a `for` that
+        states one is an ordinary trailing loop whose exit arm the assembler
+        completes, so it must stay silent here."""
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.LOOP, construct_kind="for", condition_code="i < n"),
+                _node(2),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(2, 1, back=True)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_branch_with_no_successor_at_all(self) -> None:
+        # Naming NO outcome is still a defect: the branch is a dead end.
+        cfg = _cfg(
+            [
+                _node(1),
+                _node(2, CfgNodeKind.BRANCH, construct_kind="if"),
+                _node(3, CfgNodeKind.RETURN),
+            ],
+            [_edge(1, 2), _edge(1, 3)],
+        )
+        codes = [code for code, _ in check_cfg(cfg, _method())]
+        assert codes == ["branch-arity"]
+
+    def test_unlabeled_arm_among_several_successors(self) -> None:
+        # The pre-T3 empty-arm bug's signature: one arm named, the other gone
+        # out as plain `flow` — the coarsening could not say which way control
+        # went, and that is exactly what the invariant should still catch.
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.BRANCH, construct_kind="if"),
+                _node(2),
+                _node(3, CfgNodeKind.RETURN),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(1, 3), _edge(2, 3)],
+        )
+        codes = [code for code, _ in check_cfg(cfg, _method())]
+        assert codes == ["unlabeled-arm"]
+
+    def test_convergent_branch_with_one_flow_edge_is_clean(self) -> None:
+        # `if (c) { }` with no else: both outcomes reach the same statement, so
+        # a statement-level edge set keyed on (source, target) cannot carry two
+        # labels. Recorded as a non-representable (§5.2.8 T3), not an anomaly.
         cfg = _cfg(
             [
                 _node(1, CfgNodeKind.BRANCH, construct_kind="if"),
                 _node(2, CfgNodeKind.RETURN),
             ],
-            [_edge(1, 2, ExportCfgEdgeLabel.TRUE)],
+            [_edge(1, 2)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_loop_with_unlabeled_arm(self) -> None:
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.LOOP, construct_kind="while"),
+                _node(2),
+                _node(3, CfgNodeKind.RETURN),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(1, 3), _edge(2, 1, back=True)],
         )
         codes = [code for code, _ in check_cfg(cfg, _method())]
-        assert codes == ["branch-arity"]
+        assert codes == ["unlabeled-arm"]
 
     def test_switch_without_any_arm_edge(self) -> None:
         cfg = _cfg(

@@ -130,8 +130,8 @@ class ControlFlowMatrixConformanceTest extends AnyFunSuite with Matchers with Fi
     stale shouldBe empty
   }
 
-  test("the export declares schema 2.5.0") {
-    exportJson("export_schema_version").str shouldBe "2.5.0"
+  test("the export declares schema 2.6.0") {
+    exportJson("export_schema_version").str shouldBe "2.6.0"
   }
 
   test("§5.2.8 cross-cutting: enriched vocabulary is present in the fixture") {
@@ -148,6 +148,145 @@ class ControlFlowMatrixConformanceTest extends AnyFunSuite with Matchers with Fi
       .toSet
     constructs should contain allOf ("if", "switch", "switch-arrow", "for", "foreach", "while",
       "do-while", "try", "catch", "finally", "throw", "break", "continue")
+  }
+
+  /** Out-edge labels of every node of `kind` in a handler's CFG. */
+  private def armLabels(handler: String, kind: String): Set[String] = {
+    val cfg = handlerCfgs(handler)
+    val ids = cfg("nodes").arr.filter(_("kind").str == kind).map(_("id").num.toLong).toSet
+    cfg("edges").arr.filter(e => ids.contains(e("source").num.toLong)).map(_("label").str).toSet
+  }
+
+  test("§5.2.8 T3: an if arm holding no statements still labels its edge") {
+    // An arm written only to say nothing happens (`//do nothing`) claims no
+    // statement ids, so labeling by containment alone dropped its edge to
+    // `flow` — the graph then could not say which way control went.
+    armLabels("DegenerateController.emptyThenArm", "branch") shouldBe Set("true", "false")
+    armLabels("DegenerateController.emptyElseArm", "branch") shouldBe Set("true", "false")
+    // Recorded non-representable: with the only arm empty and no `else`, both
+    // outcomes reach the SAME statement and one edge cannot carry two labels.
+    armLabels("DegenerateController.emptyThenNoElse", "branch") shouldBe Set("flow")
+  }
+
+  test("§5.2.8 T3: a construct that ends its method leaves its exit arm to the assembler") {
+    // The export is deliberately exit-free, so the untaken arm has no target
+    // here. What must NOT happen is a fabricated successor.
+    armLabels("DegenerateController.trailingIf", "branch") shouldBe Set("true")
+    armLabels("DegenerateController.trailingLoop", "loop") shouldBe Set("true")
+    armLabels("DegenerateController.trailingSwitch", "branch") shouldBe Set("case")
+  }
+
+  test("§5.2.8 T3: an empty try body still reaches its handler and its successor") {
+    val cfg   = handlerCfgs("DegenerateController.emptyTryBody")
+    val nodes = cfg("nodes").arr.map(n => n("id").num.toLong -> n).toMap
+    def construct(id: Long): Option[String] = nodes(id).obj.get("construct_kind").map(_.str)
+
+    val fromTry = cfg("edges").arr.filter(e => construct(e("source").num.toLong).contains("try"))
+    // The handler is an EXCEPTION path, never normal flow — presenting a catch
+    // as `flow` is what made the commented-out body read as the happy path.
+    val handlerEdges = fromTry.filter(e => construct(e("target").num.toLong).contains("catch"))
+    handlerEdges.map(_("label").str).toSet shouldBe Set("exception")
+    // ...and normal completion reaches the statement after the try, which was
+    // otherwise orphaned into a false second entry point.
+    val normal = fromTry.filter(e => e("label").str == "flow")
+    normal.map(e => nodes(e("target").num.toLong)("code").str).toSet shouldBe
+      Set("return \"done:\" + hits;")
+
+    val targets = cfg("edges").arr.map(_("target").num.toLong).toSet
+    val entries = cfg("nodes").arr.map(_("id").num.toLong).filterNot(targets.contains)
+    entries.size shouldBe 1
+  }
+
+  /** Edges of `method` as `(sourceCode, label, targetCode)`, with `back`
+    * folded into the label so a cycle-closing edge cannot be mistaken for a
+    * forward one. */
+  private def edgeTriples(method: String): Set[(String, String, String)] = {
+    val cfg   = handlerCfgs(method)
+    val nodes = cfg("nodes").arr.map(n => n("id").num.toLong -> n("code").str).toMap
+    cfg("edges").arr.map { e =>
+      val label = e("label").str + (if (e.obj.get("back").exists(_.bool)) "/back" else "")
+      (nodes(e("source").num.toLong), label, nodes(e("target").num.toLong))
+    }.toSet
+  }
+
+  private def entryCount(method: String): Int = {
+    val cfg     = handlerCfgs(method)
+    val targets = cfg("edges").arr.map(_("target").num.toLong).toSet
+    cfg("nodes").arr.map(_("id").num.toLong).count(id => !targets.contains(id))
+  }
+
+  test("§5.2.8 T3: an empty try with a predecessor is entered, not skipped") {
+    // The empty body projects to nothing, so the preceding statement wired
+    // itself straight to the statement AFTER the try. Left alone that gives
+    // the try no incoming edge at all — it gets entry-patched downstream and
+    // the method reads as having two entry points.
+    edgeTriples("DegenerateController.emptyTryAfterWork") shouldBe Set(
+      ("this.hits += n", "flow", "try"),
+      ("try", "flow", "return \"done:\" + hits;"),
+      ("try", "exception", "catch"),
+      ("catch", "flow", "return \"caught:\" + n;")
+    )
+    entryCount("DegenerateController.emptyTryAfterWork") shouldBe 1
+  }
+
+  test("§5.2.8 T3: an empty try nested in an if-arm keeps BOTH arms") {
+    // Two separate ways to get this wrong, and the fix has to avoid both.
+    // Reading only the immediate parent block finds no next sibling, so
+    // normal completion goes unwired and a construct whose every successor is
+    // a handler is taken to have left the method — the graph would claim this
+    // returns. And rerouting the branch's surviving edge through the try
+    // would stamp `false` on the path INTO the true arm and delete the skip
+    // path outright.
+    edgeTriples("DegenerateController.emptyTryNested") shouldBe Set(
+      ("if (n > 0)", "true", "try"),
+      ("if (n > 0)", "false", "return \"done:\" + hits;"),
+      ("try", "flow", "return \"done:\" + hits;"),
+      ("try", "exception", "catch"),
+      ("catch", "flow", "this.hits = -1")
+    )
+    entryCount("DegenerateController.emptyTryNested") shouldBe 1
+  }
+
+  test("§5.2.8 T3: an empty try completes into its finally, not past it") {
+    edgeTriples("DegenerateController.emptyTryFinally") shouldBe Set(
+      ("try", "flow", "finally"),
+      ("finally", "flow", "this.hits += n"),
+      ("this.hits += n", "flow", "return \"done:\" + hits;")
+    )
+  }
+
+  test("§5.2.8 T3: a try-with-resources enters its BODY, never a handler") {
+    // The resource declaration is hoisted to a sibling statement ahead of the
+    // TRY, so the body is the container's first block child. Picking the wrong
+    // block would make a NON-empty try look empty and route its handler as
+    // normal flow — the failure this pins against.
+    edgeTriples("DegenerateController.tryWithResources") shouldBe Set(
+      ("AutoCloseable c = () -> hits++", "flow", "try"),
+      ("try", "flow", "this.hits += n"),
+      ("this.hits += n", "flow", "return \"done:\" + hits;"),
+      ("this.hits += n", "exception", "catch"),
+      ("catch", "flow", "return \"caught:\" + n;")
+    )
+  }
+
+  test("§5.2.8 T3: a loop with no exit test states no exit arm") {
+    // `while (true)` and `for (;;)` present the same label set as a trailing
+    // loop — body arm plus a back edge, no exit arm — but there is no exit to
+    // name. The condition is the only thing that tells them apart, so it has
+    // to be exported: absent for `for (;;)`, literally "true" for the others.
+    for (method <- List("infiniteLoop", "infiniteFor")) {
+      val loops = handlerCfgs(s"DegenerateController.$method")("nodes").arr
+        .filter(_("kind").str == "loop")
+      loops.size shouldBe 1
+      withClue(s"$method: ")(
+        loops.head.obj.get("condition_code").map(_.str) shouldBe
+          (if (method == "infiniteLoop") Some("true") else None)
+      )
+    }
+    edgeTriples("DegenerateController.infiniteLoop") shouldBe Set(
+      ("while (true)", "true", "this.hits += n"),
+      ("this.hits += n", "flow/back", "while (true)")
+    )
   }
 
   test("sinks inside conditions and throws produce sink rows (§5.2.8)") {

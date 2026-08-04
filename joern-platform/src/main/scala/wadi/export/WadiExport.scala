@@ -65,8 +65,18 @@ object WadiExport {
     * flag on cycle-closing loop edges; if-without-else emits an explicit
     * `false` join edge; catch/finally handlers are graph nodes; sinks inside
     * conditions/throws/for-headers attach to their statement.
+    *
+    * 2.6.0: (additive, §5.4.2 T5) a call binding to no method in the export
+    * carries `unbound_reason`, so a consumer can tell a Lombok-generated
+    * accessor (no source exists) from a hole in the map; and (§5.2.8 T3, a
+    * semantics change within the existing label vocabulary) an `if` whose arm
+    * holds no statements labels its join edge for that arm instead of
+    * dropping to `flow`, a TRY enters through its BODY's first statement
+    * rather than the lowest-numbered statement anywhere in its subtree, and
+    * an empty try body routes its handlers (`exception`) and its normal
+    * completion explicitly.
     */
-  val ExportSchemaVersion = "2.5.0"
+  val ExportSchemaVersion = "2.6.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -472,7 +482,7 @@ object WadiExport {
     val enclosing = nearestEnclosingStatement(method, statementIds)
 
     val nodeObjs = statements.map { statement =>
-      val (kind, construct, callInfo) = classify(statement, exportedMethodIds, enclosing)
+      val (kind, construct, callInfo) = classify(cpg, statement, exportedMethodIds, enclosing)
       callInfo.flatMap(_.sinkTag).foreach { case (sinkKind, sinkCall) =>
         sinkRows ++= sinkRowsFor(cpg, statement.id, method.id, sinkKind, sinkCall)
       }
@@ -489,7 +499,8 @@ object WadiExport {
           "callee_full_name" -> info.calleeFullName,
           "callee_id"        -> info.calleeId.map(id => ujson.Num(id.toDouble)).getOrElse(ujson.Null),
           "resolved"         -> info.resolved,
-          "via_di"           -> info.viaDi
+          "via_di"           -> info.viaDi,
+          "unbound_reason"   -> info.unboundReason.map(ujson.Str.apply).getOrElse(ujson.Null)
         )
       }
       statement match {
@@ -596,18 +607,28 @@ object WadiExport {
     private def interiorIn(roots: List[AstNode]): Set[Long] =
       roots.flatMap(r => r.ast.filter(n => statementIds.contains(n.id)).map(_.id)).toSet
 
-    /** IF successors: arm-entry edges labeled per arm; without an `else`, the
-      * join edge IS where control goes on false — labeled `false` (§5.2.8).
+    /** IF successors labeled by the set of arms that REACH each target, not by
+      * statement containment alone (§5.2.8 T3). A target inside one arm takes
+      * that arm's label. The residual (join) edge takes the label of whichever
+      * arm is empty — an arm written only to say nothing happens (`//do
+      * nothing`) still carries control, and claiming edges by an empty arm's
+      * statement ids claims none of them. When BOTH arms are empty-or-absent
+      * the residual is genuinely both paths and stays `flow`: one
+      * statement-level edge cannot carry two labels (a recorded
+      * non-representable, alongside empty-body loop self-edges).
       */
     def labelIfEdges(): Unit =
       controlStructures(Set("IF")).foreach { ifS =>
-        val trueIds  = interiorIn(ifS.whenTrue.l)
-        val falseIds = interiorIn(ifS.whenFalse.l)
-        val hasElse  = ifS.whenFalse.nonEmpty
+        val trueIds    = interiorIn(ifS.whenTrue.l)
+        val falseIds   = interiorIn(ifS.whenFalse.l)
+        val trueEmpty  = trueIds.isEmpty
+        val falseEmpty = ifS.whenFalse.isEmpty || falseIds.isEmpty
         edges.filter(_._1 == ifS.id).foreach { edge =>
           if (trueIds.contains(edge._2)) labels(edge) = "true"
           else if (falseIds.contains(edge._2)) labels(edge) = "false"
-          else if (!hasElse) labels(edge) = "false"
+          else if (trueEmpty && falseEmpty) () // convergent — leave `flow`
+          else if (falseEmpty) labels(edge) = "false"
+          else if (trueEmpty) labels(edge) = "true"
         }
       }
 
@@ -646,32 +667,197 @@ object WadiExport {
         .sortBy(cs => -astDepth(cs))
       containers.foreach { container =>
         val interior = interiorOf(container)
-        if (interior.nonEmpty) {
-          val entry = interior.minBy { id =>
-            val s = statementById(id)
-            (lineOf(s.lineNumber), id)
-          }
-          val isCatch = container.controlStructureType == "CATCH"
-          val incoming = edges.toList.filter { case (s, t) =>
-            t == entry && s != container.id && !interior.contains(s)
-          }
-          incoming.foreach { edge =>
-            val viaContainer = (edge._1, container.id)
-            edges -= edge
-            edges += viaContainer
-            labels(viaContainer) =
-              if (isCatch) "exception" else labels.getOrElse(edge, "flow")
-            labels.remove(edge)
-          }
+        // A TRY's normal entry is its BODY block's first statement, never a
+        // handler. Taking the whole subtree's minimum line worked only
+        // because a non-empty body holds the lowest number; a body that is
+        // entirely commented out made the container wire itself straight to
+        // its own CATCH and present the handler as normal flow (§5.2.8 T3).
+        val entryScope =
+          if (container.controlStructureType == "TRY") bodyInteriorOf(container) else interior
+        val entry = entryScope.minByOption { id =>
+          val s = statementById(id)
+          (lineOf(s.lineNumber), id)
+        }
+        entry.foreach { entryId =>
+          rerouteThroughContainer(container, interior, entryId)
           // Always connect container→entry — a try that opens the method has
           // no incoming edge to reroute, and an unconnected container would be
           // entry-patched straight to exit downstream.
-          val toEntry = (container.id, entry)
+          val toEntry = (container.id, entryId)
           edges += toEntry
           labels.getOrElseUpdate(toEntry, "flow")
         }
+        if (entry.isEmpty && container.controlStructureType == "TRY")
+          routeEmptyTryBody(container, interior)
       }
     }
+
+    /** Reroute every edge entering `target` from outside `container` so it
+      * enters the container node instead.
+      */
+    private def rerouteThroughContainer(
+      container: ControlStructure,
+      interior: Set[Long],
+      target: Long,
+      keepSources: Set[Long] = Set.empty
+    ): Unit = {
+      val isCatch = container.controlStructureType == "CATCH"
+      val incoming = edges.toList.filter { case (s, t) =>
+        t == target && s != container.id && !interior.contains(s) && !keepSources.contains(s)
+      }
+      incoming.foreach { edge =>
+        val viaContainer = (edge._1, container.id)
+        edges -= edge
+        edges += viaContainer
+        labels(viaContainer) =
+          if (isCatch) "exception" else labels.getOrElse(edge, "flow")
+        labels.remove(edge)
+      }
+    }
+
+    /** An empty try body has no tail for javasrc2cpg's try-tail→handler
+      * approximation to start from and no interior to enter, so the whole
+      * construct projects edge-less: the handler is unreachable and the
+      * statement AFTER the try is orphaned into a false second entry point.
+      * Wire both paths explicitly (§5.2.8 T3) — handlers exceptionally,
+      * normal completion into the finally when there is one and otherwise
+      * into the try's next sibling statement.
+      */
+    private def routeEmptyTryBody(tryS: ControlStructure, interior: Set[Long]): Unit = {
+      val handlers = tryS.astChildren.l.collect {
+        case cs: ControlStructure
+            if HandlerStructureTypes.contains(cs.controlStructureType) &&
+              statementIds.contains(cs.id) =>
+          cs
+      }
+      val normal = handlers
+        .find(_.controlStructureType == "FINALLY")
+        .map(id => (id.id, false))
+        .orElse(normalCompletionTarget(tryS))
+      // An empty body projects to nothing, so a preceding statement wired
+      // itself straight to wherever the construct completes, skipping the try.
+      // Reroute it, exactly as the non-empty path does — left alone, the try
+      // has no incoming edge, gets entry-patched, and the method reads as
+      // having two entry points.
+      //
+      // An ENCLOSING branch or loop is excluded from that reroute: the edge it
+      // left behind belongs to the arm that SKIPS the try, so consuming it
+      // would stamp that arm's label on the path INTO the try and delete the
+      // skip path entirely. Such a container is owed its own arm-labeled edge
+      // instead (`armEdgeInto`).
+      val enclosing = enclosingChain(tryS).map(_.id).toSet
+      normal.foreach { case (target, _) =>
+        rerouteThroughContainer(tryS, interior, target, keepSources = enclosing)
+      }
+      armEdgeInto(tryS).foreach { case (source, label) =>
+        val edge = (source, tryS.id)
+        edges += edge
+        labels(edge) = label
+      }
+      handlers.filter(_.controlStructureType == "CATCH").foreach { handler =>
+        val edge = (tryS.id, handler.id)
+        edges += edge
+        labels(edge) = "exception"
+      }
+      normal.foreach { case (target, isBack) =>
+        val edge = (tryS.id, target)
+        edges += edge
+        labels.getOrElseUpdate(edge, "flow")
+        if (isBack) backEdges += edge
+      }
+    }
+
+    /** The arm-labeled edge an enclosing branch or loop owes a construct that
+      * OPENS one of its arms but projects to nothing.
+      *
+      * A non-empty arm gets its entry edge from the raw projection, which
+      * `labelIfEdges` then labels. An arm whose first statement is an empty
+      * try has no such edge to label — the projection wired the arm straight
+      * past it — so the edge has to be created, or the arm reads as absent.
+      */
+    private def armEdgeInto(node: ControlStructure): Option[(Long, String)] =
+      enclosingChain(node).find(cs => statementIds.contains(cs.id)).flatMap { owner =>
+        owner.controlStructureType match {
+          case "IF" =>
+            if (interiorIn(owner.whenTrue.l).contains(node.id)) Some((owner.id, "true"))
+            else if (interiorIn(owner.whenFalse.l).contains(node.id)) Some((owner.id, "false"))
+            else None
+          case t if LoopStructureTypes.contains(t) =>
+            Option.when(loopBodyOf(owner).contains(node.id))((owner.id, "true"))
+          case _ => None
+        }
+      }
+
+    /** Statement ids in a container's BODY block — its FIRST block child.
+      *
+      * Measured, not assumed: a TRY's handlers are CATCH/FINALLY
+      * ControlStructures, not blocks, and javasrc2cpg hoists a
+      * try-with-resources resource declaration OUT of the TRY to a preceding
+      * sibling statement. So the body is the only block child there. Contrast
+      * `loopBodyOf`, which takes the LAST block child because a `for`
+      * header's clauses precede the body. Pinned by
+      * `DegenerateController.tryWithResources`.
+      */
+    private def bodyInteriorOf(container: ControlStructure): Set[Long] =
+      container.astChildren.isBlock.headOption.map(interiorOf).getOrElse(Set.empty)
+
+    /** Where control goes when `node` completes normally, and whether that
+      * edge closes a cycle.
+      *
+      * Searched OUTWARD through the AST, not just in the immediate parent
+      * block. A construct at the tail of an if-arm has no next sibling there,
+      * but control has not left the method — it continues after the `if`.
+      * Reading only the parent returned None, and downstream a node whose
+      * every successor is a handler is taken to have left the method, so the
+      * graph asserted "on normal completion this returns" for code that
+      * plainly does not (§5.2.8 T3).
+      *
+      * The walk stops at the nearest enclosing LOOP, whose header is where a
+      * construct at the tail of the body actually completes to — a
+      * cycle-closing edge, flagged as such. None means the walk reached the
+      * method boundary: normal completion genuinely leaves the method, which
+      * is the one case the exit patch may complete.
+      */
+    private def normalCompletionTarget(node: AstNode): Option[(Long, Boolean)] = {
+      val own     = interiorOf(node) + node.id
+      var current = node
+      var steps   = 0
+      while (current != null && !current.isInstanceOf[Method] && steps < 10_000) {
+        steps += 1
+        val parent = current.astParent
+        if (parent == null) return None
+        parent match {
+          case cs: ControlStructure
+              if LoopStructureTypes.contains(cs.controlStructureType) &&
+                statementIds.contains(cs.id) =>
+            return Some((cs.id, true))
+          case _ => ()
+        }
+        followingStatementIn(parent, current, own) match {
+          case Some(id) => return Some((id, false))
+          case None     => ()
+        }
+        current = parent
+      }
+      None
+    }
+
+    /** The first admitted statement among `child`'s later siblings under
+      * `parent`, skipping anything inside `exclude` (the completing
+      * construct's own subtree).
+      */
+    private def followingStatementIn(
+      parent: AstNode,
+      child: AstNode,
+      exclude: Set[Long]
+    ): Option[Long] =
+      parent.astChildren.l
+        .filter(_.order > child.order)
+        .sortBy(_.order)
+        .iterator
+        .flatMap(sibling => sibling.ast.l)
+        .flatMap(n => enclosing.get(n.id))
+        .find(id => statementIds.contains(id) && !exclude.contains(id))
 
     /** Labeled jumps inherit javasrc2cpg's approximation: the label's
       * JUMP_TARGET re-enters at the labeled statement's start — for
@@ -895,8 +1081,232 @@ object WadiExport {
     calleeId: Option[Long],
     resolved: Boolean,
     viaDi: Boolean,
-    sinkTag: Option[(String, Call)]
+    sinkTag: Option[(String, Call)],
+    unboundReason: Option[String]
   )
+
+  /** Why a call binds to no method in this export (§5.4.2 T5, export 2.6.0).
+    *
+    * P10: an unresolved call is a legitimate, common outcome — 92.9% of them
+    * on the train-ticket benchmark are Lombok accessors that HAVE no source —
+    * but a consumer that is only told "unresolved" cannot tell a generated
+    * accessor from a hole in the map. The reason travels with the call so a
+    * dead-end node can say why it dead-ends.
+    */
+  private object UnboundReason {
+    /** Accessor/constructor synthesized by Lombok. Analysis runs on ORIGINAL
+      * source (`--delombok-mode types-only`, §5.3) so anchors stay on
+      * committed text — which means these bodies do not exist to show. */
+    val LombokGenerated = "lombok-generated"
+
+    /** Declared by an external supertype (Spring Data `CrudRepository.save`,
+      * etc.); the first-party interface only inherits it. */
+    val InheritedExternal = "inherited-external"
+
+    /** `values`/`valueOf` on an enum — emitted by javac, absent from source. */
+    val CompilerGenerated = "compiler-generated"
+
+    /** The declaring type is not in this CPG at all (JDK, framework, or a
+      * type no staged source root provides). */
+    val ThirdParty = "third-party"
+
+    /** The declaring type IS first-party and declares this name, but the
+      * receiver type could not be bound to one overload — never guessed. */
+    val AmbiguousOverload = "ambiguous-overload"
+
+    /** First-party type in the CPG that declares no such method: a
+      * static-import attributed to the importing class, or a receiver type
+      * javasrc2cpg could not bind. */
+    val UnresolvedReceiver = "unresolved-receiver"
+  }
+
+  /** Lombok annotations, grouped by what each ACTUALLY generates.
+    *
+    * Split by accessor direction on purpose: `@Getter` generates no setters,
+    * and `@Value` generates none either (it is immutable). One combined set
+    * let a `setX()` call on such a class be reported `lombok-generated`, which
+    * the UI renders as "Lombok generates this accessor … there is nothing
+    * hidden here" — a positive claim that no source exists, about a method
+    * Lombok never wrote.
+    *
+    * Both are read at CLASS and FIELD level, because `@Getter` on the class
+    * with `@Setter` on one field is an ordinary idiom and the setter it
+    * generates is just as sourceless as a class-level one.
+    */
+  private val LombokGetterAnnotations =
+    Set("Data", "Getter", "Value")
+  private val LombokSetterAnnotations =
+    Set("Data", "Setter")
+  private val LombokConstructorAnnotations =
+    Set("Data", "Value", "Builder", "AllArgsConstructor", "NoArgsConstructor", "RequiredArgsConstructor")
+  private val LombokObjectMethodAnnotations =
+    Set("Data", "Value", "EqualsAndHashCode", "ToString")
+  private val ObjectMethodNames = Set("toString", "equals", "hashCode", "canEqual")
+
+  /** javasrc2cpg's sentinels for "this could not be bound" (the same ones
+    * SpringDIPass and SpringPacks already screen for). A callee rendered
+    * `&lt;unresolvedNamespace&gt;.foo` matches no TypeDecl, so without this it fell
+    * through to `third-party` — telling the reader "declared outside every
+    * analyzed source root, the JDK or a library" about code that may well be
+    * theirs. `unresolved-receiver` exists for exactly this.
+    */
+  private def isUnresolvedTypeName(typeName: String): Boolean =
+    typeName.startsWith("<unresolved") || typeName.startsWith("<empty") ||
+      typeName == "ANY" || typeName.startsWith("ANY.")
+
+  /** Does `methodName` start with `prefix` AS a Java accessor prefix?
+    *
+    * `startsWith` alone matches `settle`, `island` and `getaway`. A generated
+    * accessor always capitalizes the property, so the next character has to be
+    * uppercase (or `_`, which Lombok keeps for `_field`).
+    */
+  private def hasAccessorPrefix(methodName: String, prefix: String): Boolean =
+    methodName.startsWith(prefix) && methodName.length > prefix.length && {
+      val next = methodName.charAt(prefix.length)
+      next.isUpper || next == '_'
+    }
+
+  /** Split `com.foo.Bar.baz:java.lang.Object()` into its declaring type and
+    * method name. javasrc2cpg renders unresolved callees the same way, with
+    * `<unresolvedSignature>` in place of the parameter list.
+    */
+  private def splitCalleeName(fullName: String): Option[(String, String)] = {
+    val beforeSignature = fullName.indexOf(':') match {
+      case -1 => fullName
+      case i  => fullName.substring(0, i)
+    }
+    beforeSignature.lastIndexOf('.') match {
+      case -1 => None
+      case i  => Some((beforeSignature.substring(0, i), beforeSignature.substring(i + 1)))
+    }
+  }
+
+  private def classLevelAnnotations(td: TypeDecl): Set[String] =
+    td.ast.isAnnotation.filter(_.astParent == td).name.toSet
+
+  /** Annotations on the type's FIELDS. `@Getter` on the class with `@Setter`
+    * on one field generates a setter every bit as sourceless as a class-level
+    * one, so a direction-aware check has to see both levels or it trades one
+    * mislabel for another. */
+  private def fieldLevelAnnotations(td: TypeDecl): Set[String] =
+    td.member.flatMap(_.ast.isAnnotation).name.toSet
+
+  /** A Java enum is a TypeDecl inheriting `java.lang.Enum` — javasrc2cpg
+    * exposes no `isEnum` flag, and `values`/`valueOf` exist only in bytecode.
+    */
+  private def isEnumTypeDecl(td: TypeDecl): Boolean =
+    td.inheritsFromTypeFullName.exists(_.startsWith("java.lang.Enum"))
+
+  /** Would Lombok have generated `methodName` for this type, given its
+    * class-level annotations? Deliberately conservative: a name that does not
+    * match a generated shape falls through to the other reasons.
+    */
+  private def isLombokGenerated(td: TypeDecl, methodName: String): Boolean = {
+    val onClass = classLevelAnnotations(td)
+    // Accessors can be asked for per field; the class-scoped generators
+    // (constructors, equals/hashCode/toString, the builder) cannot.
+    lazy val accessorScope = onClass ++ fieldLevelAnnotations(td)
+    def hasOnClass(group: Set[String])  = onClass.exists(group.contains)
+    def hasAnywhere(group: Set[String]) = accessorScope.exists(group.contains)
+    val isGetter = hasAccessorPrefix(methodName, "get") || hasAccessorPrefix(methodName, "is")
+    val isSetter = hasAccessorPrefix(methodName, "set")
+    if (isGetter && hasAnywhere(LombokGetterAnnotations)) true
+    else if (isSetter && hasAnywhere(LombokSetterAnnotations)) true
+    else if (methodName == "<init>" && hasOnClass(LombokConstructorAnnotations)) true
+    else if (ObjectMethodNames.contains(methodName) && hasOnClass(LombokObjectMethodAnnotations)) true
+    else if ((methodName == "builder" || methodName == "build") && onClass.contains("Builder")) true
+    else false
+  }
+
+  /** Does an EXTERNAL supertype of `td` declare `methodName`?
+    *
+    * Asking only "does this type have any external supertype" was enough for a
+    * class that merely `implements Serializable` to be reported
+    * `inherited-external`, which states "declared by a framework supertype,
+    * not by the type in your repo" about a method the repo does define. The
+    * question the reason answers is about the METHOD, so ask it about the
+    * method.
+    */
+  private def inheritsMethodFromExternal(td: TypeDecl, methodName: String): Boolean = {
+    val seen    = mutable.Set.empty[Long]
+    val pending = mutable.Queue(td)
+    var found   = false
+    while (pending.nonEmpty && !found) {
+      val current = pending.dequeue()
+      if (seen.add(current.id)) {
+        val supertypes = current.inheritsFromOut.l
+          .flatMap(_._refOut.collectAll[TypeDecl])
+          .filterNot(_.fullName == "java.lang.Object")
+        supertypes.foreach { parent =>
+          // An external supertype has no method bodies in the CPG, so a name
+          // match is the strongest evidence available; when it declares
+          // nothing at all (a stub TypeDecl) fall back to the name being
+          // absent from every first-party ancestor.
+          if (parent.isExternal && (parent.method.isEmpty || parent.method.nameExact(methodName).nonEmpty))
+            found = true
+          else if (!parent.isExternal) pending.enqueue(parent)
+        }
+      }
+    }
+    found
+  }
+
+  /** Classify a call that resolved to no internal method (§5.4.2 T5).
+    *
+    * TOTAL by contract: the reader contract says a null reason means the call
+    * BOUND. Returning None for a callee name this cannot parse would give
+    * null a second meaning — "unbindable and unclassifiable" — which a
+    * consumer has no way to tell apart from a healthy call, and which is the
+    * silent dead end the whole tranche exists to remove (P10). A name with no
+    * type qualifier is an unbound receiver, so say that.
+    */
+  private def unboundReasonOf(cpg: Cpg, call: Call): String =
+    splitCalleeName(call.methodFullName).fold(UnboundReason.UnresolvedReceiver) {
+      case (typeName, methodName) =>
+        // The answer is a property of the (type, method) pair, not of the call
+        // site, and the same pair recurs hundreds of times per service: the
+        // benchmark has 1,881 unbound sites over 617 distinct callees, and
+        // 92.9% take the Lombok path, which walks the declaring type's whole
+        // AST looking for annotations.
+        reasonCacheFor(cpg).getOrElseUpdate(
+          (typeName, methodName),
+          classifyUnbound(cpg, typeName, methodName)
+        )
+    }
+
+  /** Per-CPG memo for :func:`classifyUnbound`.
+    *
+    * Weak-keyed on the CPG so a build that goes out of scope — every
+    * conformance test builds its own — is not pinned in memory by this cache.
+    * Synchronized because nothing here promises the export is single-threaded.
+    */
+  private val reasonCaches =
+    new java.util.WeakHashMap[Cpg, mutable.Map[(String, String), String]]()
+
+  private def reasonCacheFor(cpg: Cpg): mutable.Map[(String, String), String] =
+    reasonCaches.synchronized {
+      reasonCaches.computeIfAbsent(cpg, _ => mutable.Map.empty)
+    }
+
+  private def classifyUnbound(cpg: Cpg, typeName: String, methodName: String): String =
+    // A sentinel type name means javasrc2cpg could not bind the receiver at
+    // all. It matches no TypeDecl, so without this it fell through to
+    // `third-party` — an affirmative claim that the callee lives outside
+    // every analyzed source root, which is not something the analysis knows.
+    if (isUnresolvedTypeName(typeName)) UnboundReason.UnresolvedReceiver
+    else
+      cpg.typeDecl.fullNameExact(typeName).filterNot(_.isExternal).headOption match {
+        case None => UnboundReason.ThirdParty
+        case Some(td) =>
+          val declared = td.method.nameExact(methodName).l
+          if (declared.sizeIs > 1) UnboundReason.AmbiguousOverload
+          else if (declared.nonEmpty) UnboundReason.UnresolvedReceiver
+          else if (isLombokGenerated(td, methodName)) UnboundReason.LombokGenerated
+          else if (isEnumTypeDecl(td) && (methodName == "values" || methodName == "valueOf"))
+            UnboundReason.CompilerGenerated
+          else if (inheritsMethodFromExternal(td, methodName)) UnboundReason.InheritedExternal
+          else UnboundReason.UnresolvedReceiver
+      }
 
   private def constructOf(cs: ControlStructure): String = cs.controlStructureType match {
     case "IF"       => "if"
@@ -916,6 +1326,7 @@ object WadiExport {
   }
 
   private def classify(
+    cpg: Cpg,
     statement: AstNode,
     exportedMethodIds: Set[Long],
     enclosing: mutable.Map[Long, Long]
@@ -930,11 +1341,11 @@ object WadiExport {
         // Calls the node itself owns (condition, for-header, throw argument —
         // never body statements, which claim their own): sinks inside
         // conditions and throws finally produce sink rows (§5.2.8).
-        (kind, Some(constructOf(cs)), primaryCallOf(statement, exportedMethodIds, enclosing))
+        (kind, Some(constructOf(cs)), primaryCallOf(cpg, statement, exportedMethodIds, enclosing))
       case _ if statement.label == "RETURN" =>
-        ("return", None, primaryCallOf(statement, exportedMethodIds, enclosing))
+        ("return", None, primaryCallOf(cpg, statement, exportedMethodIds, enclosing))
       case _ =>
-        primaryCallOf(statement, exportedMethodIds, enclosing) match {
+        primaryCallOf(cpg, statement, exportedMethodIds, enclosing) match {
           case some @ Some(_) => ("call", None, some)
           case None           => ("statement", None, None)
         }
@@ -945,6 +1356,7 @@ object WadiExport {
     * double-claim their statements' calls).
     */
   private def primaryCallOf(
+    cpg: Cpg,
     statement: AstNode,
     exportedMethodIds: Set[Long],
     enclosing: mutable.Map[Long, Long]
@@ -968,12 +1380,16 @@ object WadiExport {
         .orElse(internalCallees.headOption)
       val viaDi = call.tag.nameExact("wadi-di").nonEmpty
       val sink  = call.tag.nameExact("sink").value.headOption.map(kind => (kind, call))
+      val calleeId = concrete.map(_.id).filter(exportedMethodIds.contains)
       CallInfo(
         calleeFullName = concrete.map(_.fullName).getOrElse(call.methodFullName),
-        calleeId = concrete.map(_.id).filter(exportedMethodIds.contains),
+        calleeId = calleeId,
         resolved = internalCallees.nonEmpty,
         viaDi = viaDi,
-        sinkTag = sink
+        sinkTag = sink,
+        // Classify only what actually dead-ends for a consumer: an internal
+        // callee the export still carries needs no excuse (§5.4.2 T5).
+        unboundReason = Option.when(calleeId.isEmpty)(unboundReasonOf(cpg, call))
       )
     }
   }

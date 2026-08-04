@@ -108,6 +108,39 @@ class SinkKind(StrEnum):
     MQ = "mq"
 
 
+class CalleeUnboundReason(StrEnum):
+    """Why a call node's target has no interior in the graph (§5.4.2 T5).
+
+    These are *not* failures to report as errors. A Lombok accessor has no
+    source body by construction; a JDK method is not the system's code. The
+    reason exists so a consumer can render "no source to analyse, because X"
+    rather than a node that dead-ends for no stated cause — which is
+    indistinguishable from a hole in the map, and is what made a correct
+    extraction read as data loss (P10).
+    """
+
+    LOMBOK_GENERATED = "lombok-generated"
+    """Synthesized by Lombok; analysis runs on original source (§5.3) so no
+    body exists to show. 92.9% of unbound calls on the train-ticket benchmark."""
+
+    INHERITED_EXTERNAL = "inherited-external"
+    """Declared by an external supertype (e.g. Spring Data ``CrudRepository``)."""
+
+    COMPILER_GENERATED = "compiler-generated"
+    """Enum ``values``/``valueOf`` — emitted by javac, absent from source."""
+
+    THIRD_PARTY = "third-party"
+    """Declaring type is in no staged source root (JDK, framework)."""
+
+    AMBIGUOUS_OVERLOAD = "ambiguous-overload"
+    """Several first-party overloads match and the receiver could not be
+    bound to one — never guessed."""
+
+    UNRESOLVED_RECEIVER = "unresolved-receiver"
+    """First-party type declaring no such method: a static import attributed
+    to the importing class, or an unbindable receiver type."""
+
+
 class MqDirection(StrEnum):
     PUBLISH = "publish"
     CONSUME = "consume"

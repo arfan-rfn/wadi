@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    {
+      "key": "loop@174",
+      "kind": "loop",
+      "code": "for (; ; )",
+      "line": 174,
+      "line_end": 175,
+      "construct_kind": "for"
+    },
+    {
+      "key": "statement@175",
+      "kind": "statement",
+      "code": "this.hits += n",
+      "line": 175,
+      "line_end": 175
+    }
+  ],
+  "edges": []
+}

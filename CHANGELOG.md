@@ -3,6 +3,189 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## Unreleased (Phase 2.8: the endpoint workspace)
+
+The 0.4.0 Flow workspace put the call tree, canvas, and source in one
+fixed-width three-pane tab; at real scale (234 nodes on the aitest cancel
+endpoint) the graph rendered as an unreadable smear and the source strip
+truncated every line. This release splits browsing from the deep-dive and
+rebuilds the canvas around execution order (architecture.md §11 Phase 2.8).
+
+### Added
+- **A dedicated endpoint workspace** at its own route
+  (`/s/{snapshot}/e/{endpoint}`), full viewport: persistent identity header,
+  resizable call-tree rail | center lens | tabbed inspector, deep-linkable
+  via `?node&focus&expand&lens&tab&file`. Browser back returns to the
+  overview.
+- **The lanes canvas** — the flow is a vertical stack of per-method lanes in
+  call-tree order (a callee always sits below its first call site), each
+  laid out independently in source order, so the canvas reads top-to-bottom
+  like a document instead of sprawling like a map. Interprocedural calls
+  route through a left gutter; remote/DB/MQ targets pin to a right rail at
+  their call-site height — the collapsed view alone answers "what does it do,
+  who does it talk to".
+- **Focus and wayfinding:** focus-on-method re-roots the view to that method
+  and its callees (reversible via a clickable breadcrumb), search runs over
+  the whole closure and auto-expands the method containing a hit (with
+  next/prev), a trace toggle highlights the path from the handler to the
+  selection, and expand-all is gated behind an actionable node-budget
+  confirm. Keyboard: `↑/↓` execution order, `Enter` expand, `f` focus,
+  `/` search, `Esc` unwind.
+- **Graph ⇄ Source lenses** over one selection: source now gets the full
+  center surface instead of a 36% strip, with every touched file in a single
+  scroller and sticky per-file headers (the nested-scroll smell is gone).
+- **Tabbed inspector:** Selection (node identity, governing conditions,
+  per-edge resolution with confidence/provenance, source peek → open in
+  source) and Endpoint (auth evidence, params, request/response shapes,
+  outbound calls).
+- **`GET /snapshots/{id}/endpoints/{eid}/detail`** → `EndpointDetailView`
+  (**contracts 1.12.0**, additive, read-only): the endpoint plus its outbound
+  edges filtered server-side to that endpoint's call sites, the touched-file
+  list, and honest `icfg_available` / `stitched` flags. Source stays fetched
+  on demand.
+- **Contracts 1.12.0 — the honesty fields (§5.4.2 T5).** `IcfgNode` gains an
+  optional `callee_unbound_reason`, and `EndpointDetailView` gains
+  `unopenable_calls` (per-reason counts for this endpoint's flow) and
+  `icfg_schema_version`. All additive and absent-means-unknown: on an ICFG
+  written before 1.12.0 a null reason and an empty `unopenable_calls` mean
+  "not recorded", never "this call opens fine" — which is why the view states
+  the graph's version rather than leaving the empty list to be misread.
+
+### Changed
+- The main UI is now a **snapshot overview home** (`/s/{snapshot}`) —
+  coverage-first, system map, and a two-column services/endpoints browser
+  with summary rows (auth state, param count, recovered shapes).
+- One source renderer everywhere: the drill-in peeks and the full lens share
+  the same shiki pipeline, so code looks identical in both.
+- Canvas colors moved onto oklch design tokens (`--flow-*`); edge kind is
+  encoded by hue, dash, and label together, so color is never load-bearing.
+  Unresolved targets remain the only destructive-toned element and are never
+  hidden by collapsing, condensing, or focusing (P10).
+- Selection no longer triggers graph layout: clicking a node re-renders only
+  the nodes that subscribe to it, and expanding one method re-lays out only
+  that lane.
+
+- **The source panel is now the workspace's default surface, not a
+  destination.** The inspector opens on `Source`, and whatever is selected on
+  the canvas or in the call tree is highlighted in it immediately — no "open in
+  source" step. Selecting a method lights its **whole body**; selecting a
+  statement or branch lights exactly its own lines. Clicking a line of code
+  selects its node on the graph, so navigation runs both ways. The highlight is
+  a persistent tinted band with an accent rule rather than a flash that fades
+  after a second, long lines scroll inside the code column against a pinned
+  gutter instead of being truncated with an ellipsis, and a missing `min-w-0`
+  that let a long line stretch the whole panel past its slot — taking the tab
+  bar and file index off-screen — is fixed.
+
+### Fixed
+- **Degenerate constructs no longer go silent in the CFG (§5.2.8 T3,
+  export 2.6.0).** The always-on `cfg_anomalies` invariants flagged 9
+  violations on a 22-service snapshot; all three shapes behind them turned
+  out to be real defects, and each was probed into a new `DegenerateController`
+  fixture and measured against a live CPG before anything was changed.
+  - An `if` arm written only to say nothing happens (`//do nothing`) claims no
+    statements, so labeling arms by containment dropped that arm's edge to
+    plain `flow` — the graph could not say which way control went. Arms are
+    now labeled by which of them *reaches* each target. When both arms are
+    empty they converge on one edge that cannot carry two labels; that stays
+    `flow` and is recorded as a non-representable rather than half-named.
+  - A branch or loop that ends its method had **no edge at all** for the arm
+    not taken: the export is deliberately exit-free, and the assembler's exit
+    patch keys on has-any-out-edge, so a one-armed branch looked connected.
+    The graph now says *"on false, the method returns"* — an arm-labeled edge
+    to the method's exit, surfaced on the canvas as a `false → returns` chip
+    (the lanes view draws no exit nodes, so the edge would otherwise have been
+    correct in the contract and invisible in the product). Empty-body loops
+    are untouched: fabricating a body arm would assert a body that isn't there.
+  - A `try` whose body is entirely commented out entered through its own
+    CATCH, presenting the handler as normal flow, and orphaned the statement
+    after it into a false second entry point. A try now enters through its
+    body block, an empty body routes handlers as `exception`, and normal
+    completion is wired explicitly.
+- `branch-arity` is reformulated to the defect it can still catch (a construct
+  naming no outcome at all) with a new `unlabeled-arm` code for the labeling
+  failure; loop arms are checked for the first time. The assembler and the
+  invariants share one predicate for "this arm leaves the method", so they
+  cannot disagree about which silences are honest.
+- The export schema version reads 2.6.0 on both sides — T5's `unbound_reason`
+  had shipped with only its docstrings bumped.
+
+  Measured by re-analysing the 22-service benchmark: **`branch-arity` went 6 →
+  0**, and `ts-auth-service /api/v1/auth` now carries the `false` edge into its
+  method exit that the graph previously could not state. `disconnected-node`
+  holds at 3, all inside one method with a fully commented-out `try` body:
+  that try is its method's last statement, so normal completion has nowhere to
+  go, and two statements inside its handler are disconnected for reasons not
+  yet measured. Left counted in `cfg_anomalies` rather than suppressed.
+
+- **Three ways the graph could still assert something false (pre-landing
+  review).** Each reproduced against a live CPG first and is now pinned by a
+  fixture, because a wrong edge is worse than a missing one: it is confidently
+  wrong on the one surface whose whole claim is that it maps the code.
+  - An empty `try` nested in an if-arm or at the tail of a loop body found no
+    next sibling — normal completion went unwired, and a construct whose every
+    successor is a handler is taken to have left the method, so the graph said
+    *"on normal completion this returns"* about code that plainly continues.
+    Completion is now searched **outward** through the AST, and back to the
+    loop header at the tail of a body.
+  - An empty `try` with a statement before it was skipped entirely by that
+    statement, leaving the try with no incoming edge, a second entry point
+    patched in, and two independent predecessors on the statement after it.
+    Predecessors now route through the try. An enclosing branch is handled
+    separately: consuming its edge would stamp the skipping arm's label on the
+    path *into* the other arm, so it gets its own arm-labeled edge instead.
+  - `while (true)` / `for (;;)` present the same label set as a trailing loop —
+    body arm plus a back edge, no exit arm — so an exit arm was synthesized for
+    a method that cannot return. The condition now tells them apart, and
+    `exit-unreachable` stays live on them: a method whose only way out is a
+    loop it cannot leave HAS an unreachable exit, and that is worth counting.
+- **Three unbound-reason mislabels, each of which stated a positive falsehood
+  in the UI.** A receiver javasrc2cpg could not bind was reported
+  `third-party` ("declared outside every analyzed source root") rather than
+  `unresolved-receiver`; `inherited-external` ("declared by a framework
+  supertype, not by the type in your repo") fired on any class with any
+  external supertype, so `implements Serializable` was enough; and the
+  accessor test matched any name merely *starting* with get/set/is, so
+  `settle()` on a Lombok type read as a generated accessor with no source.
+  The classifier is also **total** now — a null reason strictly means the call
+  bound, never "unclassifiable".
+- **The source panel could highlight the wrong lines.** The source route split
+  content with `str.splitlines`, which breaks on form feed, vertical tab and
+  U+2028; compilers do not, so every ICFG anchor after one of those characters
+  pointed at the wrong line — while the gutter printed numbers that agreed
+  with themselves. An anchor is a compiler line number, so the route now
+  counts lines the way a compiler does.
+- The bytecode oracle's false-positive budget counts back-jumps: `while (true)`
+  folds to an unconditional `GOTO`, so a budget of conditional jumps alone
+  called a correct loop node a phantom branch. Constant-true conditions and
+  try-with-resources join the §5.2.8 desugaring whitelist.
+- The unbound-reason classifier memoizes per `(type, method)` instead of
+  walking a declaring type's whole AST once per call site — on the benchmark
+  that is 1,881 call sites over 617 distinct callees, 92.9% of them taking the
+  annotation-scanning path.
+- **Failures no longer read as analysis results (P10).** An unreachable API
+  rendered "No systems yet — run `wadi analyze .`" on the landing page and a
+  blank pane in the services browser; a failed ICFG fetch rendered "no flow
+  graph was extracted for this endpoint — the handler could not be resolved",
+  blaming the analysis for a network error. An ELK rejection left a silent
+  blank canvas, and a failed "load more lines" reset its spinner and showed
+  nothing, so the file appeared to end. Each now says what actually happened.
+- **The MCP roll-up carries `callee_unbound_reason`.** REST and the frontend
+  got the T5 reasons; the agent-facing surface did not, and an agent has less
+  recourse than a human — it cannot go and look.
+- Endpoint-workspace load no longer fetches and syntax-highlights every
+  touched file up front (§5.3 says on demand; it was doing all of them), and
+  the `/detail` aggregate parallelizes its four independent reads and tests for
+  the coverage report's existence instead of deserializing it whole.
+- `Cmd+F`/`Ctrl+F` no longer re-roots the canvas while you reach for Find, the
+  canvas shows a focus ring for the keymap it owns, and a line of code is
+  reachable by keyboard as well as by click.
+
+### Removed
+- The single-route explorer, its detail pane, the second (unhighlighted)
+  source renderer, and the old canvas. Pre-2.8 deep links other than
+  `?snapshot=`/`?endpoint=` (which still forward) no longer resolve.
+
 ## 0.4.0 — 2026-08-03 (Phase 2.7: the visual map)
 
 ### Added

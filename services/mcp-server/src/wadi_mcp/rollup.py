@@ -51,6 +51,12 @@ def method_rollup(icfg: Icfg) -> dict[str, Any]:
             if node.callee is not None:
                 call["callee_id"] = node.callee.id
                 call["callee_signature"] = node.callee.signature
+                # §5.4.2 T5: a callee_id with no matching entry in `methods` is
+                # a dead end, and an agent reading over MCP has even less
+                # recourse than a human looking at the canvas — it cannot go
+                # and check. Say why the target has no interior (P10).
+                if node.callee_unbound_reason is not None:
+                    call["callee_unbound_reason"] = node.callee_unbound_reason.value
             if node.sink is not None:
                 call["sink"] = node.sink.value
             if node.remote_call_id is not None:

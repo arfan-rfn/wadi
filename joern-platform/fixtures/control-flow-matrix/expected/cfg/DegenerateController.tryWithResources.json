@@ -1,0 +1,75 @@
+{
+  "nodes": [
+    {
+      "key": "statement@151",
+      "kind": "statement",
+      "code": "AutoCloseable c = () -> hits++",
+      "line": 151,
+      "line_end": 151
+    },
+    {
+      "key": "statement@151#1",
+      "kind": "statement",
+      "code": "try",
+      "line": 151,
+      "line_end": 154,
+      "construct_kind": "try"
+    },
+    {
+      "key": "statement@152",
+      "kind": "statement",
+      "code": "this.hits += n",
+      "line": 152,
+      "line_end": 152
+    },
+    {
+      "key": "statement@153",
+      "kind": "statement",
+      "code": "catch",
+      "line": 153,
+      "line_end": 154,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@154",
+      "kind": "return",
+      "code": "return \"caught:\" + n;",
+      "line": 154,
+      "line_end": 154
+    },
+    {
+      "key": "return@156",
+      "kind": "return",
+      "code": "return \"done:\" + hits;",
+      "line": 156,
+      "line_end": 156
+    }
+  ],
+  "edges": [
+    {
+      "source": "statement@151",
+      "target": "statement@151#1",
+      "label": "flow"
+    },
+    {
+      "source": "statement@151#1",
+      "target": "statement@152",
+      "label": "flow"
+    },
+    {
+      "source": "statement@152",
+      "target": "return@156",
+      "label": "flow"
+    },
+    {
+      "source": "statement@152",
+      "target": "statement@153",
+      "label": "exception"
+    },
+    {
+      "source": "statement@153",
+      "target": "return@154",
+      "label": "flow"
+    }
+  ]
+}

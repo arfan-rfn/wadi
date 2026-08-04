@@ -1,0 +1,71 @@
+{
+  "nodes": [
+    {
+      "key": "branch@75",
+      "kind": "branch",
+      "code": "switch(n)",
+      "line": 75,
+      "line_end": 81,
+      "construct_kind": "switch",
+      "condition_code": "n"
+    },
+    {
+      "key": "statement@77",
+      "kind": "statement",
+      "code": "this.hits = 0",
+      "line": 77,
+      "line_end": 77
+    },
+    {
+      "key": "statement@78",
+      "kind": "statement",
+      "code": "break;",
+      "line": 78,
+      "line_end": 78,
+      "construct_kind": "break"
+    },
+    {
+      "key": "statement@80",
+      "kind": "statement",
+      "code": "hits++",
+      "line": 80,
+      "line_end": 80
+    },
+    {
+      "key": "statement@81",
+      "kind": "statement",
+      "code": "break;",
+      "line": 81,
+      "line_end": 81,
+      "construct_kind": "break"
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@75",
+      "target": "statement@77",
+      "label": "case",
+      "case_values": [
+        "0"
+      ]
+    },
+    {
+      "source": "branch@75",
+      "target": "statement@80",
+      "label": "case",
+      "case_values": [
+        "1"
+      ]
+    },
+    {
+      "source": "statement@77",
+      "target": "statement@78",
+      "label": "flow"
+    },
+    {
+      "source": "statement@80",
+      "target": "statement@81",
+      "label": "flow"
+    }
+  ]
+}

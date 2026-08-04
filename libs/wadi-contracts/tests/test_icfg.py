@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from wadi_contracts.enums import IcfgEdgeKind, IcfgNodeKind, SinkKind
+from wadi_contracts.enums import CalleeUnboundReason, IcfgEdgeKind, IcfgNodeKind, SinkKind
 from wadi_contracts.icfg import (
     BranchCondition,
     Icfg,
@@ -233,3 +233,34 @@ class TestNodeKindPayloads:
                 source_text="x",
                 method=method,
             )
+
+    def test_unbound_reason_requires_a_callee(self, method: MethodRef) -> None:
+        """§5.4.2 T5: the reason explains a callee, so it needs one.
+
+        A reason floating on a node with no callee would render as "no source
+        to analyse" against nothing — the same class of misleading UI this
+        tranche exists to remove.
+        """
+        callee = MethodRef(id=method.id, signature="com.acme.Order.getId:java.lang.String()")
+        node = _node(
+            "c1",
+            IcfgNodeKind.CALL,
+            method,
+            callee=callee,
+            callee_unbound_reason=CalleeUnboundReason.LOMBOK_GENERATED,
+        )
+        assert node.callee_unbound_reason is CalleeUnboundReason.LOMBOK_GENERATED
+
+        with pytest.raises(ValidationError, match="requires a callee"):
+            _node(
+                "c2",
+                IcfgNodeKind.CALL,
+                method,
+                callee_unbound_reason=CalleeUnboundReason.LOMBOK_GENERATED,
+            )
+
+    def test_unbound_reason_defaults_to_none_on_older_artifacts(self, method: MethodRef) -> None:
+        """Absent is 'unknown', never 'it bound' (P10) — pre-1.12.0 artifacts
+        are never rewritten in place (§7), so the field must stay optional."""
+        callee = MethodRef(id=method.id, signature="com.acme.Order.getId:java.lang.String()")
+        assert _node("c3", IcfgNodeKind.CALL, method, callee=callee).callee_unbound_reason is None

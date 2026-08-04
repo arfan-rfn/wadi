@@ -2,6 +2,7 @@
 // Types come from the generated contract schemas — never hand-written (§7).
 
 import type { CoverageReport } from "@/lib/generated/coverage_report.schema"
+import type { EndpointDetailView } from "@/lib/generated/endpoint_detail.schema"
 import type { Endpoint } from "@/lib/generated/endpoint.schema"
 import type { Icfg } from "@/lib/generated/icfg.schema"
 import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
@@ -26,25 +27,44 @@ async function get<T>(path: string): Promise<T> {
   return (await response.json()) as T
 }
 
+// Ids reach us from route params, which Next has already URL-decoded, so a
+// segment carrying `/` or `..` would re-target the request at a different
+// route instead of 404ing. Every interpolated path segment goes through here.
+const seg = encodeURIComponent
+
+/** REST paths, so a link (an ICFG download href) and a fetch cannot drift. */
+export const wadiApiPaths = {
+  icfg: (snapshotId: string, endpointId: string) =>
+    `/api/v1/snapshots/${seg(snapshotId)}/endpoints/${seg(endpointId)}/icfg`,
+}
+
 export const wadiApi = {
   systems: () => get<System[]>("/api/v1/systems"),
   snapshots: (systemId: string) =>
-    get<Snapshot[]>(`/api/v1/systems/${systemId}/snapshots`),
+    get<Snapshot[]>(`/api/v1/systems/${seg(systemId)}/snapshots`),
+  snapshot: (snapshotId: string) =>
+    get<Snapshot>(`/api/v1/snapshots/${seg(snapshotId)}`),
   services: (snapshotId: string) =>
-    get<ServiceSummary[]>(`/api/v1/snapshots/${snapshotId}/services`),
+    get<ServiceSummary[]>(`/api/v1/snapshots/${seg(snapshotId)}/services`),
   endpoints: (snapshotId: string, serviceId: string) =>
     get<Endpoint[]>(
-      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/endpoints`
+      `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/endpoints`
     ),
   icfg: (snapshotId: string, endpointId: string) =>
-    get<Icfg>(`/api/v1/snapshots/${snapshotId}/endpoints/${endpointId}/icfg`),
+    get<Icfg>(wadiApiPaths.icfg(snapshotId, endpointId)),
+  // The workspace aggregate (§11 Phase 2.8): endpoint + its outbound edges +
+  // touched-file names in one read. ICFG and source stay separate fetches.
+  endpointDetail: (snapshotId: string, endpointId: string) =>
+    get<EndpointDetailView>(
+      `/api/v1/snapshots/${seg(snapshotId)}/endpoints/${seg(endpointId)}/detail`
+    ),
   coverage: (snapshotId: string) =>
-    get<CoverageReport>(`/api/v1/snapshots/${snapshotId}/coverage`),
+    get<CoverageReport>(`/api/v1/snapshots/${seg(snapshotId)}/coverage`),
   systemGraph: (snapshotId: string) =>
-    get<SystemGraphView>(`/api/v1/snapshots/${snapshotId}/graph`),
+    get<SystemGraphView>(`/api/v1/snapshots/${seg(snapshotId)}/graph`),
   remoteEdges: (snapshotId: string, serviceId: string) =>
     get<RemoteEdgesView>(
-      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/remote-edges`
+      `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/remote-edges`
     ),
   source: (
     snapshotId: string,
@@ -54,7 +74,7 @@ export const wadiApi = {
     endLine: number
   ) =>
     get<SourceView>(
-      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/source?` +
+      `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/source?` +
         new URLSearchParams({
           file,
           start_line: String(startLine),
@@ -70,7 +90,7 @@ export const wadiApi = {
     startLine = 1
   ) =>
     get<SourceView>(
-      `/api/v1/snapshots/${snapshotId}/services/${serviceId}/source?` +
+      `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/source?` +
         new URLSearchParams({
           file,
           start_line: String(startLine),
@@ -81,6 +101,7 @@ export const wadiApi = {
 export type {
   CoverageReport,
   Endpoint,
+  EndpointDetailView,
   Icfg,
   RemoteEdgesView,
   ServiceSummary,

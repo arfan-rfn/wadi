@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from wadi_contracts import (
     BranchCondition,
+    CalleeUnboundReason,
     CfgAnomaly,
     Confidence,
     DataModel,
@@ -54,8 +55,11 @@ from wadi_joern_client.export import (
     ServiceExport,
     SinkValueConfidence,
 )
+from wadi_joern_client.export import (
+    UnboundReason as ExportUnboundReason,
+)
 from wadi_worker.auth_merge import merge_endpoint_auth
-from wadi_worker.cfg_invariants import aggregate_anomalies, check_cfg
+from wadi_worker.cfg_invariants import aggregate_anomalies, arms_leaving_method, check_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,19 @@ _CFG_KIND_TO_ICFG = {
     CfgNodeKind.LOOP: IcfgNodeKind.LOOP,
     CfgNodeKind.CALL: IcfgNodeKind.CALL,
     CfgNodeKind.RETURN: IcfgNodeKind.RETURN,
+}
+
+# §5.4.2 T5: the export's vocabulary is the contract's vocabulary. Mapped
+# explicitly rather than by value coercion so a new reason code added upstream
+# fails a test here instead of silently reaching the UI unlabelled.
+_UNBOUND_REASON = {
+    ExportUnboundReason.LOMBOK_GENERATED: CalleeUnboundReason.LOMBOK_GENERATED,
+    ExportUnboundReason.INHERITED_EXTERNAL: CalleeUnboundReason.INHERITED_EXTERNAL,
+    ExportUnboundReason.COMPILER_GENERATED: CalleeUnboundReason.COMPILER_GENERATED,
+    ExportUnboundReason.THIRD_PARTY: CalleeUnboundReason.THIRD_PARTY,
+    ExportUnboundReason.AMBIGUOUS_OVERLOAD: CalleeUnboundReason.AMBIGUOUS_OVERLOAD,
+    ExportUnboundReason.UNRESOLVED_RECEIVER: CalleeUnboundReason.UNRESOLVED_RECEIVER,
+    None: None,
 }
 
 _EDGE_LABEL_TO_KIND = {
@@ -281,6 +298,7 @@ class Assembler:
             site_sinks = sinks_by_node.get(cfg_node.id, [])
             kind = _CFG_KIND_TO_ICFG[cfg_node.kind]
             callee_ref: MethodRef | None = None
+            unbound_reason: CalleeUnboundReason | None = None
             remote_ids: list[str] = []
             mq_id: str | None = None
             sink_kind: SinkKind | None = None
@@ -292,6 +310,13 @@ class Assembler:
                 callee_ref = self._callee_ref(
                     cfg_node.call.callee_id, cfg_node.call.callee_full_name, methods
                 )
+                # 1.12.0 (§5.4.2 T5): only carry the reason where the callee is
+                # genuinely absent from THIS graph. A call can be unbound in the
+                # export yet land inside the endpoint closure anyway (the export
+                # is service-wide, the closure is endpoint-scoped), and labelling
+                # a node whose interior the user can open would be a lie.
+                if cfg_node.call.callee_id not in closure_set:
+                    unbound_reason = _UNBOUND_REASON.get(cfg_node.call.unbound_reason)
             # Sinks anchor to the coarsened statement, which is not always a
             # CALL node — `return restTemplate.getForObject(...)` coarsens to
             # RETURN, `if (client.get(...) != null)` to BRANCH. Gating on CALL
@@ -334,6 +359,7 @@ class Assembler:
                         else None
                     ),
                     callee=callee_ref,
+                    callee_unbound_reason=unbound_reason if callee_ref is not None else None,
                     sink=sink_kind,
                     remote_call_id=remote_ids[0] if remote_ids else None,
                     remote_call_ids=remote_ids,
@@ -357,8 +383,10 @@ class Assembler:
         local = {c.id for c in cfg_nodes}
         has_incoming = {e.target for e in cfg_edges if e.source in local}
         has_outgoing = {e.source for e in cfg_edges if e.target in local}
+        outgoing_labels: dict[int, set[ExportCfgEdgeLabel]] = {}
         for edge in cfg_edges:
             if edge.source in local and edge.target in local:
+                outgoing_labels.setdefault(edge.source, set()).add(edge.label)
                 edges.append(
                     IcfgEdge(
                         source=f"m{method.id}:n{edge.source}",
@@ -370,22 +398,28 @@ class Assembler:
                 )
         if cfg_nodes:
             for cfg_node in cfg_nodes:
+                node_id = f"m{method.id}:n{cfg_node.id}"
                 if cfg_node.id not in has_incoming:
-                    edges.append(
-                        IcfgEdge(
-                            source=entry_id,
-                            target=f"m{method.id}:n{cfg_node.id}",
-                            kind=IcfgEdgeKind.FLOW,
-                        )
-                    )
+                    edges.append(IcfgEdge(source=entry_id, target=node_id, kind=IcfgEdgeKind.FLOW))
+                to_exit: list[IcfgEdgeKind] = []
                 if cfg_node.id not in has_outgoing or cfg_node.kind is CfgNodeKind.RETURN:
-                    edges.append(
-                        IcfgEdge(
-                            source=f"m{method.id}:n{cfg_node.id}",
-                            target=exit_id,
-                            kind=IcfgEdgeKind.FLOW,
-                        )
+                    to_exit.append(IcfgEdgeKind.FLOW)
+                # §5.2.8 T3: an arm whose control leaves the method has no
+                # target in an exit-free export, so the graph would otherwise
+                # go silent where it should say "on false, the method
+                # returns". The exit node is the assembler's to own, so arity
+                # completes here — against the same predicate the invariants
+                # use, so the two can never disagree. Keyed off the
+                # intra-method successors rather than `has_outgoing`, which
+                # also counts dangling edges.
+                if (labels := outgoing_labels.get(cfg_node.id)) is not None:
+                    to_exit.extend(
+                        kind
+                        for label in arms_leaving_method(cfg_node, labels)
+                        if (kind := _EDGE_LABEL_TO_KIND[label]) not in to_exit
                     )
+                for kind in to_exit:
+                    edges.append(IcfgEdge(source=node_id, target=exit_id, kind=kind))
         else:
             edges.append(IcfgEdge(source=entry_id, target=exit_id, kind=IcfgEdgeKind.FLOW))
 

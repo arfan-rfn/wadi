@@ -8,6 +8,13 @@
   --font-mono: var(--font-mono-next), ui-monospace, "SF Mono", monospace;
 }
 
+@theme {
+  /* Dense-UI caption size (§11 Phase 2.8): the one step below text-xs.
+     Replaces the arbitrary text-[10px]/text-[11px] long tail. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+}
+
 
 
 @utility container {
@@ -103,6 +110,13 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-flow-true: var(--flow-true);
+  --color-flow-false: var(--flow-false);
+  --color-flow-case: var(--flow-case);
+  --color-flow-exception: var(--flow-exception);
+  --color-flow-loop: var(--flow-loop);
+  --color-flow-call: var(--flow-call);
+  --color-flow-remote: var(--flow-remote);
 }
 
 /*
@@ -153,6 +167,18 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
+
+  /* Flow-canvas edge/construct hues (§11 Phase 2.8): low-chroma on purpose —
+     edge kind is triple-encoded (hue + dash + label chip), color is never
+     load-bearing, and the one saturated element in the UI stays the
+     HTTP-method chip. */
+  --flow-true: oklch(0.55 0.08 155);
+  --flow-false: oklch(0.55 0.08 20);
+  --flow-case: oklch(0.6 0.08 75);
+  --flow-exception: oklch(0.55 0.07 300);
+  --flow-loop: oklch(0.58 0.07 230);
+  --flow-call: oklch(0.55 0.03 255);
+  --flow-remote: oklch(0.55 0.09 25);
 }
 
 /*
@@ -192,6 +218,14 @@
   --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
+
+  --flow-true: oklch(0.72 0.09 155);
+  --flow-false: oklch(0.72 0.09 20);
+  --flow-case: oklch(0.75 0.09 75);
+  --flow-exception: oklch(0.72 0.08 300);
+  --flow-loop: oklch(0.74 0.08 230);
+  --flow-call: oklch(0.65 0.03 255);
+  --flow-remote: oklch(0.72 0.1 25);
 }
 
 /*

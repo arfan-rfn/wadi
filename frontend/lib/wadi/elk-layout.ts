@@ -1,11 +1,8 @@
-// ELK layered layout for the flow canvas (§11 Phase 2.7 M3). Deterministic,
-// top-down — the right idiom for CFG/call-graph shapes. The bundled build
-// runs on the main thread: the canvas is bounded (collapse-all default above
-// the node budget, condensation on by default), so layout stays in the
-// low-millisecond range; a worker is the recorded escalation if profiling
-// ever disagrees.
-
-import type { FlowGraph, FlowGraphNode } from "./flow-graph"
+// Shared ELK layered layout (system map + the per-lane flow layout in
+// flow-lanes.ts). Deterministic, top-down. The bundled build runs on the main
+// thread: inputs are bounded (per-method lanes; the system map's service
+// count), so layout stays in the low-millisecond range; a worker is the
+// recorded escalation if profiling ever disagrees.
 
 export interface LayoutedNode {
   id: string
@@ -15,25 +12,10 @@ export interface LayoutedNode {
   height: number
 }
 
-export function nodeSize(node: FlowGraphNode): {
-  width: number
-  height: number
-} {
-  switch (node.type) {
-    case "method":
-      return { width: 240, height: 72 }
-    case "statement":
-      return { width: 220, height: 44 }
-    case "condensed":
-      return { width: 150, height: 32 }
-    case "ghost":
-      return { width: 180, height: 44 }
-  }
-}
-
 export async function layoutGeneric(
   children: Array<{ id: string; width: number; height: number }>,
-  edges: Array<{ id: string; source: string; target: string }>
+  edges: Array<{ id: string; source: string; target: string }>,
+  options?: Record<string, string>
 ): Promise<Map<string, LayoutedNode>> {
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js")
   const elk = new ELK()
@@ -45,6 +27,7 @@ export async function layoutGeneric(
       "elk.layered.spacing.nodeNodeBetweenLayers": "40",
       "elk.spacing.nodeNode": "28",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      ...options,
     },
     children,
     edges: edges.map((edge) => ({
@@ -64,14 +47,4 @@ export async function layoutGeneric(
     })
   }
   return positions
-}
-
-export async function layoutFlowGraph(
-  graph: FlowGraph
-): Promise<Map<string, LayoutedNode>> {
-  return layoutGeneric(
-    graph.nodes.map((node) => ({ id: node.id, ...nodeSize(node) })),
-    // Back edges would fight the layering; route them after layout instead.
-    graph.edges.filter((edge) => !edge.back)
-  )
 }

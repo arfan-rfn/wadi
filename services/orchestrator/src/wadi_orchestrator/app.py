@@ -10,6 +10,7 @@ No analysis logic lives here (§5.3).
 import asyncio
 import contextlib
 import uuid
+from collections import Counter
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from importlib.metadata import version as metadata_version
@@ -21,10 +22,14 @@ from pydantic import BaseModel, Field
 
 from wadi_config import WadiSettings
 from wadi_contracts import (
+    CalleeUnboundReason,
     CoverageReport,
     Endpoint,
+    EndpointDetailView,
+    EndpointTouchedFile,
     ExtractionJob,
     Icfg,
+    IcfgNodeKind,
     JobStatus,
     JobType,
     RemoteEdgeItem,
@@ -39,6 +44,7 @@ from wadi_contracts import (
     SystemGraphService,
     SystemGraphView,
     TargetKind,
+    UnopenableCallCount,
     normalize_repo_source,
 )
 from wadi_orchestrator.export import export_stream
@@ -56,6 +62,24 @@ SOURCE_MAX_LINES = 2000
 # Single source: the installed package's own version (pyproject.toml, kept in
 # lockstep with the release tag) — surfaced via /healthz and the OpenAPI spec.
 ORCHESTRATOR_VERSION = metadata_version("wadi-orchestrator")
+
+
+def source_lines(content: str) -> list[str]:
+    """Split source the way a COMPILER counts lines, keeping the terminators.
+
+    Not ``str.splitlines``: Python also breaks on form feed, vertical tab,
+    file separator and U+2028, none of which Java, JavaScript or Go treat as a
+    line terminator. Every ICFG anchor is a compiler line number, so a single
+    form feed anywhere in a file shifted this response against the anchors and
+    the source panel highlighted confidently wrong code — invisibly, because
+    the line numbers it printed were its own.
+    """
+    parts = content.split("\n")
+    tail = parts.pop()
+    lines = [part + "\n" for part in parts]
+    if tail:
+        lines.append(tail)
+    return lines
 
 
 # --- request/response bodies (thin wrappers over contract models) -----------------
@@ -412,6 +436,97 @@ def create_app(
             )
         return icfg
 
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/endpoints/{{endpoint_id}}/detail",
+        response_model=EndpointDetailView,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def get_endpoint_detail(
+        snapshot_id: str, endpoint_id: str, state: StateDep
+    ) -> EndpointDetailView:
+        """The endpoint workspace's one-read aggregate (§11 Phase 2.8).
+
+        Joins the endpoint artifact with its outbound stitched edges (filtered
+        server-side by the ICFG's remote-call markers) and the touched-file
+        list derived from ICFG anchors. The ICFG itself and source content
+        stay separate on-demand fetches (§5.3).
+        """
+        # Four reads that take no input from each other, so they go together:
+        # this is the workspace's one blocking fetch and the latency is the
+        # reader's. `endpoint.service_id` is the only value anything downstream
+        # depends on, which is why the boundary and the graph read follow.
+        # 404s are raised after the gather, in the same order as before.
+        endpoint, snapshot, icfg, stitched = await asyncio.gather(
+            state.artifacts.get_endpoint(snapshot_id, endpoint_id),
+            state.snapshots.get(snapshot_id),
+            state.artifacts.get_icfg(snapshot_id, endpoint_id),
+            state.stitch.coverage_report_exists(snapshot_id),
+        )
+        if endpoint is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"endpoint {endpoint_id} not found in snapshot {snapshot_id}",
+            )
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
+        boundary = await state.artifacts.get_service_boundary(snapshot_id, endpoint.service_id)
+        service_name = boundary.name if boundary is not None else endpoint.service_id
+
+        remote_call_ids: set[str] = set()
+        touched: dict[tuple[str, SourceVariant], int] = {}
+        unopenable: Counter[CalleeUnboundReason] = Counter()
+        if icfg is not None:
+            for node in icfg.nodes:
+                remote_call_ids.update(node.remote_call_ids)
+                # §5.4.2 T5: count the call sites whose target has no interior,
+                # grouped by why. Counting per reason (not one lump total) is
+                # the point — "10 Lombok accessors" is a fact about generated
+                # code, "10 calls you cannot open" would read as data loss.
+                if node.callee_unbound_reason is not None:
+                    unopenable[node.callee_unbound_reason] += 1
+                # Same rule as the frontend source map: a method's ENTRY node
+                # anchors to its declaration, so a file reached only through a
+                # callee's entry (e.g. a constructor with no coarsened body)
+                # still counts as touched. Only synthetic exits are dropped —
+                # both surfaces must name the same files.
+                if node.kind is IcfgNodeKind.EXIT:
+                    continue
+                key = (node.anchor.file, node.anchor.variant)
+                touched[key] = touched.get(key, 0) + 1
+
+        # Pre-stitch, outbound is 'not yet', never 'none' (P10) — same rule as
+        # the system graph. (`stitched` came back from the gather above.)
+        outbound: list[RemoteEdgeItem] = []
+        if stitched and remote_call_ids:
+            edges_view = await state.graph.remote_edges(snapshot_id, endpoint.service_id)
+            outbound = [
+                edge for edge in edges_view.outbound if edge.remote_call_id in remote_call_ids
+            ]
+
+        return EndpointDetailView(
+            snapshot_id=snapshot_id,
+            system_id=snapshot.system_id,
+            service_id=endpoint.service_id,
+            service_name=service_name,
+            endpoint=endpoint,
+            icfg_available=icfg is not None,
+            stitched=stitched,
+            outbound=outbound,
+            touched_files=[
+                EndpointTouchedFile(file=file, variant=variant, node_count=count)
+                for (file, variant), count in sorted(touched.items())
+            ],
+            # Most-common first: the reader wants the dominant explanation, and
+            # on real Spring code that is overwhelmingly `lombok-generated`.
+            unopenable_calls=[
+                UnopenableCallCount(reason=reason, call_count=count)
+                for reason, count in unopenable.most_common()
+            ],
+            # Lets a consumer tell "every call opens" from "this graph predates
+            # the accounting", which the empty list alone cannot say (P10).
+            icfg_schema_version=icfg.schema_version if icfg is not None else None,
+        )
+
     # --- system graph (§11 Phase 2.7 M4) ----------------------------------------------
 
     @app.get(
@@ -523,7 +638,7 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail=f"file {file!r} not found at pinned commit"
             ) from exc
-        lines = content.splitlines(keepends=True)
+        lines = source_lines(content)
         last = end_line if end_line is not None else len(lines)
         if last < start_line:
             raise HTTPException(status_code=400, detail="end_line must be >= start_line")

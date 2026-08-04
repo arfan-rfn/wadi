@@ -5,8 +5,25 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+from wadi_contracts import (
+    CalleeUnboundReason,
+    CoverageReport,
+    CoverageTotals,
+    Endpoint,
+    IcfgNodeKind,
+    MethodRef,
+    ServiceBoundary,
+    Snapshot,
+)
 from wadi_orchestrator.state import AppState
-from wadi_testing.builders import make_endpoint, make_icfg, make_service, make_snapshot
+from wadi_storage import GraphRepository
+from wadi_testing.builders import (
+    make_endpoint,
+    make_icfg,
+    make_service,
+    make_snapshot,
+    make_system,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -153,6 +170,184 @@ class TestReadApi:
         assert (
             await client.get(f"/api/v1/snapshots/{missing_snap}/endpoints/ep_{'0' * 16}/icfg")
         ).status_code == 404
+        assert (
+            await client.get(f"/api/v1/snapshots/{missing_snap}/endpoints/ep_{'0' * 16}/detail")
+        ).status_code == 404
+
+
+class TestEndpointDetail:
+    """The workspace aggregate (§11 Phase 2.8): one read, honest states."""
+
+    @staticmethod
+    async def _seed(app_state: AppState) -> "tuple[Snapshot, ServiceBoundary, Endpoint]":
+        system = make_system("detail-seeded")
+        await app_state.systems.insert(system)
+        snapshot = make_snapshot(system)
+        await app_state.snapshots.insert(snapshot)
+        boundary = make_service(snapshot)
+        endpoint = make_endpoint(snapshot, boundary)
+        await app_state.artifacts.write_service_boundaries([boundary])
+        await app_state.artifacts.write_endpoints([endpoint])
+        return snapshot, boundary, endpoint
+
+    async def test_unstitched_with_icfg(self, client: AsyncClient, app_state: AppState) -> None:
+        """Pre-stitch: outbound is 'not yet' (stitched=False), never 'none' (P10)."""
+        snapshot, boundary, endpoint = await self._seed(app_state)
+        icfg = make_icfg(snapshot, boundary, endpoint, statement_count=3)
+        await app_state.artifacts.write_icfg(icfg)
+
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/endpoints/{endpoint.id}/detail"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["system_id"] == snapshot.system_id
+        assert body["service_id"] == boundary.service_id
+        assert body["service_name"] == boundary.name
+        assert body["endpoint"]["id"] == endpoint.id
+        assert body["icfg_available"] is True
+        assert body["stitched"] is False
+        assert body["outbound"] == []
+        # Entry nodes count (a file reached only via a callee's declaration is
+        # still touched — the frontend source map uses the same rule); only
+        # synthetic exits are dropped. 1 entry + 3 statements = 4.
+        assert body["touched_files"] == [
+            {"file": "src/A.java", "variant": "original", "node_count": 4}
+        ]
+
+    async def test_unopenable_calls_are_counted_by_reason(
+        self, client: AsyncClient, app_state: AppState
+    ) -> None:
+        """§5.4.2 T5: the endpoint-level honesty surface.
+
+        `analysis_coverage` sizes reachability system-wide and the coverage
+        report's unresolved counts cover only cross-service edges, so calls
+        with no interior were counted NOWHERE per endpoint — which is what let
+        a correct extraction read as data loss.
+        """
+        snapshot, boundary, endpoint = await self._seed(app_state)
+        icfg = make_icfg(snapshot, boundary, endpoint, statement_count=3)
+        callee = MethodRef(
+            id=endpoint.handler.id, signature="com.acme.Order.getId:java.lang.String()"
+        )
+        reasons = [
+            CalleeUnboundReason.LOMBOK_GENERATED,
+            CalleeUnboundReason.LOMBOK_GENERATED,
+            CalleeUnboundReason.THIRD_PARTY,
+        ]
+        patched = list(icfg.nodes)
+        labelled = 0
+        for index, node in enumerate(patched):
+            if node.kind is IcfgNodeKind.STATEMENT and labelled < len(reasons):
+                patched[index] = node.model_copy(
+                    update={"callee": callee, "callee_unbound_reason": reasons[labelled]}
+                )
+                labelled += 1
+        await app_state.artifacts.write_icfg(icfg.model_copy(update={"nodes": patched}))
+
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/endpoints/{endpoint.id}/detail"
+        )
+        assert response.status_code == 200, response.text
+        # Most-common first, and grouped BY REASON: "2 Lombok accessors, 1 JDK
+        # method" is a fact about generated code; a bare "3 unopenable" would
+        # read as damage.
+        assert response.json()["unopenable_calls"] == [
+            {"reason": "lombok-generated", "call_count": 2},
+            {"reason": "third-party", "call_count": 1},
+        ]
+
+    async def test_endpoint_with_every_call_openable_reports_nothing(
+        self, client: AsyncClient, app_state: AppState
+    ) -> None:
+        """Empty means 'nothing to explain', and must not be confused with
+        'not measured' — the seeded ICFG has no unbound callees at all."""
+        snapshot, boundary, endpoint = await self._seed(app_state)
+        await app_state.artifacts.write_icfg(
+            make_icfg(snapshot, boundary, endpoint, statement_count=3)
+        )
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/endpoints/{endpoint.id}/detail"
+        )
+        assert response.json()["unopenable_calls"] == []
+
+    async def test_no_icfg_is_stated_not_silent(
+        self, client: AsyncClient, app_state: AppState
+    ) -> None:
+        snapshot, _, endpoint = await self._seed(app_state)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/endpoints/{endpoint.id}/detail"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["icfg_available"] is False
+        assert body["touched_files"] == []
+
+    async def test_unknown_endpoint_404(self, client: AsyncClient, app_state: AppState) -> None:
+        snapshot, _, _ = await self._seed(app_state)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/endpoints/ep_{'f' * 16}/detail"
+        )
+        assert response.status_code == 404
+
+    async def test_stitched_outbound_filtered_to_this_endpoints_calls(
+        self,
+        client: AsyncClient,
+        app_state: AppState,
+        graph_repository: GraphRepository,
+    ) -> None:
+        """Only edges whose remote-call marker appears in THIS endpoint's ICFG
+        come back — the service-wide set stays behind /remote-edges."""
+        from wadi_contracts import IcfgEdge, IcfgEdgeKind, IcfgNode, SourceAnchor
+        from wadi_testing.builders import make_analyzed_edge, make_remote_call
+
+        app_state.graph = graph_repository
+        snapshot, caller, endpoint = await self._seed(app_state)
+        callee = make_service(snapshot, "services/inventory")
+        target = make_endpoint(snapshot, callee, uri="/stock/{id}")
+        in_flow_call = make_remote_call(snapshot, caller, line=27)
+        other_call = make_remote_call(snapshot, caller, line=99, url="http://billing:8082/invoices")
+        edges = [make_analyzed_edge(in_flow_call, target), make_analyzed_edge(other_call, target)]
+
+        icfg = make_icfg(snapshot, caller, endpoint)
+        icfg.nodes.append(
+            IcfgNode(
+                id="call0",
+                kind=IcfgNodeKind.CALL,
+                anchor=SourceAnchor(file="src/A.java", start_line=3, end_line=3),
+                source_text="inventoryClient.stock(id);",
+                method=endpoint.handler,
+                remote_call_id=in_flow_call.id,
+                remote_call_ids=[in_flow_call.id],
+            )
+        )
+        icfg.edges.append(IcfgEdge(source="s2", target="call0", kind=IcfgEdgeKind.FLOW))
+        await app_state.artifacts.write_icfg(icfg)
+        await app_state.artifacts.write_service_boundaries([callee])
+        await graph_repository.replace_snapshot(
+            snapshot.id,
+            boundaries=[caller, callee],
+            endpoints=[target],
+            remote_calls=[in_flow_call, other_call],
+            edges=edges,
+        )
+        await app_state.stitch.write_coverage_report(
+            CoverageReport(
+                snapshot_id=snapshot.id,
+                totals=CoverageTotals(
+                    call_sites=2, edges=2, analyzed=2, external=0, placeholder=0, undetermined=0
+                ),
+            )
+        )
+
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/endpoints/{endpoint.id}/detail"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["stitched"] is True
+        assert [edge["remote_call_id"] for edge in body["outbound"]] == [in_flow_call.id]
+        assert body["outbound"][0]["target_kind"] == "analyzed"
 
 
 class TestSourceOnDemand:

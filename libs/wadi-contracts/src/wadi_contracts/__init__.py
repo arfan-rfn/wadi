@@ -26,6 +26,7 @@ from wadi_contracts.endpoint import (
     TypeShape,
 )
 from wadi_contracts.enums import (
+    CalleeUnboundReason,
     Confidence,
     HttpMethod,
     IcfgEdgeKind,
@@ -93,12 +94,15 @@ from wadi_contracts.tags import (
 from wadi_contracts.timeutil import UtcDatetime, ensure_utc, utc_now
 from wadi_contracts.version import SCHEMA_VERSION
 from wadi_contracts.views import (
+    EndpointDetailView,
+    EndpointTouchedFile,
     RemoteEdgeItem,
     RemoteEdgesView,
     ServiceSummary,
     SourceView,
     SystemGraphService,
     SystemGraphView,
+    UnopenableCallCount,
 )
 
 __all__ = [
@@ -115,6 +119,7 @@ __all__ = [
     "AuthEvidence",
     "AuthEvidenceKind",
     "BranchCondition",
+    "CalleeUnboundReason",
     "CfgAnomaly",
     "CfgAnomalySection",
     "Confidence",
@@ -125,7 +130,9 @@ __all__ = [
     "DataModelRelation",
     "Endpoint",
     "EndpointAuth",
+    "EndpointDetailView",
     "EndpointParam",
+    "EndpointTouchedFile",
     "ExportManifest",
     "ExternalApiEntry",
     "ExtractionJob",
@@ -178,6 +185,7 @@ __all__ = [
     "TriggerKind",
     "TypeShape",
     "UnmodelledMechanismEntry",
+    "UnopenableCallCount",
     "UnresolvedCallEntry",
     "UtcDatetime",
     "WadiModel",

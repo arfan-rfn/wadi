@@ -32,4 +32,14 @@ npm run generate-types # regenerate lib/generated from ../schemas (run `make sch
 - The UI requires no `NEXT_PUBLIC_*` variables (same-origin proxy);
   `NEXT_PUBLIC_BASE_URL` is optional and only affects SEO metadata.
 - Server Components by default; client components only where interactivity
-  demands it (the explorer page is client-side by nature).
+  demands it (the overview home and endpoint workspace are client-side by
+  nature).
+- **Routes (§11 Phase 2.8):** `/` resolves to the newest succeeded snapshot
+  across *all* systems (there is no global snapshot route, so the resolver
+  fans out over the system list — never assume `systems[0]` has been
+  analyzed); `?system=` pins it to one system;
+  `/s/[snapshotId]` is the overview home (`?view=coverage|map|services`);
+  `/s/[snapshotId]/e/[endpointId]` is the endpoint workspace
+  (`?node&focus&expand&lens&tab&file`). Path builders live in
+  `lib/wadi/routes.ts`; the workspace's state lives in a per-page zustand
+  store (`components/endpoint/workspace-store.ts`).

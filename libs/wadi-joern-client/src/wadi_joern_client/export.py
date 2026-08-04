@@ -11,7 +11,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EXPORT_SCHEMA_VERSION = "2.5.0"
+EXPORT_SCHEMA_VERSION = "2.6.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -42,7 +42,18 @@ a ``branch`` node keeping its selector as ``condition_code``; edge labels gain
 ``case`` (with ``case_values``), ``default``, ``fallthrough``, ``exception``,
 plus a ``back`` flag on cycle-closing loop edges; catch/finally handlers are
 graph nodes; sinks inside conditions/throws/for-headers attach to their
-statement (their calls appear on branch/loop/statement nodes)."""
+statement (their calls appear on branch/loop/statement nodes).
+
+2.6.0 (additive, §5.4.2 T5): a call that binds to no method in the export
+carries ``unbound_reason`` — why it dead-ends, so a consumer can tell a
+Lombok-generated accessor (no source exists) from a hole in the map. On the
+train-ticket benchmark 92.9% of unbound calls are ``lombok-generated``;
+``None`` on every call that bound normally. 2.6.0 also carries the §5.2.8 T3
+label corrections — a semantics change inside the existing edge vocabulary,
+so no field moves: an ``if`` whose arm holds no statements labels its join
+edge for that arm instead of dropping to ``flow`` (both arms empty stays
+``flow``, a recorded non-representable), and an empty try body routes its
+handlers as ``exception`` plus an explicit normal-completion edge."""
 
 
 class ExportModelBase(BaseModel):
@@ -79,6 +90,38 @@ class CfgNodeKind(StrEnum):
     RETURN = "return"
 
 
+class UnboundReason(StrEnum):
+    """Why a call binds to no method in the export (§5.4.2 T5).
+
+    An unbindable call keeps its CFG node — deleting it would make the map lie
+    about what runs — so the node needs a reason a human can act on. These are
+    facts about *why analysis cannot open the callee*, not error codes.
+    """
+
+    LOMBOK_GENERATED = "lombok-generated"
+    """Accessor/constructor synthesized by Lombok. Joern analyses the ORIGINAL
+    source (``--delombok-mode types-only``, §5.3) so anchors stay on committed
+    text — the body genuinely does not exist to show."""
+
+    INHERITED_EXTERNAL = "inherited-external"
+    """Declared by an external supertype (Spring Data ``CrudRepository.save``);
+    the first-party type only inherits the name."""
+
+    COMPILER_GENERATED = "compiler-generated"
+    """``values``/``valueOf`` on an enum — emitted by javac, absent from source."""
+
+    THIRD_PARTY = "third-party"
+    """The declaring type is in no staged source root (JDK, framework)."""
+
+    AMBIGUOUS_OVERLOAD = "ambiguous-overload"
+    """First-party type declaring several overloads of this name; the receiver
+    could not be bound to one, and P10 forbids guessing."""
+
+    UNRESOLVED_RECEIVER = "unresolved-receiver"
+    """First-party type in the CPG that declares no such method: a static
+    import attributed to the importing class, or an unbindable receiver."""
+
+
 class ExportCall(ExportModelBase):
     """Call metadata on a CALL cfg node."""
 
@@ -88,6 +131,13 @@ class ExportCall(ExportModelBase):
     )
     resolved: bool = Field(description="Static target known (incl. via DI pass)")
     via_di: bool = False
+    unbound_reason: UnboundReason | None = Field(
+        default=None,
+        description=(
+            "Why this call binds to no method in the export (§5.4.2 T5); None when it bound. "
+            "Absent on pre-2.6.0 exports, which is not the same as 'it bound' (P10)."
+        ),
+    )
 
 
 class ExportCfgNode(ExportModelBase):
