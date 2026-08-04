@@ -3,6 +3,21 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.5.1 — 2026-08-04
+
+### Fixed
+- **Canvas nodes were unclickable.** React Flow stamps `pointer-events: none`
+  on a node's wrapper whenever the node is neither selectable nor draggable
+  and no node-level mouse handler is registered — which is every node this
+  canvas draws, because selection belongs to the workspace store rather than
+  to React Flow. Clicks fell through the card into the pan surface, so select,
+  expand and drill-in were all dead to the mouse while still rendering as
+  interactive. Lane headers kept working (they already opted back in), which
+  is what disguised how broad it was. Present since the lanes canvas landed in
+  Phase 2.8 and shipped in 0.5.0; a test now pins both halves — that React
+  Flow really does disable pointer events under these props, and that every
+  node type really does turn them back on.
+
 ## 0.5.0 — 2026-08-04 (Phase 2.8: the endpoint workspace)
 
 The 0.4.0 Flow workspace put the call tree, canvas, and source in one

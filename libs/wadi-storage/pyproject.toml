@@ -1,6 +1,6 @@
 [project]
 name = "wadi-storage"
-version = "0.5.0"
+version = "0.5.1"
 description = "Wadi storage seam: Mongo + Neo4j repositories and the job queue. The ONLY package importing DB drivers (architecture.md §9)."
 requires-python = ">=3.12"
 dependencies = [
