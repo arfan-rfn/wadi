@@ -26,14 +26,20 @@ import type { Icfg } from "@/lib/generated/icfg.schema"
 import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import { cn } from "@/lib/utils"
 import { buildCallTree } from "@/lib/wadi/call-tree"
-import { governingConditions } from "@/lib/wadi/conditions"
+import { ghostConditions, governingConditions } from "@/lib/wadi/conditions"
 import {
   breadcrumbPath,
   focusMethodIds,
   hiddenNodeIds,
 } from "@/lib/wadi/flow-focus"
-import { buildFlowGraph, exitArms, type FlowGraph } from "@/lib/wadi/flow-graph"
 import {
+  buildFlowGraph,
+  exitArms,
+  revealFor,
+  type FlowGraph,
+} from "@/lib/wadi/flow-graph"
+import {
+  framingFor,
   layoutLanes,
   resolveExpandedMethods,
   type FlowLayout,
@@ -300,13 +306,10 @@ function FlowCanvasInner({
               .filter((v): v is string => v !== null)
           ),
         ]
-        const ghostConditions = graph.edges
-          .filter((e) => e.kind === "remote" && e.target === node.id)
-          .flatMap((e) => {
-            const source = graph.nodes.find((n) => n.id === e.source)
-            if (source?.type !== "statement") return []
-            return conditions.get(source.icfgNode.id) ?? []
-          })
+        // Deduped inside the helper, so the two-chip budget below spends its
+        // slots on DISTINCT conditions (`verbs` above dedupes for the same
+        // reason).
+        const chips = ghostConditions(graph, conditions, node.id)
         nodes.push({
           ...base,
           type: "ghost",
@@ -315,7 +318,7 @@ function FlowCanvasInner({
             targetKind: node.targetKind,
             confidence: node.confidence,
             verbs,
-            conditions: ghostConditions.slice(0, 2),
+            conditions: chips.slice(0, 2),
             trace: traceStateOf(node.id),
           },
         })
@@ -372,13 +375,20 @@ function FlowCanvasInner({
   useEffect(() => {
     resolvedExpandedRef.current = resolvedExpanded
   }, [resolvedExpanded])
+  /** Draw `methodId` open, keeping whatever else is already open. */
+  const ensureExpanded = useCallback(
+    (methodId: string) => {
+      const resolved = resolvedExpandedRef.current
+      if (resolved.has(methodId)) return
+      storeApi.getState().setExplicitExpand([...resolved, methodId])
+    },
+    [storeApi]
+  )
   const actions = useMemo<FlowActions>(
     () => ({
-      selectNode: (id) => {
-        const state = storeApi.getState()
-        state.selectNode(id)
-        state.setInspectorTab("selection")
-      },
+      // Tab policy lives in the store's selectNode (graph → source), so every
+      // selection path — canvas, call tree, call links inside source — agrees.
+      selectNode: (id) => storeApi.getState().selectNode(id),
       toggleMethod: (methodId) =>
         storeApi.getState().toggleMethod(methodId, resolvedExpandedRef.current),
       expandRun: (runId) => storeApi.getState().toggleRun(runId),
@@ -412,20 +422,13 @@ function FlowCanvasInner({
           match.kind === "method" ? `m:${match.methodId}` : canvasId
       } else {
         pendingSelectRef.current = `i:${match.id}`
-        if (
-          match.methodId &&
-          !resolvedExpandedRef.current.has(match.methodId)
-        ) {
-          storeApi
-            .getState()
-            .setExplicitExpand([...resolvedExpandedRef.current, match.methodId])
-        }
+        if (match.methodId) ensureExpanded(match.methodId)
       }
       // Resolution happens in the effect below once the graph reflects the
       // expansion (or immediately if it already does).
       setResolveTick((t) => t + 1)
     },
-    [matches, storeApi]
+    [matches, ensureExpanded]
   )
 
   useEffect(() => {
@@ -475,9 +478,35 @@ function FlowCanvasInner({
     void reactFlow.setViewport({ x: margin, y: margin, zoom })
   }, [layoutState, reactFlow])
 
-  // --- zoom to selection when offscreen -------------------------------------------
+  // --- a selection must be DRAWN ---------------------------------------------------
+  // Selecting a statement whose method is collapsed — a click in source, a deep
+  // link, browser Back — otherwise points at a node the canvas is not drawing:
+  // the URL says `stmt:…`, the source panel highlights the line, and nothing on
+  // the graph is ringed. Open the method that owns it, exactly as a search hit
+  // inside a collapsed method does. Zooming to the selection (below) then has
+  // something to zoom to.
+  useEffect(() => {
+    const reveal = revealFor(graph, icfg, selectedNodeId)
+    if (!reveal) return
+    if (reveal.kind === "method") ensureExpanded(reveal.id)
+    // Safe as a toggle: a condensed run is only drawn when it is NOT in
+    // expandedRuns, and revealFor returns one only while it is still condensed.
+    else storeApi.getState().toggleRun(reveal.id)
+  }, [selectedNodeId, graph, icfg, ensureExpanded, storeApi])
+
+  // --- bring the selection into frame ---------------------------------------------
+  // Source scrolls to the selection unconditionally, so the graph owes the same
+  // guarantee coming back the other way: after a click in source, a call link,
+  // or a deep link, the selected node must be WHOLLY on screen. Testing the
+  // node's centre (as this once did) called a card "visible" while half of it
+  // sat past the edge, and called a lane visible whose header was far above the
+  // pane — the reader saw no movement and no node.
   useEffect(() => {
     if (!selectedNodeId || !layoutState) return
+    // Only act on a layout that matches the graph we are drawing; mid-reveal
+    // the old layout has no position for a node that was just revealed, and
+    // centring on a stale one would jump the canvas to the wrong place.
+    if (layoutState.graph !== graph) return
     let position = layoutState.layout.positions.get(selectedNodeId)
     if (!position && selectedNodeId.startsWith("method:")) {
       // The method is expanded (no card drawn) — center on its lane instead.
@@ -495,23 +524,16 @@ function FlowCanvasInner({
     }
     const wrapper = wrapperRef.current
     if (!position || !wrapper) return
-    const viewport = reactFlow.getViewport()
-    const cx = (position.x + position.width / 2) * viewport.zoom + viewport.x
-    const cy = (position.y + position.height / 2) * viewport.zoom + viewport.y
-    const margin = 40
-    const outside =
-      cx < margin ||
-      cy < margin ||
-      cx > wrapper.clientWidth - margin ||
-      cy > wrapper.clientHeight - margin
-    if (outside) {
-      void reactFlow.setCenter(
-        position.x + position.width / 2,
-        position.y + position.height / 2,
-        { zoom: Math.max(viewport.zoom, 0.85), duration: 300 }
-      )
-    }
-  }, [selectedNodeId, layoutState, reactFlow])
+    const framing = framingFor(position, reactFlow.getViewport(), {
+      width: wrapper.clientWidth,
+      height: wrapper.clientHeight,
+    })
+    if (!framing) return
+    void reactFlow.setCenter(framing.x, framing.y, {
+      zoom: framing.zoom,
+      duration: 300,
+    })
+  }, [selectedNodeId, layoutState, graph, reactFlow])
 
   // --- keyboard --------------------------------------------------------------------
   const executionOrder = useMemo(() => {
