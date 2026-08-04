@@ -63,6 +63,23 @@ export type Id = string
  * Fully-qualified method signature
  */
 export type Signature = string
+/**
+ * Why a call node's target has no interior in the graph (§5.4.2 T5).
+ *
+ * These are *not* failures to report as errors. A Lombok accessor has no
+ * source body by construction; a JDK method is not the system's code. The
+ * reason exists so a consumer can render "no source to analyse, because X"
+ * rather than a node that dead-ends for no stated cause — which is
+ * indistinguishable from a hole in the map, and is what made a correct
+ * extraction read as data loss (P10).
+ */
+export type CalleeUnboundReason =
+  | "lombok-generated"
+  | "inherited-external"
+  | "compiler-generated"
+  | "third-party"
+  | "ambiguous-overload"
+  | "unresolved-receiver"
 export type Expression = string
 export type Name = string
 export type OperandOrigin = "payload" | "local" | "field" | "config" | "unknown"
@@ -132,6 +149,10 @@ export interface IcfgEdge {
 export interface IcfgNode {
   anchor: SourceAnchor
   callee?: MethodRef | null
+  /**
+   * Why this call's target has no interior in the graph (§5.4.2 T5): lombok-generated | inherited-external | compiler-generated | third-party | ambiguous-overload | unresolved-receiver. The node is ALWAYS kept — a call with no visible body still runs — so this is what lets a consumer say 'no source to analyse' instead of rendering a silent dead end (P10). None = the callee is in this graph, or the artifact predates 1.12.0 (unknown, not 'bound').
+   */
+  callee_unbound_reason?: CalleeUnboundReason | null
   condition?: BranchCondition | null
   construct_kind?: ConstructKind
   id: Id1

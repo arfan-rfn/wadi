@@ -10,7 +10,9 @@ from pydantic import Field
 
 from wadi_contracts.base import WadiModel
 from wadi_contracts.boundary import ServiceBoundary
+from wadi_contracts.endpoint import Endpoint
 from wadi_contracts.enums import (
+    CalleeUnboundReason,
     Confidence,
     HttpMethod,
     Provenance,
@@ -89,6 +91,60 @@ class SystemGraphView(WadiModel):
     stitched: bool
     services: list[SystemGraphService] = Field(default_factory=list[SystemGraphService])
     edges: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
+
+
+class EndpointTouchedFile(WadiModel):
+    """One file the endpoint's flow touches (derived from ICFG anchors)."""
+
+    file: str = Field(min_length=1, description="Path relative to the service build root")
+    variant: SourceVariant
+    node_count: int = Field(ge=1, description="ICFG nodes anchored in this file")
+
+
+class UnopenableCallCount(WadiModel):
+    """Call sites sharing one reason for having no interior (§5.4.2 T5).
+
+    Deliberately a count per reason rather than a bare total: "12 calls you
+    cannot open" reads as damage, while "10 Lombok accessors, 2 JDK methods"
+    reads as what it is — code that was never the system's to show.
+    """
+
+    reason: CalleeUnboundReason
+    call_count: int = Field(ge=1, description="Call sites in this endpoint's flow with this reason")
+
+
+class EndpointDetailView(WadiModel):
+    """Everything the endpoint workspace needs in one read (§11 Phase 2.8).
+
+    1.11.0 (additive): replaces the client-side compose of endpoint +
+    service-wide remote edges. The ICFG stays its own fetch (it is large) and
+    source stays on demand (§5.3) — ``touched_files`` carries names, never
+    content. ``stitched=False`` means the stitcher has not run: the empty
+    ``outbound`` is 'not yet', never 'none'; ``icfg_available=False`` states
+    that no flow graph exists for this endpoint (P10).
+    """
+
+    snapshot_id: str
+    system_id: str
+    service_id: str
+    service_name: str
+    endpoint: Endpoint
+    icfg_available: bool
+    stitched: bool
+    outbound: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
+    touched_files: list[EndpointTouchedFile] = Field(default_factory=list[EndpointTouchedFile])
+    unopenable_calls: list[UnopenableCallCount] = Field(
+        default_factory=list[UnopenableCallCount],
+        description=(
+            "1.12.0 (§5.4.2 T5): how many call sites in this endpoint's flow "
+            "have no interior to open, by reason. This is the endpoint-level "
+            "honesty surface — `analysis_coverage` sizes reachability system-"
+            "wide and the coverage report's unresolved counts cover only "
+            "cross-service edges, so intra-service unopenable calls were "
+            "counted NOWHERE per endpoint. Empty means every call in the flow "
+            "opens, or the ICFG predates 1.12.0."
+        ),
+    )
 
 
 class SourceView(WadiModel):

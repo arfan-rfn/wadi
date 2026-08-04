@@ -165,3 +165,63 @@ export function buildSourceMap(icfg: Icfg): SourceFileSection[] {
 export function fileBasename(file: string): string {
   return file.split("/").pop() ?? file
 }
+
+/** A region of source that a canvas/tree selection maps onto. */
+export interface SourceSelection {
+  file: string
+  startLine: number
+  endLine: number
+  /** The line to scroll to — an anchor, not necessarily the region's start. */
+  focusLine: number
+}
+
+/** Where a canvas or call-tree selection lives in source (§11 Phase 2.8).
+ *
+ * The mapping is 1:1 and automatic: selecting anything on the graph selects
+ * the code it stands for, with no "open in source" step in between. A METHOD
+ * selects its whole body — asking to see a method and getting one highlighted
+ * line on its signature answers a question nobody asked — while a statement or
+ * branch selects exactly its own extent.
+ *
+ * Returns null for selections with no source of their own (remote-target
+ * ghosts, unknown ids): the caller leaves the previous highlight alone rather
+ * than clearing the panel to nothing.
+ */
+export function sourceSelectionFor(
+  icfg: Icfg | undefined,
+  selectedNodeId: string | null | undefined
+): SourceSelection | null {
+  if (!icfg || !selectedNodeId) return null
+
+  if (selectedNodeId.startsWith("method:")) {
+    const methodId = selectedNodeId.slice("method:".length)
+    let file: string | null = null
+    let start = Number.POSITIVE_INFINITY
+    let end = 0
+    for (const node of icfg.nodes) {
+      if (node.method.id !== methodId) continue
+      // The first file wins: a method lives in one file, and a stray anchor
+      // elsewhere must not stretch the highlight across the whole panel.
+      file ??= node.anchor.file
+      if (node.anchor.file !== file) continue
+      start = Math.min(start, node.anchor.start_line)
+      end = Math.max(end, node.anchor.end_line, node.anchor.start_line)
+    }
+    if (file === null || start === Number.POSITIVE_INFINITY) return null
+    return { file, startLine: start, endLine: end, focusLine: start }
+  }
+
+  const prefix = ["stmt:", "run:"].find((p) => selectedNodeId.startsWith(p))
+  if (!prefix) return null
+  const node = icfg.nodes.find(
+    (n) => n.id === selectedNodeId.slice(prefix.length)
+  )
+  if (!node) return null
+  const startLine = node.anchor.start_line
+  return {
+    file: node.anchor.file,
+    startLine,
+    endLine: Math.max(node.anchor.end_line, startLine),
+    focusLine: startLine,
+  }
+}

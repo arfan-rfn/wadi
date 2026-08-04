@@ -10,7 +10,8 @@ import { AlertTriangle, ExternalLink, HelpCircle } from "lucide-react"
 import type { CoverageReport } from "@/lib/wadi/api"
 import { useCoverage } from "@/lib/wadi/hooks"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SourceBlock } from "@/components/explorer/source-block"
+import { SectionHeading } from "@/components/shared/section-heading"
+import { SourceSnippet } from "@/components/source/source-viewer"
 
 function StatTile({
   label,
@@ -48,14 +49,6 @@ function KindChip({ label, count }: { label: string; count: number }) {
       <span className="font-medium tabular-nums">{count}</span>
       <span className="text-muted-foreground">{label}</span>
     </span>
-  )
-}
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-      {children}
-    </h3>
   )
 }
 
@@ -221,7 +214,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                 </div>
                 <p className="text-xs text-muted-foreground">{entry.reason}</p>
                 {/* §11 Phase 2.7 M5: every anchor drills into source-on-demand. */}
-                <SourceBlock
+                <SourceSnippet
                   snapshotId={snapshotId as string}
                   serviceId={entry.service_id}
                   anchor={entry.site}
@@ -341,7 +334,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                         (anomaly.sample_sites ?? [])
                           .slice(0, 2)
                           .map((site, index) => (
-                            <SourceBlock
+                            <SourceSnippet
                               key={`${anomaly.code}-${index}`}
                               snapshotId={snapshotId as string}
                               serviceId={service.service_id}

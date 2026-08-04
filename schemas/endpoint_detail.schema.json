@@ -1,0 +1,749 @@
+{
+  "$defs": {
+    "AuthEvidence": {
+      "additionalProperties": false,
+      "description": "One piece of evidence behind an auth claim \u2014 every claim carries its source (\u00a75.2).",
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detail": {
+          "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/AuthEvidenceKind"
+        }
+      },
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "title": "AuthEvidence",
+      "type": "object"
+    },
+    "AuthEvidenceKind": {
+      "enum": [
+        "annotation",
+        "security-dsl",
+        "config"
+      ],
+      "title": "AuthEvidenceKind",
+      "type": "string"
+    },
+    "CalleeUnboundReason": {
+      "description": "Why a call node's target has no interior in the graph (\u00a75.4.2 T5).\n\nThese are *not* failures to report as errors. A Lombok accessor has no\nsource body by construction; a JDK method is not the system's code. The\nreason exists so a consumer can render \"no source to analyse, because X\"\nrather than a node that dead-ends for no stated cause \u2014 which is\nindistinguishable from a hole in the map, and is what made a correct\nextraction read as data loss (P10).",
+      "enum": [
+        "lombok-generated",
+        "inherited-external",
+        "compiler-generated",
+        "third-party",
+        "ambiguous-overload",
+        "unresolved-receiver"
+      ],
+      "title": "CalleeUnboundReason",
+      "type": "string"
+    },
+    "Confidence": {
+      "description": "Confidence tiers for recovered facts (\u00a75.4). Ordered EXACT > HIGH > HEURISTIC > NONE.",
+      "enum": [
+        "exact",
+        "high",
+        "heuristic",
+        "none"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "Endpoint": {
+      "additionalProperties": false,
+      "description": "One REST endpoint of one service within a snapshot.",
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/EndpointAuth"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "full_uri": {
+          "description": "Route as written, e.g. /orders/{orderId}",
+          "minLength": 1,
+          "title": "Full Uri",
+          "type": "string"
+        },
+        "handler": {
+          "$ref": "#/$defs/MethodRef"
+        },
+        "http_method": {
+          "$ref": "#/$defs/HttpMethod"
+        },
+        "id": {
+          "pattern": "^ep_[0-9a-f]{16}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "params": {
+          "items": {
+            "$ref": "#/$defs/EndpointParam"
+          },
+          "title": "Params",
+          "type": "array"
+        },
+        "request_schema": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeShape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Field-level @RequestBody shape (\u00a75.2.7); None = no body or pre-1.6"
+        },
+        "response_schema": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeShape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Field-level response shape, wrappers unwrapped (\u00a75.2.7)"
+        },
+        "response_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Type"
+        },
+        "schema_version": {
+          "default": "1.12.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "service_id": {
+          "title": "Service Id",
+          "type": "string"
+        },
+        "simplified_uri": {
+          "description": "Identity form, e.g. /orders/{?}",
+          "minLength": 1,
+          "title": "Simplified Uri",
+          "type": "string"
+        },
+        "snapshot_id": {
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "trigger": {
+          "$ref": "#/$defs/TriggerKind",
+          "default": "http"
+        }
+      },
+      "required": [
+        "snapshot_id",
+        "service_id",
+        "id",
+        "http_method",
+        "full_uri",
+        "simplified_uri",
+        "handler"
+      ],
+      "title": "Endpoint",
+      "type": "object"
+    },
+    "EndpointAuth": {
+      "additionalProperties": false,
+      "description": "Structured authorization state of an endpoint.\n\n``authenticated`` is tri-state (P10): True/False are *claims backed by\nevidence*; None means honestly unknown \u2014 never defaulted to False.",
+      "properties": {
+        "authenticated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Authenticated"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/AuthEvidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "mechanism": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "e.g. 'spring-security'; None when no framework was detected",
+          "title": "Mechanism"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "title": "EndpointAuth",
+      "type": "object"
+    },
+    "EndpointParam": {
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/ParamLocation"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "type_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Name"
+        }
+      },
+      "required": [
+        "name",
+        "location"
+      ],
+      "title": "EndpointParam",
+      "type": "object"
+    },
+    "EndpointTouchedFile": {
+      "additionalProperties": false,
+      "description": "One file the endpoint's flow touches (derived from ICFG anchors).",
+      "properties": {
+        "file": {
+          "description": "Path relative to the service build root",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "node_count": {
+          "description": "ICFG nodes anchored in this file",
+          "minimum": 1,
+          "title": "Node Count",
+          "type": "integer"
+        },
+        "variant": {
+          "$ref": "#/$defs/SourceVariant"
+        }
+      },
+      "required": [
+        "file",
+        "variant",
+        "node_count"
+      ],
+      "title": "EndpointTouchedFile",
+      "type": "object"
+    },
+    "FieldShape": {
+      "additionalProperties": false,
+      "description": "One serialized field: the WIRE name (Jackson renames applied).",
+      "properties": {
+        "java_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The Java field name, when it differs from the wire name",
+          "title": "Java Name"
+        },
+        "name": {
+          "description": "Serialized name (@JsonProperty applied)",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "shape": {
+          "$ref": "#/$defs/TypeShape"
+        }
+      },
+      "required": [
+        "name",
+        "shape"
+      ],
+      "title": "FieldShape",
+      "type": "object"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
+      ],
+      "title": "HttpMethod",
+      "type": "string"
+    },
+    "MethodRef": {
+      "additionalProperties": false,
+      "description": "Reference to a method: stable content-derived id + human-readable signature.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^m_[0-9a-f]{16}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Fully-qualified method signature",
+          "minLength": 1,
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "signature"
+      ],
+      "title": "MethodRef",
+      "type": "object"
+    },
+    "ParamLocation": {
+      "enum": [
+        "path",
+        "query",
+        "body",
+        "header"
+      ],
+      "title": "ParamLocation",
+      "type": "string"
+    },
+    "Provenance": {
+      "description": "Where a claim came from (\u00a75.4). Never blended \u2014 every edge/fact carries one.",
+      "enum": [
+        "machine-proven",
+        "config-resolved",
+        "heuristic",
+        "llm-guessed",
+        "human-asserted",
+        "federated"
+      ],
+      "title": "Provenance",
+      "type": "string"
+    },
+    "RemoteEdgeItem": {
+      "additionalProperties": false,
+      "description": "One stitched edge enriched for display (read-time join over the graph).",
+      "properties": {
+        "caller_service_id": {
+          "title": "Caller Service Id",
+          "type": "string"
+        },
+        "caller_service_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caller Service Name"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "edge_id": {
+          "title": "Edge Id",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "external_host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Host"
+        },
+        "http_verb": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mechanism": {
+          "title": "Mechanism",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "remote_call_id": {
+          "title": "Remote Call Id",
+          "type": "string"
+        },
+        "target_endpoint_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Endpoint Id"
+        },
+        "target_http_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target_kind": {
+          "$ref": "#/$defs/TargetKind"
+        },
+        "target_service_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Service Id"
+        },
+        "target_service_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Service Name"
+        },
+        "target_simplified_uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Simplified Uri"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "edge_id",
+        "remote_call_id",
+        "caller_service_id",
+        "mechanism",
+        "target_kind",
+        "confidence",
+        "provenance"
+      ],
+      "title": "RemoteEdgeItem",
+      "type": "object"
+    },
+    "ShapeKind": {
+      "description": "The recovered wire-shape node kinds (\u00a75.2.7). ``unresolved``/``cycle``/\n``truncated`` are honest terminals \u2014 never fabricated fields (P10).",
+      "enum": [
+        "object",
+        "scalar",
+        "array",
+        "map",
+        "cycle",
+        "truncated",
+        "unresolved"
+      ],
+      "title": "ShapeKind",
+      "type": "string"
+    },
+    "SourceAnchor": {
+      "additionalProperties": false,
+      "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "file": {
+          "description": "Path relative to the service build root",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "variant": {
+          "$ref": "#/$defs/SourceVariant",
+          "default": "original"
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "title": "SourceAnchor",
+      "type": "object"
+    },
+    "SourceVariant": {
+      "description": "Whether an anchor refers to original repo text or a generated variant (\u00a75.3).\n\n``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) \u2014 the text\nthat was actually analyzed, served by source-on-demand with a badge.",
+      "enum": [
+        "original",
+        "generated"
+      ],
+      "title": "SourceVariant",
+      "type": "string"
+    },
+    "TargetKind": {
+      "description": "What a stitched edge lands on (\u00a75.4.2) \u2014 the three target kinds that\nkeep partial coverage honest, plus the explicit undetermined fact (P10).",
+      "enum": [
+        "analyzed",
+        "external",
+        "placeholder",
+        "undetermined"
+      ],
+      "title": "TargetKind",
+      "type": "string"
+    },
+    "TriggerKind": {
+      "description": "v1: http. Reserved (\u00a77): queue, stream, schedule.",
+      "enum": [
+        "http",
+        "queue",
+        "stream",
+        "schedule"
+      ],
+      "title": "TriggerKind",
+      "type": "string"
+    },
+    "TypeShape": {
+      "additionalProperties": false,
+      "description": "A recovered request/response shape (\u00a75.2.7): the wire contract, walked\nfrom in-CPG type structure with honest terminals.",
+      "properties": {
+        "element": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeShape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Element shape for kind=array; value shape for kind=map"
+        },
+        "fields": {
+          "description": "kind=object only; @JsonIgnore omitted",
+          "items": {
+            "$ref": "#/$defs/FieldShape"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ShapeKind"
+        },
+        "type_name": {
+          "description": "Declared type, e.g. 'com.acme.Pet'",
+          "minLength": 1,
+          "title": "Type Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "type_name"
+      ],
+      "title": "TypeShape",
+      "type": "object"
+    },
+    "UnopenableCallCount": {
+      "additionalProperties": false,
+      "description": "Call sites sharing one reason for having no interior (\u00a75.4.2 T5).\n\nDeliberately a count per reason rather than a bare total: \"12 calls you\ncannot open\" reads as damage, while \"10 Lombok accessors, 2 JDK methods\"\nreads as what it is \u2014 code that was never the system's to show.",
+      "properties": {
+        "call_count": {
+          "description": "Call sites in this endpoint's flow with this reason",
+          "minimum": 1,
+          "title": "Call Count",
+          "type": "integer"
+        },
+        "reason": {
+          "$ref": "#/$defs/CalleeUnboundReason"
+        }
+      },
+      "required": [
+        "reason",
+        "call_count"
+      ],
+      "title": "UnopenableCallCount",
+      "type": "object"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.12.0/endpoint_detail.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Everything the endpoint workspace needs in one read (\u00a711 Phase 2.8).\n\n1.11.0 (additive): replaces the client-side compose of endpoint +\nservice-wide remote edges. The ICFG stays its own fetch (it is large) and\nsource stays on demand (\u00a75.3) \u2014 ``touched_files`` carries names, never\ncontent. ``stitched=False`` means the stitcher has not run: the empty\n``outbound`` is 'not yet', never 'none'; ``icfg_available=False`` states\nthat no flow graph exists for this endpoint (P10).",
+  "properties": {
+    "endpoint": {
+      "$ref": "#/$defs/Endpoint"
+    },
+    "icfg_available": {
+      "title": "Icfg Available",
+      "type": "boolean"
+    },
+    "outbound": {
+      "items": {
+        "$ref": "#/$defs/RemoteEdgeItem"
+      },
+      "title": "Outbound",
+      "type": "array"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    },
+    "service_name": {
+      "title": "Service Name",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "stitched": {
+      "title": "Stitched",
+      "type": "boolean"
+    },
+    "system_id": {
+      "title": "System Id",
+      "type": "string"
+    },
+    "touched_files": {
+      "items": {
+        "$ref": "#/$defs/EndpointTouchedFile"
+      },
+      "title": "Touched Files",
+      "type": "array"
+    },
+    "unopenable_calls": {
+      "description": "1.12.0 (\u00a75.4.2 T5): how many call sites in this endpoint's flow have no interior to open, by reason. This is the endpoint-level honesty surface \u2014 `analysis_coverage` sizes reachability system-wide and the coverage report's unresolved counts cover only cross-service edges, so intra-service unopenable calls were counted NOWHERE per endpoint. Empty means every call in the flow opens, or the ICFG predates 1.12.0.",
+      "items": {
+        "$ref": "#/$defs/UnopenableCallCount"
+      },
+      "title": "Unopenable Calls",
+      "type": "array"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "system_id",
+    "service_id",
+    "service_name",
+    "endpoint",
+    "icfg_available",
+    "stitched"
+  ],
+  "title": "EndpointDetailView",
+  "type": "object"
+}

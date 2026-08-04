@@ -6,7 +6,7 @@ export const siteConfig = {
     "Ground-truth architecture of your microservice system: services, endpoints, and cross-service flows extracted from code.",
   mainNav: [
     {
-      title: "Explorer",
+      title: "Overview",
       href: "/",
     },
   ],

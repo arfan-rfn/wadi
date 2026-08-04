@@ -330,3 +330,30 @@ export function buildFlowGraph(
 
   return { nodes, edges }
 }
+
+/** Arm labels on which a statement's control leaves its method (§5.2.8 T3).
+ *
+ * The assembler materializes the arm a construct takes when it ends its
+ * method — "on false, the method returns" — as a labeled edge into the
+ * method's synthetic exit. The canvas draws lanes rather than entry/exit
+ * nodes, so that edge has nowhere to land and would silently disappear,
+ * hiding the very thing the fix made visible. Surfaced on the node instead.
+ *
+ * Plain `flow` into exit is excluded: "this statement ends the method" is what
+ * a lane's bottom edge already says. Only a NAMED arm carries new information.
+ */
+export function exitArms(icfg: Icfg): Map<string, IcfgEdge["kind"][]> {
+  const nodeById = new Map(icfg.nodes.map((n) => [n.id, n]))
+  const arms = new Map<string, IcfgEdge["kind"][]>()
+  for (const edge of icfg.edges ?? []) {
+    if (edge.kind === "flow" || edge.kind === "call" || edge.kind === "return")
+      continue
+    const source = nodeById.get(edge.source)
+    const target = nodeById.get(edge.target)
+    if (!source || !target) continue
+    if (target.kind !== "exit" || source.method.id !== target.method.id)
+      continue
+    arms.set(source.id, [...(arms.get(source.id) ?? []), edge.kind])
+  }
+  return arms
+}

@@ -19,19 +19,14 @@ import {
   governingConditions,
   type GoverningCondition,
 } from "@/lib/wadi/conditions"
+import { unopenableCopy } from "@/lib/wadi/unopenable"
+import { Chip } from "@/components/ui/chip"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SectionHeading } from "@/components/shared/section-heading"
+import { SourceSnippet } from "@/components/source/source-viewer"
 
 import { MethodBadge } from "./method-badge"
 import { ShapeTree } from "./shape-tree"
-import { SourceBlock } from "./source-block"
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-      {children}
-    </h3>
-  )
-}
 
 function AuthSection({
   endpoint,
@@ -91,7 +86,7 @@ function AuthSection({
                 <code className="text-[11px]">{item.detail}</code>
               </div>
               {item.anchor && (
-                <SourceBlock
+                <SourceSnippet
                   snapshotId={snapshotId}
                   serviceId={serviceId}
                   anchor={item.anchor}
@@ -188,7 +183,7 @@ function CallRow({
       </div>
       {anchor && (
         <div className="pl-16">
-          <SourceBlock
+          <SourceSnippet
             snapshotId={snapshotId}
             serviceId={serviceId}
             anchor={anchor}
@@ -206,6 +201,7 @@ export function EndpointOverview({
   edgesLoading,
   snapshotId,
   serviceId,
+  unopenableCalls,
 }: {
   endpoint: Endpoint
   icfg: Icfg | undefined
@@ -213,6 +209,9 @@ export function EndpointOverview({
   edgesLoading: boolean
   snapshotId: string
   serviceId: string
+  /** §5.4.2 T5 — call sites with no interior, by reason (the endpoint-level
+   *  honesty surface). Absent/empty means nothing needs explaining. */
+  unopenableCalls?: { reason: string; call_count: number }[]
 }) {
   // Closure semantics (§5.2): this endpoint's calls are the call sites inside
   // ITS ICFG — a shared helper's call appears under every endpoint that
@@ -258,6 +257,26 @@ export function EndpointOverview({
 
   return (
     <div className="space-y-6 p-4">
+      {unopenableCalls && unopenableCalls.length > 0 ? (
+        <div className="space-y-1.5">
+          <SectionHeading>Calls with no source to analyse</SectionHeading>
+          <div className="flex flex-wrap gap-1.5">
+            {unopenableCalls.map((entry) => {
+              const copy = unopenableCopy(entry.reason)
+              return (
+                <Chip key={entry.reason} variant="outline" title={copy?.detail}>
+                  {entry.call_count} {copy?.badge ?? entry.reason}
+                </Chip>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            These call sites are drawn in the flow — they run — but their bodies
+            are generated, inherited, or third-party, so there is no source to
+            open. Counted here so the map states what it cannot show.
+          </p>
+        </div>
+      ) : null}
       <AuthSection
         endpoint={endpoint}
         snapshotId={snapshotId}

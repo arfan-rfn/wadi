@@ -20,7 +20,7 @@ from typing import Self
 from pydantic import Field, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
-from wadi_contracts.enums import IcfgEdgeKind, IcfgNodeKind, SinkKind
+from wadi_contracts.enums import CalleeUnboundReason, IcfgEdgeKind, IcfgNodeKind, SinkKind
 from wadi_contracts.source import MethodRef, SourceAnchor
 
 _RC_ID = re.compile(r"^rc_[0-9a-f]{16}$")
@@ -86,6 +86,18 @@ class IcfgNode(WadiModel):
     )
     condition: BranchCondition | None = None
     callee: MethodRef | None = None
+    callee_unbound_reason: CalleeUnboundReason | None = Field(
+        default=None,
+        description=(
+            "Why this call's target has no interior in the graph (§5.4.2 T5): "
+            "lombok-generated | inherited-external | compiler-generated | "
+            "third-party | ambiguous-overload | unresolved-receiver. The node "
+            "is ALWAYS kept — a call with no visible body still runs — so this "
+            "is what lets a consumer say 'no source to analyse' instead of "
+            "rendering a silent dead end (P10). None = the callee is in this "
+            "graph, or the artifact predates 1.12.0 (unknown, not 'bound')."
+        ),
+    )
     sink: SinkKind | None = None
     remote_call_id: str | None = Field(
         default=None,
@@ -121,6 +133,12 @@ class IcfgNode(WadiModel):
         # branch condition puts the call on the BRANCH node (§5.2.8).
         if self.callee is not None and self.kind in synthetic:
             raise ValueError(f"callee is not valid on {self.kind} nodes")
+        # 1.12.0 (§5.4.2 T5): the reason explains a CALLEE that has no interior,
+        # so it is meaningless without one — and a reason on a callee the graph
+        # does contain would contradict itself (the writer's own bookkeeping is
+        # what the invariant guards).
+        if self.callee_unbound_reason is not None and self.callee is None:
+            raise ValueError("callee_unbound_reason requires a callee")
         if self.method_info is not None and self.kind is not IcfgNodeKind.ENTRY:
             raise ValueError(f"method_info is only valid on entry nodes, not {self.kind}")
         # Markers anchor to the coarsened statement, which is not always a

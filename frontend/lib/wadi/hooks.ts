@@ -1,10 +1,11 @@
 "use client"
 
 // TanStack Query hooks over the wadi API (the template's data-fetching idiom).
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 
 import { QUERY_KEYS } from "@/config/query-keys"
 import { wadiApi } from "@/lib/wadi/api"
+import { newestSucceeded } from "@/lib/wadi/routes"
 
 export function useSystems() {
   return useQuery({ queryKey: QUERY_KEYS.systems, queryFn: wadiApi.systems })
@@ -15,6 +16,46 @@ export function useSnapshots(systemId: string | null) {
     queryKey: QUERY_KEYS.snapshots(systemId ?? ""),
     queryFn: () => wadiApi.snapshots(systemId as string),
     enabled: systemId !== null,
+  })
+}
+
+/**
+ * The newest succeeded snapshot across EVERY system — what `/` forwards to.
+ *
+ * There is no global snapshot route (the orchestrator lists them per system),
+ * so this fans out over the system list. Picking `systems[0]` instead would
+ * strand the user on whichever system happens to sort first even when it has
+ * no snapshots and six others do.
+ *
+ * `pending` stays true until every system has reported, so the caller never
+ * renders an empty state over a half-loaded fan-out.
+ */
+export function useNewestSnapshot() {
+  const systems = useSystems()
+  const systemIds = systems.data?.map((s) => s.id) ?? []
+  const results = useQueries({
+    queries: systemIds.map((id) => ({
+      queryKey: QUERY_KEYS.snapshots(id),
+      queryFn: () => wadiApi.snapshots(id),
+    })),
+  })
+
+  const pending =
+    systems.isPending || results.some((r) => r.isPending && !r.isError)
+  const snapshots = results.flatMap((r) => r.data ?? [])
+  return {
+    pending,
+    noSystems: !systems.isPending && systemIds.length === 0,
+    snapshot: pending ? null : newestSucceeded(snapshots),
+  }
+}
+
+/** One snapshot by id — resolves its system for the scope chrome. */
+export function useSnapshot(snapshotId: string | null) {
+  return useQuery({
+    queryKey: QUERY_KEYS.snapshot(snapshotId ?? ""),
+    queryFn: () => wadiApi.snapshot(snapshotId as string),
+    enabled: snapshotId !== null,
   })
 }
 
@@ -41,6 +82,19 @@ export function useIcfg(snapshotId: string | null, endpointId: string | null) {
   return useQuery({
     queryKey: QUERY_KEYS.icfg(snapshotId ?? "", endpointId ?? ""),
     queryFn: () => wadiApi.icfg(snapshotId as string, endpointId as string),
+    enabled: snapshotId !== null && endpointId !== null,
+  })
+}
+
+/** The endpoint workspace's one-read aggregate (§11 Phase 2.8). */
+export function useEndpointDetail(
+  snapshotId: string | null,
+  endpointId: string | null
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.endpointDetail(snapshotId ?? "", endpointId ?? ""),
+    queryFn: () =>
+      wadiApi.endpointDetail(snapshotId as string, endpointId as string),
     enabled: snapshotId !== null && endpointId !== null,
   })
 }

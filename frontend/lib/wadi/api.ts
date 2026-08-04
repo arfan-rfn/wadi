@@ -2,6 +2,7 @@
 // Types come from the generated contract schemas — never hand-written (§7).
 
 import type { CoverageReport } from "@/lib/generated/coverage_report.schema"
+import type { EndpointDetailView } from "@/lib/generated/endpoint_detail.schema"
 import type { Endpoint } from "@/lib/generated/endpoint.schema"
 import type { Icfg } from "@/lib/generated/icfg.schema"
 import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
@@ -30,6 +31,8 @@ export const wadiApi = {
   systems: () => get<System[]>("/api/v1/systems"),
   snapshots: (systemId: string) =>
     get<Snapshot[]>(`/api/v1/systems/${systemId}/snapshots`),
+  snapshot: (snapshotId: string) =>
+    get<Snapshot>(`/api/v1/snapshots/${snapshotId}`),
   services: (snapshotId: string) =>
     get<ServiceSummary[]>(`/api/v1/snapshots/${snapshotId}/services`),
   endpoints: (snapshotId: string, serviceId: string) =>
@@ -38,6 +41,12 @@ export const wadiApi = {
     ),
   icfg: (snapshotId: string, endpointId: string) =>
     get<Icfg>(`/api/v1/snapshots/${snapshotId}/endpoints/${endpointId}/icfg`),
+  // The workspace aggregate (§11 Phase 2.8): endpoint + its outbound edges +
+  // touched-file names in one read. ICFG and source stay separate fetches.
+  endpointDetail: (snapshotId: string, endpointId: string) =>
+    get<EndpointDetailView>(
+      `/api/v1/snapshots/${snapshotId}/endpoints/${endpointId}/detail`
+    ),
   coverage: (snapshotId: string) =>
     get<CoverageReport>(`/api/v1/snapshots/${snapshotId}/coverage`),
   systemGraph: (snapshotId: string) =>
@@ -81,6 +90,7 @@ export const wadiApi = {
 export type {
   CoverageReport,
   Endpoint,
+  EndpointDetailView,
   Icfg,
   RemoteEdgesView,
   ServiceSummary,

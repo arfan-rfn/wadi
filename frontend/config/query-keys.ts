@@ -1,11 +1,14 @@
 export const QUERY_KEYS = {
   systems: ["systems"] as const,
   snapshots: (systemId: string) => ["snapshots", systemId] as const,
+  snapshot: (snapshotId: string) => ["snapshot", snapshotId] as const,
   services: (snapshotId: string) => ["services", snapshotId] as const,
   endpoints: (snapshotId: string, serviceId: string) =>
     ["endpoints", snapshotId, serviceId] as const,
   icfg: (snapshotId: string, endpointId: string) =>
     ["icfg", snapshotId, endpointId] as const,
+  endpointDetail: (snapshotId: string, endpointId: string) =>
+    ["endpoint-detail", snapshotId, endpointId] as const,
   coverage: (snapshotId: string) => ["coverage", snapshotId] as const,
   remoteEdges: (snapshotId: string, serviceId: string) =>
     ["remote-edges", snapshotId, serviceId] as const,

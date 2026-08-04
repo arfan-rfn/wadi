@@ -1,14 +1,15 @@
+import { fireEvent, within } from "@testing-library/react"
 import { afterEach, describe, expect, test, vi } from "vitest"
 
 import type { Icfg } from "@/lib/generated/icfg.schema"
-import { SourcePane } from "@/components/explorer/source-pane"
+import { SourceSnippet, SourceViewer } from "@/components/source/source-viewer"
 
 import { renderWithQuery } from "./utils"
 
 const FILE = "src/main/java/com/acme/FlowController.java"
 
 const icfg = {
-  schema_version: "1.9.0",
+  schema_version: "1.11.0",
   snapshot_id: "snap_1",
   service_id: "svc_1",
   endpoint_id: "ep_" + "0".repeat(16),
@@ -49,11 +50,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("SourcePane honesty states (§11 Phase 2.7 M1)", () => {
+describe("SourceViewer honesty states (§11 Phase 2.8)", () => {
   test("no icfg → skeleton, never a false empty", () => {
     stubFetch({})
     const { container } = renderWithQuery(
-      <SourcePane
+      <SourceViewer
         icfg={undefined}
         snapshotId="snap_1"
         serviceId="svc_1"
@@ -76,7 +77,7 @@ describe("SourcePane honesty states (§11 Phase 2.7 M1)", () => {
       truncated: false,
     })
     const { findAllByText, findByText, getAllByText } = renderWithQuery(
-      <SourcePane icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
+      <SourceViewer icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
     )
     expect(getAllByText(/FlowController\.java/).length).toBeGreaterThan(0)
     expect(await findByText(/1 file touched/)).toBeInTheDocument()
@@ -87,6 +88,25 @@ describe("SourcePane honesty states (§11 Phase 2.7 M1)", () => {
         (element.textContent?.includes("class FlowController {") ?? false)
     )
     expect(codeLines.length).toBeGreaterThan(0)
+  })
+
+  test("one scroller for all files — no nested scrolling", () => {
+    stubFetch({
+      file: FILE,
+      start_line: 1,
+      end_line: 3,
+      variant: "original",
+      content: "class FlowController {\n  int go;\n}\n",
+      total_lines: 3,
+      truncated: false,
+    })
+    const { container } = renderWithQuery(
+      <SourceViewer icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
+    )
+    const scrollers = container.querySelectorAll(
+      '[class*="overflow-y-auto"], [class*="overflow-auto"]'
+    )
+    expect(scrollers.length).toBe(1)
   })
 
   test("a truncated window pages honestly, never silently", async () => {
@@ -100,7 +120,7 @@ describe("SourcePane honesty states (§11 Phase 2.7 M1)", () => {
       truncated: true,
     })
     const { findByText } = renderWithQuery(
-      <SourcePane icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
+      <SourceViewer icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
     )
     expect(await findByText(/Load lines 3–/)).toBeInTheDocument()
     expect(await findByText(/of 4200/)).toBeInTheDocument()
@@ -109,16 +129,16 @@ describe("SourcePane honesty states (§11 Phase 2.7 M1)", () => {
   test("source failure is a stated state, not a blank", async () => {
     stubFetch({ detail: "file not found at pinned commit" }, false, 404)
     const { findByText } = renderWithQuery(
-      <SourcePane icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
+      <SourceViewer icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
     )
     expect(await findByText(/Source unavailable:/)).toBeInTheDocument()
   })
 
-  test("inactive tab fetches nothing (§5.3 on-demand)", () => {
+  test("inactive lens fetches nothing (§5.3 on-demand)", () => {
     const spy = vi.fn()
     vi.stubGlobal("fetch", spy)
     renderWithQuery(
-      <SourcePane
+      <SourceViewer
         icfg={icfg}
         snapshotId="snap_1"
         serviceId="svc_1"
@@ -126,5 +146,50 @@ describe("SourcePane honesty states (§11 Phase 2.7 M1)", () => {
       />
     )
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe("SourceSnippet (drill-in peek)", () => {
+  const anchor: import("@/lib/generated/icfg.schema").SourceAnchor = {
+    file: FILE,
+    start_line: 2,
+    end_line: 2,
+    variant: "original",
+  }
+
+  test("closed by default and fetches nothing until opened", () => {
+    const spy = vi.fn()
+    vi.stubGlobal("fetch", spy)
+    const { getByText } = renderWithQuery(
+      <SourceSnippet snapshotId="snap_1" serviceId="svc_1" anchor={anchor} />
+    )
+    expect(getByText(`${FILE}:2`).closest("button")).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    )
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  test("opening fetches the anchored window and highlights the anchor line", async () => {
+    stubFetch({
+      file: FILE,
+      start_line: 1,
+      end_line: 5,
+      variant: "original",
+      content: "class A {\nif (n < 0)\n  x();\n}\n",
+      total_lines: 5,
+      truncated: false,
+    })
+    const { container } = renderWithQuery(
+      <SourceSnippet snapshotId="snap_1" serviceId="svc_1" anchor={anchor} />
+    )
+    const scoped = within(container as HTMLElement)
+    fireEvent.click(scoped.getByText(`${FILE}:2`))
+    const highlighted = await scoped.findAllByText(
+      (_, element) =>
+        (element?.className?.includes?.("bg-amber-500/10") ?? false) &&
+        (element?.textContent?.includes("if (n < 0)") ?? false)
+    )
+    expect(highlighted.length).toBeGreaterThan(0)
   })
 })
