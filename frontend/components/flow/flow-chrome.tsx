@@ -103,6 +103,14 @@ export const NodeShell = memo(function NodeShell({
       aria-current={selected ? "true" : undefined}
       onClick={onClick}
       className={cn(
+        // React Flow stamps `pointer-events: none` on the node wrapper whenever
+        // a node is neither selectable nor draggable and no node mouse handler
+        // is registered (NodeWrapper's `hasPointerEvents`). Every node here is
+        // exactly that — selection is the store's job, not React Flow's — so
+        // without this opt-in, clicks fall through the card into the pan
+        // surface and every in-node control (expand, drill-in, select) is dead
+        // to the mouse. LaneNode does the same on its header.
+        "pointer-events-auto",
         "relative rounded-md border bg-card text-card-foreground transition-[box-shadow,opacity]",
         selected && "ring-2 ring-ring",
         trace === "dim" && "opacity-25",
