@@ -23,6 +23,8 @@ public class OrderController {
 
     private final OrderSummary summary = new OrderSummary();
 
+    private final OrderFormatter formatter = new OrderFormatter();
+
     @GetMapping("/orders/{id}")
     public ResponseEntity<String> lookup(@PathVariable String id) {
         Order order = new Order();
@@ -43,8 +45,20 @@ public class OrderController {
         // the classifier does not label calls that bind fine.
         String label = summary.describe(found, all.length);
 
+        // NOT an accessor despite the "set" prefix, and hand-written: must
+        // never be reported lombok-generated.
+        String settled = formatter.settle(id);
+
+        // The setter comes from a FIELD-level @Setter on a class annotated
+        // @Getter — still Lombok-generated, still no source to open.
+        formatter.setPrefix(settled);
+
+        // Two first-party overloads of `format`; whichever way the receiver
+        // binds, the classifier must not invent a body.
+        String formatted = formatter.format(id, all.length);
+
         // unresolved-receiver: `ok` is a static import of
         // ResponseEntity.ok, which javasrc2cpg attributes to THIS class.
-        return ok(label + upstream);
+        return ok(label + upstream + formatted);
     }
 }

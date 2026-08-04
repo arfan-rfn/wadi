@@ -64,6 +64,24 @@ SOURCE_MAX_LINES = 2000
 ORCHESTRATOR_VERSION = metadata_version("wadi-orchestrator")
 
 
+def source_lines(content: str) -> list[str]:
+    """Split source the way a COMPILER counts lines, keeping the terminators.
+
+    Not ``str.splitlines``: Python also breaks on form feed, vertical tab,
+    file separator and U+2028, none of which Java, JavaScript or Go treat as a
+    line terminator. Every ICFG anchor is a compiler line number, so a single
+    form feed anywhere in a file shifted this response against the anchors and
+    the source panel highlighted confidently wrong code — invisibly, because
+    the line numbers it printed were its own.
+    """
+    parts = content.split("\n")
+    tail = parts.pop()
+    lines = [part + "\n" for part in parts]
+    if tail:
+        lines.append(tail)
+    return lines
+
+
 # --- request/response bodies (thin wrappers over contract models) -----------------
 
 
@@ -610,7 +628,7 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail=f"file {file!r} not found at pinned commit"
             ) from exc
-        lines = content.splitlines(keepends=True)
+        lines = source_lines(content)
         last = end_line if end_line is not None else len(lines)
         if last < start_line:
             raise HTTPException(status_code=400, detail="end_line must be >= start_line")

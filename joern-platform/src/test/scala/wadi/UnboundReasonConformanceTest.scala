@@ -67,6 +67,28 @@ class UnboundReasonConformanceTest extends AnyFunSuite with Matchers with Fixtur
     reasonFor("OrderSummary.describe") shouldBe None
   }
 
+  test("a static import attributed to the importing class is unresolved-receiver") {
+    // `unresolved-receiver` is also the classifier's fall-through, so without
+    // pinning it to a specific input a regression that collapsed everything
+    // into the default would still look covered by the blanket test below.
+    reasonFor("OrderController.ok") shouldBe Some("unresolved-receiver")
+  }
+
+  test("a setter asked for per FIELD is still lombok-generated") {
+    // `OrderFormatter` carries @Getter at class level and @Setter on the
+    // field. Reading only class-level annotations, a direction-aware check
+    // concludes "@Getter generates no setters" and mislabels this — trading
+    // one wrong answer for another. Both levels have to be read.
+    reasonFor("OrderFormatter.setPrefix") shouldBe Some("lombok-generated")
+  }
+
+  test("a hand-written method that merely starts with 'set' is never generated") {
+    // `settle` binds to a real body, so the honest answer is no reason at all.
+    // Testing the prefix without a boundary check was what let names like
+    // settle/island/getaway read as generated accessors.
+    reasonFor("OrderFormatter.settle") shouldBe None
+  }
+
   test("every unbound call has a reason and every bound call has none") {
     val bound   = calls.filter(_._2.isEmpty).map(_._1)
     val unbound = calls.filter(_._2.nonEmpty)

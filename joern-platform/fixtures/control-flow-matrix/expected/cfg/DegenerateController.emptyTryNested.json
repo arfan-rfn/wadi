@@ -1,0 +1,70 @@
+{
+  "nodes": [
+    {
+      "key": "branch@123",
+      "kind": "branch",
+      "code": "if (n > 0)",
+      "line": 123,
+      "line_end": 127,
+      "construct_kind": "if",
+      "condition_code": "n > 0"
+    },
+    {
+      "key": "statement@124",
+      "kind": "statement",
+      "code": "try",
+      "line": 124,
+      "line_end": 127,
+      "construct_kind": "try"
+    },
+    {
+      "key": "statement@126",
+      "kind": "statement",
+      "code": "catch",
+      "line": 126,
+      "line_end": 127,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "statement@127",
+      "kind": "statement",
+      "code": "this.hits = -1",
+      "line": 127,
+      "line_end": 127
+    },
+    {
+      "key": "return@130",
+      "kind": "return",
+      "code": "return \"done:\" + hits;",
+      "line": 130,
+      "line_end": 130
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@123",
+      "target": "return@130",
+      "label": "false"
+    },
+    {
+      "source": "branch@123",
+      "target": "statement@124",
+      "label": "true"
+    },
+    {
+      "source": "statement@124",
+      "target": "return@130",
+      "label": "flow"
+    },
+    {
+      "source": "statement@124",
+      "target": "statement@126",
+      "label": "exception"
+    },
+    {
+      "source": "statement@126",
+      "target": "statement@127",
+      "label": "flow"
+    }
+  ]
+}

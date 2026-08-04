@@ -112,6 +112,52 @@ rebuilds the canvas around execution order (architecture.md §11 Phase 2.8).
   go, and two statements inside its handler are disconnected for reasons not
   yet measured. Left counted in `cfg_anomalies` rather than suppressed.
 
+- **Three ways the graph could still assert something false (pre-landing
+  review).** Each reproduced against a live CPG first and is now pinned by a
+  fixture, because a wrong edge is worse than a missing one: it is confidently
+  wrong on the one surface whose whole claim is that it maps the code.
+  - An empty `try` nested in an if-arm or at the tail of a loop body found no
+    next sibling — normal completion went unwired, and a construct whose every
+    successor is a handler is taken to have left the method, so the graph said
+    *"on normal completion this returns"* about code that plainly continues.
+    Completion is now searched **outward** through the AST, and back to the
+    loop header at the tail of a body.
+  - An empty `try` with a statement before it was skipped entirely by that
+    statement, leaving the try with no incoming edge, a second entry point
+    patched in, and two independent predecessors on the statement after it.
+    Predecessors now route through the try. An enclosing branch is handled
+    separately: consuming its edge would stamp the skipping arm's label on the
+    path *into* the other arm, so it gets its own arm-labeled edge instead.
+  - `while (true)` / `for (;;)` present the same label set as a trailing loop —
+    body arm plus a back edge, no exit arm — so an exit arm was synthesized for
+    a method that cannot return. The condition now tells them apart, and
+    `exit-unreachable` stays live on them: a method whose only way out is a
+    loop it cannot leave HAS an unreachable exit, and that is worth counting.
+- **Three unbound-reason mislabels, each of which stated a positive falsehood
+  in the UI.** A receiver javasrc2cpg could not bind was reported
+  `third-party` ("declared outside every analyzed source root") rather than
+  `unresolved-receiver`; `inherited-external` ("declared by a framework
+  supertype, not by the type in your repo") fired on any class with any
+  external supertype, so `implements Serializable` was enough; and the
+  accessor test matched any name merely *starting* with get/set/is, so
+  `settle()` on a Lombok type read as a generated accessor with no source.
+  The classifier is also **total** now — a null reason strictly means the call
+  bound, never "unclassifiable".
+- **The source panel could highlight the wrong lines.** The source route split
+  content with `str.splitlines`, which breaks on form feed, vertical tab and
+  U+2028; compilers do not, so every ICFG anchor after one of those characters
+  pointed at the wrong line — while the gutter printed numbers that agreed
+  with themselves. An anchor is a compiler line number, so the route now
+  counts lines the way a compiler does.
+- The bytecode oracle's false-positive budget counts back-jumps: `while (true)`
+  folds to an unconditional `GOTO`, so a budget of conditional jumps alone
+  called a correct loop node a phantom branch. Constant-true conditions and
+  try-with-resources join the §5.2.8 desugaring whitelist.
+- The unbound-reason classifier memoizes per `(type, method)` instead of
+  walking a declaring type's whole AST once per call site — on the benchmark
+  that is 1,881 call sites over 617 distinct callees, 92.9% of them taking the
+  annotation-scanning path.
+
 ### Removed
 - The single-route explorer, its detail pane, the second (unhighlighted)
   source renderer, and the old canvas. Pre-2.8 deep links other than

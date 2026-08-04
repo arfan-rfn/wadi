@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    {
+      "key": "loop@165",
+      "kind": "loop",
+      "code": "while (true)",
+      "line": 165,
+      "line_end": 166,
+      "construct_kind": "while",
+      "condition_code": "true"
+    },
+    {
+      "key": "statement@166",
+      "kind": "statement",
+      "code": "this.hits += n",
+      "line": 166,
+      "line_end": 166
+    }
+  ],
+  "edges": [
+    {
+      "source": "loop@165",
+      "target": "statement@166",
+      "label": "true"
+    },
+    {
+      "source": "statement@166",
+      "target": "loop@165",
+      "label": "flow",
+      "back": true
+    }
+  ]
+}

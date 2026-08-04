@@ -38,6 +38,10 @@ from wadi_worker.assembler import Assembler, ExportIncompatibleError
 SNAP = "snap_" + "a" * 16
 SVC = "svc_" + "b" * 16
 
+_UNSET = "<unset>"
+"""Distinguishes 'the caller said nothing' from an explicit `None`, which for a
+loop is the meaningful value: `for (;;)` states no condition."""
+
 
 @pytest.fixture
 def assembler() -> Assembler:
@@ -343,7 +347,19 @@ class TestUnboundCalleeReason:
         icfg = Assembler(snapshot_id="snap_x", service_id="svc_x").assemble(export).icfgs[0]
         return next(n for n in icfg.nodes if n.id.endswith(f":n{REPO_CALLSITE}"))
 
-    def test_reason_reaches_the_contract(self) -> None:
+    def test_every_reason_reaches_the_contract(self) -> None:
+        """The mapping table's whole purpose (see the comment above it in
+        assembler.py) is that a reason code added upstream fails HERE rather
+        than reaching the UI unlabelled — which only holds if something checks
+        the table is total. Driven through the real assembly path rather than
+        the table itself, so an unmapped member cannot pass by degrading to
+        `None`, i.e. "this callee opens fine": the exact silent dead end T5
+        exists to remove (P10).
+        """
+        for export_reason in ExportUnboundReason:
+            node = self._assemble(export_reason)
+            assert node.callee_unbound_reason is not None, export_reason
+            assert node.callee_unbound_reason.value == export_reason.value
         node = self._assemble(ExportUnboundReason.INHERITED_EXTERNAL)
         assert node.callee_unbound_reason is CalleeUnboundReason.INHERITED_EXTERNAL
         # The node itself survives — losing it is what would make the map lie.
@@ -402,7 +418,14 @@ class TestArmsLeavingTheMethod:
         nid: int,
         kind: CfgNodeKind = CfgNodeKind.STATEMENT,
         construct_kind: str | None = None,
+        condition_code: str | None = _UNSET,
     ) -> ExportCfgNode:
+        # A conditional loop states its condition in a real export; only
+        # `for (;;)` states none. That is the discriminator T3 uses to refuse
+        # an exit arm to a loop with no exit test, so it has to be faithful —
+        # and an explicit `None` from the caller has to survive as `None`.
+        if condition_code == _UNSET:
+            condition_code = "i < n" if construct_kind in {"for", "while", "do-while"} else None
         return ExportCfgNode(
             id=nid,
             kind=kind,
@@ -410,6 +433,7 @@ class TestArmsLeavingTheMethod:
             line=nid,
             line_end=nid,
             construct_kind=construct_kind,
+            condition_code=condition_code,
         )
 
     def test_trailing_if_gains_its_false_arm(self) -> None:
@@ -433,6 +457,27 @@ class TestArmsLeavingTheMethod:
         )
         assert ("m1:n1", "m1:exit", IcfgEdgeKind.FALSE_BRANCH) in edges
         assert ("m1:n1", "m1:exit", IcfgEdgeKind.TRUE_BRANCH) not in edges
+
+    def test_an_unconditional_loop_is_never_given_an_exit_arm(self) -> None:
+        """`void h(int n) { while (true) { hits += n; } }` — §5.2.8 T3.
+
+        Indistinguishable from a trailing loop by label set alone, so the
+        condition is what tells them apart. Completing a `false` arm here
+        would draw an exit path out of a loop that has no exit test, on the
+        one surface whose whole claim is that the graph is honest.
+        """
+        for construct, condition in (("while", "true"), ("do-while", "true"), ("for", None)):
+            edges = self._icfg_edges(
+                [
+                    self._node(1, CfgNodeKind.LOOP, construct, condition_code=condition),
+                    self._node(2),
+                ],
+                [
+                    ExportCfgEdge(source=1, target=2, label=ExportCfgEdgeLabel.TRUE),
+                    ExportCfgEdge(source=2, target=1, label=ExportCfgEdgeLabel.FLOW, back=True),
+                ],
+            )
+            assert ("m1:n1", "m1:exit", IcfgEdgeKind.FALSE_BRANCH) not in edges, construct
 
     def test_empty_body_loop_is_never_given_a_body(self) -> None:
         # The body arm is missing because there IS no body (a recorded

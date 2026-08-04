@@ -1,50 +1,50 @@
 {
   "nodes": [
     {
-      "key": "statement@89",
+      "key": "statement@93",
       "kind": "statement",
       "code": "try",
-      "line": 89,
-      "line_end": 92,
+      "line": 93,
+      "line_end": 96,
       "construct_kind": "try"
     },
     {
-      "key": "statement@91",
+      "key": "statement@95",
       "kind": "statement",
       "code": "catch",
-      "line": 91,
-      "line_end": 92,
+      "line": 95,
+      "line_end": 96,
       "construct_kind": "catch"
     },
     {
-      "key": "return@92",
+      "key": "return@96",
       "kind": "return",
       "code": "return \"caught:\" + n;",
-      "line": 92,
-      "line_end": 92
+      "line": 96,
+      "line_end": 96
     },
     {
-      "key": "return@94",
+      "key": "return@98",
       "kind": "return",
       "code": "return \"done:\" + hits;",
-      "line": 94,
-      "line_end": 94
+      "line": 98,
+      "line_end": 98
     }
   ],
   "edges": [
     {
-      "source": "statement@89",
-      "target": "return@94",
+      "source": "statement@93",
+      "target": "return@98",
       "label": "flow"
     },
     {
-      "source": "statement@89",
-      "target": "statement@91",
+      "source": "statement@93",
+      "target": "statement@95",
       "label": "exception"
     },
     {
-      "source": "statement@91",
-      "target": "return@92",
+      "source": "statement@95",
+      "target": "return@96",
       "label": "flow"
     }
   ]

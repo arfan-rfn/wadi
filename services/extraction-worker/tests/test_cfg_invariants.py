@@ -23,12 +23,23 @@ def _method(method_id: int = 1) -> ExportMethod:
     )
 
 
+_UNSET = "<unset>"
+"""Distinguishes 'the caller said nothing' from an explicit `None`, which for a
+loop is the meaningful value: `for (;;)` states no condition."""
+
+
 def _node(
     node_id: int,
     kind: CfgNodeKind = CfgNodeKind.STATEMENT,
     line: int = 0,
     construct_kind: str | None = None,
+    condition_code: str | None = _UNSET,
 ) -> ExportCfgNode:
+    # A real export always states a loop's condition unless the source has
+    # none (`for (;;)`), which is how an unconditional loop is told apart from
+    # a trailing one — so a conditional loop node here must carry one too.
+    if condition_code == _UNSET:
+        condition_code = "i < n" if construct_kind in {"for", "while", "do-while"} else None
     return ExportCfgNode(
         id=node_id,
         kind=kind,
@@ -36,6 +47,7 @@ def _node(
         line=line or node_id,
         line_end=line or node_id,
         construct_kind=construct_kind,
+        condition_code=condition_code,
     )
 
 
@@ -106,6 +118,39 @@ class TestCheckCfg:
         cfg = _cfg(
             [
                 _node(1, CfgNodeKind.LOOP, construct_kind="for"),
+                _node(2),
+            ],
+            [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(2, 1, back=True)],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_an_unconditional_loop_keeps_exit_unreachable_live(self) -> None:
+        """`void h() { while (true) { hits++; } }` — §5.2.8 T3.
+
+        The label set is identical to a trailing loop's, so completing an exit
+        arm here would assert the method can return past a loop it can never
+        leave. Suppressing the arm ALSO has to leave `exit-unreachable`
+        reporting: that method's exit really is unreachable, and the whole
+        point of the invariant layer is that such a fact stays counted.
+        """
+        for construct, condition in (("while", "true"), ("do-while", "true"), ("for", None)):
+            cfg = _cfg(
+                [
+                    _node(1, CfgNodeKind.LOOP, construct_kind=construct, condition_code=condition),
+                    _node(2),
+                ],
+                [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(2, 1, back=True)],
+            )
+            codes = [code for code, _ in check_cfg(cfg, _method())]
+            assert codes == ["exit-unreachable"], f"{construct} {condition!r} -> {codes}"
+
+    def test_a_conditional_for_is_still_a_trailing_loop(self) -> None:
+        """The discriminator is the condition, not the construct: a `for` that
+        states one is an ordinary trailing loop whose exit arm the assembler
+        completes, so it must stay silent here."""
+        cfg = _cfg(
+            [
+                _node(1, CfgNodeKind.LOOP, construct_kind="for", condition_code="i < n"),
                 _node(2),
             ],
             [_edge(1, 2, ExportCfgEdgeLabel.TRUE), _edge(2, 1, back=True)],

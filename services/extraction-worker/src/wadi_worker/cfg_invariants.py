@@ -30,6 +30,25 @@ _SWITCH_CONSTRUCTS = {"switch", "switch-arrow"}
 _MAX_SAMPLE_SITES = 5
 
 
+def _is_unconditional_loop(node: ExportCfgNode) -> bool:
+    """``while (true)`` / ``do … while (true)`` / ``for (;;)`` — a loop with no
+    exit test (§5.2.8 T3).
+
+    Its label set is indistinguishable from a trailing loop's — body arm plus a
+    back edge, no exit arm — so the exit-arm rule below would complete it, and
+    the graph would claim the method can return past a loop it can never leave.
+    Measured against the fixtures: a `for` states no ``condition_code`` only
+    when it has no condition clause at all, while `foreach` always carries one
+    (the loop's own text), so the two cannot be confused.
+    """
+    condition = (node.condition_code or "").strip()
+    if node.construct_kind == "for":
+        return not condition
+    if node.construct_kind in {"while", "do-while"}:
+        return condition == "true"
+    return False
+
+
 def arms_leaving_method(
     node: ExportCfgNode, labels: set[ExportCfgEdgeLabel]
 ) -> list[ExportCfgEdgeLabel]:
@@ -66,9 +85,21 @@ def arms_leaving_method(
         # Exit arm only. A missing body arm is an empty-body loop (a recorded
         # non-representable); fabricating one would assert a body that is not
         # there, and would claim that body exits the method besides.
+        if _is_unconditional_loop(node):
+            # No exit test, so no exit arm exists to name. Returning nothing
+            # here also keeps `exit-unreachable` live below: a method whose
+            # only way out is a loop it cannot leave HAS an unreachable exit,
+            # and that is a fact worth counting, not one to paper over with a
+            # `false` edge nobody can take.
+            return []
         return [] if ExportCfgEdgeLabel.FALSE in labels else [ExportCfgEdgeLabel.FALSE]
     if labels == {ExportCfgEdgeLabel.EXCEPTION}:
         # Every successor is a handler, so normal completion left the method.
+        # Sound only because the exporter now wires normal completion wherever
+        # a target exists — searching OUTWARD past the enclosing block and, at
+        # the tail of a loop body, back to the loop header (§5.2.8 T3). What
+        # survives to here is a construct whose normal completion genuinely
+        # reached the method boundary.
         return [ExportCfgEdgeLabel.FLOW]
     return []
 

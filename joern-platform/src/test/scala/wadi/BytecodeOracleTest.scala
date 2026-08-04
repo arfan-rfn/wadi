@@ -44,10 +44,19 @@ class BytecodeOracleTest extends AnyFunSuite with Matchers with FixtureCpg {
     * from this map must match EXACTLY.
     */
   private val whitelist: Map[String, List[String]] = Map(
-    "ConditionalController.ternary"      -> List("ternary"),
-    "ConditionalController.shortCircuit" -> List("short-circuit"),
-    "SwitchController.onString"          -> List("switch-on-string"),
-    "SwitchController.yieldForm"         -> List("switch-lowering", "ternary")
+    "ConditionalController.ternary"          -> List("ternary"),
+    "ConditionalController.shortCircuit"     -> List("short-circuit"),
+    "SwitchController.onString"              -> List("switch-on-string"),
+    "SwitchController.yieldForm"             -> List("switch-lowering", "ternary"),
+    // javac folds a constant-true loop test away entirely: `while (true)` and
+    // `for (;;)` emit an unconditional GOTO and zero conditional jumps, while
+    // the source graph still has a loop node. Source-level truth and bytecode
+    // truth genuinely differ here.
+    "DegenerateController.infiniteLoop"      -> List("constant-true-condition"),
+    "DegenerateController.infiniteFor"       -> List("constant-true-condition"),
+    // try-with-resources desugars into null-checks plus a synthetic finally,
+    // so the bytecode carries conditionals the source never wrote.
+    "DegenerateController.tryWithResources"  -> List("try-with-resources")
   )
 
   private case class Counts(condJumps: Int, switches: Int, backJumps: Int)
@@ -152,10 +161,15 @@ class BytecodeOracleTest extends AnyFunSuite with Matchers with FixtureCpg {
 
     // The FP direction is never whitelisted: the graph must not claim MORE
     // decision points than the bytecode has (phantom branches).
+    //
+    // Back-jumps count toward the budget because a loop node corresponds to
+    // one whether or not javac made its test conditional: `while (true)` folds
+    // to an unconditional GOTO, so a budget of cond+switch alone would call a
+    // correct loop node a phantom branch.
     rows.foreach { case (name, bc, graph, _) =>
       withClue(s"$name claims more decision points than the bytecode: ") {
         (graph.condJumps + graph.switches + graph.backJumps) should be <=
-          (bc.condJumps + bc.switches)
+          (bc.condJumps + bc.switches + bc.backJumps)
       }
     }
 

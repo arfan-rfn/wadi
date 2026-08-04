@@ -83,7 +83,11 @@ public class DegenerateController {
     }
 
     /** A try whose body is entirely commented out — nothing flows into the
-     * container, so nothing flows into its handler either. */
+     * container, so nothing flows into its handler either.
+     *
+     * <p>Note the try is the method's FIRST statement, which is the one shape
+     * where a missing incoming edge is invisible. {@link #emptyTryAfterWork}
+     * covers the case with a predecessor. */
     @GetMapping("/degenerate/empty-try/{n}")
     public String emptyTryBody(@PathVariable int n) {
         try {
@@ -92,5 +96,83 @@ public class DegenerateController {
             return "caught:" + n;
         }
         return "done:" + hits;
+    }
+
+    /** An empty try with a statement BEFORE it. Routing the container has to
+     * reroute that predecessor through the try; leaving it wired straight to
+     * the statement after would give the method two entry points and give the
+     * following statement two independent predecessors. */
+    @GetMapping("/degenerate/empty-try-after-work/{n}")
+    public String emptyTryAfterWork(@PathVariable int n) {
+        hits += n;
+        try {
+            // Deliberately commented out.
+        } catch (RuntimeException e) {
+            return "caught:" + n;
+        }
+        return "done:" + hits;
+    }
+
+    /** An empty try nested inside an if-arm, so it has no next SIBLING — the
+     * statement it completes into is the one after the enclosing if. Reading
+     * only the immediate parent block finds nothing here, and a construct
+     * whose every successor is a handler is otherwise taken to have left the
+     * method: the graph would claim this returns on normal completion. */
+    @GetMapping("/degenerate/empty-try-nested/{n}")
+    public String emptyTryNested(@PathVariable int n) {
+        if (n > 0) {
+            try {
+                // Deliberately commented out.
+            } catch (RuntimeException e) {
+                hits = -1;
+            }
+        }
+        return "done:" + hits;
+    }
+
+    /** An empty try with a {@code finally}: normal completion goes into the
+     * finally, not to the statement after the construct. */
+    @GetMapping("/degenerate/empty-try-finally/{n}")
+    public String emptyTryFinally(@PathVariable int n) {
+        try {
+            // Deliberately commented out.
+        } finally {
+            hits += n;
+        }
+        return "done:" + hits;
+    }
+
+    /** try-with-resources: the resource declaration is a child of the TRY
+     * alongside the body, so "the body block" is not simply "the first block
+     * child". Pinned because picking the wrong one makes a NON-empty try look
+     * empty, which routes the handler as normal flow. */
+    @GetMapping("/degenerate/try-with-resources/{n}")
+    public String tryWithResources(@PathVariable int n) {
+        try (AutoCloseable c = () -> hits++) {
+            hits += n;
+        } catch (Exception e) {
+            return "caught:" + n;
+        }
+        return "done:" + hits;
+    }
+
+    /** An intentionally infinite loop. Its label set is indistinguishable from
+     * a trailing loop's — body arm plus a back edge, no exit arm — but there
+     * is no exit path to name: synthesizing one would assert the method can
+     * return, and this method cannot. */
+    @GetMapping("/degenerate/infinite-loop/{n}")
+    public void infiniteLoop(@PathVariable int n) {
+        while (true) {
+            hits += n;
+        }
+    }
+
+    /** The other infinite form: a {@code for} with no condition clause at all,
+     * so there is no condition text to read. */
+    @GetMapping("/degenerate/infinite-for/{n}")
+    public void infiniteFor(@PathVariable int n) {
+        for (;;) {
+            hits += n;
+        }
     }
 }

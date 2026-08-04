@@ -389,7 +389,25 @@ The frontier of what stitching handles is recorded here — every scenario is *h
   - **~127 (6.8%) are third-party methods misread as first-party by fully-qualified name.** Spring Data `save`/`findById`/`deleteById` are inherited from the **external** `CrudRepository`/`JpaRepository` supertype (`interface FooRepository extends CrudRepository<…>`), and `Controller.ok` is `org.springframework.http.ResponseEntity.ok` reached through a **static import**, which javasrc2cpg attributes to the importing class. Enum `values()` is compiler-generated. None has first-party source.
   - The behavioural spine was never affected: **no `Service`/`ServiceImpl` method is missing**, and every sink is already tagged at its call site (**242/242** repository-calling endpoints carry their `db` sink; HTTP likewise).
 
-- **Decision — the defect is honesty, not reachability, so the fix is accounting rather than rebinding.** Each unbound callee is exported with a **reason code** — `lombok-generated` (accessor synthesized by an annotation processor; no source by construction), `inherited-external` (declared by an external supertype), `static-import` (attributed to the importing type), `compiler-generated` (enum `values`/`valueOf`), `third-party` (outside every staged source root), `ambiguous-overload`, `not-in-cpg` — counted per endpoint and carried to the UI, so a call node that dead-ends **says why** instead of looking like a hole in the map. P10 is precisely this: what analysis cannot determine is materialized, never omitted.
+- **Decision — the defect is honesty, not reachability, so the fix is accounting rather than rebinding.** Each unbound callee is exported with a **reason code**, counted per endpoint and carried to the UI, so a call node that dead-ends **says why** instead of looking like a hole in the map. P10 is precisely this: what analysis cannot determine is materialized, never omitted. The vocabulary is **six codes** (export 2.6.0 `UnboundReason`, contracts 1.12.0 `CalleeUnboundReason` — one enum, one spelling, both generated into the frontend types):
+
+  | Code | Means |
+  |---|---|
+  | `lombok-generated` | Accessor/constructor synthesized by an annotation processor; no source by construction. Read at class AND field level, since `@Getter` on the type with `@Setter` on one field generates a setter just as sourceless as a class-level one. |
+  | `inherited-external` | The METHOD is declared by an external supertype (Spring Data `CrudRepository.save`). Asked of the method, not the type: "this class has some external supertype" was enough to mislabel anything that merely `implements Serializable`. |
+  | `compiler-generated` | Enum `values`/`valueOf` — emitted by javac, absent from source. |
+  | `third-party` | The declaring type is in no staged source root (JDK, framework). |
+  | `ambiguous-overload` | Several first-party overloads match and the receiver could not be pinned to one. Never guessed. |
+  | `unresolved-receiver` | The receiver could not be bound: a static import attributed to the importing class, or javasrc2cpg's `<unresolvedNamespace>` sentinel. Also the fall-through. |
+
+  **The classifier is total.** `unbound_reason == null` means the call BOUND — never "unbindable and unclassifiable", which a consumer cannot tell apart from a healthy call.
+
+  <!-- TODO(author): this list supersedes an earlier draft naming `static-import`
+  and `not-in-cpg`, neither of which shipped. In the implementation
+  `static-import` folded into `unresolved-receiver` and `not-in-cpg` into
+  `third-party`. Record WHY in your own words — the collapse is itself a
+  decision, and this doc is where decisions live. -->
+
 - *Rejected: name-based rebinding of unresolved callees onto internal methods (the plan this tranche replaced).* It presumed a first-party body existed to bind to; for 92.9% of sites none does, and for the rest the target is genuinely external. Implementing it would have manufactured anchors into text absent from the repo — an honesty regression sold as a completeness fix, and the exact failure P10 exists to prevent. *Rejected: turning delombok back on in full-rewrite mode to materialize accessor bodies* — it moves every anchor in every Lombok class off committed text, breaking the §5.3 source-on-demand guarantee validated by `lombok-mini`, to reveal bodies that are mechanically derivable from the field list. *Rejected: silently excluding generated accessors from the call graph* — they are real calls with real runtime effect; deleting them would make the map lie in the opposite direction.
 - **Sizing the honesty surface:** `analysis_coverage` measures reachability system-wide, and the coverage report's `unresolved`/`undetermined` count **cross-service remote edges only** (169 on the benchmark), so intra-service unbound calls were counted **nowhere per endpoint** — the map did not know what it was hiding, which is what made a non-bug read as a data-loss bug for a human reader.
 
