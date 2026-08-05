@@ -27,9 +27,9 @@ import {
 
 import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import { BREAKPOINT, useMediaQuery } from "@/lib/hooks/use-media-query"
+import { cn } from "@/lib/utils"
 import type { EndpointDetailView, Icfg } from "@/lib/wadi/api"
 import { sourceSelectionFor } from "@/lib/wadi/source-map"
-import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CallTree } from "@/components/explorer/call-tree"
@@ -115,7 +115,11 @@ export function WorkspaceInterior({
   const remoteEdgesView = useMemo<RemoteEdgesView | null>(
     () =>
       detail
-        ? { service_id: detail.service_id, outbound: detail.outbound, inbound: [] }
+        ? {
+            service_id: detail.service_id,
+            outbound: detail.outbound,
+            inbound: [],
+          }
         : null,
     [detail]
   )
@@ -140,7 +144,11 @@ export function WorkspaceInterior({
   const sourceFocus = useMemo(
     () =>
       sourceTarget
-        ? { file: sourceTarget.file, line: sourceTarget.line, seq: sourceTarget.token }
+        ? {
+            file: sourceTarget.file,
+            line: sourceTarget.line,
+            seq: sourceTarget.token,
+          }
         : null,
     [sourceTarget]
   )
@@ -276,7 +284,11 @@ export function WorkspaceInterior({
       className="min-h-0 flex-1"
     >
       {collapsed.has("tree") ? (
-        <PaneRail label="Call tree" side="left" onExpand={() => toggle("tree", false)} />
+        <PaneRail
+          label="Call tree"
+          side="left"
+          onExpand={() => toggle("tree", false)}
+        />
       ) : (
         <>
           <Panel
@@ -284,7 +296,11 @@ export function WorkspaceInterior({
             minSize="12"
             className="flex min-h-0 min-w-0 flex-col"
           >
-            <PaneShell label="Call tree" side="left" onCollapse={() => toggle("tree", true)}>
+            <PaneShell
+              label="Call tree"
+              side="left"
+              onCollapse={() => toggle("tree", true)}
+            >
               {treeBody}
             </PaneShell>
           </Panel>
@@ -293,11 +309,23 @@ export function WorkspaceInterior({
       )}
 
       {collapsed.has("flow") ? (
-        <PaneRail label="Flow" side="left" onExpand={() => toggle("flow", false)} />
+        <PaneRail
+          label="Flow"
+          side="left"
+          onExpand={() => toggle("flow", false)}
+        />
       ) : (
         <>
-          <Panel defaultSize="46" minSize="24" className="flex min-h-0 min-w-0 flex-col">
-            <PaneShell label="Flow" side="left" onCollapse={() => toggle("flow", true)}>
+          <Panel
+            defaultSize="46"
+            minSize="24"
+            className="flex min-h-0 min-w-0 flex-col"
+          >
+            <PaneShell
+              label="Flow"
+              side="left"
+              onCollapse={() => toggle("flow", true)}
+            >
               {flowBody}
             </PaneShell>
           </Panel>
@@ -306,10 +334,22 @@ export function WorkspaceInterior({
       )}
 
       {collapsed.has("source") ? (
-        <PaneRail label="Source" side="right" onExpand={() => toggle("source", false)} />
+        <PaneRail
+          label="Source"
+          side="right"
+          onExpand={() => toggle("source", false)}
+        />
       ) : (
-        <Panel defaultSize="36" minSize="20" className="flex min-h-0 min-w-0 flex-col">
-          <PaneShell label="Source" side="right" onCollapse={() => toggle("source", true)}>
+        <Panel
+          defaultSize="36"
+          minSize="20"
+          className="flex min-h-0 min-w-0 flex-col"
+        >
+          <PaneShell
+            label="Source"
+            side="right"
+            onCollapse={() => toggle("source", true)}
+          >
             {sourceBody}
           </PaneShell>
         </Panel>

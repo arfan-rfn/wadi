@@ -101,7 +101,8 @@ export function SchemaTree({
     )
   }
 
-  if (shape.kind !== "object") return <Row name={name} shape={shape} depth={depth} />
+  if (shape.kind !== "object")
+    return <Row name={name} shape={shape} depth={depth} />
 
   const fields = shape.fields ?? []
   if (depth >= MAX_DEPTH && fields.length > 0) {

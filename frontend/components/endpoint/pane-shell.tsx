@@ -71,7 +71,10 @@ export function PaneRail({
         side === "right" && "border-r-0 border-l"
       )}
     >
-      <Chevron aria-hidden className="size-3.5 shrink-0 text-muted-foreground/70" />
+      <Chevron
+        aria-hidden
+        className="size-3.5 shrink-0 text-muted-foreground/70"
+      />
       <span
         className="text-2xs tracking-[0.1em] whitespace-nowrap text-muted-foreground uppercase"
         style={{ writingMode: "vertical-rl" }}

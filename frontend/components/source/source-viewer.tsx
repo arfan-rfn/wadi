@@ -44,7 +44,6 @@ import { useTheme } from "next-themes"
 import { QUERY_KEYS } from "@/config/query-keys"
 import type { SourceAnchor } from "@/lib/generated/icfg.schema"
 import { cn } from "@/lib/utils"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import type { Icfg, SourceView } from "@/lib/wadi/api"
 import { wadiApi } from "@/lib/wadi/api"
 import { tokenizeLines, type HighlightToken } from "@/lib/wadi/highlight"
@@ -69,6 +68,7 @@ import {
   writeWrapPreference,
   type SourceRow,
 } from "@/lib/wadi/source-rows"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const LINE_HEIGHT = 21
@@ -360,9 +360,7 @@ export function SourceViewer({
     () => new Set()
   )
   const openFile = useCallback((file: string) => {
-    setOpenFiles((prev) =>
-      prev.has(file) ? prev : new Set(prev).add(file)
-    )
+    setOpenFiles((prev) => (prev.has(file) ? prev : new Set(prev).add(file)))
   }, [])
   const toggleFile = useCallback((file: string) => {
     setOpenFiles((prev) => {
@@ -963,129 +961,130 @@ function SourceFileView({
             {/* Say what is NOT on screen, at every width. The panel shows whole
                 methods, so a header reporting only the file's length reads as a
                 claim to be showing all of it (P10). */}
-            {rowModel.foldedCount > 0 ? ` · ${rowModel.foldedCount} folded` : ""}
+            {rowModel.foldedCount > 0
+              ? ` · ${rowModel.foldedCount} folded`
+              : ""}
           </span>
         </div>
       </header>
 
       {!expanded ? null : (
         <>
-
-      {first.data?.variant && first.data.variant !== "original" ? (
-        <p className="border-b bg-amber-500/10 px-3 py-1 text-2xs text-amber-700 dark:text-amber-400">
-          Generated variant — the text as analysis saw it, not the committed
-          file.
-        </p>
-      ) : null}
-
-      {/* Reserves height for a file not yet fetched, so the sections below it
-          do not all pile into the viewport at once and defeat the laziness. */}
-      {(first.isPending && wanted) || (active && !wanted) ? (
-        <div className="min-h-60 space-y-1.5 p-3">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-5/6" />
-          <Skeleton className="h-4 w-2/3" />
-        </div>
-      ) : null}
-      {first.isError ? (
-        <p className="p-3 text-xs text-muted-foreground">
-          Source unavailable: {(first.error as Error).message}
-        </p>
-      ) : null}
-
-      {lines.length > 0 ? (
-        <div
-          ref={bodyRef}
-          className={cn(
-            // Long lines scroll here, inside the code column — code is wide,
-            // and truncating it with an ellipsis is what made this panel feel
-            // like a preview instead of a source view.
-            "overflow-x-auto font-mono text-xs leading-[21px]",
-            // Thin themed bar rather than the OS default: a full-width native
-            // gutter under every code block was the loudest chrome on screen.
-            "[scrollbar-color:var(--color-muted-foreground)_transparent] [scrollbar-width:thin]",
-            virtualize && "relative"
-          )}
-          style={
-            virtualize ? { height: virtualizer.getTotalSize() } : undefined
-          }
-        >
-          {virtualize
-            ? virtualizer.getVirtualItems().map((item) => (
-                <div
-                  key={item.key}
-                  className="absolute left-0 w-full"
-                  style={{
-                    top: 0,
-                    transform: `translateY(${item.start - scrollMargin}px)`,
-                    height: item.size,
-                  }}
-                >
-                  <SourceRowView
-                    row={rowModel.rows[item.index]}
-                    section={section}
-                    lines={lines}
-                    tokens={tokens}
-                    callLinksByLine={callLinksByLine}
-                    flashLine={flashLine}
-                    selection={selection}
-                    wrap={wrap}
-                    onExpandFold={expandFold}
-                    onJump={onJump}
-                    onJumpNode={onJumpNode}
-                    onSelectNode={onSelectNode}
-                  />
-                </div>
-              ))
-            : rowModel.rows.map((row) => (
-                <SourceRowView
-                  key={
-                    row.kind === "line"
-                      ? `l${row.line}`
-                      : `${row.kind}${row.id}`
-                  }
-                  row={row}
-                  section={section}
-                  lines={lines}
-                  tokens={tokens}
-                  callLinksByLine={callLinksByLine}
-                  flashLine={flashLine}
-                  selection={selection}
-                  wrap={wrap}
-                  onExpandFold={expandFold}
-                  onJump={onJump}
-                  onJumpNode={onJumpNode}
-                  onSelectNode={onSelectNode}
-                />
-              ))}
-        </div>
-      ) : null}
-
-      {hasMore ? (
-        <div className="border-t px-3 py-1.5">
-          <button
-            onClick={() => void loadMore()}
-            disabled={loadingMore}
-            className="inline-flex items-center gap-1 text-2xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-          >
-            <ArrowUpRight className="size-3" />
-            {loadingMore
-              ? "Loading…"
-              : // Window size comes from the window the server actually sent,
-                // not a client-side copy of its cap — a copy would make this
-                // label lie the moment the cap moved.
-                `Load lines ${(lastWindow?.end_line ?? 0) + 1}–${Math.min(
-                  (lastWindow?.end_line ?? 0) + windowSize,
-                  totalLines ?? Infinity
-                )} of ${totalLines}`}
-          </button>
-          {loadMoreError ? (
-            <p className="text-2xs text-destructive">
-              Could not load more — {loadMoreError.message}
+          {first.data?.variant && first.data.variant !== "original" ? (
+            <p className="border-b bg-amber-500/10 px-3 py-1 text-2xs text-amber-700 dark:text-amber-400">
+              Generated variant — the text as analysis saw it, not the committed
+              file.
             </p>
           ) : null}
-        </div>
-      ) : null}
+
+          {/* Reserves height for a file not yet fetched, so the sections below it
+          do not all pile into the viewport at once and defeat the laziness. */}
+          {(first.isPending && wanted) || (active && !wanted) ? (
+            <div className="min-h-60 space-y-1.5 p-3">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          ) : null}
+          {first.isError ? (
+            <p className="p-3 text-xs text-muted-foreground">
+              Source unavailable: {(first.error as Error).message}
+            </p>
+          ) : null}
+
+          {lines.length > 0 ? (
+            <div
+              ref={bodyRef}
+              className={cn(
+                // Long lines scroll here, inside the code column — code is wide,
+                // and truncating it with an ellipsis is what made this panel feel
+                // like a preview instead of a source view.
+                "overflow-x-auto font-mono text-xs leading-[21px]",
+                // Thin themed bar rather than the OS default: a full-width native
+                // gutter under every code block was the loudest chrome on screen.
+                "[scrollbar-color:var(--color-muted-foreground)_transparent] [scrollbar-width:thin]",
+                virtualize && "relative"
+              )}
+              style={
+                virtualize ? { height: virtualizer.getTotalSize() } : undefined
+              }
+            >
+              {virtualize
+                ? virtualizer.getVirtualItems().map((item) => (
+                    <div
+                      key={item.key}
+                      className="absolute left-0 w-full"
+                      style={{
+                        top: 0,
+                        transform: `translateY(${item.start - scrollMargin}px)`,
+                        height: item.size,
+                      }}
+                    >
+                      <SourceRowView
+                        row={rowModel.rows[item.index]}
+                        section={section}
+                        lines={lines}
+                        tokens={tokens}
+                        callLinksByLine={callLinksByLine}
+                        flashLine={flashLine}
+                        selection={selection}
+                        wrap={wrap}
+                        onExpandFold={expandFold}
+                        onJump={onJump}
+                        onJumpNode={onJumpNode}
+                        onSelectNode={onSelectNode}
+                      />
+                    </div>
+                  ))
+                : rowModel.rows.map((row) => (
+                    <SourceRowView
+                      key={
+                        row.kind === "line"
+                          ? `l${row.line}`
+                          : `${row.kind}${row.id}`
+                      }
+                      row={row}
+                      section={section}
+                      lines={lines}
+                      tokens={tokens}
+                      callLinksByLine={callLinksByLine}
+                      flashLine={flashLine}
+                      selection={selection}
+                      wrap={wrap}
+                      onExpandFold={expandFold}
+                      onJump={onJump}
+                      onJumpNode={onJumpNode}
+                      onSelectNode={onSelectNode}
+                    />
+                  ))}
+            </div>
+          ) : null}
+
+          {hasMore ? (
+            <div className="border-t px-3 py-1.5">
+              <button
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                className="inline-flex items-center gap-1 text-2xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                <ArrowUpRight className="size-3" />
+                {loadingMore
+                  ? "Loading…"
+                  : // Window size comes from the window the server actually sent,
+                    // not a client-side copy of its cap — a copy would make this
+                    // label lie the moment the cap moved.
+                    `Load lines ${(lastWindow?.end_line ?? 0) + 1}–${Math.min(
+                      (lastWindow?.end_line ?? 0) + windowSize,
+                      totalLines ?? Infinity
+                    )} of ${totalLines}`}
+              </button>
+              {loadMoreError ? (
+                <p className="text-2xs text-destructive">
+                  Could not load more — {loadMoreError.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </>
       )}
     </section>

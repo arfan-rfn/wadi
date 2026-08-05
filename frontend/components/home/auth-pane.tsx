@@ -6,6 +6,7 @@
 // "nobody can reach it" call for opposite responses, and a UI that blurs them
 // makes the honest state meaningless.
 import { useMemo, useState } from "react"
+import Link from "next/link"
 
 import type { AuthEndpointRow } from "@/lib/generated/system_auth.schema"
 import { cn } from "@/lib/utils"
@@ -13,15 +14,13 @@ import { useSystemAuth } from "@/lib/wadi/hooks"
 import { endpointPath } from "@/lib/wadi/routes"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
+import { MethodBadge } from "@/components/explorer/method-badge"
 import {
   AuthChip,
   authStateOf,
   withheldReason,
   type AuthState,
 } from "@/components/shared/auth-chip"
-import { MethodBadge } from "@/components/explorer/method-badge"
-
-import Link from "next/link"
 
 type Filter = "all" | AuthState
 

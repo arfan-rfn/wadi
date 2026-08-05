@@ -64,7 +64,8 @@ function RootResolver() {
   if (global.noSystems) {
     return (
       <EmptyState className="p-8">
-        No systems yet — run <code className="rounded bg-muted px-1 font-mono">wadi analyze .</code>{" "}
+        No systems yet — run{" "}
+        <code className="rounded bg-muted px-1 font-mono">wadi analyze .</code>{" "}
         to create the first snapshot.
       </EmptyState>
     )

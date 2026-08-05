@@ -1,4 +1,10 @@
-import { Ban, ShieldAlert, ShieldCheck, ShieldQuestion, ShieldX } from "lucide-react"
+import {
+  Ban,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
+  ShieldX,
+} from "lucide-react"
 
 import type { AuthEvidenceKind } from "@/lib/generated/endpoint.schema"
 import { Chip } from "@/components/ui/chip"
@@ -71,7 +77,8 @@ const PRESENTATION: Record<
   open: {
     icon: ShieldAlert,
     label: "no auth (evidenced)",
-    title: "No authentication — every guard in scope was read, and none gates this",
+    title:
+      "No authentication — every guard in scope was read, and none gates this",
   },
   withheld: {
     icon: ShieldX,
@@ -97,11 +104,23 @@ export function AuthChip({
   compact?: boolean
   title?: string
 }) {
-  const { icon: Icon, label, title: defaultTitle, unknown } = PRESENTATION[state]
+  const {
+    icon: Icon,
+    label,
+    title: defaultTitle,
+    unknown,
+  } = PRESENTATION[state]
   return (
-    <Chip variant={unknown ? "unknown" : "outline"} title={title ?? defaultTitle}>
+    <Chip
+      variant={unknown ? "unknown" : "outline"}
+      title={title ?? defaultTitle}
+    >
       <Icon aria-hidden />
-      {compact ? label.split(" ")[0] === "no" ? "no auth" : label.split(" ")[0] : label}
+      {compact
+        ? label.split(" ")[0] === "no"
+          ? "no auth"
+          : label.split(" ")[0]
+        : label}
     </Chip>
   )
 }

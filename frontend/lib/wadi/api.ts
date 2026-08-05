@@ -2,6 +2,7 @@
 // Types come from the generated contract schemas — never hand-written (§7).
 
 import type { CoverageReport } from "@/lib/generated/coverage_report.schema"
+import type { EndpointDependenciesView } from "@/lib/generated/endpoint_dependencies.schema"
 import type { EndpointDetailView } from "@/lib/generated/endpoint_detail.schema"
 import type { Endpoint } from "@/lib/generated/endpoint.schema"
 import type { Icfg } from "@/lib/generated/icfg.schema"
@@ -9,7 +10,6 @@ import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import type { ServiceSummary } from "@/lib/generated/service_summary.schema"
 import type { Snapshot } from "@/lib/generated/snapshot.schema"
 import type { SourceView } from "@/lib/generated/source_view.schema"
-import type { EndpointDependenciesView } from "@/lib/generated/endpoint_dependencies.schema"
 import type { SystemAuthView } from "@/lib/generated/system_auth.schema"
 import type { SystemGraphView } from "@/lib/generated/system_graph.schema"
 import type { System } from "@/lib/generated/system.schema"

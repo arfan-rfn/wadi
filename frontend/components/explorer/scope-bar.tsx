@@ -56,7 +56,9 @@ export function ScopeBar(props: ScopeBarProps) {
           {props.systems.length === 0 ? (
             <DropdownMenuItem disabled>
               No systems yet — run{" "}
-              <code className="ml-1 rounded bg-muted px-1 font-mono">wadi analyze .</code>
+              <code className="ml-1 rounded bg-muted px-1 font-mono">
+                wadi analyze .
+              </code>
             </DropdownMenuItem>
           ) : null}
           {props.systems.map((s) => (

@@ -167,9 +167,11 @@ describe("path display", () => {
   })
 
   test("elides the MIDDLE of a deep path, keeping root and last two", () => {
-    expect(shortDirectory("wadi-libs/ts-common/src/main/java/edu/fudan/common/entity")).toBe(
-      "wadi-libs/…/common/entity"
-    )
+    expect(
+      shortDirectory(
+        "wadi-libs/ts-common/src/main/java/edu/fudan/common/entity"
+      )
+    ).toBe("wadi-libs/…/common/entity")
     expect(shortDirectory("src/main/java/cancel/controller")).toBe(
       "src/…/cancel/controller"
     )

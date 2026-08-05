@@ -9,9 +9,9 @@
 // service. Everything here is already on the Endpoint artifact; the row costs
 // no extra fetch.
 import type { EndpointDependency } from "@/lib/generated/endpoint_dependencies.schema"
+import { cn } from "@/lib/utils"
 import type { Endpoint } from "@/lib/wadi/api"
 import { useRoleSwatchStyle } from "@/lib/wadi/role-colors"
-import { cn } from "@/lib/utils"
 import { MethodBadge } from "@/components/explorer/method-badge"
 import { authStateOf, type AuthState } from "@/components/shared/auth-chip"
 

@@ -12,10 +12,10 @@
 import { Split } from "lucide-react"
 
 import type { Icfg } from "@/lib/generated/icfg.schema"
+import { cn } from "@/lib/utils"
 import type { EndpointDetailView } from "@/lib/wadi/api"
 import { conditionLabel, governingConditions } from "@/lib/wadi/conditions"
 import { shortSignature } from "@/lib/wadi/rollup"
-import { cn } from "@/lib/utils"
 
 /** The ICFG node id a workspace selection points at, if any. */
 function icfgNodeIdOf(selectedNodeId: string | null): string | null {
@@ -59,9 +59,7 @@ export function SelectionStrip({
     methodNodes[0]?.method_info?.signature ??
     null
 
-  const conditions = nodeId
-    ? (governingConditions(icfg).get(nodeId) ?? [])
-    : []
+  const conditions = nodeId ? (governingConditions(icfg).get(nodeId) ?? []) : []
 
   // A selected call node's stitched targets, with the confidence tier that is
   // the whole reason those tiers exist (§5.4).
@@ -77,7 +75,10 @@ export function SelectionStrip({
         className
       )}
     >
-      <span className="min-w-0 truncate text-foreground" title={signature ?? undefined}>
+      <span
+        className="min-w-0 truncate text-foreground"
+        title={signature ?? undefined}
+      >
         {signature ? shortSignature(signature) : "selection"}
       </span>
       {methodNodes.length > 0 ? (

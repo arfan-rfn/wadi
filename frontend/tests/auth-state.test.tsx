@@ -12,12 +12,12 @@ import { within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
 import type { EndpointDependency } from "@/lib/generated/endpoint_dependencies.schema"
+import { AccessChip, DependencyChip } from "@/components/home/endpoint-meta"
 import {
   authStateOf,
   unreadLabel,
   withheldReason,
 } from "@/components/shared/auth-chip"
-import { AccessChip, DependencyChip } from "@/components/home/endpoint-meta"
 
 import { renderWithQuery } from "./utils"
 
@@ -68,7 +68,9 @@ describe("unreadLabel", () => {
 
 describe("withheldReason", () => {
   it("reads as a sentence for one, two, and three guards", () => {
-    expect(withheldReason(["aspect"])).toMatch(/^an aspect guards this endpoint/)
+    expect(withheldReason(["aspect"])).toMatch(
+      /^an aspect guards this endpoint/
+    )
     expect(withheldReason(["aspect", "interceptor"])).toMatch(
       /^an aspect and a request interceptor guards/
     )
@@ -95,7 +97,9 @@ describe("AccessChip — the endpoint row's one auth fact", () => {
     state: Parameters<typeof AccessChip>[0]["state"],
     roles: string[] = []
   ) =>
-    within(renderWithQuery(<AccessChip state={state} roles={roles} />).container)
+    within(
+      renderWithQuery(<AccessChip state={state} roles={roles} />).container
+    )
 
   it("names the roles instead of the generic label when they are known", () => {
     const view = renderChip("required", ["ADMIN", "USER"])
@@ -106,7 +110,9 @@ describe("AccessChip — the endpoint row's one auth fact", () => {
   })
 
   it("falls back to the state label when the roles are not known", () => {
-    expect(renderChip("required").getByText("Authenticated")).toBeInTheDocument()
+    expect(
+      renderChip("required").getByText("Authenticated")
+    ).toBeInTheDocument()
     expect(renderChip("open").getByText("Public")).toBeInTheDocument()
   })
 
@@ -124,7 +130,9 @@ describe("AccessChip — the endpoint row's one auth fact", () => {
     expect(
       renderChip("withheld").getByText("Unreadable guard")
     ).toBeInTheDocument()
-    expect(renderChip("unknown").getByText("No guard found")).toBeInTheDocument()
+    expect(
+      renderChip("unknown").getByText("No guard found")
+    ).toBeInTheDocument()
   })
 
   it("ignores roles on a state that makes no claim", () => {
@@ -145,7 +153,11 @@ describe("AccessChip — the endpoint row's one auth fact", () => {
     // `hasRole("X")` and `hasAuthority("X")` match different grants in Spring,
     // so the chip lists both but never calls an authority a role.
     const { container } = renderWithQuery(
-      <AccessChip state="required" roles={["ADMIN"]} authorities={["ORDER_DELETE"]} />
+      <AccessChip
+        state="required"
+        roles={["ADMIN"]}
+        authorities={["ORDER_DELETE"]}
+      />
     )
     const view = within(container)
     expect(view.getByText("ADMIN")).toBeInTheDocument()
@@ -196,7 +208,10 @@ describe("DependencyChip — cross-service calls, spelled out", () => {
 
     const two = renderWithQuery(
       <DependencyChip
-        dependencies={[dependency("ts-config-service"), dependency("ts-order-service")]}
+        dependencies={[
+          dependency("ts-config-service"),
+          dependency("ts-order-service"),
+        ]}
       />
     )
     expect(within(two.container).getByText("2 services")).toBeInTheDocument()

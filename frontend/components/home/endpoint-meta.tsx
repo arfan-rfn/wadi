@@ -18,11 +18,18 @@
 // "No claim" would have collapsed the §5.2.9 distinction into the tooltip,
 // and that distinction is the whole point: one is a gap in wadi, the other a
 // possible hole in the system.
-import { Ban, Globe, Lock, Network, ShieldQuestion, ShieldX } from "lucide-react"
+import {
+  Ban,
+  Globe,
+  Lock,
+  Network,
+  ShieldQuestion,
+  ShieldX,
+} from "lucide-react"
 
 import type { EndpointDependency } from "@/lib/generated/endpoint_dependencies.schema"
-import { useRoleSwatchStyle } from "@/lib/wadi/role-colors"
 import { cn } from "@/lib/utils"
+import { useRoleSwatchStyle } from "@/lib/wadi/role-colors"
 import {
   HoverCard,
   HoverCardContent,
@@ -37,7 +44,13 @@ import type { AuthState } from "@/components/shared/auth-chip"
 
 const ACCESS: Record<
   AuthState,
-  { icon: typeof Lock; tone: string; fallback: string; title: string; detail: string }
+  {
+    icon: typeof Lock
+    tone: string
+    fallback: string
+    title: string
+    detail: string
+  }
 > = {
   required: {
     icon: Lock,

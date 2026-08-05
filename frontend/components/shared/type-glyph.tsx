@@ -42,7 +42,11 @@ type GlyphSpec = { mark: string; tone: string; title: string }
 function scalarGlyph(typeName: string): GlyphSpec {
   const simple = typeName.split(/[.<]/).pop() ?? typeName
   if (NUMERIC.has(simple))
-    return { mark: "#", tone: "text-sky-600 dark:text-sky-400", title: "number" }
+    return {
+      mark: "#",
+      tone: "text-sky-600 dark:text-sky-400",
+      title: "number",
+    }
   if (BOOLEAN.has(simple))
     return {
       mark: "01",
@@ -85,7 +89,11 @@ function glyphFor(kind: ShapeKind, typeName: string): GlyphSpec {
     // The honest terminals (P10) share the dashed treatment the rest of the UI
     // gives unresolved facts — they must LOOK unresolved, not like a type.
     case "unresolved":
-      return { mark: "?", tone: "text-destructive", title: "type not in the CPG" }
+      return {
+        mark: "?",
+        tone: "text-destructive",
+        title: "type not in the CPG",
+      }
     case "cycle":
       return { mark: "↻", tone: "text-destructive", title: "self-reference" }
     case "truncated":

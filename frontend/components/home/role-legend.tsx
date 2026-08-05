@@ -10,10 +10,11 @@
 import { useMemo } from "react"
 
 import type { SystemAuthView } from "@/lib/generated/system_auth.schema"
-import { useRoleSwatchStyle } from "@/lib/wadi/role-colors"
 import { cn } from "@/lib/utils"
+import { useRoleSwatchStyle } from "@/lib/wadi/role-colors"
 
-export type RoleFilter = { kind: "role"; role: string } | { kind: "open" } | null
+export type RoleFilter =
+  { kind: "role"; role: string } | { kind: "open" } | null
 
 export function rolesInSnapshot(
   auth: SystemAuthView | undefined
@@ -22,10 +23,12 @@ export function rolesInSnapshot(
   for (const row of auth?.rows ?? [])
     for (const role of row.roles ?? [])
       counts.set(role, (counts.get(role) ?? 0) + 1)
-  return [...counts.entries()]
-    .map(([role, count]) => ({ role, count }))
-    // Most-used first: the roles worth learning are the ones you will meet.
-    .sort((a, b) => b.count - a.count || a.role.localeCompare(b.role))
+  return (
+    [...counts.entries()]
+      .map(([role, count]) => ({ role, count }))
+      // Most-used first: the roles worth learning are the ones you will meet.
+      .sort((a, b) => b.count - a.count || a.role.localeCompare(b.role))
+  )
 }
 
 export function RoleLegend({
@@ -122,7 +125,11 @@ function LegendRole({
         active && "border-border bg-background"
       )}
     >
-      <span aria-hidden className="size-2 shrink-0 rounded-full" style={swatch} />
+      <span
+        aria-hidden
+        className="size-2 shrink-0 rounded-full"
+        style={swatch}
+      />
       {role}
       <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
         {count}

@@ -9,18 +9,23 @@
 // the flow: the auth evidence with its source anchor, and the count of calls
 // whose bodies cannot be opened (§5.4.2 T5).
 import Link from "next/link"
-import { ArrowRight, CornerDownRight, ExternalLink, KeyRound } from "lucide-react"
+import {
+  ArrowRight,
+  CornerDownRight,
+  ExternalLink,
+  KeyRound,
+} from "lucide-react"
 
+import { cn } from "@/lib/utils"
 import type { Endpoint } from "@/lib/wadi/api"
 import { useEndpointDetail } from "@/lib/wadi/hooks"
 import { endpointPath } from "@/lib/wadi/routes"
 import { unopenableCopy } from "@/lib/wadi/unopenable"
-import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
+import { MethodBadge } from "@/components/explorer/method-badge"
 import { CollapsibleSection } from "@/components/shared/collapsible-section"
 import { EmptyState } from "@/components/shared/empty-state"
-import { MethodBadge } from "@/components/explorer/method-badge"
 
 import { SecurityLine } from "./endpoint-list"
 import { SchemaTree } from "./schema-tree"
@@ -29,7 +34,8 @@ const TARGET_NOTE: Record<string, string> = {
   analyzed: "Another analyzed service in this snapshot — its endpoint is known",
   external: "A host outside the analyzed system",
   placeholder: "Named in config but not analyzed — no endpoints known",
-  undetermined: "The target could not be resolved; the coverage report says why",
+  undetermined:
+    "The target could not be resolved; the coverage report says why",
 }
 
 function ParamRow({
@@ -50,7 +56,9 @@ function ParamRow({
       <span className="font-mono text-xs">{name}</span>
       <span className="font-mono text-2xs text-muted-foreground/80">
         {location}
-        {typeName ? ` · ${typeName.substring(typeName.lastIndexOf(".") + 1)}` : ""}
+        {typeName
+          ? ` · ${typeName.substring(typeName.lastIndexOf(".") + 1)}`
+          : ""}
       </span>
       {required ? (
         <span className="rounded-full border border-amber-500/35 px-1.5 text-[9.5px] tracking-wide text-amber-700 uppercase dark:text-amber-400">
@@ -100,7 +108,10 @@ export function EndpointPeek({
         <h2 className="font-mono text-[13px] leading-snug break-all">
           {endpoint.full_uri}
         </h2>
-        <p className="truncate font-mono text-2xs text-muted-foreground/80" title={endpoint.handler.signature}>
+        <p
+          className="truncate font-mono text-2xs text-muted-foreground/80"
+          title={endpoint.handler.signature}
+        >
           {endpoint.handler.signature.split(":")[0]}
         </p>
       </header>
@@ -153,7 +164,10 @@ export function EndpointPeek({
                   </div>
                   {edge.target_simplified_uri ? (
                     <p className="mt-1 flex items-center gap-1.5 pl-[3.25rem] font-mono text-[10px] text-muted-foreground">
-                      <CornerDownRight aria-hidden className="size-2.5 shrink-0" />
+                      <CornerDownRight
+                        aria-hidden
+                        className="size-2.5 shrink-0"
+                      />
                       <span className="truncate">
                         {edge.target_http_method ?? ""}{" "}
                         {edge.target_simplified_uri}
@@ -210,7 +224,8 @@ export function EndpointPeek({
                   <p
                     className={cn(
                       "rounded-md bg-muted px-2 py-1.5 font-mono text-[11px] leading-relaxed break-all",
-                      item.active === false && "text-muted-foreground line-through"
+                      item.active === false &&
+                        "text-muted-foreground line-through"
                     )}
                   >
                     {item.detail}
@@ -304,7 +319,6 @@ export function EndpointPeek({
             </p>
           )}
         </CollapsibleSection>
-
       </ScrollArea>
 
       <footer className="shrink-0 border-t bg-muted/25 p-3.5">

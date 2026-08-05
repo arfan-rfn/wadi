@@ -47,7 +47,9 @@ export function preferredHue(role: string): number {
  * colour stops being the right encoding.
  */
 export function buildRolePalette(roles: Iterable<string>): Map<string, number> {
-  const unique = [...new Set([...roles].map((role) => role.toUpperCase()))].sort()
+  const unique = [
+    ...new Set([...roles].map((role) => role.toUpperCase())),
+  ].sort()
   const palette = new Map<string, number>()
   const taken = new Set<number>()
   for (const role of unique) {
@@ -69,10 +71,15 @@ export function RolePaletteProvider({
   roles: Iterable<string>
   children: React.ReactNode
 }) {
-  const key = [...new Set([...roles].map((r) => r.toUpperCase()))].sort().join(",")
+  const key = [...new Set([...roles].map((r) => r.toUpperCase()))]
+    .sort()
+    .join(",")
   // Keyed on the role SET, so a re-render with the same roles keeps the exact
   // same Map identity and nothing downstream repaints.
-  const palette = useMemo(() => buildRolePalette(key ? key.split(",") : []), [key])
+  const palette = useMemo(
+    () => buildRolePalette(key ? key.split(",") : []),
+    [key]
+  )
   return (
     <RolePaletteContext.Provider value={palette}>
       {children}
