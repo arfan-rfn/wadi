@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.enums import HttpMethod, TriggerKind
@@ -48,11 +48,30 @@ class FieldShape(WadiModel):
     shape: "TypeShape"
 
 
+class ShapeOrigin(StrEnum):
+    """Which evidence the shape was read from (§5.2.7, amended 2026-08-05).
+
+    ``declared`` is the signature — the strongest evidence, and the only one
+    used until a raw wrapper (`public HttpEntity query(...)`) leaves nothing to
+    unwrap. ``return_expression`` means the payload came from what the handler
+    returns, which is still symbolic truth but rests on a weaker premise: one
+    return path standing for the whole contract. P7 keeps the two legible
+    rather than blending them.
+    """
+
+    DECLARED = "declared"
+    RETURN_EXPRESSION = "return-expression"
+
+
 class TypeShape(WadiModel):
     """A recovered request/response shape (§5.2.7): the wire contract, walked
     from in-CPG type structure with honest terminals."""
 
     kind: ShapeKind
+    origin: ShapeOrigin = Field(
+        default=ShapeOrigin.DECLARED,
+        description="Evidence the shape was read from; nested shapes are always declared",
+    )
     type_name: str = Field(min_length=1, description="Declared type, e.g. 'com.acme.Pet'")
     fields: list[FieldShape] = Field(
         default_factory=list[FieldShape], description="kind=object only; @JsonIgnore omitted"
@@ -345,6 +364,33 @@ class Endpoint(ArtifactEnvelope):
     auth: EndpointAuth = Field(default_factory=EndpointAuth)
     handler: MethodRef
     trigger: TriggerKind = TriggerKind.HTTP
+
+    @field_validator("full_uri", mode="before")
+    @classmethod
+    def _root_anchor(cls, value: object) -> object:
+        """A route is the same route with or without its leading slash.
+
+        Spring accepts ``@RequestMapping("api/v1/x")`` and routes it exactly as
+        ``/api/v1/x``, so the two spellings are one endpoint — ``endpoint_id``
+        has always agreed, hashing ``simplify_uri`` which anchors the root. Only
+        the published ``full_uri`` disagreed, and a consumer matching it
+        literally against a caller's URL missed those routes (§5.2.11).
+
+        Normalizing here rather than rejecting is deliberate: snapshots written
+        before this rule hold the verbatim form, and they must stay readable.
+        The coercion is idempotent and leaves ``simplified_uri`` and the id
+        untouched, so old and new snapshots still join on identity.
+
+        A URI whose head is an unresolved hole or a config template is left
+        alone — we do not know what it expands to, and asserting a leading
+        slash in front of it would invent information analysis does not have
+        (P10). Mirrors ``SpringPacks.rootAnchored`` on the Scala side.
+        """
+        if not isinstance(value, str) or not value or value.startswith("/"):
+            return value
+        if value.startswith(("{", "$")) or "://" in value:
+            return value
+        return "/" + value
 
     @model_validator(mode="after")
     def _enforce_identity(self) -> Self:

@@ -362,6 +362,14 @@ object SpringPacks {
     walk(typeDecl).distinctBy(_.id)
   }
 
+  /** Join a class-level prefix to a method-level path.
+    *
+    * Deliberately NOT root-anchoring: this helper also builds OUTBOUND client
+    * URLs (Feign, `@HttpExchange`), where the left side is an absolute URL or a
+    * `${key}` template and a prepended slash would corrupt it. Root-anchoring
+    * is a property of a SERVED route, so it is applied at that site
+    * (`rootAnchored`) rather than here.
+    */
   private[wadi] def joinPaths(prefix: String, path: String): String = {
     val left = prefix.stripSuffix("/")
     val joined =
@@ -370,6 +378,24 @@ object SpringPacks {
       else s"$left/$path"
     if (joined.isEmpty) "/" else joined
   }
+
+  /** A served route is published from the root (§5.2.11).
+    *
+    * Spring routes `@RequestMapping("api/v1/x")` exactly as `/api/v1/x`, so a
+    * controller that omits the slash declares the same route — but publishing
+    * it verbatim left `full_uri` unmatchable against a caller's URL on those
+    * endpoints (14 of 365 on `train-ticket-aitest`, from 2 controllers).
+    * Identity is unaffected: `endpoint_id` hashes `simplify_uri`, which already
+    * anchors the root, so both spellings have always hashed alike.
+    *
+    * A URI whose head is an unresolved hole or a config template is left ALONE:
+    * we do not know what it expands to, and asserting a leading slash in front
+    * of it would invent information analysis does not have (P10).
+    */
+  private[wadi] def rootAnchored(uri: String): String =
+    if (uri.isEmpty || uri.startsWith("/")) uri
+    else if (uri.startsWith("{") || uri.startsWith("$") || uri.contains("://")) uri
+    else s"/$uri"
 }
 
 /** Tags controller methods: `endpoint=GET /pets/{id}` (class-level prefix respected).
@@ -412,7 +438,7 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
                 case declared => declared
               }
               paths.foreach { path =>
-                val uri = joinPaths(classPrefix, path)
+                val uri = rootAnchored(joinPaths(classPrefix, path))
                 Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
               }
             }
@@ -423,7 +449,8 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
                   case declared => declared
                 }
                 paths.foreach { path =>
-                  Iterator(method).newTagNodePair("endpoint", s"$httpMethod ${joinPaths(classPrefix, path)}").store()(using builder)
+                  val uri = rootAnchored(joinPaths(classPrefix, path))
+                  Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
                 }
               }
             }
