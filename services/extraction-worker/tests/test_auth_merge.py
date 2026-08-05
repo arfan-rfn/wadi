@@ -4,6 +4,7 @@ from typing import ClassVar
 
 from wadi_contracts import (
     AuthEffect,
+    AuthEvidence,
     AuthEvidenceKind,
     AuthResolution,
     EndpointAuth,
@@ -970,3 +971,78 @@ class TestOrderedAlternativesAreNotConjunctive:
             _rule("/**", "authenticated()", line=20),
         )
         assert guarded.authenticated is True
+
+
+class TestConfigRecoveredProvenance:
+    """A recovered rule must cite the branch that applies it, and the config
+    it was declared in (§5.2.10).
+
+    Neither pattern nor roles appear anywhere in the Java, so a reader who
+    follows the anchor lands on a loop over values they cannot see. If the
+    anchor also points at the wrong branch — a rule reading
+    `hasAnyRole('ROLE_ADMIN')` citing a line that says `denyAll()` — the reader
+    who checks is told the analysis is wrong. The value being right does not
+    save it; a false citation is its own defect.
+    """
+
+    RULES: ClassVar[dict[str, list[dict[str, object]]]] = {
+        "security.authorization-rules": [
+            {"paths": ["/admin/open"], "method": "GET", "authorities": ["permitAll"]},
+            {"paths": ["/admin/**"], "authorities": ["ROLE_ADMIN"]},
+        ]
+    }
+
+    def _site(self, line: int, access: str) -> ExportSecurityRule:
+        return ExportSecurityRule(
+            call_id=line,
+            pattern="@security",
+            pattern_confidence=RulePatternConfidence.CONFIG,
+            access=access,
+            kind="filter-chain",
+            chain_id="chain",
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=line),
+            evidence=access,
+        )
+
+    def _chain(self) -> list[ExportSecurityRule]:
+        # One site per branch of the loop's if/else, exactly as the pass emits.
+        return [
+            self._site(87, "denyAll()"),
+            self._site(89, "permitAll()"),
+            self._site(91, "authenticated()"),
+            self._site(97, "hasAnyRole(roles)"),
+        ]
+
+    def _evidence(self, uri: str, verb: HttpMethod) -> list[AuthEvidence]:
+        from wadi_worker.auth_merge import (
+            _rule_evidence,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        return _rule_evidence(self._chain(), uri, verb, self.RULES, {})
+
+    def test_a_role_rule_cites_the_role_branch(self) -> None:
+        item = self._evidence("/admin/thing", HttpMethod.POST)[0]
+        assert item.roles == ["ADMIN"]
+        # NOT line 87 (denyAll) — a branch this rule never takes.
+        assert item.anchor is not None
+        assert item.anchor.start_line == 97
+
+    def test_a_permit_rule_cites_the_permit_branch(self) -> None:
+        item = self._evidence("/admin/open", HttpMethod.GET)[0]
+        assert item.effect is AuthEffect.PERMIT_ALL
+        assert item.anchor is not None
+        assert item.anchor.start_line == 89
+
+    def test_the_config_key_is_named_so_the_policy_can_be_read(self) -> None:
+        item = self._evidence("/admin/thing", HttpMethod.POST)[0]
+        assert "security.authorization-rules" in item.detail
+
+    def test_one_binding_expands_once_not_once_per_branch(self) -> None:
+        # Four sites bind the same prefix. Expanding each would replay the
+        # whole policy four times and make the chain read as 4x its length.
+        from wadi_worker.auth_merge import (
+            _rule_evidence,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        evidence = _rule_evidence(self._chain(), "/admin/thing", HttpMethod.POST, self.RULES, {})
+        assert len(evidence) == 1

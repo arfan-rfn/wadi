@@ -338,6 +338,29 @@ def _enforcement_evidence(
 _VERBS = frozenset(method.value for method in HttpMethod)
 
 
+def _config_entries(
+    rule: ExportSecurityRule, config_structured: dict[str, list[dict[str, object]]]
+) -> tuple[str, list[dict[str, object]]] | None:
+    """The config node a ``@prefix`` binding correlates to, and its key.
+
+    The KEY is half the answer: a recovered rule's pattern and roles appear
+    nowhere in the Java, so naming ``security.authorization-rules`` is what
+    lets a reader go read the policy for themselves instead of taking the
+    analysis on faith.
+    """
+    prefix = (rule.pattern or "").removeprefix(CONFIG_PREFIX)
+    if not prefix:
+        return None
+    return next(
+        (
+            (key, value)
+            for key, value in config_structured.items()
+            if key == prefix or key.startswith(f"{prefix}.")
+        ),
+        None,
+    )
+
+
 def _expand_config_rules(
     rule: ExportSecurityRule, config_structured: dict[str, list[dict[str, object]]]
 ) -> list[ExportSecurityRule] | None:
@@ -374,19 +397,10 @@ def _expand_config_rules(
     An entry whose access cannot be determined at all yields an unresolvable
     rule rather than a fabricated one, so it withholds instead of guessing.
     """
-    prefix = (rule.pattern or "").removeprefix(CONFIG_PREFIX)
-    if not prefix:
+    correlated = _config_entries(rule, config_structured)
+    if correlated is None:
         return None
-    entries = next(
-        (
-            value
-            for key, value in config_structured.items()
-            if key == prefix or key.startswith(f"{prefix}.")
-        ),
-        None,
-    )
-    if not entries:
-        return None
+    _, entries = correlated
 
     # Which grant vocabulary the Java asked for, read from the loop that
     # consumed these values rather than guessed from the YAML key name.
@@ -532,15 +546,37 @@ def _rule_evidence(
     the endpoint and nothing says which, that ambiguity is itself opaque —
     picking one would be a guess about which policy runs.
     """
+    # A config-bound loop emits one site per BRANCH of its if/else — denyAll,
+    # permitAll, authenticated, hasAnyRole — and every one of them binds the
+    # same prefix. Expanding each would replay the whole policy once per
+    # branch; expanding once, at the first site, reproduces what the loop
+    # actually does: walk the config entries in order.
     expanded: list[ExportSecurityRule] = []
+    config_sites = [
+        rule for rule in security_rules if rule.pattern_confidence is RulePatternConfidence.CONFIG
+    ]
+    recovered_from: dict[int, str] = {}
+    seen_bindings: set[tuple[str | None, str | None]] = set()
     for rule in security_rules:
-        if rule.pattern_confidence is RulePatternConfidence.CONFIG:
-            recovered = _expand_config_rules(rule, config_structured)
+        if rule.pattern_confidence is not RulePatternConfidence.CONFIG:
+            expanded.append(rule)
+            continue
+        binding = (rule.chain_id, rule.pattern)
+        if binding in seen_bindings:
+            continue
+        seen_bindings.add(binding)
+        recovered = _expand_config_rules(rule, config_structured)
+        if recovered is None:
             # No correlation: the rule stays as-is and reads as unresolvable,
             # which withholds rather than falling through.
-            expanded.extend(recovered if recovered is not None else [rule])
-        else:
             expanded.append(rule)
+            continue
+        correlated = _config_entries(rule, config_structured)
+        source = correlated[0] if correlated else (rule.pattern or "")
+        for entry in recovered:
+            anchored = _anchored_at_applying_branch(entry, rule, config_sites)
+            recovered_from[id(anchored)] = source
+            expanded.append(anchored)
     expanded = [_with_resolved_placeholders(rule, config_env) for rule in expanded]
     chains = _chains_governing(expanded, full_uri)
     if not chains:
@@ -558,6 +594,13 @@ def _rule_evidence(
             # whose scope is known and whose effect is not definitely does.
             if not unresolvable:
                 detail = f"{matched.pattern} -> {matched.access}"
+                # Say where the rule was WRITTEN. Recovered from config, its
+                # pattern and roles appear nowhere in the Java, so a reader
+                # following the anchor finds a loop over values it cannot see
+                # — and would reasonably conclude the roles were invented.
+                source = recovered_from.get(id(matched))
+                if source is not None:
+                    detail += f"  ·  declared in {source}"
             elif matched.pattern is None:
                 detail = "a security rule's path could not be read"
             else:
@@ -583,6 +626,50 @@ def _rule_evidence(
                 )
             )
     return evidence
+
+
+#: The Java call each synthesized access corresponds to, so a recovered rule
+#: can be anchored at the branch that actually runs for it.
+_BRANCH_FOR_ACCESS = (
+    ("permitAll", "permitAll"),
+    ("denyAll", "denyAll"),
+    ("hasAnyAuthority", "hasAnyAuthority"),
+    ("hasAuthority", "hasAuthority"),
+    ("hasAnyRole", "hasAnyRole"),
+    ("hasRole", "hasRole"),
+    ("authenticated", "authenticated"),
+)
+
+
+def _anchored_at_applying_branch(
+    recovered: ExportSecurityRule,
+    binding: ExportSecurityRule,
+    sites: list[ExportSecurityRule],
+) -> ExportSecurityRule:
+    """Point a config-recovered rule at the branch that applies IT.
+
+    The loop's if/else emits one site per branch, and the binding that got
+    expanded is simply the first of them. Keeping its anchor means a rule
+    reading ``hasAnyRole('ROLE_ADMIN')`` can point at the line
+    ``authorizedUrl.denyAll();`` — a branch this rule never takes, whose text
+    contradicts the fact above it. The value is right and the citation is not,
+    which is the worse of the two failures: a reader who checks is told the
+    analysis is wrong.
+
+    Matched on the access VERB rather than by position, because the branch
+    order is the codebase's choice, not a convention.
+    """
+    access = recovered.access
+    verb = next((call for marker, call in _BRANCH_FOR_ACCESS if marker in access), None)
+    if verb is None:
+        return recovered
+    branch = next(
+        (site for site in sites if site.chain_id == binding.chain_id and verb in site.access),
+        None,
+    )
+    if branch is None:
+        return recovered
+    return recovered.model_copy(update={"anchor": branch.anchor, "call_id": branch.call_id})
 
 
 def _with_resolved_placeholders(
