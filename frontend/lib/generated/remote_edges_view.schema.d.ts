@@ -5,6 +5,10 @@
  * and run json-schema-to-typescript to regenerate this file.
  */
 
+/**
+ * 1.13.0: how auth crosses this call when statically visible — 'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall artifact, which has always recorded it. None is NOT 'does not forward': detection currently misses the inbound-HttpHeaders pass-through idiom (§5.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present.
+ */
+export type AuthPropagation = string | null
 export type CallerServiceId = string
 export type CallerServiceName = string | null
 /**
@@ -55,6 +59,7 @@ export interface RemoteEdgesView {
  * One stitched edge enriched for display (read-time join over the graph).
  */
 export interface RemoteEdgeItem {
+  auth_propagation?: AuthPropagation
   caller_service_id: CallerServiceId
   caller_service_name?: CallerServiceName
   confidence: Confidence

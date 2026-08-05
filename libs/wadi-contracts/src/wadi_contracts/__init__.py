@@ -15,8 +15,12 @@ from wadi_contracts.boundary import (
 from wadi_contracts.comms import MqInteraction, RemoteCall
 from wadi_contracts.datamodel import DataModel, DataModelField, DataModelRelation
 from wadi_contracts.endpoint import (
+    AuthEffect,
     AuthEvidence,
     AuthEvidenceKind,
+    AuthMechanism,
+    AuthMechanismKind,
+    AuthResolution,
     Endpoint,
     EndpointAuth,
     EndpointParam,
@@ -70,6 +74,7 @@ from wadi_contracts.registry import CONTRACT_MODELS
 from wadi_contracts.source import MethodRef, SourceAnchor
 from wadi_contracts.stitching import (
     AnalysisCoverageSection,
+    AuthCoverageSection,
     CfgAnomalySection,
     CoverageReport,
     CoverageTotals,
@@ -94,12 +99,17 @@ from wadi_contracts.tags import (
 from wadi_contracts.timeutil import UtcDatetime, ensure_utc, utc_now
 from wadi_contracts.version import SCHEMA_VERSION
 from wadi_contracts.views import (
+    AuthEndpointRow,
+    AuthTotals,
+    EndpointDependenciesView,
+    EndpointDependency,
     EndpointDetailView,
     EndpointTouchedFile,
     RemoteEdgeItem,
     RemoteEdgesView,
     ServiceSummary,
     SourceView,
+    SystemAuthView,
     SystemGraphService,
     SystemGraphView,
     UnopenableCallCount,
@@ -116,8 +126,15 @@ __all__ = [
     "AnalysisCoverageSection",
     "ArtifactEnvelope",
     "AsyncRoot",
+    "AuthCoverageSection",
+    "AuthEffect",
+    "AuthEndpointRow",
     "AuthEvidence",
     "AuthEvidenceKind",
+    "AuthMechanism",
+    "AuthMechanismKind",
+    "AuthResolution",
+    "AuthTotals",
     "BranchCondition",
     "CalleeUnboundReason",
     "CfgAnomaly",
@@ -130,6 +147,8 @@ __all__ = [
     "DataModelRelation",
     "Endpoint",
     "EndpointAuth",
+    "EndpointDependenciesView",
+    "EndpointDependency",
     "EndpointDetailView",
     "EndpointParam",
     "EndpointTouchedFile",
@@ -177,6 +196,7 @@ __all__ = [
     "SourceView",
     "StitchedEdge",
     "System",
+    "SystemAuthView",
     "SystemGraphService",
     "SystemGraphView",
     "Tag",

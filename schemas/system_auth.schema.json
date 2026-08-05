@@ -1,0 +1,213 @@
+{
+  "$defs": {
+    "AuthEndpointRow": {
+      "additionalProperties": false,
+      "description": "One endpoint's auth state, flattened for the system auth view (\u00a75.2.9).",
+      "properties": {
+        "authenticated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "None means no claim \u2014 read `unread_kinds` to tell why",
+          "title": "Authenticated"
+        },
+        "authorities": {
+          "description": "Required authorities, when named as authorities",
+          "items": {
+            "type": "string"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "denied": {
+          "default": false,
+          "description": "A read rule admits nobody \u2014 the endpoint is unreachable",
+          "title": "Denied",
+          "type": "boolean"
+        },
+        "endpoint_id": {
+          "title": "Endpoint Id",
+          "type": "string"
+        },
+        "full_uri": {
+          "title": "Full Uri",
+          "type": "string"
+        },
+        "http_method": {
+          "$ref": "#/$defs/HttpMethod"
+        },
+        "mechanism_kinds": {
+          "description": "Distinct active mechanisms",
+          "items": {
+            "$ref": "#/$defs/AuthMechanismKind"
+          },
+          "title": "Mechanism Kinds",
+          "type": "array"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        },
+        "service_id": {
+          "title": "Service Id",
+          "type": "string"
+        },
+        "service_name": {
+          "title": "Service Name",
+          "type": "string"
+        },
+        "simplified_uri": {
+          "title": "Simplified Uri",
+          "type": "string"
+        },
+        "unread_kinds": {
+          "description": "Kinds of enforcement detected here but not readable \u2014 why a claim is withheld",
+          "items": {
+            "$ref": "#/$defs/AuthEvidenceKind"
+          },
+          "title": "Unread Kinds",
+          "type": "array"
+        }
+      },
+      "required": [
+        "endpoint_id",
+        "service_id",
+        "service_name",
+        "http_method",
+        "full_uri",
+        "simplified_uri",
+        "authenticated"
+      ],
+      "title": "AuthEndpointRow",
+      "type": "object"
+    },
+    "AuthEvidenceKind": {
+      "description": "What kind of construct enforces (or could enforce) access (\u00a75.2.9).\n\nThe first three are declarative sources; the rest are enforcement points\nthat gate requests without a security-framework rule behind them. All are\nframework-neutral by construction \u2014 a FastAPI ``Security(...)`` dependency\nor an Express middleware maps onto the same vocabulary (goal 9).",
+      "enum": [
+        "annotation",
+        "security-dsl",
+        "config",
+        "chain-bypass",
+        "interceptor",
+        "servlet-filter",
+        "aspect",
+        "in-handler",
+        "gateway"
+      ],
+      "title": "AuthEvidenceKind",
+      "type": "string"
+    },
+    "AuthMechanismKind": {
+      "description": "How a caller proves identity \u2014 distinct from what it is then allowed to do.",
+      "enum": [
+        "jwt-bearer",
+        "opaque-token",
+        "http-basic",
+        "form-login",
+        "oauth2-login",
+        "oauth2-resource-server",
+        "saml2",
+        "x509",
+        "remember-me",
+        "custom-filter",
+        "stateless-session"
+      ],
+      "title": "AuthMechanismKind",
+      "type": "string"
+    },
+    "AuthTotals": {
+      "additionalProperties": false,
+      "description": "Snapshot-wide auth tally. The five states are disjoint and sum to ``endpoints``.\n\n``withheld`` and ``no_evidence`` are split deliberately even though both\nleave ``authenticated=None``: they call for opposite responses. Withheld\nmeans wadi saw a guard it could not read (a wadi gap, and the endpoint may\nwell be protected); no-evidence means wadi found nothing that gates this\nendpoint at all (possibly a real hole in the system).\n\n``denied`` is carved out of ``authenticated`` for the same reason: a route\n``denyAll()`` admits nobody is not a working protected route, and counting\nit as one overstates the reachable protected surface.",
+      "properties": {
+        "authenticated": {
+          "minimum": 0,
+          "title": "Authenticated",
+          "type": "integer"
+        },
+        "denied": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Denied",
+          "type": "integer"
+        },
+        "endpoints": {
+          "minimum": 0,
+          "title": "Endpoints",
+          "type": "integer"
+        },
+        "no_evidence": {
+          "minimum": 0,
+          "title": "No Evidence",
+          "type": "integer"
+        },
+        "unauthenticated": {
+          "minimum": 0,
+          "title": "Unauthenticated",
+          "type": "integer"
+        },
+        "withheld": {
+          "minimum": 0,
+          "title": "Withheld",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "endpoints",
+        "authenticated",
+        "unauthenticated",
+        "withheld",
+        "no_evidence"
+      ],
+      "title": "AuthTotals",
+      "type": "object"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
+      ],
+      "title": "HttpMethod",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.15.0/system_auth.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Every endpoint's auth state across the snapshot in one read (\u00a75.2.9).\n\nOne route rather than a per-service fan-out: the question this answers \u2014\n\"which endpoints here are unprotected?\" \u2014 is inherently system-wide, and a\nclient walking 42 services to assemble it would make the honest answer the\nexpensive one.",
+  "properties": {
+    "rows": {
+      "items": {
+        "$ref": "#/$defs/AuthEndpointRow"
+      },
+      "title": "Rows",
+      "type": "array"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "totals": {
+      "$ref": "#/$defs/AuthTotals"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "totals"
+  ],
+  "title": "SystemAuthView",
+  "type": "object"
+}

@@ -1,9 +1,159 @@
 {
   "$defs": {
+    "AuthEffect": {
+      "description": "What an enforcement point does to a request that reaches it.\n\n``UNKNOWN`` is a first-class answer, not a placeholder: an enforcement we\ncan see but cannot interpret must say so, because the alternative is\nleaving the endpoint reading as unprotected (\u00a75.2.9).",
+      "enum": [
+        "require-authenticated",
+        "require-roles",
+        "require-authorities",
+        "permit-all",
+        "deny-all",
+        "unknown"
+      ],
+      "title": "AuthEffect",
+      "type": "string"
+    },
     "AuthEvidence": {
       "additionalProperties": false,
-      "description": "One piece of evidence behind an auth claim \u2014 every claim carries its source (\u00a75.2).",
+      "description": "One enforcement point that gates \u2014 or could gate \u2014 this endpoint (\u00a75.2.9).\n\nEvery claim carries its source, and every construct that *could* gate a\nrequest is recorded here whether or not its effect could be determined.\nThat is what makes the claim rule on :class:`EndpointAuth` safe: a rule we\nfailed to read is present as ``resolution=opaque`` rather than absent.\n\n**Reader migration (pre-1.13.0 artifacts):** records written before the\nenforcement model carry no ``effect``/``resolution``, so they default to\n``unknown``/``resolved`` \u2014 honest about what was recorded (the effect was\nnever stored) while preserving the claim those artifacts were written with.",
       "properties": {
+        "active": {
+          "default": true,
+          "description": "False when present in source but not in effect",
+          "title": "Active",
+          "type": "boolean"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "authorities": {
+          "description": "Authorities required, when distinct from roles",
+          "items": {
+            "type": "string"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "detail": {
+          "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "effect": {
+          "$ref": "#/$defs/AuthEffect",
+          "default": "unknown",
+          "description": "What this does to a request that reaches it"
+        },
+        "expression": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Raw access expression / SpEL, preserved verbatim",
+          "title": "Expression"
+        },
+        "http_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verb restriction; None means the rule applies to every verb"
+        },
+        "inactive_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it is not in effect, e.g. 'disabled in chain' \u2014 required when inactive",
+          "title": "Inactive Reason"
+        },
+        "kind": {
+          "$ref": "#/$defs/AuthEvidenceKind"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path pattern this is scoped to; '{?}' means read but unresolvable",
+          "title": "Pattern"
+        },
+        "resolution": {
+          "$ref": "#/$defs/AuthResolution",
+          "default": "resolved",
+          "description": "How completely it was read"
+        },
+        "roles": {
+          "description": "Roles required, ROLE_ prefix stripped",
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "title": "AuthEvidence",
+      "type": "object"
+    },
+    "AuthEvidenceKind": {
+      "description": "What kind of construct enforces (or could enforce) access (\u00a75.2.9).\n\nThe first three are declarative sources; the rest are enforcement points\nthat gate requests without a security-framework rule behind them. All are\nframework-neutral by construction \u2014 a FastAPI ``Security(...)`` dependency\nor an Express middleware maps onto the same vocabulary (goal 9).",
+      "enum": [
+        "annotation",
+        "security-dsl",
+        "config",
+        "chain-bypass",
+        "interceptor",
+        "servlet-filter",
+        "aspect",
+        "in-handler",
+        "gateway"
+      ],
+      "title": "AuthEvidenceKind",
+      "type": "string"
+    },
+    "AuthMechanism": {
+      "additionalProperties": false,
+      "description": "One authentication mechanism configured on the service that serves this endpoint.\n\nA custom filter is only ever promoted past ``CUSTOM_FILTER`` on evidence\ninside the filter itself \u2014 naming a mechanism from a class name would be\nexactly the fabricated security fact \u00a712 forbids.",
+      "properties": {
+        "active": {
+          "default": true,
+          "description": "False when present in source but not in effect",
+          "title": "Active",
+          "type": "boolean"
+        },
         "anchor": {
           "anyOf": [
             {
@@ -16,34 +166,66 @@
           "default": null
         },
         "detail": {
-          "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
+          "description": "Raw source text or filter class name",
           "minLength": 1,
           "title": "Detail",
           "type": "string"
         },
+        "inactive_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it is not in effect, e.g. 'disabled in chain' \u2014 required when inactive",
+          "title": "Inactive Reason"
+        },
         "kind": {
-          "$ref": "#/$defs/AuthEvidenceKind"
+          "$ref": "#/$defs/AuthMechanismKind"
         }
       },
       "required": [
         "kind",
         "detail"
       ],
-      "title": "AuthEvidence",
+      "title": "AuthMechanism",
       "type": "object"
     },
-    "AuthEvidenceKind": {
+    "AuthMechanismKind": {
+      "description": "How a caller proves identity \u2014 distinct from what it is then allowed to do.",
       "enum": [
-        "annotation",
-        "security-dsl",
-        "config"
+        "jwt-bearer",
+        "opaque-token",
+        "http-basic",
+        "form-login",
+        "oauth2-login",
+        "oauth2-resource-server",
+        "saml2",
+        "x509",
+        "remember-me",
+        "custom-filter",
+        "stateless-session"
       ],
-      "title": "AuthEvidenceKind",
+      "title": "AuthMechanismKind",
+      "type": "string"
+    },
+    "AuthResolution": {
+      "description": "How completely an enforcement point was read.\n\n``OPAQUE`` is what withholds an endpoint's claim (\u00a75.2.9): the construct\nwas detected but its effect or scope could not be determined.",
+      "enum": [
+        "resolved",
+        "partial",
+        "opaque"
+      ],
+      "title": "AuthResolution",
       "type": "string"
     },
     "EndpointAuth": {
       "additionalProperties": false,
-      "description": "Structured authorization state of an endpoint.\n\n``authenticated`` is tri-state (P10): True/False are *claims backed by\nevidence*; None means honestly unknown \u2014 never defaulted to False.",
+      "description": "Structured authorization state of an endpoint (\u00a75.2.9).\n\n``authenticated`` is tri-state (P10): True/False are *claims backed by\nfully-read enforcement*; None means honestly unknown \u2014 never defaulted to\nFalse. The distinction between None and False is load-bearing: None says\n\"we did not read everything that guards this\", False says \"we read it all\nand nothing guards this\". Collapsing them is the failure mode this model\nexists to prevent.\n\n``denied`` refines the True case rather than replacing it. ``denyAll()``\nadmits nobody, so \"a request must be authenticated to pass\" is still true\nof it \u2014 but a route no caller can reach is not the same fact as a working\nprotected route, and rendering the two identically tells an auditor a dead\nendpoint is live. It is a separate boolean, not a fourth value of\n``authenticated``, so every existing reader of the tri-state keeps working.",
       "properties": {
         "authenticated": {
           "anyOf": [
@@ -57,7 +239,22 @@
           "default": null,
           "title": "Authenticated"
         },
+        "authorities": {
+          "description": "Authorities required, when the rule names authorities rather than roles",
+          "items": {
+            "type": "string"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "denied": {
+          "default": false,
+          "description": "A read rule denies EVERY caller (denyAll); the endpoint is unreachable",
+          "title": "Denied",
+          "type": "boolean"
+        },
         "evidence": {
+          "description": "Every enforcement point in scope \u2014 read or not (\u00a75.2.9)",
           "items": {
             "$ref": "#/$defs/AuthEvidence"
           },
@@ -74,8 +271,16 @@
             }
           ],
           "default": null,
-          "description": "e.g. 'spring-security'; None when no framework was detected",
+          "description": "Framework family, e.g. 'spring-security'; see mechanisms[] for how auth works",
           "title": "Mechanism"
+        },
+        "mechanisms": {
+          "description": "How authentication is performed on this endpoint's service",
+          "items": {
+            "$ref": "#/$defs/AuthMechanism"
+          },
+          "title": "Mechanisms",
+          "type": "array"
         },
         "roles": {
           "items": {
@@ -315,7 +520,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.12.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.15.0/endpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One REST endpoint of one service within a snapshot.",
@@ -389,7 +594,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.12.0",
+      "default": "1.15.0",
       "title": "Schema Version",
       "type": "string"
     },

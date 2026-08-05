@@ -401,6 +401,30 @@ class CfgAnomalySection(WadiModel):
     )
 
 
+class AuthCoverageSection(WadiModel):
+    """Snapshot rollup of what the auth layer could and could not read (§5.2.9).
+
+    The standing tracking mechanism for auth blind spots, playing the role
+    ``cfg_anomalies`` plays for control flow: an idiom wadi cannot interpret
+    stays counted here rather than living in prose, so the next tranche is
+    scheduled by measured demand rather than intuition.
+    """
+
+    endpoints: int = Field(default=0, ge=0)
+    authenticated: int = Field(default=0, ge=0)
+    unauthenticated: int = Field(default=0, ge=0)
+    withheld: int = Field(
+        default=0, ge=0, description="No claim because an in-scope guard could not be read"
+    )
+    no_evidence: int = Field(
+        default=0, ge=0, description="No claim because nothing that could gate was found"
+    )
+    unread_by_kind: dict[str, int] = Field(
+        default_factory=dict,
+        description="Enforcement points detected but not readable, counted per AuthEvidenceKind",
+    )
+
+
 class CoverageReport(SnapshotEnvelope):
     """What the map knows it doesn't know (§5.4) — surfaced FIRST everywhere.
 
@@ -440,6 +464,13 @@ class CoverageReport(SnapshotEnvelope):
         description=(
             "ICFG structural-invariant violations (§5.2.8 M2, schema 1.8.0). "
             "None only on reports written before the invariants existed"
+        ),
+    )
+    auth_coverage: AuthCoverageSection | None = Field(
+        default=None,
+        description=(
+            "What the auth layer could and could not read (§5.2.9, schema 1.13.0). "
+            "None only on reports written before the enforcement model existed"
         ),
     )
     applied_hint_ids: list[str] = Field(

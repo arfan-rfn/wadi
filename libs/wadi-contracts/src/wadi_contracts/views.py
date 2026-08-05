@@ -6,11 +6,13 @@ Views are DERIVED — never written to storage (the stored artifact stays pure,
 shares one definition.
 """
 
-from pydantic import Field
+from typing import Self
+
+from pydantic import Field, model_validator
 
 from wadi_contracts.base import WadiModel
 from wadi_contracts.boundary import ServiceBoundary
-from wadi_contracts.endpoint import Endpoint
+from wadi_contracts.endpoint import AuthEvidenceKind, AuthMechanismKind, Endpoint
 from wadi_contracts.enums import (
     CalleeUnboundReason,
     Confidence,
@@ -48,6 +50,16 @@ class RemoteEdgeItem(WadiModel):
     confidence: Confidence
     provenance: Provenance
     evidence: str | None = None
+    auth_propagation: str | None = Field(
+        default=None,
+        description=(
+            "1.13.0: how auth crosses this call when statically visible — "
+            "'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall "
+            "artifact, which has always recorded it. None is NOT 'does not forward': "
+            "detection currently misses the inbound-HttpHeaders pass-through idiom "
+            "(§5.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present."
+        ),
+    )
 
 
 class RemoteEdgesView(WadiModel):
@@ -91,6 +103,122 @@ class SystemGraphView(WadiModel):
     stitched: bool
     services: list[SystemGraphService] = Field(default_factory=list[SystemGraphService])
     edges: list[RemoteEdgeItem] = Field(default_factory=list[RemoteEdgeItem])
+
+
+class EndpointDependency(WadiModel):
+    """One downstream target an endpoint reaches (§5.4).
+
+    Deliberately flattened to a label + how sure we are: the endpoint list
+    needs "who does this call", not the full edge. The confidence tier travels
+    with it because a HEURISTIC dependency is a different claim from an EXACT
+    one, and a list that hides the difference is the kind of quiet flattening
+    P10 exists to prevent.
+    """
+
+    label: str = Field(description="Target service name, external host, or 'undetermined'")
+    target_kind: TargetKind
+    confidence: Confidence
+
+
+class EndpointDependenciesView(WadiModel):
+    """Per-endpoint downstream targets for one service (§5.2.9 UI).
+
+    Cross-service calls are the product's core extracted fact, so the endpoint
+    list shows them inline rather than making the reader open each endpoint to
+    find out. Scoped to a service because that is the unit the list renders,
+    and it keeps the ICFG join bounded.
+
+    ``stitched=False`` means the stitcher has not run: an empty map is then
+    'not yet', never 'this endpoint calls nothing' (P10).
+    """
+
+    snapshot_id: str
+    service_id: str
+    stitched: bool
+    dependencies: dict[str, list[EndpointDependency]] = Field(
+        default_factory=dict[str, list[EndpointDependency]],
+        description="endpoint_id -> its downstream targets, de-duplicated",
+    )
+
+
+class AuthEndpointRow(WadiModel):
+    """One endpoint's auth state, flattened for the system auth view (§5.2.9)."""
+
+    endpoint_id: str
+    service_id: str
+    service_name: str
+    http_method: HttpMethod
+    full_uri: str
+    simplified_uri: str
+    authenticated: bool | None = Field(
+        description="None means no claim — read `unread_kinds` to tell why"
+    )
+    denied: bool = Field(
+        default=False, description="A read rule admits nobody — the endpoint is unreachable"
+    )
+    roles: list[str] = Field(default_factory=list[str])
+    authorities: list[str] = Field(
+        default_factory=list[str], description="Required authorities, when named as authorities"
+    )
+    mechanism_kinds: list[AuthMechanismKind] = Field(
+        default_factory=list[AuthMechanismKind], description="Distinct active mechanisms"
+    )
+    unread_kinds: list[AuthEvidenceKind] = Field(
+        default_factory=list[AuthEvidenceKind],
+        description="Kinds of enforcement detected here but not readable — why a claim is withheld",
+    )
+
+
+class AuthTotals(WadiModel):
+    """Snapshot-wide auth tally. The five states are disjoint and sum to ``endpoints``.
+
+    ``withheld`` and ``no_evidence`` are split deliberately even though both
+    leave ``authenticated=None``: they call for opposite responses. Withheld
+    means wadi saw a guard it could not read (a wadi gap, and the endpoint may
+    well be protected); no-evidence means wadi found nothing that gates this
+    endpoint at all (possibly a real hole in the system).
+
+    ``denied`` is carved out of ``authenticated`` for the same reason: a route
+    ``denyAll()`` admits nobody is not a working protected route, and counting
+    it as one overstates the reachable protected surface.
+    """
+
+    endpoints: int = Field(ge=0)
+    authenticated: int = Field(ge=0)
+    denied: int = Field(default=0, ge=0)
+    unauthenticated: int = Field(ge=0)
+    withheld: int = Field(ge=0)
+    no_evidence: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _states_account_for_every_endpoint(self) -> Self:
+        counted = (
+            self.authenticated
+            + self.denied
+            + self.unauthenticated
+            + self.withheld
+            + self.no_evidence
+        )
+        if counted != self.endpoints:
+            raise ValueError(
+                f"auth states must partition the endpoints: {counted} counted vs "
+                f"{self.endpoints} endpoints — an unaccounted endpoint is a silent gap (P10)"
+            )
+        return self
+
+
+class SystemAuthView(WadiModel):
+    """Every endpoint's auth state across the snapshot in one read (§5.2.9).
+
+    One route rather than a per-service fan-out: the question this answers —
+    "which endpoints here are unprotected?" — is inherently system-wide, and a
+    client walking 42 services to assemble it would make the honest answer the
+    expensive one.
+    """
+
+    snapshot_id: str
+    totals: AuthTotals
+    rows: list[AuthEndpointRow] = Field(default_factory=list[AuthEndpointRow])
 
 
 class EndpointTouchedFile(WadiModel):

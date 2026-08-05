@@ -2,7 +2,10 @@
 
 import pytest
 
+from wadi_contracts.endpoint import AuthMechanismKind
 from wadi_contracts.tags import (
+    AUTH_ENFORCEMENT_KINDS,
+    AUTH_MECHANISM_KINDS,
     Tag,
     TagValidationError,
     parse_tag,
@@ -87,7 +90,17 @@ class TestParseTag:
 class TestRegistry:
     def test_registered_namespaces(self) -> None:
         assert registered_namespaces() == frozenset(
-            {"endpoint", "sink", "model", "auth", "auth-rule", "token-propagation", "async-root"}
+            {
+                "endpoint",
+                "sink",
+                "model",
+                "auth",
+                "auth-rule",
+                "auth-mechanism",
+                "auth-enforcement",
+                "token-propagation",
+                "async-root",
+            }
         )
 
     def test_async_root_kinds(self) -> None:
@@ -99,3 +112,59 @@ class TestRegistry:
     def test_validate_tag_unknown_namespace_names_known_ones(self) -> None:
         with pytest.raises(TagValidationError, match="endpoint"):
             validate_tag("nope", "x")
+
+
+class TestAuthNamespaces:
+    """§5.2.9 — the auth vocabularies are derived from the contract enums, so a
+    new enum member is registered by construction and cannot drift."""
+
+    def test_mechanism_kinds_track_the_enum(self) -> None:
+        assert frozenset(kind.value for kind in AuthMechanismKind) == AUTH_MECHANISM_KINDS
+
+    def test_enforcement_kinds_exclude_the_declarative_sources(self) -> None:
+        # annotations / DSL rules / config keys travel in their own namespaces;
+        # this one exists for gating constructs that have no rule behind them.
+        assert "interceptor" in AUTH_ENFORCEMENT_KINDS
+        assert "chain-bypass" in AUTH_ENFORCEMENT_KINDS
+        assert AUTH_ENFORCEMENT_KINDS.isdisjoint({"annotation", "security-dsl", "config"})
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "auth-mechanism=oauth2-resource-server:oauth2ResourceServer(oauth2 -> oauth2.jwt())",
+            "auth-mechanism=custom-filter:JWTFilter",
+            "auth-mechanism=http-basic:httpBasic()!disabled in chain",
+        ],
+    )
+    def test_mechanism_values_accepted(self, raw: str) -> None:
+        assert parse_tag(raw).namespace == "auth-mechanism"
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "auth-mechanism=jwt:whatever",  # not a registered kind
+            "auth-mechanism=custom-filter",  # missing the raw text
+        ],
+    )
+    def test_mechanism_values_rejected(self, raw: str) -> None:
+        with pytest.raises(TagValidationError, match="auth-mechanism"):
+            parse_tag(raw)
+
+    def test_enforcement_value_accepted(self) -> None:
+        tag = parse_tag("auth-enforcement=interceptor|/api/**|AuthInterceptor.preHandle")
+        assert tag.value.startswith("interceptor|")
+
+    def test_enforcement_unresolvable_pattern_is_expressible(self) -> None:
+        # The whole point: a guard whose scope we cannot read is still stated.
+        assert parse_tag("auth-enforcement=servlet-filter|{?}|TokenFilter").namespace == (
+            "auth-enforcement"
+        )
+
+    def test_enforcement_rejects_a_declarative_kind(self) -> None:
+        with pytest.raises(TagValidationError, match="auth-enforcement"):
+            parse_tag("auth-enforcement=annotation|/x|@PreAuthorize")
+
+    def test_auth_rule_accepts_the_unresolvable_pattern_form(self) -> None:
+        # §5.2.9: a rule read but not resolved is emitted as '{?}' so it can
+        # withhold the claim — dropping it is what manufactured wrong answers.
+        assert parse_tag('auth-rule=POST|{?}|hasAnyRole(admin, "USER")').namespace == "auth-rule"

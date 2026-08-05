@@ -42,6 +42,19 @@
       "additionalProperties": false,
       "description": "One stitched edge enriched for display (read-time join over the graph).",
       "properties": {
+        "auth_propagation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "1.13.0: how auth crosses this call when statically visible \u2014 'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall artifact, which has always recorded it. None is NOT 'does not forward': detection currently misses the inbound-HttpHeaders pass-through idiom (\u00a75.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present.",
+          "title": "Auth Propagation"
+        },
         "caller_service_id": {
           "title": "Caller Service Id",
           "type": "string"
@@ -210,7 +223,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.12.0/remote_edges_view.schema.json",
+  "$id": "https://trywadi.com/schemas/1.15.0/remote_edges_view.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Who a service calls and who calls it (\u00a78 ``remote_edges``).",
