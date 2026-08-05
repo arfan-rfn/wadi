@@ -1,7 +1,16 @@
 package wadi.`export`
 
 import io.shiftleft.codepropertygraph.generated.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.{Member, Method, TypeDecl}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+  AstNode,
+  Block,
+  Call,
+  Identifier,
+  Literal,
+  Member,
+  Method,
+  TypeDecl
+}
 import io.shiftleft.semanticcpg.language.*
 
 /** Provider-side wire-shape recovery (§5.2.7).
@@ -30,6 +39,16 @@ object TypeShapes {
   )
   private val ArrayLike = Set("List", "Set", "Collection", "Iterable", "Flux", "Stream")
   private val MapLike   = Set("Map", "HashMap", "TreeMap", "SortedMap")
+
+  /** `ResponseEntity` static builders whose first argument IS the payload.
+    *
+    * `ok(x)` covers the static-import form; `body(x)` covers every builder
+    * chain that ends in it (`status(...).body(x)`, `badRequest().body(x)`),
+    * since the outermost call is what a `return` statement holds. `ok()` with
+    * no argument returns a builder, not an entity — it contributes nothing,
+    * which is the honest answer rather than an empty object.
+    */
+  private val ResponseBuilders = Set("ok", "body")
 
   private val ScalarSimpleNames = Set(
     "String", "CharSequence", "Integer", "int", "Long", "long", "Short", "short",
@@ -104,6 +123,112 @@ object TypeShapes {
   /** Build the wire shape for a declared type text. */
   def shapeOf(cpg: Cpg, typeText: String): Option[ujson.Obj] =
     parseTypeText(typeText).map(raw => build(cpg, raw, Set.empty, MaxDepth))
+
+  /** The response shape for a handler, carrying the provenance of the type it read.
+    *
+    * §5.2.7 (amended 2026-08-05): the declared return type is the primary
+    * evidence and is always tried first. When it is a wrapper written RAW —
+    * `public HttpEntity query(...)`, the dominant TrainTicket idiom at 376
+    * occurrences against 9 generic ones — there is no type argument to unwrap
+    * and the walk would terminate on an off-CPG framework type. The payload is
+    * still recoverable, just from the return EXPRESSION rather than the
+    * signature. Recovery is strictly a fallback: it can never override a
+    * declared generic, and it yields nothing unless every return agrees.
+    */
+  private[`export`] def responseShapeOf(cpg: Cpg, method: Method): Option[ujson.Obj] = {
+    val declaredText  = returnTypeTextOf(method)
+    val declaredShape = declaredText.flatMap(shapeOf(cpg, _)).map(withOrigin(_, "declared"))
+    val rawWrapper = declaredText
+      .flatMap(parseTypeText)
+      .exists(raw => UnwrapOne.contains(simpleName(raw.name)) && raw.args.isEmpty)
+    if (!rawWrapper) declaredShape
+    else
+      inferredPayloadTextOf(cpg, method)
+        .flatMap(shapeOf(cpg, _))
+        .map(withOrigin(_, "return-expression"))
+        .orElse(declaredShape)
+  }
+
+  private def withOrigin(shape: ujson.Obj, origin: String): ujson.Obj = {
+    shape("origin") = origin
+    shape
+  }
+
+  /** The payload type text agreed by every return statement, or None.
+    *
+    * Disagreement is an honest unknown (P10): if two returns resolve to
+    * different types, neither is "the" response shape and we do not elect a
+    * winner. `return ok()` with no argument contributes nothing, as does any
+    * expression whose type is off-CPG.
+    */
+  private def inferredPayloadTextOf(cpg: Cpg, method: Method): Option[String] = {
+    val texts = method.ast.isReturn.l
+      .flatMap(ret => payloadExpressionOf(ret.astChildren.l))
+      .flatMap(typeTextOfExpression(cpg, _))
+      .filterNot(isRawWrapperText)
+      .distinct
+    if (texts.sizeIs == 1) texts.headOption else None
+  }
+
+  /** A recovered type that is ITSELF a raw wrapper is not a recovery.
+    *
+    * `ResponseEntity.noContent().build()` types as `HttpEntity` again, and
+    * accepting it published an `object` with zero fields — a shape invented
+    * out of an external stub that has no members, which is precisely the
+    * fabrication P10 forbids. Learning "it returns a wrapper" is learning
+    * nothing, so the claim goes back to being withheld.
+    */
+  private def isRawWrapperText(text: String): Boolean =
+    parseTypeText(text).exists(raw => UnwrapOne.contains(simpleName(raw.name)) && raw.args.isEmpty)
+
+  /** Unwrap the response-builder call around the payload, if there is one. */
+  private def payloadExpressionOf(returned: List[AstNode]): Option[AstNode] =
+    returned.headOption.flatMap {
+      case call: Call if ResponseBuilders.contains(call.name) => firstRealArgument(call)
+      case call: Call if isWrapperInit(call)                  => firstRealArgument(call)
+      // javasrc2cpg lowers `new X(a, b)` into a BLOCK (alloc, `<init>`, temp),
+      // so a directly-returned constructor is nested rather than the returned
+      // node itself.
+      case block: Block => block.ast.isCall.find(isWrapperInit).flatMap(firstRealArgument)
+      case other        => Some(other)
+    }
+
+  private def isWrapperInit(call: Call): Boolean =
+    call.name == "<init>" &&
+      UnwrapOne.contains(simpleName(call.methodFullName.split("\\.<init>").head))
+
+  /** Argument index 0 is the receiver (or the allocation for `<init>`). */
+  private def firstRealArgument(call: Call): Option[AstNode] =
+    call.argument.l.filter(_.argumentIndex >= 1).sortBy(_.argumentIndex).headOption
+
+  /** A type text for an expression, generics preserved where recoverable.
+    *
+    * A call resolves through its CALLEE's declaration text — the same rule the
+    * declared-generics decision already establishes, applied one hop further,
+    * because `typeFullName` is erased and would drop `Response<ArrayList<Order>>`
+    * to a bare `Response`.
+    */
+  private def typeTextOfExpression(cpg: Cpg, expr: AstNode): Option[String] =
+    expr match {
+      case call: Call =>
+        cpg.method
+          .fullNameExact(call.methodFullName)
+          .filterNot(_.isExternal)
+          .headOption
+          .flatMap(returnTypeTextOf)
+          .orElse(usableTypeName(call.typeFullName))
+      case identifier: Identifier => usableTypeName(identifier.typeFullName)
+      case literal: Literal       => usableTypeName(literal.typeFullName)
+      case _                      => None
+    }
+
+  /** javasrc2cpg writes `ANY`/`<empty>`/`<unresolved…>` where it knows nothing —
+    * those are not type names and must not be fabricated into a shape (P10).
+    */
+  private def usableTypeName(name: String): Option[String] =
+    Option(name)
+      .map(_.trim)
+      .filter(n => n.nonEmpty && n != "ANY" && !n.startsWith("<"))
 
   private def simpleName(name: String): String = {
     val stripped = name.takeWhile(_ != '<')

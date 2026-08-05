@@ -12,7 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.8.0"
+EXPORT_SCHEMA_VERSION = "2.9.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -76,7 +76,18 @@ which config-driven Spring code must do) erased its site instead of degrading
 it — 365 train-ticket-aitest endpoints published as confidently authenticated
 with zero roles and zero withheld claims. Every detected access site now emits
 a row, asserted by an export-time invariant. Pre-2.8.0 documents still parse:
-the sentinels are normalized into the new fields on load."""
+the sentinels are normalized into the new fields on load.
+
+2.9.0 (additive, §5.2.7 amended): wire shapes carry ``origin``
+(``declared``/``return-expression``). A handler declaring a RAW wrapper —
+``public HttpEntity query(...)``, which train-ticket-aitest writes 376 times
+against 9 generic ones — leaves no type argument to unwrap, so the shape
+terminated at ``unresolved`` on 274 of 365 endpoints. The payload is instead
+read from the return expression (``ok(expr)``, ``new ResponseEntity<>(expr,
+…)``), and ``origin`` keeps that inference distinguishable from a shape the
+signature actually declared (P7). Recovery never overrides a declared generic
+and yields nothing unless every return agrees. Pre-2.9.0 documents still
+parse: ``origin`` defaults to ``declared``, which is what they were."""
 
 
 class ExportModelBase(BaseModel):
@@ -230,6 +241,10 @@ class ExportTypeShape(ExportModelBase):
     """A recovered wire shape (§5.2.7) — mirrors the contract TypeShape."""
 
     kind: str = Field(description="object|scalar|array|map|cycle|truncated|unresolved")
+    origin: str = Field(
+        default="declared",
+        description="declared|return-expression (§5.2.7); absent on pre-2.9.0 exports",
+    )
     type_name: str
     fields: list["ExportFieldShape"] = Field(default_factory=lambda: [])
     element: "ExportTypeShape | None" = None

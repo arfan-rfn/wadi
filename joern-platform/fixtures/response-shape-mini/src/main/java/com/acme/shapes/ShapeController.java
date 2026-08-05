@@ -1,0 +1,74 @@
+package com.acme.shapes;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import static org.springframework.http.ResponseEntity.ok;
+
+/**
+ * Raw-wrapper handlers: the dominant TrainTicket idiom (376 raw `HttpEntity`
+ * declarations against 9 generic ones), where the signature names no payload
+ * and the return expression does.
+ *
+ * The class-level mapping deliberately OMITS its leading slash. Spring routes
+ * `shapes` exactly as `/shapes`, and two real controllers in the corpus are
+ * written this way — every URI below must still be published root-anchored
+ * (§5.2.11 / T0).
+ */
+@RestController
+@RequestMapping("shapes")
+public class ShapeController {
+
+    private final ItemService service = new ItemService();
+
+    /** Recovery: `ok(expr)` where the callee declares the payload. */
+    @GetMapping("/one")
+    public HttpEntity one() {
+        return ok(service.findOne());
+    }
+
+    /** Recovery through generics — the callee declares `List<Item>`. */
+    @GetMapping("/list")
+    public HttpEntity list() {
+        return ok(service.findAll());
+    }
+
+    /** Recovery: the constructor form, payload at argument 1. */
+    @PostMapping("/created")
+    public HttpEntity created() {
+        return new ResponseEntity<>(service.findOne(), HttpStatus.CREATED);
+    }
+
+    /**
+     * Honest unknown: two returns, two types. Neither is "the" response shape
+     * and recovery must not elect a winner — this stays unresolved, and its
+     * origin stays `declared`, proving no inference was published (P10).
+     */
+    @GetMapping("/disagree")
+    public HttpEntity disagree(@RequestParam boolean flag) {
+        if (flag) {
+            return ok(service.findOne());
+        }
+        return ok(service.describe());
+    }
+
+    /** Honest unknown: a builder chain carrying no body at all. */
+    @GetMapping("/empty")
+    public HttpEntity empty() {
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Honest unknown: the payload's type is not in this CPG. */
+    @GetMapping("/offcpg")
+    public HttpEntity offCpg() {
+        return ok(new AtomicInteger(1));
+    }
+}

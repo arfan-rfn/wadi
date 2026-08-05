@@ -31,6 +31,7 @@ from wadi_contracts.endpoint import (
     FieldShape,
     ParamLocation,
     ShapeKind,
+    ShapeOrigin,
     TypeShape,
 )
 from wadi_contracts.enums import (
@@ -202,6 +203,7 @@ __all__ = [
     "ServiceKind",
     "ServiceSummary",
     "ShapeKind",
+    "ShapeOrigin",
     "SinkKind",
     "Snapshot",
     "SnapshotEnvelope",

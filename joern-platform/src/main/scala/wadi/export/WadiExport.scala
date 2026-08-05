@@ -78,7 +78,7 @@ object WadiExport {
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
     */
-  val ExportSchemaVersion = "2.8.0"
+  val ExportSchemaVersion = "2.9.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -123,10 +123,11 @@ object WadiExport {
                 "auth_tags"   -> method.tag.nameExact("auth").value.l.map(v => s"auth=$v"),
                 "params"      -> endpointParamObjs(method)
               )
-              // §5.2.7: field-level wire shapes, honest terminals.
+              // §5.2.7: field-level wire shapes, honest terminals. The response
+              // shape falls back to the return expression when the signature
+              // declares a raw wrapper (§5.2.7 amendment) and marks which it read.
               TypeShapes
-                .returnTypeTextOf(method)
-                .flatMap(TypeShapes.shapeOf(cpg, _))
+                .responseShapeOf(cpg, method)
                 .foreach(shape => obj("response_schema") = shape)
               requestBodyTypeText(method)
                 .flatMap(TypeShapes.shapeOf(cpg, _))

@@ -39,6 +39,7 @@ from wadi_contracts import (
     ParamLocation,
     RemoteCall,
     ShapeKind,
+    ShapeOrigin,
     SinkKind,
     SourceAnchor,
     TypeShape,
@@ -717,6 +718,7 @@ def _shape(exported: "ExportTypeShape | None") -> TypeShape | None:
         return None
     return TypeShape(
         kind=ShapeKind(exported.kind),
+        origin=ShapeOrigin(exported.origin),
         type_name=exported.type_name,
         fields=[
             FieldShape(name=f.name, java_name=f.java_name, shape=_shape_required(f.shape))

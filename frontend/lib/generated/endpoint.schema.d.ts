@@ -165,6 +165,10 @@ export type Fields = FieldShape[]
 export type ShapeKind =
   "object" | "scalar" | "array" | "map" | "cycle" | "truncated" | "unresolved"
 /**
+ * Evidence the shape was read from; nested shapes are always declared
+ */
+export type ShapeOrigin = "declared" | "return-expression"
+/**
  * Declared type, e.g. 'com.acme.Pet'
  */
 export type TypeName1 = string
@@ -314,6 +318,7 @@ export interface TypeShape {
   element?: TypeShape | null
   fields?: Fields
   kind: ShapeKind
+  origin?: ShapeOrigin
   type_name: TypeName1
 }
 /**

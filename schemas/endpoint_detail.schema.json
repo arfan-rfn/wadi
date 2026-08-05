@@ -321,7 +321,7 @@
           "title": "Response Type"
         },
         "schema_version": {
-          "default": "1.18.0",
+          "default": "1.19.0",
           "title": "Schema Version",
           "type": "string"
         },
@@ -772,6 +772,15 @@
       "title": "ShapeKind",
       "type": "string"
     },
+    "ShapeOrigin": {
+      "description": "Which evidence the shape was read from (\u00a75.2.7, amended 2026-08-05).\n\n``declared`` is the signature \u2014 the strongest evidence, and the only one\nused until a raw wrapper (`public HttpEntity query(...)`) leaves nothing to\nunwrap. ``return_expression`` means the payload came from what the handler\nreturns, which is still symbolic truth but rests on a weaker premise: one\nreturn path standing for the whole contract. P7 keeps the two legible\nrather than blending them.",
+      "enum": [
+        "declared",
+        "return-expression"
+      ],
+      "title": "ShapeOrigin",
+      "type": "string"
+    },
     "SourceAnchor": {
       "additionalProperties": false,
       "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
@@ -863,6 +872,11 @@
         "kind": {
           "$ref": "#/$defs/ShapeKind"
         },
+        "origin": {
+          "$ref": "#/$defs/ShapeOrigin",
+          "default": "declared",
+          "description": "Evidence the shape was read from; nested shapes are always declared"
+        },
         "type_name": {
           "description": "Declared type, e.g. 'com.acme.Pet'",
           "minLength": 1,
@@ -899,7 +913,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.18.0/endpoint_detail.schema.json",
+  "$id": "https://trywadi.com/schemas/1.19.0/endpoint_detail.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Everything the endpoint workspace needs in one read (\u00a711 Phase 2.8).\n\n1.11.0 (additive): replaces the client-side compose of endpoint +\nservice-wide remote edges. The ICFG stays its own fetch (it is large) and\nsource stays on demand (\u00a75.3) \u2014 ``touched_files`` carries names, never\ncontent.\n\n**Reading the empty lists.** Each one has a flag that says whether empty\nmeans 'none' or 'not known', because on their own they cannot be told\napart (P10):\n\n* ``outbound`` \u2014 ``stitched=False`` means the stitcher has not run, so\n  empty is 'not yet'.\n* ``touched_files`` and ``unopenable_calls`` \u2014 both are DERIVED from the\n  ICFG, so ``icfg_available=False`` makes empty 'not known'. Without that\n  reading, an endpoint with no flow graph reports the same shape as one\n  whose every call opens cleanly.",
