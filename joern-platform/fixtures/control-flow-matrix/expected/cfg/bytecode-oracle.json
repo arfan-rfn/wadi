@@ -1,4 +1,52 @@
 {
+  "ConditionalController.allocInCondition": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": false,
+    "reasons": [
+      "short-circuit"
+    ]
+  },
+  "ConditionalController.allocInConditionNoElse": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": false,
+    "reasons": [
+      "short-circuit"
+    ]
+  },
+  "ConditionalController.allocInOrCondition": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": false,
+    "reasons": [
+      "short-circuit"
+    ]
+  },
   "ConditionalController.elseIfChain": {
     "bytecode": {
       "cond_jumps": 3,

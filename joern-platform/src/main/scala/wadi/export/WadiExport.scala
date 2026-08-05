@@ -407,7 +407,8 @@ object WadiExport {
     })
 
   /** Statement nodes of a method: AST children of blocks, in line order,
-    * excluding lowering artifacts nested inside leaf statements.
+    * excluding lowering artifacts nested inside leaf statements or inside a
+    * control structure's condition.
     */
   private def statementsOf(method: Method): List[AstNode] = {
     val candidates = method.ast
@@ -417,11 +418,51 @@ object WadiExport {
         case call: Call => call.name == "<operator>.fieldAccess" // bare field reads aren't statements
         case _          => false
       }
+      .filterNot(isConditionInterior)
       .l
     val candidateIds = candidates.map(_.id).toSet
     candidates
       .filterNot(node => hasLeafStatementAncestor(node, candidateIds, candidates))
       .sortBy(n => (lineOf(n.lineNumber), n.id))
+  }
+
+  /** Is this candidate part of a control structure's CONDITION rather than of
+    * its body (§5.2.8, recorded 2026-08-05)?
+    *
+    * A condition is an expression, so nothing inside one is a statement — but
+    * javasrc2cpg lowers an allocation into a BLOCK holding `$obj = new X()`,
+    * and that block's children sit in "statement position" by the only test
+    * `isStatementPosition` can make locally (their AST parent is a BLOCK).
+    * Admitting them put a node in NEITHER arm on the branch's successor list,
+    * which `labelIfEdges` labels by arm-interior membership: with an `else`
+    * the edge stayed `flow` and surfaced as an `unlabeled-arm` anomaly; with
+    * no `else` the empty-arm heuristic stamped it `false`, so the graph grew a
+    * second `false` successor that does not exist and the invariants reported
+    * clean. Silently wrong is the worse half, and it is the common one —
+    * `if (x != null && x.f(new Y()))` is an idiomatic guard clause.
+    *
+    * Excluding them collapses the lowering into the enclosing control
+    * structure, whose own self-edge is dropped as a recorded
+    * non-representable — the condition's cost stops being drawn as control
+    * flow, which is what the source says.
+    *
+    * MATCH shields its interior for the same reason it does in
+    * `hasLeafStatementAncestor`: an expression-position switch used inside a
+    * condition still holds real yield-arm statements.
+    */
+  private def isConditionInterior(node: AstNode): Boolean = {
+    var current: AstNode = node
+    var steps            = 0
+    while (current != null && !current.isInstanceOf[Method] && steps < 10_000) {
+      current.astParent match {
+        case cs: ControlStructure if cs.controlStructureType == "MATCH" => return false
+        case cs: ControlStructure if cs.condition.id.l.contains(current.id) => return true
+        case _                                                             => ()
+      }
+      current = current.astParent
+      steps += 1
+    }
+    false
   }
 
   private def hasLeafStatementAncestor(

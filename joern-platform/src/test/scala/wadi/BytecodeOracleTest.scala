@@ -46,6 +46,17 @@ class BytecodeOracleTest extends AnyFunSuite with Matchers with FixtureCpg {
   private val whitelist: Map[String, List[String]] = Map(
     "ConditionalController.ternary"          -> List("ternary"),
     "ConditionalController.shortCircuit"     -> List("short-circuit"),
+    // Same short-circuit class, reached with an ALLOCATION in the
+    // short-circuited operand (§5.2.8, 2026-08-05). The allocation's lowering
+    // block used to be admitted as a statement, putting a node in neither arm
+    // on the branch's successor list; it is now condition interior and
+    // collapses into the branch. What remains is the ordinary `&&`/`||`
+    // divergence — 2 bytecode conditional jumps against 1 source branch — in
+    // the safe direction: the graph never claims MORE decision points than
+    // the bytecode.
+    "ConditionalController.allocInCondition"       -> List("short-circuit"),
+    "ConditionalController.allocInConditionNoElse" -> List("short-circuit"),
+    "ConditionalController.allocInOrCondition"     -> List("short-circuit"),
     "SwitchController.onString"              -> List("switch-on-string"),
     "SwitchController.yieldForm"             -> List("switch-lowering", "ternary"),
     // javac folds a constant-true loop test away entirely: `while (true)` and
@@ -135,11 +146,48 @@ class BytecodeOracleTest extends AnyFunSuite with Matchers with FixtureCpg {
 
   private def compiledFixtureAvailable: Boolean = Files.isDirectory(classesDir)
 
+  private val sourceDir =
+    Paths.get("fixtures", "control-flow-matrix", "src", "main", "java").toAbsolutePath
+
+  /** Newest mtime under a tree, or None when the tree is absent. */
+  private def newestMtime(root: Path): Option[Long] =
+    if (!Files.isDirectory(root)) None
+    else {
+      val stream = Files.walk(root)
+      try
+        stream.iterator().asScala.filter(Files.isRegularFile(_)).map { p =>
+          Files.getLastModifiedTime(p).toMillis
+        }.maxOption
+      finally stream.close()
+    }
+
+  /** Are the compiled classes older than the fixture source?
+    *
+    * Found on 2026-08-05 while adding handlers for the condition-lowering fix:
+    * three new methods were invisible to this oracle because `target/classes`
+    * predated them, and the suite reported "0 unexplained divergences" over the
+    * OLD method set — a check that passes while covering nothing, which is the
+    * same failure class as the incident that prompted the work. Availability is
+    * not freshness, so staleness fails loudly rather than being assumed away.
+    */
+  private def compiledFixtureIsStale: Boolean =
+    (for {
+      classes <- newestMtime(classesDir)
+      sources <- newestMtime(sourceDir)
+    } yield sources > classes).getOrElse(false)
+
   test("every divergence between bytecode and graph is whitelisted (§5.2.8)") {
     assume(
       compiledFixtureAvailable,
       s"compile the fixture first: mvn -q -f fixtures/control-flow-matrix/pom.xml compile"
     )
+    withClue(
+      "fixture source is newer than target/classes — this oracle would compare " +
+        "STALE bytecode and report green over the old method set. Recompile: " +
+        "mvn -q -f fixtures/control-flow-matrix/pom.xml compile : "
+    ) {
+      compiledFixtureIsStale shouldBe false
+    }
 
     val rows = bytecode.toList.sortBy(_._1).map { case (name, bc) =>
       val graph = cpg.getOrElse(name, Counts(0, 0, 0))
