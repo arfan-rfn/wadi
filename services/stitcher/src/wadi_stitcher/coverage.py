@@ -9,10 +9,12 @@ from collections.abc import Sequence
 from wadi_contracts import (
     MODELLED_CLIENT_LIBRARIES,
     AnalysisCoverageSection,
+    AuthCoverageSection,
     CfgAnomalySection,
     Confidence,
     CoverageReport,
     CoverageTotals,
+    Endpoint,
     ExternalApiEntry,
     PlaceholderEntry,
     RemoteCall,
@@ -115,6 +117,40 @@ def build_cfg_anomalies(boundaries: Sequence[ServiceBoundary]) -> CfgAnomalySect
     return CfgAnomalySection(total_by_code=dict(sorted(total_by_code.items())), services=entries)
 
 
+def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
+    """Snapshot rollup of what the auth layer could and could not read (§5.2.9).
+
+    The standing tracking mechanism for auth blind spots, playing the role
+    `cfg_anomalies` plays for control flow: an idiom wadi cannot interpret is
+    counted on EVERY snapshot rather than living in prose, so the next tranche
+    is scheduled by measured demand. `withheld` and `no_evidence` are split
+    because they call for opposite responses — one is a gap in wadi, the other
+    a possible hole in the system.
+    """
+    unread_by_kind: dict[str, int] = {}
+    authenticated = unauthenticated = withheld = no_evidence = 0
+    for endpoint in endpoints:
+        unread = endpoint.auth.unread_enforcement
+        for item in unread:
+            unread_by_kind[item.kind.value] = unread_by_kind.get(item.kind.value, 0) + 1
+        if endpoint.auth.authenticated is True:
+            authenticated += 1
+        elif endpoint.auth.authenticated is False:
+            unauthenticated += 1
+        elif unread:
+            withheld += 1
+        else:
+            no_evidence += 1
+    return AuthCoverageSection(
+        endpoints=len(endpoints),
+        authenticated=authenticated,
+        unauthenticated=unauthenticated,
+        withheld=withheld,
+        no_evidence=no_evidence,
+        unread_by_kind=dict(sorted(unread_by_kind.items())),
+    )
+
+
 def build_coverage_report(
     snapshot_id: str,
     *,
@@ -126,6 +162,7 @@ def build_coverage_report(
     unmodelled_mechanisms: Sequence[UnmodelledMechanismEntry] = (),
     analysis_coverage: AnalysisCoverageSection | None = None,
     cfg_anomalies: CfgAnomalySection | None = None,
+    auth_coverage: AuthCoverageSection | None = None,
 ) -> CoverageReport:
     by_kind: dict[TargetKind, list[StitchedEdge]] = {kind: [] for kind in TargetKind}
     by_confidence: dict[str, int] = {}
@@ -198,4 +235,5 @@ def build_coverage_report(
         unmodelled_mechanisms=list(unmodelled_mechanisms),
         analysis_coverage=analysis_coverage,
         cfg_anomalies=cfg_anomalies,
+        auth_coverage=auth_coverage,
     )

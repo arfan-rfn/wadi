@@ -598,3 +598,115 @@ class TestSystemGraph:
     async def test_missing_snapshot_404(self, client: AsyncClient) -> None:
         missing = "snap_" + "0" * 32
         assert (await client.get(f"/api/v1/snapshots/{missing}/graph")).status_code == 404
+
+
+class TestSystemAuthRoute:
+    """§5.2.9 — "which endpoints here are unprotected?" in one read."""
+
+    async def test_totals_partition_the_endpoints_by_auth_state(
+        self, client: AsyncClient, app_state: AppState, sample_repo: Path
+    ) -> None:
+        from wadi_contracts import (
+            AuthEffect,
+            AuthEvidence,
+            AuthEvidenceKind,
+            AuthResolution,
+            Endpoint,
+            EndpointAuth,
+            HttpMethod,
+            MethodRef,
+            ServiceBoundary,
+            normalize_repo_source,
+            service_id,
+        )
+
+        system_id = await _register_system(client, sample_repo)
+        analyze = await client.post(f"/api/v1/systems/{system_id}/analyze")
+        snapshot_id = analyze.json()["snapshot"]["id"]
+        svc = service_id(str(sample_repo), ".")
+        await app_state.artifacts.write_service_boundaries(
+            [
+                ServiceBoundary(
+                    snapshot_id=snapshot_id,
+                    service_id=svc,
+                    name="sample",
+                    repo=normalize_repo_source(str(sample_repo)),
+                    build_root=".",
+                    languages=["java"],
+                    build_system="maven",
+                )
+            ]
+        )
+
+        def _endpoint(uri: str, auth: EndpointAuth) -> Endpoint:
+            return Endpoint.create(
+                snapshot_id=snapshot_id,
+                service_id=svc,
+                http_method=HttpMethod.GET,
+                full_uri=uri,
+                handler=MethodRef(id="m_" + "0" * 16, signature=f"C.h{uri}:void()"),
+                auth=auth,
+            )
+
+        protected = AuthEvidence(
+            kind=AuthEvidenceKind.SECURITY_DSL,
+            detail='/a -> hasRole("ADMIN")',
+            effect=AuthEffect.REQUIRE_ROLES,
+            roles=["ADMIN"],
+        )
+        open_rule = AuthEvidence(
+            kind=AuthEvidenceKind.SECURITY_DSL,
+            detail="/b -> permitAll()",
+            effect=AuthEffect.PERMIT_ALL,
+        )
+        unread = AuthEvidence(
+            kind=AuthEvidenceKind.INTERCEPTOR,
+            detail="AuthInterceptor",
+            effect=AuthEffect.UNKNOWN,
+            resolution=AuthResolution.OPAQUE,
+            pattern="/c",
+        )
+        deny = AuthEvidence(
+            kind=AuthEvidenceKind.SECURITY_DSL,
+            detail="/e -> denyAll()",
+            effect=AuthEffect.DENY_ALL,
+        )
+        await app_state.artifacts.write_endpoints(
+            [
+                _endpoint(
+                    "/a", EndpointAuth(authenticated=True, roles=["ADMIN"], evidence=[protected])
+                ),
+                _endpoint("/b", EndpointAuth(authenticated=False, evidence=[open_rule])),
+                _endpoint("/c", EndpointAuth(authenticated=None, evidence=[unread])),
+                _endpoint("/d", EndpointAuth()),
+                _endpoint("/e", EndpointAuth(authenticated=True, denied=True, evidence=[deny])),
+            ]
+        )
+
+        response = await client.get(f"/api/v1/snapshots/{snapshot_id}/auth")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # `denied` is carved OUT of `authenticated`, never counted in both:
+        # a route nobody can reach is not part of the protected surface, and
+        # double-counting it would break the partition this test exists for.
+        assert body["totals"] == {
+            "endpoints": 5,
+            "authenticated": 1,
+            "denied": 1,
+            "unauthenticated": 1,
+            "withheld": 1,
+            "no_evidence": 1,
+        }
+        by_uri = {row["full_uri"]: row for row in body["rows"]}
+        assert by_uri["/a"]["roles"] == ["ADMIN"]
+        assert by_uri["/a"]["denied"] is False
+        assert by_uri["/e"]["denied"] is True
+        # withheld vs no-evidence must stay distinguishable: one is a wadi gap,
+        # the other a possible hole in the system.
+        assert by_uri["/c"]["unread_kinds"] == ["interceptor"]
+        assert by_uri["/d"]["unread_kinds"] == []
+        assert by_uri["/d"]["authenticated"] is None
+
+    async def test_missing_snapshot_404(self, client: AsyncClient) -> None:
+        missing = "snap_" + "0" * 32
+        assert (await client.get(f"/api/v1/snapshots/{missing}/auth")).status_code == 404

@@ -2,8 +2,16 @@
 
 from wadi_contracts import (
     AnalysisCoverage,
+    AuthEffect,
+    AuthEvidence,
+    AuthEvidenceKind,
+    AuthResolution,
     CfgAnomaly,
     Confidence,
+    Endpoint,
+    EndpointAuth,
+    HttpMethod,
+    MethodRef,
     Provenance,
     ServiceKind,
     SourceAnchor,
@@ -14,6 +22,7 @@ from wadi_contracts import (
 )
 from wadi_stitcher.coverage import (
     build_analysis_coverage,
+    build_auth_coverage,
     build_cfg_anomalies,
     build_coverage_report,
 )
@@ -341,3 +350,57 @@ def test_cfg_anomalies_excludes_libraries_and_travels_on_the_report() -> None:
     )
     assert report.cfg_anomalies is not None
     assert report.cfg_anomalies.total_by_code == {}
+
+
+class TestAuthCoverage:
+    """§5.2.9 — auth blind spots stay counted on every snapshot, never prose."""
+
+    @staticmethod
+    def _endpoint(uri: str, auth: EndpointAuth) -> Endpoint:
+        return Endpoint.create(
+            snapshot_id="snap_a",
+            service_id="svc_" + "a" * 16,
+            http_method=HttpMethod.GET,
+            full_uri=uri,
+            handler=MethodRef(id="m_" + "0" * 16, signature=f"C.h{uri}:void()"),
+            auth=auth,
+        )
+
+    def test_states_partition_and_unread_guards_are_counted_by_kind(self) -> None:
+        protected = AuthEvidence(
+            kind=AuthEvidenceKind.SECURITY_DSL,
+            detail='/a -> hasRole("ADMIN")',
+            effect=AuthEffect.REQUIRE_ROLES,
+            roles=["ADMIN"],
+        )
+        permissive = AuthEvidence(
+            kind=AuthEvidenceKind.SECURITY_DSL,
+            detail="/b -> permitAll()",
+            effect=AuthEffect.PERMIT_ALL,
+        )
+        unread = AuthEvidence(
+            kind=AuthEvidenceKind.INTERCEPTOR,
+            detail="AuthInterceptor",
+            effect=AuthEffect.UNKNOWN,
+            resolution=AuthResolution.OPAQUE,
+            pattern="/c",
+        )
+        section = build_auth_coverage(
+            [
+                self._endpoint("/a", EndpointAuth(authenticated=True, evidence=[protected])),
+                self._endpoint("/b", EndpointAuth(authenticated=False, evidence=[permissive])),
+                self._endpoint("/c", EndpointAuth(authenticated=None, evidence=[unread])),
+                self._endpoint("/d", EndpointAuth()),
+            ]
+        )
+        assert section.endpoints == 4
+        assert (section.authenticated, section.unauthenticated) == (1, 1)
+        # withheld vs no_evidence stay apart: one is a wadi gap, the other a
+        # possible hole in the system, and they call for opposite responses.
+        assert (section.withheld, section.no_evidence) == (1, 1)
+        assert section.unread_by_kind == {"interceptor": 1}
+
+    def test_a_clean_snapshot_reports_no_blind_spots(self) -> None:
+        section = build_auth_coverage([])
+        assert section.unread_by_kind == {}
+        assert section.endpoints == 0
