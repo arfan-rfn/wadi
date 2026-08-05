@@ -16,6 +16,7 @@ from wadi_joern_client.export import (
     ExportAuthMechanism,
     ExportMethodSecurity,
     ExportSecurityRule,
+    RulePatternConfidence,
 )
 from wadi_worker.auth_merge import (
     _ant_match,  # pyright: ignore[reportPrivateUsage] — the matching core deserves direct tests
@@ -707,3 +708,119 @@ class TestPropertyPlaceholderScopes:
         )
         assert auth.authenticated is None, "an unread scope must withhold, never fall through"
         assert auth.unread_enforcement, "and it must say which construct it could not read"
+
+
+class TestConfigDefinedRuleShapes:
+    """§5.2.10 T4: the config reader knew yas's shape, not the shape space.
+
+    Every case here is a real train-ticket-aitest construct. The verb one is a
+    measured wrong answer, not a hypothetical: without it a GET-only permitAll
+    widened to every verb and `POST /adminbasic/configs` published as
+    evidenced-open against a ROLE_ADMIN ground truth.
+    """
+
+    PREFIX = "@security"
+
+    def _bound(self, access: str = "hasAnyRole(roles)") -> ExportSecurityRule:
+        return ExportSecurityRule(
+            call_id=1,
+            pattern=self.PREFIX,
+            pattern_confidence=RulePatternConfidence.CONFIG,
+            access=access,
+            kind="filter-chain",
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=21),
+            evidence="authorizedUrl.hasAnyRole(roles)",
+        )
+
+    #: The real ts-admin-service policy, verbatim in shape.
+    AITEST_RULES: ClassVar[dict[str, list[dict[str, object]]]] = {
+        "security.authorization-rules": [
+            {
+                "paths": ["/api/v1/adminbasicservice/adminbasic/configs"],
+                "method": "GET",
+                "authorities": ["permitAll"],
+            },
+            {"paths": ["/api/v1/adminbasicservice/**"], "authorities": ["ROLE_ADMIN"]},
+        ]
+    }
+
+    def _auth(self, uri: str, verb: HttpMethod, **kwargs: object) -> EndpointAuth:
+        return merge_endpoint_auth(
+            full_uri=uri,
+            http_method=verb,
+            auth_tags=[],
+            security_rules=[self._bound(), _rule("/**", "authenticated()", line=99)],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured=self.AITEST_RULES,
+            **kwargs,  # pyright: ignore[reportArgumentType]
+        )
+
+    def test_a_scalar_method_key_keeps_the_rule_verb_scoped(self) -> None:
+        # The measured regression: `method: "GET"` was read from lists only.
+        opened = self._auth("/api/v1/adminbasicservice/adminbasic/configs", HttpMethod.GET)
+        assert opened.authenticated is False, "GET is permitAll by rule 1"
+
+        guarded = self._auth("/api/v1/adminbasicservice/adminbasic/configs", HttpMethod.POST)
+        assert guarded.authenticated is True, "POST must fall to the ROLE_ADMIN rule"
+        assert guarded.roles == ["ADMIN"]
+
+    def test_a_permissive_sentinel_in_the_authority_list_opens_the_route(self) -> None:
+        # Not as a demand for a role literally named "permitAll".
+        auth = self._auth("/api/v1/adminbasicservice/adminbasic/configs", HttpMethod.GET)
+        assert auth.roles == []
+        assert auth.authenticated is False
+
+    def test_role_vs_authority_follows_the_java_not_the_yaml_key(self) -> None:
+        # The key is spelled "authorities", but the loop called hasAnyRole, so
+        # ROLE_ADMIN is a role. A reader that trusted the key name would emit
+        # an authority and the chip would name a grant the rule never asks for.
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/adminbasicservice/x",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound()],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured=self.AITEST_RULES,
+        )
+        assert auth.roles == ["ADMIN"]
+        assert auth.authorities == []
+
+        as_authority = merge_endpoint_auth(
+            full_uri="/api/v1/adminbasicservice/x",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound(access="hasAnyAuthority(auths)")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured=self.AITEST_RULES,
+        )
+        assert as_authority.authorities == ["ROLE_ADMIN"]
+        assert as_authority.roles == []
+
+    def test_an_undeterminable_entry_withholds_instead_of_inventing_a_grant(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/thing",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound(), _rule("/**", "permitAll()", line=99)],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured={"security.rules": [{"paths": ["/api/v1/**"], "note": "tbd"}]},
+        )
+        assert auth.authenticated is None
+
+    def test_a_deny_sentinel_is_a_denial_not_a_role(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/legacy",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound()],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured={
+                "security.rules": [{"paths": ["/api/v1/legacy"], "authorities": ["denyAll"]}]
+            },
+        )
+        assert auth.denied is True

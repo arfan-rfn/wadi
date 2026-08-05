@@ -44,16 +44,22 @@ from wadi_joern_client.export import (
     RulePatternConfidence,
 )
 
-_ROLE_PATTERNS = (
-    re.compile(r"hasRole\(\s*['\"]([^'\"]+)['\"]\s*\)"),
-    re.compile(r"hasAuthority\(\s*['\"](?:ROLE_)?([^'\"]+)['\"]\s*\)"),
-)
+# Role-scoped grants. Spring PREPENDS `ROLE_` to a hasRole argument, so the
+# role's name is the bare part and stripping a redundant prefix is defensive.
+# `@Secured`/`@RolesAllowed` name roles by the same convention.
+_ROLE_PATTERNS = (re.compile(r"hasRole\(\s*['\"]([^'\"]+)['\"]\s*\)"),)
 _MULTI_ROLE_PATTERNS = (
     re.compile(r"hasAnyRole\(([^)]*)\)"),
-    re.compile(r"hasAnyAuthority\(([^)]*)\)"),
     re.compile(r"@RolesAllowed\(([^)]*)\)"),
     re.compile(r"@Secured\(([^)]*)\)"),
 )
+# Authority-scoped grants, kept VERBATIM (§5.2.10). `hasAuthority("ROLE_ADMIN")`
+# tests for the authority literally spelled `ROLE_ADMIN`; reporting it as
+# `ADMIN` names a different grant, one that would NOT pass the check. The
+# predecessor stripped the prefix from both families, which quietly undid half
+# of the role/authority split it had just shipped.
+_AUTHORITY_PATTERNS = (re.compile(r"hasAuthority\(\s*['\"]([^'\"]+)['\"]\s*\)"),)
+_MULTI_AUTHORITY_PATTERNS = (re.compile(r"hasAnyAuthority\(([^)]*)\)"),)
 _QUOTED = re.compile(r"['\"]([^'\"]+)['\"]")
 _ARGUMENTS = re.compile(r"\(([^)]*)\)")
 
@@ -311,6 +317,27 @@ def _expand_config_rules(
     restriction, a truthy ``permit*`` flag is permitAll — so the next project
     that spells its keys differently still resolves. Returns None when nothing
     correlates, which leaves the enforcement opaque and withholds the claim.
+
+    *Three corrections from train-ticket-aitest (§5.2.10 T4).* Shape-reading is
+    only as good as the shapes it knows, and this one knew yas's:
+
+    * **A scalar ``method:`` was dropped.** Verbs were read from LISTS only, so
+      ``method: "GET"`` vanished and a GET-only ``permitAll`` leaked onto every
+      verb. Measured: ``POST /adminbasic/configs`` would have published
+      ``authenticated=false`` against a ROLE_ADMIN ground truth — the original
+      §5.2.9 defect, re-entered through the fix for it.
+    * **Permissive sentinels live inside the authority LIST**, not only in a
+      boolean key: ``authorities: ["permitAll"]``. Read as roles they became a
+      demand for a role nobody holds. The current answer is right only by the
+      accident of ``permitAll`` being a substring of the fabricated
+      ``hasAnyRole('permitAll')``.
+    * **Whether the values are roles or authorities is the JAVA's decision.**
+      The loop that consumed them called ``hasAnyRole`` or ``hasAnyAuthority``;
+      guessing from the YAML key name would get ``authorities: [ROLE_ADMIN]``
+      exactly backwards. The original rule's access text is the evidence.
+
+    An entry whose access cannot be determined at all yields an unresolvable
+    rule rather than a fabricated one, so it withholds instead of guessing.
     """
     prefix = (rule.pattern or "").removeprefix(CONFIG_PREFIX)
     if not prefix:
@@ -326,11 +353,19 @@ def _expand_config_rules(
     if not entries:
         return None
 
+    # Which grant vocabulary the Java asked for, read from the loop that
+    # consumed these values rather than guessed from the YAML key name.
+    grant = (
+        "hasAnyAuthority"
+        if ("hasAnyAuthority" in rule.access or "hasAuthority" in rule.access)
+        else "hasAnyRole"
+    )
+
     expanded: list[ExportSecurityRule] = []
     for entry in entries:
         patterns: list[str] = []
         verbs: list[str] = []
-        roles: list[str] = []
+        grants: list[str] = []
         permit = False
         for key, value in entry.items():
             if isinstance(value, bool):
@@ -338,17 +373,22 @@ def _expand_config_rules(
             elif isinstance(value, list):
                 items: list[object] = value  # pyright: ignore[reportUnknownVariableType]
                 strings = [str(item) for item in items]
-                if all(s.startswith("/") for s in strings):
+                if strings and all(s.startswith("/") for s in strings):
                     patterns.extend(strings)
-                elif all(s.upper() in _VERBS for s in strings):
+                elif strings and all(s.upper() in _VERBS for s in strings):
                     verbs.extend(s.upper() for s in strings)
                 else:
-                    roles.extend(strings)
-            elif isinstance(value, str) and value.startswith("/"):
-                patterns.append(value)
+                    grants.extend(strings)
+            elif isinstance(value, str):
+                if value.startswith("/"):
+                    patterns.append(value)
+                elif value.upper() in _VERBS:
+                    # `method: "GET"`. Read from lists only, this restriction
+                    # vanished and widened the rule to every verb.
+                    verbs.append(value.upper())
         if not patterns:
             continue
-        access = "permitAll()" if permit else f"hasAnyRole({', '.join(repr(r) for r in roles)})"
+        access = _config_access(grants, grant, permit=permit)
         for pattern in patterns:
             for verb in verbs or [None]:
                 expanded.append(
@@ -362,9 +402,54 @@ def _expand_config_rules(
                             "http_method": verb,
                             "access": access,
                         }
+                        if access is not None
+                        # Scope known, effect unreadable: the site still exists,
+                        # and withholding beats inventing a grant.
+                        else {
+                            "pattern": None,
+                            "pattern_confidence": RulePatternConfidence.NONE,
+                            "http_method": verb,
+                        }
                     )
                 )
     return expanded or None
+
+
+#: Values that stand for a whole access decision rather than naming a grant.
+#: Spelled loosely because every project invents its own casing, and matched
+#: against a normalized form so `PERMIT_ALL`, `permit-all` and `permitAll` are
+#: one thing.
+_PERMIT_SENTINELS = frozenset({"permitall", "permit", "public", "anonymous", "isanonymous"})
+_DENY_SENTINELS = frozenset({"denyall", "deny", "denied", "none"})
+_AUTHENTICATED_SENTINELS = frozenset(
+    {"authenticated", "isauthenticated", "fullyauthenticated", "isfullyauthenticated"}
+)
+
+
+def _config_access(grants: list[str], grant: str, *, permit: bool) -> str | None:
+    """A config entry's grant list → the access expression it stands for.
+
+    None means the entry named no readable decision, which withholds. Order
+    matters and follows how the Java actually branches: a permissive sentinel
+    anywhere short-circuits, exactly as
+    ``if (authorities.contains("permitAll"))`` does.
+    """
+    normalized = {value.strip().replace("_", "").replace("-", "").lower() for value in grants}
+    if permit or normalized & _PERMIT_SENTINELS:
+        return "permitAll()"
+    if normalized & _DENY_SENTINELS:
+        return "denyAll()"
+    named = [
+        value
+        for value in grants
+        if value.strip().replace("_", "").replace("-", "").lower()
+        not in _PERMIT_SENTINELS | _DENY_SENTINELS | _AUTHENTICATED_SENTINELS
+    ]
+    if named:
+        return f"{grant}({', '.join(repr(value) for value in named)})"
+    if normalized & _AUTHENTICATED_SENTINELS:
+        return "authenticated()"
+    return None
 
 
 #: Spring property placeholder, with its optional `:default`.
@@ -550,19 +635,19 @@ def _read_access(
         return AuthEffect.PERMIT_ALL, [], [], AuthResolution.RESOLVED
     if "denyAll" in expression or "@DenyAll" in expression:
         return AuthEffect.DENY_ALL, [], [], AuthResolution.RESOLVED
-    named = _extract_roles(expression)
+    # Roles and authorities are different things in Spring — `hasRole("X")`
+    # matches the authority `ROLE_X`, `hasAuthority("X")` matches `X` — so they
+    # are extracted by their OWN patterns and land in separate lists. Only the
+    # role family has its `ROLE_` prefix normalized away; an authority is
+    # reported exactly as written, because `hasAuthority("ROLE_ADMIN")` asks
+    # for a grant that `ADMIN` would not satisfy.
+    roles = _extract_roles(expression)
+    authorities = _extract_authorities(expression)
     partial = _has_unresolved_arguments(expression)
-    if named:
-        # Roles and authorities are different things in Spring — `hasRole("X")`
-        # matches the authority `ROLE_X`, `hasAuthority("X")` matches `X` — so
-        # the values land in separate lists rather than being pooled under
-        # "roles" and quietly losing which kind of grant is required.
-        authority_scoped = "hasAuthority" in expression or "hasAnyAuthority" in expression
-        effect = AuthEffect.REQUIRE_AUTHORITIES if authority_scoped else AuthEffect.REQUIRE_ROLES
+    if roles or authorities:
+        effect = AuthEffect.REQUIRE_ROLES if roles else AuthEffect.REQUIRE_AUTHORITIES
         resolution = AuthResolution.PARTIAL if partial else AuthResolution.RESOLVED
-        if authority_scoped:
-            return effect, [], named, resolution
-        return effect, named, [], resolution
+        return effect, roles, authorities, resolution
     if _requires_identity(expression):
         return AuthEffect.REQUIRE_AUTHENTICATED, [], [], AuthResolution.RESOLVED
     # A gate whose condition we cannot read: it still gates, and it is not
@@ -588,14 +673,33 @@ def _has_unresolved_arguments(expression: str) -> bool:
 
 
 def _extract_roles(expression: str) -> list[str]:
-    """Best-effort role extraction; unparseable expressions stay evidence-only."""
-    roles: list[str] = []
-    for pattern in _ROLE_PATTERNS:
-        roles.extend(pattern.findall(expression))
-    for pattern in _MULTI_ROLE_PATTERNS:
+    """Role names, `ROLE_` normalized away; unparseable stays evidence-only."""
+    named = _extract_grants(expression, _ROLE_PATTERNS, _MULTI_ROLE_PATTERNS)
+    return sorted(dict.fromkeys(role.removeprefix("ROLE_") for role in named))
+
+
+def _extract_authorities(expression: str) -> list[str]:
+    """Authority names, VERBATIM — see the pattern definitions for why."""
+    return sorted(
+        dict.fromkeys(
+            _extract_grants(expression, *(_AUTHORITY_PATTERNS,))
+            + _extract_grants(expression, (), _MULTI_AUTHORITY_PATTERNS)
+        )
+    )
+
+
+def _extract_grants(
+    expression: str,
+    single: tuple[re.Pattern[str], ...],
+    multi: tuple[re.Pattern[str], ...] = (),
+) -> list[str]:
+    grants: list[str] = []
+    for pattern in single:
+        grants.extend(pattern.findall(expression))
+    for pattern in multi:
         for group in pattern.findall(expression):
-            roles.extend(quoted.removeprefix("ROLE_") for quoted in _QUOTED.findall(group))
-    return sorted(dict.fromkeys(role.removeprefix("ROLE_") for role in roles))
+            grants.extend(_QUOTED.findall(group))
+    return grants
 
 
 def _matching_rules(
