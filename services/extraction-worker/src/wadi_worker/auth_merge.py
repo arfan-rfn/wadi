@@ -41,6 +41,7 @@ from wadi_joern_client.export import (
     ExportAuthMechanism,
     ExportMethodSecurity,
     ExportSecurityRule,
+    RulePatternConfidence,
 )
 
 _ROLE_PATTERNS = (
@@ -309,7 +310,9 @@ def _expand_config_rules(
     that spells its keys differently still resolves. Returns None when nothing
     correlates, which leaves the enforcement opaque and withholds the claim.
     """
-    prefix = rule.pattern.removeprefix("@")
+    prefix = (rule.pattern or "").removeprefix(CONFIG_PREFIX)
+    if not prefix:
+        return None
     entries = next(
         (
             value
@@ -348,7 +351,15 @@ def _expand_config_rules(
             for verb in verbs or [None]:
                 expanded.append(
                     rule.model_copy(
-                        update={"pattern": pattern, "http_method": verb, "access": access}
+                        update={
+                            "pattern": pattern,
+                            # Recovered from config, so the scope IS now known —
+                            # without this the rule stays unresolvable and every
+                            # config-defined policy withholds forever (§5.2.10).
+                            "pattern_confidence": RulePatternConfidence.EXACT,
+                            "http_method": verb,
+                            "access": access,
+                        }
                     )
                 )
     return expanded or None
@@ -368,7 +379,7 @@ def _rule_evidence(
     """
     expanded: list[ExportSecurityRule] = []
     for rule in security_rules:
-        if rule.pattern.startswith(CONFIG_PREFIX):
+        if rule.pattern_confidence is RulePatternConfidence.CONFIG:
             recovered = _expand_config_rules(rule, config_structured)
             # No correlation: the rule stays as-is and reads as unresolvable,
             # which withholds rather than falling through.
@@ -561,7 +572,7 @@ def _matching_rules(
     for rule in rules:
         if rule.http_method is not None and rule.http_method.upper() != http_method.value:
             continue
-        if not rule.resolvable:
+        if not rule.resolvable or rule.pattern is None:
             matched.append(rule)
             continue  # the fork: keep walking for the alternative branch
         if _governs(rule.pattern, full_uri):

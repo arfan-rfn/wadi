@@ -15,6 +15,7 @@ import io.shiftleft.semanticcpg.language.*
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import scala.collection.mutable
 
+import wadi.packs.SpringSecurityPack
 import wadi.slicing.UrlSlicer
 
 /** Bulk subgraph export (§5.1): the endpoint-reachable closure as JSON.
@@ -76,7 +77,7 @@ object WadiExport {
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
     */
-  val ExportSchemaVersion = "2.7.0"
+  val ExportSchemaVersion = "2.8.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -155,6 +156,8 @@ object WadiExport {
       }
     }
 
+    val securityRules = securityRuleObjs(cpg)
+
     val document = ujson.Obj(
       "export_schema_version" -> ExportSchemaVersion,
       "language"              -> "java",
@@ -165,12 +168,13 @@ object WadiExport {
       "sinks"                 -> sinkRows.toList,
       "unreachable_sinks"     -> unreachableObjs,
       "data_models"           -> modelObjs,
-      "security_rules"        -> securityRuleObjs(cpg),
+      "security_rules"        -> securityRules,
       "auth_enforcements"     -> authEnforcementObjs(cpg),
       "method_security"       -> methodSecurityObj(cpg),
       "auth_mechanisms"       -> authMechanismObjs(cpg),
       "config_refs"           -> configRefObjs(cpg),
-      "analysis_coverage"     -> coverageObj
+      "analysis_coverage"     -> coverageObj,
+      "auth_extraction"       -> authExtractionObj(cpg, securityRules)
     )
 
     val target: Path = Paths.get(outDir)
@@ -1571,8 +1575,22 @@ object WadiExport {
           // contains the separator, and an unlimited split would throw.
           val Array(verb, pattern, access) = encoded.split('|').take(2) :+
             encoded.split('|').drop(2).mkString("|")
+          // 2.8.0 (§5.2.10): the scope is a nullable field with a confidence,
+          // not a sentinel smuggled into a required string. A sentinel can only
+          // be written by a code path that already resolved a matcher, which is
+          // precisely why an unreadable chain SHAPE erased its site instead of
+          // degrading it.
+          val (patternValue, confidence) =
+            if (pattern == SpringSecurityPack.Unresolvable) (ujson.Null, "none")
+            else if (pattern.startsWith(SpringSecurityPack.ConfigPrefix))
+              (ujson.Str(pattern), "config")
+            else (ujson.Str(pattern), "exact")
           ujson.Obj(
-            "pattern"     -> pattern,
+            // The SITE identity: rows sharing it are one access call with
+            // several patterns, exactly as sink rows share `node_id`.
+            "call_id"            -> num(call.id),
+            "pattern"            -> patternValue,
+            "pattern_confidence" -> confidence,
             "http_method" -> (if (verb == "*") ujson.Null else ujson.Str(verb)),
             "access"      -> access,
             "kind"        -> "filter-chain",
@@ -1589,6 +1607,32 @@ object WadiExport {
           )
         }
       }
+
+  /** What the auth vocabulary SAW versus what it turned into rules (§5.2.10).
+    *
+    * The in-graph half of the no-drop invariant. `access_calls_seen` counts
+    * every call bearing an access-vocabulary name anywhere in the CPG — no
+    * scope test, no filtering — so it cannot be talked down by the same
+    * predicate that decides emission. `rule_sites_emitted` counts the distinct
+    * sites that produced rules.
+    *
+    * The two are NOT expected to be equal: `access`, `authenticated` and
+    * `anonymous` are ordinary words, and a business method named `access()`
+    * legitimately raises the first number without belonging in the second. The
+    * gap is the point — the worker reconciles it against an independent
+    * source-text oracle, and a gap that grows without a matching business
+    * explanation is how the next unreadable chain shape announces itself
+    * instead of publishing a confident wrong claim.
+    */
+  private def authExtractionObj(cpg: Cpg, securityRules: List[ujson.Obj]): ujson.Obj = {
+    val emittedSites = securityRules.map(_("call_id").num).distinct.size
+    ujson.Obj(
+      "access_calls_seen" -> cpg.call
+        .nameExact(SpringSecurityPack.AccessCallNames.toSeq*)
+        .size,
+      "rule_sites_emitted" -> emittedSites
+    )
+  }
 
   /** The chain a rule belongs to: its enclosing `SecurityFilterChain` bean or
     * `configure(HttpSecurity)` override, identified by method full name.

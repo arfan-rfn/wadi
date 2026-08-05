@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from wadi_contracts import AuthEvidenceKind, AuthResolution, Endpoint
-from wadi_joern_client.export import ServiceExport
+from wadi_joern_client.export import RulePatternConfidence, ServiceExport
 from wadi_worker.appconfig import parse_app_config
 from wadi_worker.assembler import Assembler
 
@@ -158,7 +158,11 @@ class TestConfigDefinedPolicy:
 
         export = ServiceExport.model_validate(json.loads(EXPORT.read_text()))
         config = parse_app_config(FIXTURE_ROOT / "fixtures" / "spring-auth-matrix")
-        bound = next(rule for rule in export.security_rules if rule.pattern.startswith("@"))
+        bound = next(
+            rule
+            for rule in export.security_rules
+            if rule.pattern_confidence is RulePatternConfidence.CONFIG
+        )
         recovered = _expand_config_rules(bound, config.structured)
         assert recovered is not None, "the bound prefix must correlate to the parsed YAML"
         by_pattern = {rule.pattern: rule.access for rule in recovered}

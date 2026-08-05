@@ -8,10 +8,11 @@ version and refuse mismatched majors).
 """
 
 from enum import StrEnum
+from typing import cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.7.0"
+EXPORT_SCHEMA_VERSION = "2.8.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -62,7 +63,20 @@ instead of being dropped — the change that stops an unreadable rule from
 falling through to a later ``permitAll``. New top-level ``auth_enforcements``
 section for gating constructs that carry no rule at all (chain bypasses,
 interceptors, servlet filters, aspects, in-handler checks). Readers of 2.6.0
-still parse: both additions default to empty/None."""
+still parse: both additions default to empty/None.
+
+2.8.0 (§5.2.10): a security rule is now a **site record**. It gained
+``call_id`` (the access call's CPG id — rows sharing it are one site with
+several patterns), ``pattern`` became nullable, and ``pattern_confidence``
+(``exact``/``config``/``none``) replaces the ``{?}`` sentinel. The reason is
+structural, not cosmetic: with the sentinel living inside a required field,
+only a code path that had already resolved a matcher could emit it, so a chain
+whose SHAPE was unreadable (the ``AuthorizedUrl`` parked in a local variable,
+which config-driven Spring code must do) erased its site instead of degrading
+it — 365 train-ticket-aitest endpoints published as confidently authenticated
+with zero roles and zero withheld claims. Every detected access site now emits
+a row, asserted by an export-time invariant. Pre-2.8.0 documents still parse:
+the sentinels are normalized into the new fields on load."""
 
 
 class ExportModelBase(BaseModel):
@@ -304,12 +318,29 @@ parsed config tree and recovers the real rules.
 """
 
 UNRESOLVABLE_PATTERN = "{?}"
-"""A rule that was READ but whose path could not be resolved (§5.2.9).
+"""Legacy spelling of "read but unresolvable" (pre-2.8.0; §5.2.9).
 
-Emitted instead of dropping the rule, because dropping does not degrade to
-"unknown": the endpoint falls through to whatever permissive rule comes next.
-The worker turns this into a withheld claim.
+Superseded by ``pattern=None`` + ``RulePatternConfidence.NONE`` (§5.2.10): a
+sentinel inside a REQUIRED field can only be produced by a code path that
+already succeeded structurally, which is exactly why an unreadable chain
+*shape* erased its site instead of degrading it. Retained so the worker keeps
+reading pre-2.8.0 exports, and normalized away on load.
 """
+
+
+class RulePatternConfidence(StrEnum):
+    """How well a rule's scope could be read (§5.2.10).
+
+    Mirrors ``SinkValueConfidence``, and for the same reason: resolution
+    failure must degrade a FIELD, never erase the site. ``CONFIG`` is not a
+    lesser ``EXACT`` — it says "readable, but not from the Java", and the
+    worker recovers the real patterns by correlating the binding against the
+    parsed config tree.
+    """
+
+    EXACT = "exact"
+    CONFIG = "config"
+    NONE = "none"
 
 
 class ExportSecurityRule(ExportModelBase):
@@ -317,10 +348,34 @@ class ExportSecurityRule(ExportModelBase):
 
     Pattern → endpoint pairing is deliberately NOT done in Scala — wrong
     security facts are worse than absent ones (§12); the worker matches.
+
+    Since 2.8.0 (§5.2.10) this is a **site record**, not merely a rule: every
+    access call the vocabulary detects produces at least one row, keyed by
+    ``call_id``, whether or not any of its facts could be resolved. Rows
+    sharing a ``call_id`` are one site with several patterns
+    (``requestMatchers("/a", "/b")``), the same way sink rows share
+    ``node_id``. The invariant that makes the drop impossible — every detected
+    access site appears here — is asserted at export time, because a pass that
+    cannot drop cannot regress.
     """
 
-    pattern: str = Field(
-        description="Ant-style pattern, e.g. '/admin/**'; '{?}' = read but unresolvable"
+    call_id: int = Field(
+        default=0,
+        description=(
+            "2.8.0: CPG id of the access call — the SITE identity. Rows sharing "
+            "it are one call site with several patterns. 0 in pre-2.8.0 exports"
+        ),
+    )
+    pattern: str | None = Field(
+        default=None,
+        description=(
+            "Ant-style pattern, e.g. '/admin/**'. None = the site was detected "
+            "and its scope could not be read (2.8.0; formerly '{?}')"
+        ),
+    )
+    pattern_confidence: RulePatternConfidence = Field(
+        default=RulePatternConfidence.NONE,
+        description="2.8.0: how the pattern was obtained — exact | config | none",
     )
     http_method: str | None = Field(default=None, description="Verb restriction, when present")
     access: str = Field(description="Raw access expression, e.g. \"hasRole('ADMIN')\"")
@@ -340,15 +395,60 @@ class ExportSecurityRule(ExportModelBase):
     anchor: ExportAnchor
     evidence: str = Field(description="First line of the rule's source text")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_pattern(cls, data: object) -> object:
+        """Pre-2.8.0 exports carry the sentinels inside ``pattern`` (§5.2.10).
+
+        Normalized on load rather than handled at every read site, so exactly
+        one place in the codebase knows the old spelling existed.
+        """
+        if not isinstance(data, dict):
+            return data
+        values = cast(dict[str, object], data)
+        if "pattern_confidence" in values:
+            return values
+        pattern = values.get("pattern")
+        if not isinstance(pattern, str):
+            return values
+        if pattern == UNRESOLVABLE_PATTERN:
+            values["pattern"] = None
+            values["pattern_confidence"] = RulePatternConfidence.NONE
+        elif pattern.startswith(CONFIG_PREFIX):
+            values["pattern_confidence"] = RulePatternConfidence.CONFIG
+        else:
+            values["pattern_confidence"] = RulePatternConfidence.EXACT
+        return values
+
     @property
     def resolvable(self) -> bool:
-        """False when the rule was seen but its scope could not be read.
+        """True only when this rule's scope is known well enough to match on.
 
-        A ``@prefix`` pattern counts as UNresolvable here: until the worker has
-        correlated it against config it is exactly as unreadable as ``{?}``, and
-        treating it otherwise would let it match nothing and fall through.
+        A ``CONFIG`` pattern counts as UNresolvable here: until the worker has
+        correlated it against config it is exactly as unreadable as a missing
+        one, and treating it otherwise would let it match nothing and fall
+        through — the §5.2.9 failure mode.
         """
-        return self.pattern != UNRESOLVABLE_PATTERN and not self.pattern.startswith(CONFIG_PREFIX)
+        return self.pattern_confidence is RulePatternConfidence.EXACT
+
+
+class ExportAuthExtraction(ExportModelBase):
+    """What the auth vocabulary saw versus what it emitted (2.8.0; §5.2.10).
+
+    The in-graph half of the no-drop invariant. ``access_calls_seen`` counts
+    every access-vocabulary name in the CPG with no scope test applied, so it
+    cannot be talked down by the same predicate that decides emission.
+
+    The two counts are NOT expected to be equal — ``access``, ``authenticated``
+    and ``anonymous`` are ordinary words, and a business method named
+    ``access()`` raises the first without belonging in the second. The GAP is
+    the signal, reconciled worker-side against an independent source-text
+    oracle so an unreadable chain shape announces itself as a number instead of
+    publishing a confident wrong claim.
+    """
+
+    access_calls_seen: int = Field(default=0, ge=0)
+    rule_sites_emitted: int = Field(default=0, ge=0)
 
 
 class ExportAuthEnforcement(ExportModelBase):
@@ -465,6 +565,10 @@ class ServiceExport(ExportModelBase):
     config_refs: list[ExportConfigRef] = Field(default_factory=list[ExportConfigRef])
     analysis_coverage: ExportAnalysisCoverage | None = Field(
         default=None, description="None = exporter predates 2.2.0 (unknown, not zero — P10)"
+    )
+    auth_extraction: ExportAuthExtraction | None = Field(
+        default=None,
+        description="2.8.0 (§5.2.10): detected-vs-emitted auth sites; None pre-2.8.0",
     )
 
     def compatible_with_reader(self) -> bool:

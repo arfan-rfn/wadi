@@ -76,7 +76,7 @@ Many features split across the rule: e.g., "resolve this REST call's URL" starts
 
 **P7 — Symbolic truth, LLM judgment.** The graph layers make exhaustive, verifiable claims (endpoint inventories, ICFGs). LLMs are used only where statics structurally cannot answer (runtime-config URLs, ambiguous DI) and their outputs are marked low-confidence — never silently mixed into ground truth. Corollary: **the core pipeline requires no LLM** — extraction, tagging, ICFG assembly, and stitching are deterministic and run fully offline with no API keys; every LLM touch (gap resolution, method summaries, semantic labeling) is an optional enrichment activated only when a key is configured, and their absence degrades coverage, never correctness.
 
-**P8 — Every framework pack ships with a conformance fixture.** A tiny sample repo plus expected-output JSON, diffed in CI. This is the required template for all catalog growth (§10).
+**P8 — Every framework pack ships with a conformance fixture.** A tiny sample repo plus expected-output JSON, diffed in CI. This is the required template for all catalog growth (§10). *Amended 2026-08-05 (§5.2.10):* a fixture must enumerate the **framework's** shape space, not the corpus's — and its goldens must assert the **absence of drops** (detected-site counts), not only the presence of expected facts. A presence-only golden can never fail on a shape its author did not imagine, which is how eight auth shapes and an entire reactive stack passed CI.
 
 **P9 — Time and versioning.** Every stored artifact carries `schema_version`, its snapshot key, and timezone-aware UTC timestamps.
 
@@ -430,6 +430,97 @@ The token-propagation row is a recorded limitation, not an omission: `SpringToke
 *Config-defined authorization, measured separately:* the yas snapshot could not be built (its git checkout carries a corrupt ref — `refs/heads/evosuit` has a null OID — which is a defect in that repo, not in wadi, and the intake error says so precisely). D5 was therefore verified against yas's **real `application.yaml` files** instead: all **15** modules' policies are recovered, including the `/backoffice/**` → `ADMIN` gating that was previously invisible in its entirety. The end-to-end path — Java loop with no literal patterns → bound prefix → parsed YAML → concrete rules — is additionally pinned on a real CPG by the matrix fixture's config-driven chain.
 
 *Remaining zero is not proof of completeness.* train-ticket reaching 0 withheld means its idioms are all readable now, not that every idiom is; the `unread_by_kind` counter exists precisely so the first repo that uses one wadi cannot read shows up as a number rather than a silent `false`.
+
+**§5.2.10 Auth extraction fidelity — the shape-robustness audit (recorded 2026-08-05, binding; Phase 2.9.1).**
+
+§5.2.9 closes with the sentence *"remaining zero is not proof of completeness — the `unread_by_kind` counter exists precisely so the first repo that uses an idiom wadi cannot read shows up as a number rather than a silent `false`."* The first such repo arrived the next day, and the counter did not fire. This section records why the counter **structurally could not** fire, which is a deeper defect than any idiom it was meant to catch.
+
+*The measurement.* `train-ticket-aitest` (365 endpoints / 20 services, snapshot `snap_3a3459c9…`, schema 1.15.0) published all **365 endpoints identically**: `authenticated=true, roles=[], authorities=[], denied=false, unread_kinds=[]`. Not one role, and — decisively — **not one withheld claim**. Every service declares its policy in `application.yml` (`security.authorization-rules`, with `ROLE_ADMIN` on the admin routes) and binds it with `@ConfigurationProperties`, exactly the D5 shape §5.2.9 claims to recover. The YAML parsed correctly and landed under the matching key; the Java-side rules never reached the export.
+
+*The cause is not an idiom, it is a structural property.* Because the access verb is chosen by an `if/else`, config-driven code **must** park the `AuthorizedUrl` in a local variable:
+
+```java
+AuthorizeHttpRequestsConfigurer.AuthorizedUrl url;
+url = authorize.requestMatchers(HttpMethod.valueOf(method), paths);   // ← a Call
+...
+url.hasAnyRole(roles);                                                // ← receiver is an Identifier
+```
+
+`SpringSecurityDslPass` resolves a rule's pattern from the access call's **immediate receiver**, accepted only when that receiver *is a call* (`collect { case receiver: Call => … }`). An `Identifier` receiver yields `None`, the traversal emits nothing, and the rule is **dropped — not marked `{?}`**. The file's own doc comment states the invariant this breaks ("a rule that cannot be read is emitted as `{?}`, never dropped"); that guard lives inside `patternsOf`, which is only reached *after* a matcher receiver has been found, so it cannot fire when the chain **shape** is what was unreadable. The endpoint then falls through to the chain's `anyRequest().authenticated()` and reads as a confident, fully-resolved claim. This is the §5.2.9 dropped-pattern failure mode re-entering through a door the fix did not cover.
+
+*Why every validation layer missed it.* All three of §5.2.9's layers are structurally incapable of catching this class, which is the finding that matters:
+
+1. **The fixture encodes the implementation.** `spring-auth-matrix/SecurityConfig.java` is pure Spring Security 5 (`httpBasic().disable()`, `authorizeRequests()`, `antMatchers`), and the config-driven chain is written *fluently* with *parameter*-injected properties — because that is yas's shape. A fixture authored beside the pass enumerates the shapes the pass handles. P8 makes a fixture mandatory; it cannot make it imaginative.
+2. **`AuthCoverageSection` is emission-derived.** Its docstring names it the auth analogue of `cfg_anomalies`, but `cfg_anomalies` is computed in `cfg_invariants.py` over the **raw export, independently of what the passes claimed**, while every `AuthCoverageSection` counter (`withheld`, `unread_by_kind`, `no_evidence`) is derived from evidence that was *emitted*. A dropped construct contributes to none of them — it makes an endpoint look cleanly authenticated. **The blind-spot tracker is blind to the blind spot.**
+3. **There is no auth oracle.** Control flow has four independent layers including the ASM bytecode oracle; auth has goldens plus emission-derived counters, and no independent ground truth.
+
+*The contract permits the drop.* `ExportSecurityRule.pattern` is a **required `str`**, with `{?}` and `@prefix` smuggled in as sentinel values. To emit a sentinel the pass must already have got far enough to *construct a rule*, so "an access call exists at line 87 and produced nothing" has no representation. `ExportSink` — for the same job on the stitching side — carries `call_id` (site identity), `value: str | None` and a `value_confidence` ladder, so a failed slice **degrades a field and never erases the site**. Measured on a shape sweep, `UrlSlicer` follows assignments, helper returns and constant fields, and reports the un-sliceable case as `value: null, confidence: "none", evidence: "call has no argument to slice"`. **The correct pattern already exists in this repo, one directory away; the auth pass is the outlier.**
+
+**The decision — a detected site is a record, always.** Detection and resolution are separated, and the split is enforced by the contract rather than by pass discipline:
+
+> **Every construct the auth vocabulary detects emits exactly one record carrying its site identity, whether or not any of its facts could be resolved. Resolution failure degrades fields — `pattern: null` with `pattern_confidence`, roles unread, effect unknown — and never removes the site. A pass that cannot drop cannot regress.**
+
+Five tranches implement it, sequenced so the structural guarantee lands before the coverage work it protects:
+
+- **T1 — no-drop guarantee.** `ExportSecurityRule` takes the `ExportSink` shape (`call_id`, `pattern: str | None`, `pattern_confidence`); `SpringSecurityDslPass` emits one record per access-call site before attempting resolution; an export-time invariant asserts `count(access-call sites) == count(distinct call_id)`.
+- **T2 — an independent auth oracle.** A second, deliberately dumb detector (a text scan over the service's sources, sharing no code path with the CPG) counts access/matcher/mechanism sites and diffs them against emitted records. Divergence is a per-snapshot anomaly surfaced in `AuthCoverageSection`. On `train-ticket-aitest` this would have shouted on the first run: ~100 access calls in source, 20 rules emitted.
+- **T3 — shape robustness by dataflow, not syntax.** Receiver resolution follows assignments, ternaries and helper returns, reusing the slicer's machinery rather than growing a second one; `.disable()` is honoured in lambda and method-reference form; the `@ConfigurationProperties` prefix search covers class fields and constructor parameters.
+- **T4 — config-shape robustness.** Scalar `method:` keys, permissive **string sentinels** in authority lists, and confidence degradation on unrecognized keys.
+- **T6/T7 — vocabulary and meaning.** Reactive security (`ServerHttpSecurity`/`authorizeExchange`/`pathMatchers`/`anyExchange` — currently a total silent drop), CORS and CSRF exemptions as first-class facts, and **authority provenance**: where a role is minted (`jwtAuthenticationConverter`, `UserDetailsService`) and what it means (`RoleHierarchy`, `GrantedAuthorityDefaults`).
+
+*Rejected: fixing the eight measured shapes and keeping the fused traversal.* This is the §5.2.9 rejection repeated one level up. The shapes are instances; **fusing detection with resolution is the class**, and the ninth shape would fail exactly as the first eight did — silently, permissively, and invisibly to every counter.
+
+*Rejected: keeping `{?}` as the sole unknown and adding a shape for each new receiver form.* A sentinel inside a required field can only be produced by a code path that already succeeded structurally. The unknown must live at the **site**, not inside the value.
+
+*Rejected: treating this as a Spring Security 6 migration.* It is tempting — the shapes that work are SS5 and the shapes that break are mandatory in SS6+ — but framing it as a version gap would license the same fused traversal with a longer vocabulary. Measured: `train-ticket-upstream` (SS5) hits 0/39 broken shapes, `train-ticket-aitest` (SS6) hits **20/20** on all three of lambda-form `.disable()`, `AuthorizedUrl`-in-a-variable and field-injected properties. That is priority evidence, not scope evidence (§5.2.9's standing directive: measurement sets priority, never coverage).
+
+*Rejected: withholding on the whole service when any site is unemitted.* It would have been correct here and useless in general — one unreadable helper would black out a fully-readable config. The site record carries its own resolution; the claim rule in §5.2.9 already composes them.
+
+**Shape matrix** (20 chain shapes + 1 reactive, each built through a real CPG; ✅ correct · ⚠️ honest but lossy, withholds · ❌ silently wrong):
+
+| Axis | Shape | Before | After |
+|---|---|---|---|
+| Receiver | fluent `a.requestMatchers("/x").hasRole("R")` | ✅ | ✅ |
+| Receiver | held in a local variable | ❌ dropped | ✅ |
+| Receiver | ternary receiver | ❌ dropped | ✅ |
+| Receiver | returned by a helper method | ❌ dropped | ✅ |
+| Receiver | SS5 `.and()` chain | ✅ | ✅ |
+| Mechanism | `httpBasic().disable()` | ✅ inactive | ✅ |
+| Mechanism | `httpBasic(t -> t.disable())` | ❌ reported **active** | ✅ |
+| Mechanism | `httpBasic(X::disable)` | ❌ reported **active** | ✅ |
+| Pattern | constant field | ✅ | ✅ |
+| Pattern | `@Value("${…}")` field | ⚠️ `{?}` | ✅ placeholder passthrough |
+| Pattern | `RequestMatcher` bean | ✅ `{?}` | ✅ |
+| Pattern | `List.of(…).toArray(…)` | ⚠️ `{?}` | ✅ |
+| Properties | field-injected | ⚠️ `{?}` | ✅ `@prefix` |
+| Properties | constructor-injected | ⚠️ `{?}` | ✅ `@prefix` |
+| Properties | parameter-injected | ✅ `@prefix` | ✅ |
+| Access | SpEL `access("hasRole('X')")` | ✅ | ✅ |
+| Access | SS6 `access(AuthorizationManager…)` | ✅ | ✅ |
+| Access | `hasAnyRole(rolesVar)` | ✅ partial | ✅ |
+| Chain | no `anyRequest()` catch-all | ✅ | ✅ |
+| Reactive | `pathMatchers(…)` / `anyExchange()` | ❌ **total drop** | ✅ |
+
+**What a `SecurityConfig` declares** (measured over the 76 security-config files in `train-ticket-aitest`, `train-ticket-upstream` and `yas`), and where each lands:
+
+| Declares | Uses | Disposition |
+|---|---|---|
+| Authorization rules (matcher → access) | 126 `antMatchers`, 88 `requestMatchers` | T1/T3 |
+| Chain scoping and ordering (`securityMatcher`, `@Order`, N chains) | 35 chains | partial — `@Order` precedence and per-class scope pooling tracked below |
+| Auth mechanisms (`httpBasic`, `oauth2ResourceServer`, …) | 61 + 15 | T3 |
+| Custom filters (`addFilterBefore(new JWTFilter())`) | 59 | modelled |
+| Session policy (`STATELESS`) | 59 | modelled |
+| Method-security enablement, `WebSecurity.ignoring()` | 5 | modelled |
+| **CORS** (`allowedOrigins`, `allowCredentials`) | **58** | T6 — the second most common construct in these files, entirely unmodelled |
+| **CSRF** (`disable`, `ignoringRequestMatchers`) | 64 / 2 | T6 |
+| **Identity & authority sources** (`jwtAuthenticationConverter`, `getClaim`, `SimpleGrantedAuthority`, `UserDetailsService`) | 14–16 | T7 |
+| **Role semantics** (`RoleHierarchy`, `GrantedAuthorityDefaults`) | 0 measured | T7 — zero in both corpora and in scope anyway: one `GrantedAuthorityDefaults("")` bean silently invalidates the `ROLE_`-prefix role/authority split shipped in 0.6.0 |
+| Exception handling (`authenticationEntryPoint`, `accessDeniedHandler`) | 0 measured | T6 |
+| Headers (`cacheControl`, HSTS, frame options) | 58 | out of scope — no bearing on who may reach an endpoint |
+
+*Tracked, not fixed here:* `chainPatternOf` pools `securityMatcher` scopes **per declaring type**, so several chains in one class cross-contaminate — reproduced: an *unscoped* chain inherited its siblings' `"/fluent/**,/literal/**"`. It is a restriction added where none exists, which withdraws endpoints, and is the same over-approximation error the rule-scoping fix corrected in 0.6.0. It did not contribute to the measurement above (train-ticket-aitest declares one chain per class) and is scheduled with T6, where chain identity is already being touched. Also unswept and therefore unclaimed: `@PreAuthorize` meta-annotation and interface-inheritance shapes, interceptor/servlet-filter/aspect detection, and `WebSecurity.ignoring()` variants — the annotation pass matches on annotation names rather than call shapes and is *expected* to hold up, but that is a prediction and this section does not record predictions as coverage.
+
+**Validation layers.** The §5.2.9 layers, plus the one whose absence let this ship: the shape matrix above lands as pinned goldens spanning both DSL eras; the T2 oracle diffs an independent count against emitted records on **every** snapshot; and — amending P8 — **goldens assert the absence of drops (site counts), not only the presence of expected rules.** A presence-only golden can never fail on a shape nobody imagined, which is precisely how eight shapes and a whole reactive stack passed CI.
 
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**
 
@@ -812,6 +903,19 @@ Goal 9's core claim, audited and rebuilt. The trigger was a measurement, not a h
    *Two corrections from the pre-landing review (recorded 2026-08-05).* **Authorities are not roles.** `hasRole("X")` tests for the authority `ROLE_X`; `hasAuthority("X")` tests for `X`. The first cut pooled both into `EndpointAuth.roles` and left the declared `authorities` field permanently empty — a schema promising something it never delivered, and a chip naming a grant the rule never asks for. `_read_access` now returns the two lists separately and every surface renders both, keeping them apart in the tooltip. **`denyAll()` is not "protected".** A denied route admits nobody, so it is unreachable rather than gated; the claim rule bucketed it with every other non-permissive effect and published it as an ordinary protected endpoint, which counts dead surface as live (§12). `denied` is now a boolean that REFINES the positive claim — it cannot stand without `authenticated=True`, enforced by a contract validator, because a denial is something we *read* — plus a fifth `AuthState` in the UI and its own bucket carved OUT of `authenticated` in `AuthTotals`, so the partition still holds. *Found while writing the fixture for it:* rule matching over-approximated in the one direction where that is unsafe. Ant matching lets an endpoint's `{orderId}` segment match any literal, which is honest for a wildcard rule but wrong for a LITERAL one — Spring routes `/orders/legacy` to the more specific handler, so a literal rule governs that endpoint and not its templated sibling. Left alone it attached `denyAll()` to a live route and withdrew it. `_governs` now requires an exact match for wildcard-free patterns; over-approximation stays only where it adds restriction rather than removes an endpoint. Ships as contracts **1.15.0** with 24 matrix goldens. *Rejected: deleting the unused `authorities` field* (free right now, but it throws away a distinction Spring makes and the analysis had already computed); *pinning denyAll's current answer with a fixture and deferring the UI state* (cheaper, but it records a wrong fact as intended behaviour).
 
 *Sequenced before Phase 3 by dependency:* the auth-consistency layer below walks from an upstream endpoint's requirement to a downstream handler's, so it inherits whatever these claims are worth. Building it on a layer that publishes confidently wrong `false` values would propagate the error across the stitched graph rather than contain it. *Rejected: folding this into Phase 3* (same reasoning as 2.6 — the foundation precedes what is built on it); *shipping the UI surface alone* (the original request — but surfacing a wrong claim more prominently makes it worse, not better).
+
+### Phase 2.9.1 — Auth extraction fidelity: the shape-robustness audit
+
+The model from 2.9 is sound; the **extraction feeding it** was shape-fragile, and the failure was invisible to every layer 2.9 built to catch it. Triggered by measurement one day after 2.9 shipped: `train-ticket-aitest` (365 endpoints / 20 services) published all 365 endpoints identically as `authenticated=true, roles=[]` with **zero withheld**, while every service's `application.yml` declares `ROLE_ADMIN` on its admin routes. Full audit, evidence and decisions in **§5.2.10**; the class is that detection and resolution were fused, so an unreadable chain *shape* erased the site instead of degrading its facts.
+
+1. **T1 — the no-drop guarantee.** `ExportSecurityRule` takes the `ExportSink` shape (site identity + optional pattern + confidence); one record per detected access-call site, always; an export-time site-count invariant. This is the load-bearing tranche — it converts every remaining gap below from silence into a number.
+2. **T2 — the independent auth oracle.** A second, deliberately dumb detector sharing no code path with the CPG, diffed against emitted records on every snapshot and surfaced in `AuthCoverageSection`. The analogue of the §5.2.8 bytecode oracle, and the layer whose absence let 2.9 ship green.
+3. **T3/T4 — shape and config robustness.** Dataflow receiver resolution (variable, ternary, helper return), `.disable()` in lambda and method-reference form, `@ConfigurationProperties` prefixes on fields and constructor parameters; scalar `method:` keys and permissive string sentinels in the worker's config expansion.
+4. **T6 — vocabulary completion.** Reactive security (`authorizeExchange`/`pathMatchers`/`anyExchange` — a total silent drop today), CORS and CSRF exemptions as first-class facts, entry-point/denied-handler, and the per-class chain-scope pooling fix.
+5. **T7 — authority provenance.** Where a role is minted (`jwtAuthenticationConverter`, `UserDetailsService`) and what it means (`RoleHierarchy`, `GrantedAuthorityDefaults`) — at minimum a withholding signal, since one `GrantedAuthorityDefaults("")` bean silently invalidates the role/authority split shipped in 0.6.0.
+6. **Goldens spanning both DSL eras**, asserting the absence of drops as well as the presence of facts (the P8 amendment), then re-measurement against `train-ticket-aitest`.
+
+*Rejected: folding this into Phase 3's auth-consistency work* — same dependency argument 2.9 made against itself. Phase 3 walks these claims across the stitched graph; shipping it on extraction that silently drops rules would propagate the error system-wide instead of containing it.
 
 ### Phase 3 — New analysis depth on Java: async + security analysis
 

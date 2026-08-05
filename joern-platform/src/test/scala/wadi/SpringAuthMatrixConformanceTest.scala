@@ -20,15 +20,29 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
   private lazy val exportJson: ujson.Value =
     exportFixture("spring-auth-matrix", "spring-auth-matrix-export")
 
-  /** (verb, pattern, access) for every extracted filter-chain rule. */
+  /** (verb, pattern, access) for every extracted filter-chain rule.
+    *
+    * Since export 2.8.0 (§5.2.10) an unreadable scope arrives as `null` with
+    * `pattern_confidence = "none"` rather than the `{?}` sentinel. The tests
+    * below still speak in `{?}` because that is what the *worker* contract
+    * calls a hole; this is the one place that translates.
+    */
   private lazy val rules: List[(String, String, String)] =
     exportJson("security_rules").arr.toList.map { rule =>
       val verb = rule("http_method") match {
         case ujson.Null => "*"
         case other      => other.str
       }
-      (verb, rule("pattern").str, rule("access").str)
+      val pattern = rule("pattern") match {
+        case ujson.Null => "{?}"
+        case other      => other.str
+      }
+      (verb, pattern, rule("access").str)
     }
+
+  /** Every rule row keyed by the SITE that produced it (2.8.0). */
+  private lazy val siteIds: List[Long] =
+    exportJson("security_rules").arr.toList.map(_("call_id").num.toLong)
 
   private def ruleFor(pattern: String, verb: String): (String, String, String) =
     rules
@@ -39,6 +53,46 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
             rules.map { case (v, p, a) => s"  $v | $p | $a" }.mkString("\n")
         )
       )
+
+  // ---- §5.2.10: the no-drop invariant, asserted rather than assumed ----
+
+  test("every rule row carries the site that produced it") {
+    // Site identity is what makes a drop detectable at all: without it, a rule
+    // that was never emitted is indistinguishable from a chain that declared
+    // none. 0 is the pre-2.8.0 default and must never appear from this build.
+    siteIds should not be empty
+    all(siteIds) should not be 0L
+  }
+
+  test("a site's rows are its patterns, never a duplicate rule") {
+    // requestMatchers("/a", "/b") is ONE site with two patterns; the two rows
+    // must therefore agree on everything except the pattern, or first-match
+    // ordering would depend on which row the exporter walked first.
+    val bySite = exportJson("security_rules").arr.toList.groupBy(_("call_id").num.toLong)
+    bySite.values.foreach { rows =>
+      rows.map(_("access").str).distinct should have size 1
+      rows.map(_("chain_id").str).distinct should have size 1
+    }
+  }
+
+  test("no access site is silently dropped (the P8 amendment)") {
+    // The assertion that would have caught train-ticket-aitest. A golden that
+    // only checks the rules it EXPECTS can never fail on a shape its author did
+    // not imagine; this one fails when a detected site produces no row at all.
+    //
+    // `access_calls_seen` counts the vocabulary with no scope test, so it also
+    // counts this fixture's deliberate non-rule uses of those names. The
+    // reconciliation is therefore a floor, not equality — what it forbids is
+    // the number that matters going to zero or collapsing.
+    val extraction = exportJson("auth_extraction")
+    val seen       = extraction("access_calls_seen").num.toInt
+    val emitted    = extraction("rule_sites_emitted").num.toInt
+    withClue(s"seen=$seen emitted=$emitted: ") {
+      emitted shouldBe siteIds.distinct.size
+      emitted should be >= 10
+      seen should be >= emitted
+    }
+  }
 
   test("every endpoint in the fixture is extracted") {
     val endpoints = exportJson("endpoints").arr.map(e => s"${e("http_method").str} ${e("uri").str}")
@@ -249,7 +303,10 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     // would pass or fail by accident of which chain the exporter walked first.
     val legacy = exportJson("security_rules").arr.toList
       .filter(_("chain_id").str.contains(".configure:"))
-      .map(_("pattern").str)
+      .map(_("pattern") match {
+        case ujson.Null => "{?}"
+        case other      => other.str
+      })
     legacy.indexOf("/api/v1/orders") should be < legacy.indexOf("/api/v1/orders/**")
     legacy.indexOf("/api/v1/orders/**") should be < legacy.indexOf("/**")
   }

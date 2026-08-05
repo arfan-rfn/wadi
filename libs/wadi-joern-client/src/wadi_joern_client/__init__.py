@@ -7,6 +7,7 @@ from wadi_joern_client.export import (
     ExportAnalysisCoverage,
     ExportAnchor,
     ExportAuthEnforcement,
+    ExportAuthExtraction,
     ExportAuthMechanism,
     ExportCall,
     ExportCfg,
@@ -24,6 +25,7 @@ from wadi_joern_client.export import (
     ExportSecurityRule,
     ExportSink,
     ExportTypeShape,
+    RulePatternConfidence,
     ServiceExport,
     SinkValueConfidence,
 )
@@ -34,6 +36,7 @@ __all__ = [
     "ExportAnalysisCoverage",
     "ExportAnchor",
     "ExportAuthEnforcement",
+    "ExportAuthExtraction",
     "ExportAuthMechanism",
     "ExportCall",
     "ExportCfg",
@@ -54,6 +57,7 @@ __all__ = [
     "JoernClient",
     "JoernError",
     "JoernUnreachableError",
+    "RulePatternConfidence",
     "ServiceExport",
     "SinkValueConfidence",
 ]

@@ -40,6 +40,32 @@ object SpringSecurityPack {
     */
   private[wadi] val ConfigPrefix = "@"
 
+  /** Everything that decides access on a matched request.
+    *
+    * Object-level because the exporter counts occurrences of these names to
+    * report what the vocabulary saw against what it emitted (§5.2.10) — a
+    * count computed from the same list the pass matches on, but deliberately
+    * WITHOUT the pass's scope test, so the two cannot fail together.
+    *
+    * Names absent here silently produce no rule — the same fall-through
+    * failure as a dropped pattern — so the list tracks the DSL rather than one
+    * corpus.
+    */
+  private[wadi] val AccessCallNames = Set(
+    "hasRole",
+    "hasAnyRole",
+    "hasAuthority",
+    "hasAnyAuthority",
+    "authenticated",
+    "fullyAuthenticated",
+    "anonymous",
+    "rememberMe",
+    "hasIpAddress",
+    "permitAll",
+    "denyAll",
+    "access"
+  )
+
   /** Method-level security annotations → `auth=annotation:<raw>` / `auth=jsr250:<raw>`.
     * Class-level annotations propagate to every declared method.
     *
@@ -138,24 +164,10 @@ object SpringSecurityPack {
     */
   class SpringSecurityDslPass(cpg: Cpg) extends CpgPass(cpg) {
 
-    /** Everything that decides access on a matched request. Names absent here
-      * would silently produce no rule — the same fall-through failure as a
-      * dropped pattern — so the list tracks the DSL rather than one corpus.
+    /** Everything that decides access on a matched request (object-level, so
+      * the exporter's independent count reads the same vocabulary).
       */
-    private val AccessCalls = Set(
-      "hasRole",
-      "hasAnyRole",
-      "hasAuthority",
-      "hasAnyAuthority",
-      "authenticated",
-      "fullyAuthenticated",
-      "anonymous",
-      "rememberMe",
-      "hasIpAddress",
-      "permitAll",
-      "denyAll",
-      "access"
-    )
+    private val AccessCalls = AccessCallNames
 
     /** Rule-scoped matchers. `securityMatcher`/`antMatcher` are deliberately
       * absent: they scope a whole CHAIN, not one rule, and are read as chain
@@ -169,18 +181,84 @@ object SpringSecurityPack {
       */
     private val VerbArgument = "^(?:org\\.springframework\\.http\\.)?HttpMethod\\.([A-Z]+)$".r
 
-    override def run(builder: DiffGraphBuilder): Unit =
-      cpg.call.nameExact(AccessCalls.toSeq*).l.foreach { accessCall =>
-        receiverCall(accessCall).filter(r => MatcherCalls.contains(r.name)).foreach { matcher =>
-          val verb   = verbOf(matcher).getOrElse("*")
-          val access = accessText(accessCall)
-          patternsOf(matcher).foreach { pattern =>
+    /** The registry calls that open an authorization scope. */
+    private val AuthorizeRegistries =
+      Set("authorizeHttpRequests", "authorizeRequests", "authorizeExchange")
+
+    /** Every detected access site emits a rule — always (§5.2.10).
+      *
+      * The predecessor fused detection with resolution: the pattern was read
+      * from the access call's immediate receiver, and only when that receiver
+      * *was a call*. Config-driven Spring code has to park the `AuthorizedUrl`
+      * in a local variable (the access verb is chosen by an if/else), so the
+      * receiver is an Identifier, the traversal yielded nothing, and the rule
+      * was DROPPED — not marked `{?}`. The endpoint then fell through to the
+      * chain's `anyRequest()` and read as a fully-resolved claim. That is how
+      * 365 train-ticket-aitest endpoints published as authenticated with no
+      * roles and no withheld claims.
+      *
+      * Now resolution can only degrade FIELDS. A site with no readable matcher
+      * still emits, with `Unresolvable` standing in for its scope, which the
+      * worker turns into a withheld claim rather than a permissive one.
+      */
+    override def run(builder: DiffGraphBuilder): Unit = {
+      val scopes = authorizationScopes
+      val candidates = cpg.call
+        .nameExact(AccessCalls.toSeq*)
+        .l
+        .filter(call => scopes.contains(call.method.fullName))
+      // An access name nested inside another access call's ARGUMENTS is that
+      // call's expression, not a rule of its own:
+      // `access(AuthorityAuthorizationManager.hasRole("X"))` is one rule whose
+      // text already names the role. Emitting the inner call too would invent
+      // a second, scopeless rule and withhold the claim it just answered.
+      // Receivers are excluded from the scan (index > 0), so a matcher this
+      // rule hangs off can never be mistaken for a nested expression.
+      val nested = candidates.flatMap(_.argument.argumentIndexGt(0).ast.isCall.id).toSet
+      candidates
+        .filterNot(call => nested.contains(call.id))
+        .foreach { accessCall =>
+          val matcher  = matcherOf(accessCall)
+          val verb     = matcher.flatMap(verbOf).getOrElse("*")
+          val access   = accessText(accessCall)
+          val patterns = matcher.map(patternsOf).getOrElse(List(Unresolvable))
+          patterns.foreach { pattern =>
             Iterator(accessCall)
               .newTagNodePair("auth-rule", s"$verb|$pattern|$access")
               .store()(using builder)
           }
         }
-      }
+    }
+
+    /** Methods whose body sits inside an authorization registry.
+      *
+      * Needed only because emission no longer depends on finding a matcher:
+      * `AccessCalls` holds ordinary words (`access`, `authenticated`,
+      * `anonymous`), and without a scope test a business method named
+      * `access()` would publish itself as a security rule — trading a silent
+      * drop for a fabricated fact, which §12 rates worse.
+      *
+      * Three ways a method qualifies, because the DSL has three shapes:
+      *   - it CONTAINS the registry call (Spring Security 5 fluent chains);
+      *   - it IS the lambda handed to one (`authorizeHttpRequests(a -> …)`,
+      *     which javasrc2cpg lowers to its own method whose full name appears
+      *     verbatim as the call's argument text);
+      *   - it CONTAINS a rule matcher (`requestMatchers`, `antMatchers`, …),
+      *     which catches the helper a method reference points at
+      *     (`authorizeHttpRequests(this::rules)`) — a shape neither of the
+      *     first two sees.
+      */
+    private lazy val authorizationScopes: Set[String] = {
+      val registries = cpg.call.nameExact(AuthorizeRegistries.toSeq*).l
+      val declaring  = registries.map(_.method.fullName).toSet
+      val lambdas    = registries.flatMap(_.argument.argumentIndexGt(0).code).toSet
+      val matchers   = cpg.call.nameExact(MatcherCalls.toSeq*).method.fullName.toSet
+      declaring ++ lambdas ++ matchers
+    }
+
+    /** The rule matcher this access call is scoped by, when one can be read. */
+    private def matcherOf(accessCall: Call): Option[Call] =
+      receiverCall(accessCall).filter(receiver => MatcherCalls.contains(receiver.name))
 
     /** The verb restriction, read from the matcher's own arguments. */
     private def verbOf(matcher: Call): Option[String] =
