@@ -731,6 +731,20 @@
       "switch-on-string"
     ]
   },
+  "SwitchController.switchInsideLoop": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 1,
+      "back_jumps": 1
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 1,
+      "loop_nodes": 1
+    },
+    "exact": true,
+    "reasons": []
+  },
   "SwitchController.yieldForm": {
     "bytecode": {
       "cond_jumps": 1,

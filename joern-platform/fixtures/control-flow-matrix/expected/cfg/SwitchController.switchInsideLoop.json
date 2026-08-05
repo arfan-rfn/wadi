@@ -1,0 +1,231 @@
+{
+  "nodes": [
+    {
+      "key": "statement@105",
+      "kind": "statement",
+      "code": "StringBuilder out = new StringBuilder()",
+      "line": 105,
+      "line_end": 105
+    },
+    {
+      "key": "call@105",
+      "kind": "call",
+      "code": "new StringBuilder()",
+      "line": 105,
+      "line_end": 105,
+      "call": {
+        "callee": "java.lang.StringBuilder.<init>",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@106",
+      "kind": "statement",
+      "code": "int i = 0",
+      "line": 106,
+      "line_end": 106
+    },
+    {
+      "key": "loop@106",
+      "kind": "loop",
+      "code": "for (int i = 0; i < n; i++)",
+      "line": 106,
+      "line_end": 121,
+      "construct_kind": "for",
+      "condition_code": "i < n"
+    },
+    {
+      "key": "branch@107",
+      "kind": "branch",
+      "code": "if (i == 3)",
+      "line": 107,
+      "line_end": 108,
+      "construct_kind": "if",
+      "condition_code": "i == 3"
+    },
+    {
+      "key": "statement@108",
+      "kind": "statement",
+      "code": "continue;",
+      "line": 108,
+      "line_end": 108,
+      "construct_kind": "continue"
+    },
+    {
+      "key": "statement@110",
+      "kind": "statement",
+      "code": "String tag = \"\"",
+      "line": 110,
+      "line_end": 110
+    },
+    {
+      "key": "branch@111",
+      "kind": "branch",
+      "code": "switch(i % 3)",
+      "line": 111,
+      "line_end": 119,
+      "construct_kind": "switch",
+      "condition_code": "i % 3"
+    },
+    {
+      "key": "statement@113",
+      "kind": "statement",
+      "code": "tag = \"zero\"",
+      "line": 113,
+      "line_end": 113
+    },
+    {
+      "key": "statement@114",
+      "kind": "statement",
+      "code": "break;",
+      "line": 114,
+      "line_end": 114,
+      "construct_kind": "break"
+    },
+    {
+      "key": "statement@116",
+      "kind": "statement",
+      "code": "tag = \"one\"",
+      "line": 116,
+      "line_end": 116
+    },
+    {
+      "key": "statement@117",
+      "kind": "statement",
+      "code": "break;",
+      "line": 117,
+      "line_end": 117,
+      "construct_kind": "break"
+    },
+    {
+      "key": "statement@119",
+      "kind": "statement",
+      "code": "break;",
+      "line": 119,
+      "line_end": 119,
+      "construct_kind": "break"
+    },
+    {
+      "key": "call@121",
+      "kind": "call",
+      "code": "out.append(tag)",
+      "line": 121,
+      "line_end": 121,
+      "call": {
+        "callee": "java.lang.StringBuilder.append",
+        "resolved": false
+      }
+    },
+    {
+      "key": "return@123",
+      "kind": "return",
+      "code": "return out.toString();",
+      "line": 123,
+      "line_end": 123,
+      "call": {
+        "callee": "java.lang.StringBuilder.toString",
+        "resolved": false
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@107",
+      "target": "statement@108",
+      "label": "true"
+    },
+    {
+      "source": "branch@107",
+      "target": "statement@110",
+      "label": "false"
+    },
+    {
+      "source": "branch@111",
+      "target": "statement@113",
+      "label": "case",
+      "case_values": [
+        "0"
+      ]
+    },
+    {
+      "source": "branch@111",
+      "target": "statement@116",
+      "label": "case",
+      "case_values": [
+        "1"
+      ]
+    },
+    {
+      "source": "branch@111",
+      "target": "statement@119",
+      "label": "default"
+    },
+    {
+      "source": "call@105",
+      "target": "statement@106",
+      "label": "flow"
+    },
+    {
+      "source": "call@121",
+      "target": "loop@106",
+      "label": "flow",
+      "back": true
+    },
+    {
+      "source": "loop@106",
+      "target": "branch@107",
+      "label": "true"
+    },
+    {
+      "source": "loop@106",
+      "target": "return@123",
+      "label": "false"
+    },
+    {
+      "source": "statement@105",
+      "target": "call@105",
+      "label": "flow"
+    },
+    {
+      "source": "statement@106",
+      "target": "loop@106",
+      "label": "flow"
+    },
+    {
+      "source": "statement@108",
+      "target": "loop@106",
+      "label": "flow",
+      "back": true
+    },
+    {
+      "source": "statement@110",
+      "target": "branch@111",
+      "label": "flow"
+    },
+    {
+      "source": "statement@113",
+      "target": "statement@114",
+      "label": "flow"
+    },
+    {
+      "source": "statement@114",
+      "target": "call@121",
+      "label": "flow"
+    },
+    {
+      "source": "statement@116",
+      "target": "statement@117",
+      "label": "flow"
+    },
+    {
+      "source": "statement@117",
+      "target": "call@121",
+      "label": "flow"
+    },
+    {
+      "source": "statement@119",
+      "target": "call@121",
+      "label": "flow"
+    }
+  ]
+}

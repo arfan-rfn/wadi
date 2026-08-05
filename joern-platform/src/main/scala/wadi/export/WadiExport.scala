@@ -394,6 +394,8 @@ object WadiExport {
 
   private val HandlerStructureTypes = Set("CATCH", "FINALLY")
   private val LoopStructureTypes    = Set("FOR", "WHILE", "DO")
+  /** Constructs a bare `break` can bind to besides a loop (JLS §14.15). */
+  private val SwitchStructureTypes  = Set("SWITCH", "MATCH")
 
   private def isLeafStatement(node: AstNode): Boolean = node match {
     case cs: ControlStructure => !ContainerStructureTypes.contains(cs.controlStructureType)
@@ -989,15 +991,38 @@ object WadiExport {
       val jumps = controlStructures(Set("BREAK", "CONTINUE"))
       jumps.foreach { jump =>
         val isBreak = jump.controlStructureType == "BREAK"
-        val enclosingLoops = enclosingChain(jump).collect {
+        val chain = enclosingChain(jump)
+        val enclosingLoops = chain.collect {
           case cs: ControlStructure
               if LoopStructureTypes.contains(cs.controlStructureType) &&
                 statementIds.contains(cs.id) =>
             cs
         }
+        // `break` binds to the nearest enclosing BREAKABLE construct, and a
+        // switch is one (JLS §14.15). Collecting only loops meant a break
+        // inside a switch inside a loop matched the LOOP — its raw target, the
+        // switch join, lies within the loop's interior — and was redirected to
+        // the loop's exit. The map then claimed those arms leave the loop
+        // entirely, and the statement after the switch was left with no
+        // incoming edge at all (measured: every `disconnected-node` still
+        // standing on the benchmark). `continue` is unaffected: a switch does
+        // not capture it, so its nearest binder is still the loop.
+        val nearestBreakable = chain.collectFirst {
+          case cs: ControlStructure
+              if (LoopStructureTypes.contains(cs.controlStructureType) ||
+                SwitchStructureTypes.contains(cs.controlStructureType)) &&
+                statementIds.contains(cs.id) =>
+            cs
+        }
+        val breakBindsToSwitch =
+          isBreak && nearestBreakable.exists(cs => SwitchStructureTypes.contains(cs.controlStructureType))
         edges.toList.filter(_._1 == jump.id).foreach { edge =>
           val target = edge._2
           enclosingLoops.find(l => l.id == target || interiorOf(l).contains(target)) match {
+            case Some(_) if breakBindsToSwitch =>
+              // The break leaves the SWITCH, not the loop; its raw target — the
+              // statement after the switch — is already right.
+              ()
             case Some(loop) if isBreak =>
               edges -= edge
               labels.remove(edge)
