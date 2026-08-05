@@ -165,8 +165,22 @@ class UnboundReason(StrEnum):
     could not be bound to one, and P10 forbids guessing."""
 
     UNRESOLVED_RECEIVER = "unresolved-receiver"
-    """First-party type in the CPG that declares no such method: a static
-    import attributed to the importing class, or an unbindable receiver."""
+    """The receiver's TYPE is a javasrc2cpg sentinel — unbindable, so nothing
+    downstream can name the callee."""
+
+    DECLARED_NOT_BOUND = "declared-not-bound"
+    """The first-party type declares exactly this method and the call still did
+    not bind. The one actionable bucket (§5.2.11 T5): every other code here
+    describes something analysis cannot see; this describes something it saw
+    and failed to connect."""
+
+    NOT_DECLARED = "not-declared"
+    """A first-party type in the CPG that declares no such method — a static
+    import attributed to the importing class (``ok(…)`` from
+    ``ResponseEntity.ok``). Not a hole: the callee is real and elsewhere."""
+
+    UNPARSEABLE_CALLEE = "unparseable-callee"
+    """The callee name carries no type qualifier to split on."""
 
 
 class ExportCall(ExportModelBase):

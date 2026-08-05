@@ -200,6 +200,19 @@ def build_auth_coverage(
             extraction_gaps[gap.code.value] = extraction_gaps.get(gap.code.value, 0) + gap.count
         for policy in boundary.request_policies:
             request_policies[policy.kind] = request_policies.get(policy.kind, 0) + 1
+    # §5.2.11 T6: a zero counter is ambiguous — wadi looked and found none, or
+    # the corpus never exercises the idiom and the zero proves nothing. Naming
+    # the second case stops `denied: 0` being read as "the denial path works".
+    exercised = {
+        "roles": any(e.auth.roles for e in endpoints),
+        "authorities": any(e.auth.authorities for e in endpoints),
+        "denied": any(e.auth.denied for e in endpoints),
+        "withheld": withheld > 0,
+        "no-evidence": no_evidence > 0,
+        "unread-enforcement": bool(unread_by_kind),
+        "request-policy": bool(request_policies),
+    }
+    unexercised = sorted(name for name, seen in exercised.items() if not seen)
     return AuthCoverageSection(
         endpoints=len(endpoints),
         authenticated=authenticated,
@@ -209,6 +222,7 @@ def build_auth_coverage(
         unread_by_kind=dict(sorted(unread_by_kind.items())),
         extraction_gaps=dict(sorted(extraction_gaps.items())),
         request_policies=dict(sorted(request_policies.items())),
+        unexercised_vocabulary=unexercised,
     )
 
 

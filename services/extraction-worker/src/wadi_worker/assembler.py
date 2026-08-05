@@ -85,6 +85,9 @@ _UNBOUND_REASON = {
     ExportUnboundReason.THIRD_PARTY: CalleeUnboundReason.THIRD_PARTY,
     ExportUnboundReason.AMBIGUOUS_OVERLOAD: CalleeUnboundReason.AMBIGUOUS_OVERLOAD,
     ExportUnboundReason.UNRESOLVED_RECEIVER: CalleeUnboundReason.UNRESOLVED_RECEIVER,
+    ExportUnboundReason.DECLARED_NOT_BOUND: CalleeUnboundReason.DECLARED_NOT_BOUND,
+    ExportUnboundReason.NOT_DECLARED: CalleeUnboundReason.NOT_DECLARED,
+    ExportUnboundReason.UNPARSEABLE_CALLEE: CalleeUnboundReason.UNPARSEABLE_CALLEE,
     None: None,
 }
 

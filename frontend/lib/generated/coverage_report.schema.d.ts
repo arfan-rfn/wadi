@@ -41,6 +41,10 @@ export type Endpoints = number
 export type NoEvidence = number
 export type Unauthenticated = number
 /**
+ * Auth vocabulary this snapshot contains ZERO instances of (§5.2.11 T6). A zero counter is otherwise ambiguous: it may mean wadi looked and the system genuinely has none, or that this corpus never exercises the idiom and the zero is evidence of nothing. Naming the second case stops a reader taking `denied: 0` as proof the denial path works
+ */
+export type UnexercisedVocabulary = string[]
+/**
  * No claim because an in-scope guard could not be read
  */
 export type Withheld = number
@@ -316,6 +320,7 @@ export interface AuthCoverageSection {
   no_evidence?: NoEvidence
   request_policies?: RequestPolicies
   unauthenticated?: Unauthenticated
+  unexercised_vocabulary?: UnexercisedVocabulary
   unread_by_kind?: UnreadByKind
   withheld?: Withheld
 }

@@ -91,6 +91,14 @@
           "title": "Unauthenticated",
           "type": "integer"
         },
+        "unexercised_vocabulary": {
+          "description": "Auth vocabulary this snapshot contains ZERO instances of (\u00a75.2.11 T6). A zero counter is otherwise ambiguous: it may mean wadi looked and the system genuinely has none, or that this corpus never exercises the idiom and the zero is evidence of nothing. Naming the second case stops a reader taking `denied: 0` as proof the denial path works",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unexercised Vocabulary",
+          "type": "array"
+        },
         "unread_by_kind": {
           "additionalProperties": {
             "type": "integer"

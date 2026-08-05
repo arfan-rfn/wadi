@@ -31,7 +31,10 @@
         "compiler-generated",
         "third-party",
         "ambiguous-overload",
-        "unresolved-receiver"
+        "unresolved-receiver",
+        "declared-not-bound",
+        "not-declared",
+        "unparseable-callee"
       ],
       "title": "CalleeUnboundReason",
       "type": "string"

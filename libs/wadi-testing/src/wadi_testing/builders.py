@@ -5,6 +5,7 @@ import uuid
 from wadi_contracts import (
     Confidence,
     Endpoint,
+    EndpointAuth,
     HttpMethod,
     Icfg,
     IcfgEdge,
@@ -65,7 +66,11 @@ def make_method(svc_id: str, signature: str) -> MethodRef:
 
 
 def make_endpoint(
-    snapshot: Snapshot, boundary: ServiceBoundary, uri: str = "/orders/{id}"
+    snapshot: Snapshot,
+    boundary: ServiceBoundary,
+    uri: str = "/orders/{id}",
+    *,
+    auth: EndpointAuth | None = None,
 ) -> Endpoint:
     handler = make_method(
         boundary.service_id, f"com.acme.OrderController.handler_{uri}(java.lang.String)"
@@ -76,6 +81,7 @@ def make_endpoint(
         http_method=HttpMethod.GET,
         full_uri=uri,
         handler=handler,
+        auth=auth,
     )
 
 

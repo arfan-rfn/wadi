@@ -137,6 +137,9 @@ class CalleeUnboundReason(StrEnum):
     bound to one — never guessed."""
 
     UNRESOLVED_RECEIVER = "unresolved-receiver"
+    DECLARED_NOT_BOUND = "declared-not-bound"
+    NOT_DECLARED = "not-declared"
+    UNPARSEABLE_CALLEE = "unparseable-callee"
     """First-party type declaring no such method: a static import attributed
     to the importing class, or an unbindable receiver type."""
 

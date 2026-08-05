@@ -1330,10 +1330,24 @@ object WadiExport {
       * receiver type could not be bound to one overload — never guessed. */
     val AmbiguousOverload = "ambiguous-overload"
 
-    /** First-party type in the CPG that declares no such method: a
-      * static-import attributed to the importing class, or a receiver type
-      * javasrc2cpg could not bind. */
+    /** The receiver's TYPE is a javasrc2cpg sentinel — it could not be bound at
+      * all, so nothing downstream can name the callee. */
     val UnresolvedReceiver = "unresolved-receiver"
+
+    /** The first-party type declares exactly this method, and the call still
+      * did not bind. The ACTIONABLE bucket (§5.2.11 T5): every other code here
+      * describes something analysis cannot see, this one describes something
+      * it saw and failed to connect. */
+    val DeclaredNotBound = "declared-not-bound"
+
+    /** A first-party type in the CPG that declares no such method — a static
+      * import attributed to the importing class (`ok(…)` from
+      * `ResponseEntity.ok` is the common one). Not a hole in the map: the
+      * callee is real and elsewhere. */
+    val NotDeclared = "not-declared"
+
+    /** The callee name carries no type qualifier to split on. */
+    val UnparseableCallee = "unparseable-callee"
   }
 
   /** Lombok annotations, grouped by what each ACTUALLY generates.
@@ -1477,7 +1491,7 @@ object WadiExport {
     * type qualifier is an unbound receiver, so say that.
     */
   private def unboundReasonOf(cpg: Cpg, call: Call): String =
-    splitCalleeName(call.methodFullName).fold(UnboundReason.UnresolvedReceiver) {
+    splitCalleeName(call.methodFullName).fold(UnboundReason.UnparseableCallee) {
       case (typeName, methodName) =>
         // The answer is a property of the (type, method) pair, not of the call
         // site, and the same pair recurs hundreds of times per service: the
@@ -1516,12 +1530,12 @@ object WadiExport {
         case Some(td) =>
           val declared = td.method.nameExact(methodName).l
           if (declared.sizeIs > 1) UnboundReason.AmbiguousOverload
-          else if (declared.nonEmpty) UnboundReason.UnresolvedReceiver
+          else if (declared.nonEmpty) UnboundReason.DeclaredNotBound
           else if (isLombokGenerated(td, methodName)) UnboundReason.LombokGenerated
           else if (isEnumTypeDecl(td) && (methodName == "values" || methodName == "valueOf"))
             UnboundReason.CompilerGenerated
           else if (inheritsMethodFromExternal(td, methodName)) UnboundReason.InheritedExternal
-          else UnboundReason.UnresolvedReceiver
+          else UnboundReason.NotDeclared
       }
 
   private def constructOf(cs: ControlStructure): String = cs.controlStructureType match {

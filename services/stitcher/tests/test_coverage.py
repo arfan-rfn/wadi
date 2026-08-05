@@ -446,3 +446,43 @@ def test_async_rooted_sites_are_split_out_of_the_unreachable_count() -> None:
     assert report.totals.unreachable_call_sites == 2
     assert report.totals.async_rooted_call_sites == 1
     assert report.totals.call_sites == 1
+
+
+def test_a_zero_says_whether_it_was_measured_or_never_exercised() -> None:
+    """§5.2.11 T6 — `denied: 0` is not evidence the denial path works.
+
+    On train-ticket-aitest `authorities`, `denied` and `withheld` all read 0.
+    Each is CORRECT — the corpus uses only hasAnyRole, has no denyAll route,
+    and every idiom in it is readable — but a reader cannot tell that from a
+    zero, and the role/authority split shipped in 0.6.0 is fixture-proven only.
+    """
+    snapshot = make_snapshot(make_system())
+    service = make_service(snapshot, "services/petstore")
+    # One plainly authenticated endpoint carrying a role and nothing else.
+    endpoint = make_endpoint(
+        snapshot,
+        service,
+        uri="/orders",
+        auth=EndpointAuth(
+            authenticated=True,
+            roles=["ADMIN"],
+            evidence=[
+                AuthEvidence(
+                    kind=AuthEvidenceKind.SECURITY_DSL,
+                    detail="/orders -> hasRole('ADMIN')",
+                    effect=AuthEffect.REQUIRE_ROLES,
+                    resolution=AuthResolution.RESOLVED,
+                    anchor=SourceAnchor(file="Sec.java", start_line=1, end_line=1),
+                )
+            ],
+        ),
+    )
+    section = build_auth_coverage([endpoint], [service])
+
+    assert section.authenticated == 1
+    # roles WERE exercised, so their presence is real evidence...
+    assert "roles" not in section.unexercised_vocabulary
+    # ...while these zeros are evidence of nothing, and say so.
+    assert "authorities" in section.unexercised_vocabulary
+    assert "denied" in section.unexercised_vocabulary
+    assert "withheld" in section.unexercised_vocabulary

@@ -67,11 +67,22 @@ class UnboundReasonConformanceTest extends AnyFunSuite with Matchers with Fixtur
     reasonFor("OrderSummary.describe") shouldBe None
   }
 
-  test("a static import attributed to the importing class is unresolved-receiver") {
-    // `unresolved-receiver` is also the classifier's fall-through, so without
-    // pinning it to a specific input a regression that collapsed everything
-    // into the default would still look covered by the blanket test below.
-    reasonFor("OrderController.ok") shouldBe Some("unresolved-receiver")
+  test("a static import attributed to the importing class is NOT a hole (T5)") {
+    // Sharpened by §5.2.11 T5. This used to read `unresolved-receiver`, which
+    // was also the classifier's fall-through — so the single largest bucket on
+    // train-ticket-aitest (682 calls) pooled four structurally different
+    // outcomes and told a reader nothing actionable about any of them.
+    // `ok(…)` from a static `ResponseEntity.ok` import is the benign case: the
+    // callee is real and lives elsewhere, so it is not a hole in the map.
+    reasonFor("OrderController.ok") shouldBe Some("not-declared")
+  }
+
+  test("the fall-through no longer hides behind a real answer (T5)") {
+    // The reason the split matters: with one code serving as both a finding
+    // and the default, a regression that collapsed every classification into
+    // the default would still have passed the blanket test below.
+    val reasons = calls.flatMap(_._2).toSet
+    reasons should not contain "unparseable-callee"
   }
 
   test("a setter asked for per FIELD is still lombok-generated") {

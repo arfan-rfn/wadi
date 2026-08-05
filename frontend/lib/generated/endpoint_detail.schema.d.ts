@@ -268,6 +268,9 @@ export type CalleeUnboundReason =
   | "third-party"
   | "ambiguous-overload"
   | "unresolved-receiver"
+  | "declared-not-bound"
+  | "not-declared"
+  | "unparseable-callee"
 /**
  * 1.12.0 (§5.4.2 T5): how many call sites in this endpoint's flow have no interior to open, by reason. This is the endpoint-level honesty surface — `analysis_coverage` sizes reachability system-wide and the coverage report's unresolved counts cover only cross-service edges, so intra-service unopenable calls were counted NOWHERE per endpoint. Derived from the ICFG, so read it with `icfg_available`: empty with a graph present means every call opens; empty WITHOUT one means not known. `icfg_schema_version` distinguishes a pre-1.12.0 graph, which carried no reasons to count.
  */

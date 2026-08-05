@@ -444,6 +444,17 @@ class AuthCoverageSection(WadiModel):
             "of the authenticated/withheld numbers"
         ),
     )
+    unexercised_vocabulary: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Auth vocabulary this snapshot contains ZERO instances of "
+            "(§5.2.11 T6). A zero counter is otherwise ambiguous: it may mean "
+            "wadi looked and the system genuinely has none, or that this "
+            "corpus never exercises the idiom and the zero is evidence of "
+            "nothing. Naming the second case stops a reader taking "
+            "`denied: 0` as proof the denial path works"
+        ),
+    )
 
 
 class CoverageReport(SnapshotEnvelope):
