@@ -1529,12 +1529,25 @@ object WadiExport {
         case None => UnboundReason.ThirdParty
         case Some(td) =>
           val declared = td.method.nameExact(methodName).l
-          if (declared.sizeIs > 1) UnboundReason.AmbiguousOverload
-          else if (declared.nonEmpty) UnboundReason.DeclaredNotBound
+          // A declaration matched by NAME is not evidence that source exists
+          // for the overload being called. `Response` is `@Data
+          // @AllArgsConstructor`: javasrc2cpg materializes one bodiless
+          // `<init>:void()` stub, every call site is the 3-arg generated
+          // constructor, and matching on the name alone let the stub stand in
+          // for it — pre-empting the Lombok branch below and reporting 585
+          // sites as a binding failure when nothing was ever there to bind to.
+          // `declared-not-bound` means "source exists and we failed to reach
+          // it", so it requires a BODY.
+          val implemented = declared.filter(_.body.astChildren.nonEmpty)
+          if (implemented.sizeIs > 1) UnboundReason.AmbiguousOverload
+          else if (implemented.sizeIs == 1) UnboundReason.DeclaredNotBound
           else if (isLombokGenerated(td, methodName)) UnboundReason.LombokGenerated
           else if (isEnumTypeDecl(td) && (methodName == "values" || methodName == "valueOf"))
             UnboundReason.CompilerGenerated
           else if (inheritsMethodFromExternal(td, methodName)) UnboundReason.InheritedExternal
+          // Declared, bodiless, and none of the generators explain it: an
+          // interface or abstract method whose implementation was not found.
+          else if (declared.nonEmpty) UnboundReason.DeclaredNotBound
           else UnboundReason.NotDeclared
       }
 

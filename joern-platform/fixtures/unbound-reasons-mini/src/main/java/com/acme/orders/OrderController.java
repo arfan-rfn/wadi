@@ -57,8 +57,13 @@ public class OrderController {
         // binds, the classifier must not invent a body.
         String formatted = formatter.format(id, all.length);
 
+        // A Lombok-generated constructor: no declaration exists for THIS
+        // overload, only a bodiless no-arg stub the classifier must not
+        // mistake for source (§5.2.11 T7).
+        Envelope envelope = new Envelope(1, label, formatted);
+
         // unresolved-receiver: `ok` is a static import of
         // ResponseEntity.ok, which javasrc2cpg attributes to THIS class.
-        return ok(label + upstream + formatted);
+        return ok(label + upstream + formatted + envelope.getMsg());
     }
 }

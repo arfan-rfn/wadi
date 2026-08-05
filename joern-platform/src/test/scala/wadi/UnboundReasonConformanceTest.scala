@@ -85,6 +85,15 @@ class UnboundReasonConformanceTest extends AnyFunSuite with Matchers with Fixtur
     reasons should not contain "unparseable-callee"
   }
 
+  test("a Lombok-generated CONSTRUCTOR is not a binding failure (T7)") {
+    // The shape that made 585 train-ticket-aitest calls read as
+    // `declared-not-bound`. `Envelope` is @Data @AllArgsConstructor: the CPG
+    // holds one bodiless `<init>:void()` stub while the call site is the
+    // 3-arg generated form, so matching a declaration by NAME let the stub
+    // stand in for it and pre-empted the Lombok branch entirely.
+    reasonFor("Envelope.<init>") shouldBe Some("lombok-generated")
+  }
+
   test("a setter asked for per FIELD is still lombok-generated") {
     // `OrderFormatter` carries @Getter at class level and @Setter on the
     // field. Reading only class-level annotations, a direction-aware check
