@@ -69,8 +69,8 @@ describe("route builders (§11 Phase 2.8)", () => {
 
   test("endpoint path carries workspace params", () => {
     expect(endpointPath("snap_1", "ep_a")).toBe("/s/snap_1/e/ep_a")
-    expect(endpointPath("snap_1", "ep_a", { node: "n1", lens: "source" })).toBe(
-      "/s/snap_1/e/ep_a?node=n1&lens=source"
+    expect(endpointPath("snap_1", "ep_a", { node: "n1", focus: "m_2" })).toBe(
+      "/s/snap_1/e/ep_a?node=n1&focus=m_2"
     )
   })
 })
@@ -87,8 +87,6 @@ describe("workspace params round-trip", () => {
       node: "n42",
       focus: "m_7",
       expand: ["m_1", "m_2"],
-      lens: "source" as const,
-      tab: "endpoint" as const,
       file: "src/A.java",
     }
     const query = serializeWorkspaceParams(state)
@@ -118,11 +116,13 @@ describe("workspace params round-trip", () => {
     expect(serializeWorkspaceParams(WORKSPACE_DEFAULTS).toString()).toBe("")
   })
 
-  test("invalid enum values clamp to defaults", () => {
-    const params = new URLSearchParams("lens=hologram&tab=nope")
-    const parsed = parseWorkspaceParams(params)
-    expect(parsed.lens).toBe("graph")
-    expect(parsed.tab).toBe("source")
+  test("unknown params are ignored rather than carried", () => {
+    // lens/tab were retired with the workspace tab strip (§5.2.9 UI); a stale
+    // bookmark carrying them must still parse to a clean default state.
+    const parsed = parseWorkspaceParams(
+      new URLSearchParams("lens=hologram&tab=nope&node=stmt:n1")
+    )
+    expect(parsed).toEqual({ ...WORKSPACE_DEFAULTS, node: "stmt:n1" })
   })
 })
 

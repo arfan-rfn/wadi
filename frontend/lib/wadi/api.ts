@@ -9,6 +9,8 @@ import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import type { ServiceSummary } from "@/lib/generated/service_summary.schema"
 import type { Snapshot } from "@/lib/generated/snapshot.schema"
 import type { SourceView } from "@/lib/generated/source_view.schema"
+import type { EndpointDependenciesView } from "@/lib/generated/endpoint_dependencies.schema"
+import type { SystemAuthView } from "@/lib/generated/system_auth.schema"
 import type { SystemGraphView } from "@/lib/generated/system_graph.schema"
 import type { System } from "@/lib/generated/system.schema"
 
@@ -62,6 +64,12 @@ export const wadiApi = {
     get<CoverageReport>(`/api/v1/snapshots/${seg(snapshotId)}/coverage`),
   systemGraph: (snapshotId: string) =>
     get<SystemGraphView>(`/api/v1/snapshots/${seg(snapshotId)}/graph`),
+  endpointDependencies: (snapshotId: string, serviceId: string) =>
+    get<EndpointDependenciesView>(
+      `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/endpoint-dependencies`
+    ),
+  systemAuth: (snapshotId: string) =>
+    get<SystemAuthView>(`/api/v1/snapshots/${seg(snapshotId)}/auth`),
   remoteEdges: (snapshotId: string, serviceId: string) =>
     get<RemoteEdgesView>(
       `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/remote-edges`

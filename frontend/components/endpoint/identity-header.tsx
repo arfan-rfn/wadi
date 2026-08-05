@@ -2,16 +2,12 @@
 
 // The workspace identity header (§11 Phase 2.8): who this page is about stays
 // visible at all times — verb + URI, service, auth state, graph stats — plus
-// the center-surface lens toggle and the raw-artifact escape hatch (the old
-// Raw ICFG tab is now a download link to the API route itself).
+// the raw-artifact escape hatch (a download link to the API route itself).
+//
+// The Graph/Source lens toggle that used to live here is gone: the workspace
+// shows both permanently (§5.2.9 UI), so there is nothing left to switch.
 import Link from "next/link"
-import {
-  ArrowLeft,
-  Download,
-  ShieldAlert,
-  ShieldCheck,
-  ShieldQuestion,
-} from "lucide-react"
+import { ArrowLeft, Download } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import {
@@ -20,32 +16,30 @@ import {
   type Icfg,
 } from "@/lib/wadi/api"
 import { rollupMethods, shortSignature } from "@/lib/wadi/rollup"
-import { LENSES, snapshotPath, type Lens } from "@/lib/wadi/routes"
+import { snapshotPath } from "@/lib/wadi/routes"
 import { Chip } from "@/components/ui/chip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MethodBadge } from "@/components/explorer/method-badge"
+import {
+  AuthChip,
+  authStateOf,
+  withheldReason,
+} from "@/components/shared/auth-chip"
 
-function AuthChip({ detail }: { detail: EndpointDetailView }) {
-  const authenticated = detail.endpoint.auth?.authenticated ?? null
-  if (authenticated === true)
-    return (
-      <Chip variant="outline">
-        <ShieldCheck aria-hidden />
-        auth required
-      </Chip>
-    )
-  if (authenticated === false)
-    return (
-      <Chip variant="outline">
-        <ShieldAlert aria-hidden />
-        no auth (evidenced)
-      </Chip>
-    )
+function EndpointAuthChip({ detail }: { detail: EndpointDetailView }) {
+  const unread = (detail.endpoint.auth?.evidence ?? [])
+    .filter((item) => item.active !== false && item.resolution === "opaque")
+    .map((item) => item.kind)
+  const state = authStateOf(
+    detail.endpoint.auth?.authenticated,
+    unread,
+    detail.endpoint.auth?.denied
+  )
   return (
-    <Chip variant="unknown">
-      <ShieldQuestion aria-hidden />
-      auth unknown
-    </Chip>
+    <AuthChip
+      state={state}
+      title={state === "withheld" ? withheldReason(unread) : undefined}
+    />
   )
 }
 
@@ -54,31 +48,37 @@ export function IdentityHeader({
   endpointId,
   detail,
   icfg,
-  lens,
-  onLens,
 }: {
   snapshotId: string
   endpointId: string
   detail: EndpointDetailView | undefined
   icfg: Icfg | undefined
-  lens: Lens
-  onLens: (lens: Lens) => void
 }) {
   const methods = icfg ? rollupMethods(icfg) : null
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-4 py-2.5">
+      {/* An actual button, not a breadcrumb crumb: it was reading as the
+          first segment of a path, so its job — LEAVING this endpoint — was
+          invisible. Border, label and icon now say "go back", and the service
+          name says where back goes. */}
       <Link
         href={snapshotPath(snapshotId, {
           view: "services",
           serviceId: detail?.service_id ?? null,
         })}
-        className="inline-flex items-center gap-1 text-2xs text-muted-foreground transition-colors hover:text-foreground"
-        title="Back to the overview"
+        className={cn(
+          "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-2xs transition-colors",
+          "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        )}
       >
-        <ArrowLeft className="size-3.5" aria-hidden />
-        {detail?.service_name ?? "overview"}
+        <ArrowLeft className="size-3.5 shrink-0" aria-hidden />
+        <span className="font-medium">Back</span>
+        {detail?.service_name ? (
+          <span className="hidden max-w-40 truncate text-muted-foreground md:inline">
+            to {detail.service_name}
+          </span>
+        ) : null}
       </Link>
-      <span className="text-muted-foreground/40">/</span>
       {detail ? (
         <span className="flex min-w-0 items-center gap-2">
           <MethodBadge method={detail.endpoint.http_method} />
@@ -94,7 +94,7 @@ export function IdentityHeader({
           {shortSignature(detail.endpoint.handler.signature)}
         </span>
       ) : null}
-      {detail ? <AuthChip detail={detail} /> : null}
+      {detail ? <EndpointAuthChip detail={detail} /> : null}
       {icfg ? (
         <span className="font-mono text-2xs text-muted-foreground">
           {icfg.nodes.length} nodes · {(icfg.edges ?? []).length} edges ·{" "}
@@ -105,28 +105,6 @@ export function IdentityHeader({
       ) : null}
 
       <span className="ml-auto flex items-center gap-2">
-        <div
-          role="tablist"
-          aria-label="Center surface"
-          className="flex items-center rounded-md border p-0.5"
-        >
-          {LENSES.map((id) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={lens === id}
-              onClick={() => onLens(id)}
-              className={cn(
-                "rounded px-2.5 py-1 text-xs font-medium capitalize transition-colors",
-                lens === id
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {id}
-            </button>
-          ))}
-        </div>
         <a
           href={wadiApiPaths.icfg(snapshotId, endpointId)}
           download={`${endpointId}-icfg.json`}

@@ -2,17 +2,13 @@
 
 // The endpoint workspace shell (§11 Phase 2.8): full-viewport, graph-first.
 // Owns the per-page store (fresh per endpoint — navigation resets it), the
-// URL mirror, and the identity header; the interior (rail | lens | inspector)
-// mounts inside.
+// URL mirror, and the identity header; the interior (call tree | flow |
+// source) mounts inside.
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { useEndpointDetail, useIcfg } from "@/lib/wadi/hooks"
-import {
-  parseWorkspaceParams,
-  writeWorkspaceParams,
-  type Lens,
-} from "@/lib/wadi/routes"
+import { parseWorkspaceParams, writeWorkspaceParams } from "@/lib/wadi/routes"
 
 import { IdentityHeader } from "./identity-header"
 import { WorkspaceInterior } from "./workspace-interior"
@@ -35,27 +31,21 @@ export function EndpointWorkspace({
     createWorkspaceStore(parseWorkspaceParams(searchParams))
   )
 
-  // Mirror the shareable subset back onto the URL. Lens flips push a history
-  // entry so browser Back leaves the Source lens before leaving the page.
-  useEffect(() => {
-    let lastLens: Lens = store.getState().lens
-    return store.subscribe((state) => {
-      const push = state.lens !== lastLens
-      lastLens = state.lens
-      writeWorkspaceParams(
-        {
+  // Mirror the shareable subset back onto the URL. Every write replaces now
+  // that the lens is gone — there is no in-page mode change left that a reader
+  // would expect browser Back to undo.
+  useEffect(
+    () =>
+      store.subscribe((state) => {
+        writeWorkspaceParams({
           node: state.selectedNodeId,
           focus: state.focusMethodId,
           expand: expandToParams(state.expand),
-          lens: state.lens,
-          tab: state.inspectorTab,
-          file:
-            state.lens === "source" ? (state.sourceTarget?.file ?? null) : null,
-        },
-        { push }
-      )
-    })
-  }, [store])
+          file: state.sourceTarget?.file ?? null,
+        })
+      }),
+    [store]
+  )
 
   // Browser back/forward must move the UI, not just the address bar: the
   // store hydrates from the URL at mount, so popstate has to re-apply it.
@@ -76,7 +66,6 @@ export function EndpointWorkspace({
     snapshotId,
     detail.data?.icfg_available === false ? null : endpointId
   )
-  const lens = useMemoLens(store)
 
   return (
     <WorkspaceStoreContext.Provider value={store}>
@@ -86,8 +75,6 @@ export function EndpointWorkspace({
           endpointId={endpointId}
           detail={detail.data}
           icfg={icfg.data}
-          lens={lens}
-          onLens={(next) => store.getState().setLens(next)}
         />
         {detail.isError ? (
           <p className="border-b bg-destructive/5 px-4 py-2 text-sm text-destructive">
@@ -107,11 +94,4 @@ export function EndpointWorkspace({
       </div>
     </WorkspaceStoreContext.Provider>
   )
-}
-
-/** Subscribe to just the lens (header toggle) without a context consumer. */
-function useMemoLens(store: ReturnType<typeof createWorkspaceStore>): Lens {
-  const [lens, setLens] = useState<Lens>(() => store.getState().lens)
-  useEffect(() => store.subscribe((state) => setLens(state.lens)), [store])
-  return lens
 }

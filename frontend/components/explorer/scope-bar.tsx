@@ -2,6 +2,10 @@
 
 // Scope switchers (the SaaS project-switcher pattern): system and snapshot
 // live in the chrome, not in the content flow — the panes get the canvas.
+//
+// These render INLINE inside `AppHeader` rather than owning a bar of their
+// own: two stacked chrome rows cost 7rem before any content and made the
+// reader correlate two lines to know what they were looking at.
 import {
   Check,
   ChevronsUpDown,
@@ -28,7 +32,6 @@ interface ScopeBarProps {
   snapshotId: string | null
   onSystem: (id: string) => void
   onSnapshot: (id: string) => void
-  summary?: string
 }
 
 export function ScopeBar(props: ScopeBarProps) {
@@ -36,7 +39,7 @@ export function ScopeBar(props: ScopeBarProps) {
   const snapshot = props.snapshots.find((s) => s.id === props.snapshotId)
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 px-4">
+    <div className="flex min-w-0 items-center gap-1">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className="gap-2 px-2 font-medium">
@@ -53,7 +56,7 @@ export function ScopeBar(props: ScopeBarProps) {
           {props.systems.length === 0 ? (
             <DropdownMenuItem disabled>
               No systems yet — run{" "}
-              <code className="ml-1 font-mono">wadi analyze .</code>
+              <code className="ml-1 rounded bg-muted px-1 font-mono">wadi analyze .</code>
             </DropdownMenuItem>
           ) : null}
           {props.systems.map((s) => (
@@ -142,12 +145,6 @@ export function ScopeBar(props: ScopeBarProps) {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-
-      {props.summary ? (
-        <span className="ml-auto hidden font-mono text-xs text-muted-foreground md:block">
-          {props.summary}
-        </span>
-      ) : null}
     </div>
   )
 }

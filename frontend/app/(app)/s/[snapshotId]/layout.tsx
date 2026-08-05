@@ -12,6 +12,7 @@ import {
   useSystems,
 } from "@/lib/wadi/hooks"
 import { snapshotPath } from "@/lib/wadi/routes"
+import { AppHeader } from "@/components/app-header"
 import { ScopeBar } from "@/components/explorer/scope-bar"
 
 export default function SnapshotLayout({
@@ -35,18 +36,22 @@ export default function SnapshotLayout({
   )
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] flex-col">
-      <ScopeBar
-        systems={systems.data ?? []}
-        snapshots={snapshots.data ?? []}
-        systemId={systemId}
-        snapshotId={snapshotId}
-        onSystem={(id) => router.push(`/?system=${id}`)}
-        onSnapshot={(id) => router.push(snapshotPath(id))}
+    <div className="flex h-dvh flex-col">
+      <AppHeader
         summary={
           services.data
             ? `${services.data.length} services · ${totalEndpoints} endpoints`
             : undefined
+        }
+        scope={
+          <ScopeBar
+            systems={systems.data ?? []}
+            snapshots={snapshots.data ?? []}
+            systemId={systemId}
+            snapshotId={snapshotId}
+            onSystem={(id) => router.push(`/?system=${id}`)}
+            onSnapshot={(id) => router.push(snapshotPath(id))}
+          />
         }
       />
       {snapshot.isError ? (

@@ -4,6 +4,12 @@
 // Source lens (one scroller, sticky file headers, a filterable file index) and
 // `SourceSnippet` is the anchor peek used by drill-ins — both share the same
 // shiki pipeline and line rendering, so code looks identical everywhere.
+// A flow touches several files, and they used to be concatenated into one
+// unbroken column of rules and gutters where no boundary said "a new file
+// starts here". Each file is now a CARD — its own edges, its own header, its
+// own collapsed state — numbered by the order the flow first reaches it. The
+// handler's file opens by itself; the rest open on click, or on their own when
+// a selection or a jump lands inside them (a closed file is never a dead end).
 // Source is fetched lazily on demand (§5.3); server-truncated windows page
 // honestly ("load more", never silence); generated variants are flagged.
 // The unit of disclosure is the METHOD (§11 M8): whole methods render,
@@ -24,9 +30,11 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
   ChevronsUpDown,
   CornerDownRight,
   Database,
+  FileCode2,
   Globe,
   MailWarning,
   WrapText,
@@ -36,6 +44,7 @@ import { useTheme } from "next-themes"
 import { QUERY_KEYS } from "@/config/query-keys"
 import type { SourceAnchor } from "@/lib/generated/icfg.schema"
 import { cn } from "@/lib/utils"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import type { Icfg, SourceView } from "@/lib/wadi/api"
 import { wadiApi } from "@/lib/wadi/api"
 import { tokenizeLines, type HighlightToken } from "@/lib/wadi/highlight"
@@ -44,7 +53,9 @@ import { shortSignature } from "@/lib/wadi/rollup"
 import {
   buildSourceMap,
   fileBasename,
+  fileDirname,
   isTouched,
+  shortDirectory,
   type CallLink,
   type LineMark,
   type SourceFileSection,
@@ -141,6 +152,59 @@ function TokenLine({
   )
 }
 
+/**
+ * Which edges of a horizontal scroller have content past them. The tab strip
+ * hides its native scrollbar (chrome under chrome — it read as a second rule
+ * competing with the tabs' own bottom edge), so the fact that there is more to
+ * see has to be carried by the strip itself, the way an editor does it.
+ */
+function useOverflowEdges<T extends HTMLElement>(): [
+  React.RefObject<T | null>,
+  boolean,
+  boolean,
+] {
+  const ref = useRef<T>(null)
+  const [edges, setEdges] = useState({ start: false, end: false })
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    const update = () => {
+      const max = node.scrollWidth - node.clientWidth
+      setEdges({ start: node.scrollLeft > 1, end: node.scrollLeft < max - 1 })
+    }
+    update()
+    node.addEventListener("scroll", update, { passive: true })
+    // Tabs appear and the panel resizes; neither fires `scroll`.
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update)
+    observer?.observe(node)
+    for (const child of node.children) observer?.observe(child)
+    return () => {
+      node.removeEventListener("scroll", update)
+      observer?.disconnect()
+    }
+  }, [])
+  // A tuple, not an object: bundling the ref with plain booleans reads to the
+  // linter as reaching into a ref during render every time the flags are used.
+  return [ref, edges.start, edges.end]
+}
+
+// Written out rather than composed: Tailwind reads class names out of the
+// SOURCE TEXT, so a template-built arbitrary value compiles to nothing.
+const FADE_BOTH =
+  "[mask-image:linear-gradient(to_right,transparent,black_1.5rem,black_calc(100%_-_1.5rem),transparent)]"
+const FADE_START =
+  "[mask-image:linear-gradient(to_right,transparent,black_1.5rem)]"
+const FADE_END =
+  "[mask-image:linear-gradient(to_right,black_calc(100%_-_1.5rem),transparent)]"
+
+function fadeMask(start: boolean, end: boolean): string | undefined {
+  if (start && end) return FADE_BOTH
+  if (start) return FADE_START
+  if (end) return FADE_END
+  return undefined
+}
+
 // --- snippet mode (drill-ins: auth evidence, call sites, anomaly samples) ---
 
 export function SourceSnippet({
@@ -183,7 +247,7 @@ export function SourceSnippet({
         {anchor.file}:{anchor.start_line}
       </button>
       {open && (
-        <div className="mt-1.5 overflow-x-auto rounded-md border bg-muted/40">
+        <div className="mt-1.5 overflow-x-auto rounded-md border bg-muted/40 [scrollbar-color:var(--color-muted-foreground)_transparent] [scrollbar-width:thin]">
           {source.isLoading && (
             <div className="space-y-1 p-2">
               <Skeleton className="h-3 w-3/4" />
@@ -287,6 +351,26 @@ export function SourceViewer({
   const [wrap, setWrap] = useState(() => readWrapPreference())
   useEffect(() => writeWrapPreference(wrap), [wrap])
   const [onlyFile, setOnlyFile] = useState<string | null>(null)
+  const [tabsRef, tabsAtStart, tabsAtEnd] = useOverflowEdges<HTMLDivElement>()
+
+  // Which file cards are open. Closed is a real state, not a lazy one: a
+  // closed card fetches nothing and renders no code, so a ten-file endpoint
+  // opens as ten readable headers instead of ten screens of concatenated text.
+  const [openFiles, setOpenFiles] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const openFile = useCallback((file: string) => {
+    setOpenFiles((prev) =>
+      prev.has(file) ? prev : new Set(prev).add(file)
+    )
+  }, [])
+  const toggleFile = useCallback((file: string) => {
+    setOpenFiles((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(file)) next.add(file)
+      return next
+    })
+  }, [])
 
   const jumpTo = useCallback((file: string, line: number) => {
     jumpSeq.current += 1
@@ -304,6 +388,19 @@ export function SourceViewer({
   useEffect(() => {
     if (targetFile && onlyFile && targetFile !== onlyFile) setOnlyFile(null)
   }, [targetFile, onlyFile])
+  // …and neither must a closed card. Same rule the folds follow: whatever the
+  // graph selects is opened, never merely pointed at.
+  useEffect(() => {
+    if (targetFile) openFile(targetFile)
+  }, [targetFile, openFile])
+
+  // The handler's file — flow order 0 — is what the reader came for, so it is
+  // open on arrival. Keyed on the file itself: re-running the effect for a new
+  // endpoint must not re-open a card this reader has since closed.
+  const entryFile = sections[0]?.file
+  useEffect(() => {
+    if (entryFile) openFile(entryFile)
+  }, [entryFile, openFile])
 
   const visibleSections = useMemo(
     () => (onlyFile ? sections.filter((s) => s.file === onlyFile) : sections),
@@ -337,69 +434,140 @@ export function SourceViewer({
     )
   }
 
+  const allOpen = sections.every((section) => openFiles.has(section.file))
+
   return (
     // `min-w-0`: without it a flex column is sized by its widest child, so a
     // long line of code would stretch the whole panel past its slot and take
     // the tab bar and file index off-screen with it.
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <nav className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
-        {/* The chips FILTER rather than scroll. Four files concatenated into
-            one column is what made this panel feel like a document dump; being
-            able to say "just this file" is the cheapest way out of it. */}
-        <button
-          onClick={() => setOnlyFile(null)}
+      {/* Editor-style file tabs: the shape every IDE uses, so the affordance
+          needs no learning. They FILTER rather than scroll — four files
+          concatenated into one column is what made this panel read as a
+          document dump, and "just this file" is the cheapest way out. The
+          active tab is joined to the content below by a flush bottom edge,
+          which is what makes a tab read as a tab rather than a chip. */}
+      <div className="flex shrink-0 items-end gap-2 border-b bg-muted/30 pr-1.5 pl-1.5">
+        <div
+          ref={tabsRef}
+          role="tablist"
+          aria-label="Source files"
           className={cn(
-            "rounded-md border px-2 py-0.5 text-2xs transition-colors",
-            onlyFile === null
-              ? "border-primary/40 bg-primary/10 text-foreground"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            "flex min-w-0 flex-1 items-end gap-px overflow-x-auto pt-1.5",
+            // The strip's own scrollbar was chrome under chrome — a second
+            // horizontal rule right beneath the tabs' bottom edge, for a row
+            // that scrolls fine by wheel and drag. Editors hide it and let the
+            // fading edge say "there is more"; so does this.
+            "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+            fadeMask(tabsAtStart, tabsAtEnd)
           )}
         >
-          all {sections.length} file{sections.length === 1 ? "" : "s"}
-        </button>
-        {sections.map((section) => (
           <button
-            key={section.file}
-            onClick={() => {
-              setOnlyFile(section.file)
-              jumpTo(section.file, section.shown[0]?.[0] ?? 1)
-            }}
+            role="tab"
+            type="button"
+            aria-selected={onlyFile === null}
+            onClick={() => setOnlyFile(null)}
             className={cn(
-              "rounded-md border px-2 py-0.5 font-mono text-2xs transition-colors",
-              onlyFile === section.file
+              "-mb-px shrink-0 cursor-pointer rounded-t-md border border-b-0 px-2.5 py-1 text-2xs transition-colors",
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              onlyFile === null
+                ? "border-border bg-background text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            All {sections.length}
+          </button>
+          {sections.map((section) => (
+            <button
+              key={section.file}
+              role="tab"
+              type="button"
+              aria-selected={onlyFile === section.file}
+              onClick={() => {
+                setOnlyFile(section.file)
+                openFile(section.file)
+                jumpTo(section.file, section.shown[0]?.[0] ?? 1)
+              }}
+              className={cn(
+                "-mb-px flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 py-1 font-mono text-2xs transition-colors",
+                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                onlyFile === section.file
+                  ? "border-border bg-background text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+              title={section.file}
+            >
+              <FileCode2 aria-hidden className="size-3 shrink-0 opacity-70" />
+              {fileBasename(section.file)}
+            </button>
+          ))}
+        </div>
+        {/* Outside the scroller: view controls that scroll away with the tabs
+            are controls you cannot find. */}
+        <div className="flex shrink-0 items-center gap-1 pb-1">
+          {onlyFile === null && sections.length > 1 ? (
+            <button
+              type="button"
+              onClick={() =>
+                setOpenFiles(
+                  allOpen ? new Set() : new Set(sections.map((s) => s.file))
+                )
+              }
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-2xs text-muted-foreground transition-colors",
+                "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              )}
+              title={
+                allOpen
+                  ? "Collapse every file to its header"
+                  : "Open every file in the flow"
+              }
+            >
+              {allOpen ? (
+                <ChevronsDownUp className="size-3" aria-hidden />
+              ) : (
+                <ChevronsUpDown className="size-3" aria-hidden />
+              )}
+              {allOpen ? "collapse" : "expand"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setWrap((v) => !v)}
+            aria-pressed={wrap}
+            className={cn(
+              "inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-2xs transition-colors",
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              wrap
                 ? "border-primary/40 bg-primary/10 text-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
-            title={section.file}
+            title="Wrap long lines instead of scrolling sideways"
           >
-            {fileBasename(section.file)}
-          </button>
-        ))}
-        <button
-          onClick={() => setWrap((v) => !v)}
-          aria-pressed={wrap}
-          className={cn(
-            "ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-2xs transition-colors",
+            <WrapText className="size-3" aria-hidden />
             wrap
-              ? "border-primary/40 bg-primary/10 text-foreground"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-          title="Wrap long lines instead of scrolling sideways"
-        >
-          <WrapText className="size-3" aria-hidden />
-          wrap
-        </button>
-      </nav>
+          </button>
+        </div>
+      </div>
       {/* ONE scroller for every file — sticky headers live in normal flow, so
-          there is no nested scrolling anywhere in the lens. */}
-      <div
-        ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+          there is no nested scrolling anywhere in the lens. `viewportRef` hands
+          the real scrolling element to the IntersectionObserver that lazy-loads
+          each file: Radix nests it below Root, so a ref on the Root would watch
+          the wrong box and every section would report itself visible. */}
+      <ScrollArea
+        viewportRef={scrollRef}
+        // The muted ground is what makes each file card read as a raised
+        // object rather than as another band in a continuous column.
+        className="min-h-0 flex-1 bg-muted/25"
+        viewportClassName="[&>div]:!block"
       >
         {visibleSections.map((section) => (
           <SourceFileView
             key={section.file}
             section={section}
+            fileCount={sections.length}
+            expanded={openFiles.has(section.file)}
+            onToggleExpanded={() => toggleFile(section.file)}
             snapshotId={snapshotId}
             serviceId={serviceId}
             active={active}
@@ -414,13 +582,16 @@ export function SourceViewer({
             onLayoutShift={onLayoutShift}
           />
         ))}
-      </div>
+      </ScrollArea>
     </div>
   )
 }
 
 function SourceFileView({
   section,
+  fileCount,
+  expanded,
+  onToggleExpanded,
   snapshotId,
   serviceId,
   active,
@@ -435,6 +606,10 @@ function SourceFileView({
   onLayoutShift,
 }: {
   section: SourceFileSection
+  /** How many files the whole flow touches — the badge's denominator. */
+  fileCount: number
+  expanded: boolean
+  onToggleExpanded: () => void
   snapshotId: string
   serviceId: string
   active: boolean
@@ -458,7 +633,7 @@ function SourceFileView({
   // must not re-fetch.
   const [seen, setSeen] = useState(false)
   useEffect(() => {
-    if (seen || !active) return
+    if (seen || !active || !expanded) return
     const node = sectionRef.current
     if (!node) return
     // No IntersectionObserver (jsdom, very old browsers): load eagerly. The
@@ -476,10 +651,12 @@ function SourceFileView({
     )
     observer.observe(node)
     return () => observer.disconnect()
-  }, [seen, active, scrollRef])
+  }, [seen, active, expanded, scrollRef])
   // A jump or a selection targets THIS file, so it is wanted whether or not it
-  // has been scrolled near — that is the click that asked for it.
-  const wanted = active && (seen || jump !== null || selection !== null)
+  // has been scrolled near — that is the click that asked for it. A closed card
+  // is wanted by nobody: it fetches nothing until it is opened.
+  const wanted =
+    active && expanded && (seen || jump !== null || selection !== null)
   const first = useSourceFile(wanted, snapshotId, serviceId, section.file)
   const [extra, setExtra] = useState<SourceView[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
@@ -682,36 +859,117 @@ function SourceFileView({
     return map
   }, [section.callLinks])
 
+  const directory = fileDirname(section.file)
+
   return (
-    <section ref={sectionRef} className="min-w-0 border-b last:border-b-0">
-      {/* Sticky within the ONE scroller — the current file stays named while
-          its code scrolls (context is never lost). */}
+    // One card per file: its own edges on a muted ground, so "a different file
+    // starts here" is carried by the shape and not left to the reader to infer
+    // from a change of path text. `overflow-clip` rather than `overflow-hidden`
+    // — hidden would make this box the sticky header's scrollport and the
+    // header would never stick at all.
+    <section
+      ref={sectionRef}
+      data-source-card={section.file}
+      className={cn(
+        "mx-2 mb-2 min-w-0 overflow-clip rounded-lg border bg-background shadow-xs first:mt-2",
+        !expanded && "bg-background/60"
+      )}
+    >
+      {/* Sticky within the ONE scroller, and bounded by this card — the current
+          file stays named while its code scrolls, then hands over to the next
+          file's header instead of stacking on top of it. */}
       <header
         ref={headerRef}
-        className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b bg-background/95 px-3 py-1.5 backdrop-blur"
+        className={cn(
+          // A CONTAINER, not a media query: this panel is user-resizable, so
+          // what fits is a fact about the panel's width and nothing to do with
+          // the viewport's.
+          "@container sticky top-0 z-10 bg-muted/60 backdrop-blur",
+          expanded && "border-b"
+        )}
       >
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate font-mono text-xs">{section.file}</span>
-          {currentMethod ? (
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          aria-expanded={expanded}
+          className={cn(
+            "flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left transition-colors",
+            "hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+          )}
+        >
+          <ChevronDown
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              !expanded && "-rotate-90"
+            )}
+          />
+          {/* Files are listed in the order the flow first reaches them, so the
+              position is a fact about the flow, not a row number. */}
+          <span
+            className="shrink-0 rounded border border-border/70 bg-background px-1 font-mono text-[10px] text-muted-foreground tabular-nums"
+            title={`File ${section.order + 1} of ${fileCount}, in the order this endpoint's flow first reaches them`}
+          >
+            {section.order + 1}
+          </span>
+          <FileCode2
+            aria-hidden
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
+          <span
+            className="truncate font-mono text-xs font-medium"
+            title={section.file}
+          >
+            {fileBasename(section.file)}
+          </span>
+          {expanded && currentMethod ? (
             // The enclosing method, pinned: scrolling into the middle of a file
             // must never leave the reader asking which method they are in.
-            <span className="shrink-0 truncate font-mono text-2xs text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
               › {shortSignature(currentMethod)}
             </span>
-          ) : null}
-        </span>
-        <span className="shrink-0 font-mono text-2xs text-muted-foreground">
-          {section.methods.length} method
-          {section.methods.length === 1 ? "" : "s"} · {section.touched.length}{" "}
-          executed region
-          {section.touched.length === 1 ? "" : "s"}
-          {totalLines ? ` · ${totalLines} lines` : ""}
-          {/* Say what is NOT on screen. The panel shows whole methods, so a
-              header reporting only the file's length reads as a claim to be
-              showing all of it (P10). */}
-          {rowModel.foldedCount > 0 ? ` · ${rowModel.foldedCount} folded` : ""}
-        </span>
+          ) : (
+            <span className="flex-1" />
+          )}
+        </button>
+        <div className="flex items-baseline gap-2 px-2 pb-1.5 pl-[1.6rem] font-mono text-[10px] text-muted-foreground/70">
+          {directory ? (
+            <span className="min-w-0 flex-1 truncate" title={directory}>
+              {shortDirectory(directory)}
+            </span>
+          ) : (
+            <span className="flex-1" />
+          )}
+          <span className="shrink-0">
+            {section.methods.length} method
+            {section.methods.length === 1 ? "" : "s"}
+            {/* Dropped first when the panel is narrow AND there is a fuller
+                set to fall back on — a squeezed row that truncates mid-word
+                tells the reader nothing. On a closed card, where nothing has
+                been fetched yet, this is the only stat besides the method
+                count, so it stays at every width. */}
+            <span className={totalLines ? "hidden @[26rem]:inline" : undefined}>
+              {" · "}
+              {section.touched.length} executed
+            </span>
+            {/* Only known once the file is fetched — a closed card says what
+                the graph knows, not what it has not looked at. */}
+            {totalLines ? (
+              <span className="hidden @[20rem]:inline">
+                {" · "}
+                {totalLines} lines
+              </span>
+            ) : null}
+            {/* Say what is NOT on screen, at every width. The panel shows whole
+                methods, so a header reporting only the file's length reads as a
+                claim to be showing all of it (P10). */}
+            {rowModel.foldedCount > 0 ? ` · ${rowModel.foldedCount} folded` : ""}
+          </span>
+        </div>
       </header>
+
+      {!expanded ? null : (
+        <>
 
       {first.data?.variant && first.data.variant !== "original" ? (
         <p className="border-b bg-amber-500/10 px-3 py-1 text-2xs text-amber-700 dark:text-amber-400">
@@ -743,6 +1001,9 @@ function SourceFileView({
             // and truncating it with an ellipsis is what made this panel feel
             // like a preview instead of a source view.
             "overflow-x-auto font-mono text-xs leading-[21px]",
+            // Thin themed bar rather than the OS default: a full-width native
+            // gutter under every code block was the loudest chrome on screen.
+            "[scrollbar-color:var(--color-muted-foreground)_transparent] [scrollbar-width:thin]",
             virtualize && "relative"
           )}
           style={
@@ -825,6 +1086,8 @@ function SourceFileView({
           ) : null}
         </div>
       ) : null}
+        </>
+      )}
     </section>
   )
 }
@@ -983,25 +1246,26 @@ function SourceLine({
         selectable && "cursor-pointer hover:bg-muted/60"
       )}
     >
-      {/* Selection accent: a solid rule down the left edge of the region, so
-          a multi-line method body reads as one block rather than as a wash. */}
-      <span
-        className={cn(
-          "sticky left-0 z-[1] h-full w-[2px] shrink-0",
-          inSelection ? "bg-primary" : "bg-transparent"
-        )}
-      />
+      {/* Selection groups through the GUTTER — a tinted number column with the
+          numbers themselves in the accent — not through a coloured rule down
+          the left edge. A stripe was one more vertical line in a panel already
+          full of them, and it is not how this UI marks selection anywhere else. */}
       <span
         className={cn(
           // Pinned: scrolling a long line sideways must not cost you the
-          // line numbers, which are how the gutter marks stay readable.
-          "sticky left-[2px] z-[1] w-11 shrink-0 select-none bg-background pr-2 text-right",
+          // line numbers, which are how the gutter marks stay readable. The
+          // opaque base is what occludes the code sliding under it, so the
+          // selection tint has to ride on top of it rather than replace it.
+          "sticky left-0 z-[1] w-11 shrink-0 select-none bg-background pr-2 text-right",
           inSelection
-            ? "text-primary/80"
+            ? "font-medium text-primary"
             : "text-muted-foreground/60 group-hover:text-muted-foreground"
         )}
       >
-        {lineNo}
+        {inSelection ? (
+          <span aria-hidden className="absolute inset-0 bg-primary/15" />
+        ) : null}
+        <span className="relative">{lineNo}</span>
       </span>
       {/* The mark strip doubles as the "this line is on the graph" tell: only
           ~7% of a file carries an ICFG node, and without a visible difference a

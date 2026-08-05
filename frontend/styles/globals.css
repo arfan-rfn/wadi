@@ -179,6 +179,20 @@
   --flow-loop: oklch(0.58 0.07 230);
   --flow-call: oklch(0.55 0.03 255);
   --flow-remote: oklch(0.55 0.09 25);
+
+  /* Role hue wheel (§5.2.9 UI): a role's swatch is derived from its NAME, so
+     ADMIN is the same colour everywhere. Hues are spaced to stay separable at
+     7px, and deliberately avoid the HTTP-method hues (155 / 240 / 75 / 22) —
+     a role dot must never read as another verb badge. Chroma is held below the
+     method chips' so the one saturated element in the UI stays the verb. */
+  --role-0: oklch(0.55 0.15 350);
+  --role-1: oklch(0.52 0.14 285);
+  --role-2: oklch(0.52 0.11 200);
+  --role-3: oklch(0.52 0.12 130);
+  --role-4: oklch(0.55 0.12 60);
+  --role-5: oklch(0.54 0.15 310);
+  --role-6: oklch(0.52 0.14 258);
+  --role-7: oklch(0.56 0.14 35);
 }
 
 /*
@@ -225,7 +239,17 @@
   --flow-exception: oklch(0.72 0.08 300);
   --flow-loop: oklch(0.74 0.08 230);
   --flow-call: oklch(0.65 0.03 255);
-  --flow-remote: oklch(0.72 0.1 25);
+  --flow-remote: oklch(0.72 0.11 25);
+
+  /* Lifted for legibility on the dark ground; same hues, same order. */
+  --role-0: oklch(0.74 0.14 350);
+  --role-1: oklch(0.72 0.13 285);
+  --role-2: oklch(0.76 0.1 200);
+  --role-3: oklch(0.76 0.12 130);
+  --role-4: oklch(0.79 0.12 60);
+  --role-5: oklch(0.73 0.14 310);
+  --role-6: oklch(0.72 0.13 258);
+  --role-7: oklch(0.75 0.13 35);
 }
 
 /*
@@ -243,7 +267,6 @@
   }
 }
 
-/* MDX code highlight colors and classes */
 h1,
 h2,
 h3,
@@ -251,66 +274,17 @@ h4 {
   text-wrap: balance;
 }
 
-pre {
-  background-color: #16161e;
-  border-radius: 0.5rem;
-  overflow-x: auto;
-  padding: 1rem;
-  margin: 1.5rem 0;
-  line-height: 1;
-}
-
-pre::-webkit-scrollbar {
-  display: none;
-}
-
-pre {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-code {
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 14px;
-  padding: 0.2em 0.4em;
-  border-radius: 0.3em;
-  background-color: var(--color-gray-100);
-}
-
-pre code {
-  background-color: transparent;
-  padding: 0;
-  border: none;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-pre code > span .sh__token--identifier {
-  color: white !important;
-}
-
-code:not(pre code) span {
-  font-weight: 500;
-  color: black !important;
-}
-
-@media (prefers-color-scheme: dark) {
-  code {
-    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-    font-size: 14px;
-    padding: 0.2em 0.4em;
-    border-radius: 0.3em;
-    background-color: var(--color-zinc-800);
-  }
-
-  code:not(pre code) span {
-    color: var(--color-zinc-100) !important;
-  }
-}
-
-pre code span {
-  font-weight: 500;
-}
+/*
+ * The template's MDX code-block styling used to live here and was deleted
+ * (2026-08-05). It was unscoped — `pre`, `code`, and `code:not(pre code) span`
+ * with no prose wrapper — so it reached every `<code>` the source viewer
+ * renders and painted them with a pill background, a 14px override, and
+ * `color: black !important`, which beat shiki's inline per-token colours.
+ * Its dark variant keyed off `@media (prefers-color-scheme: dark)` while this
+ * app themes by the `.dark` CLASS, so a reader on a light OS who chose the
+ * dark theme got black text on a near-white pill over dark code. There is no
+ * MDX in this app; the rules had nothing left to style but the bug.
+ */
 
 hr {
   color: var(--color-gray-200);

@@ -7,7 +7,7 @@
 import { createContext, useContext } from "react"
 import { createStore, useStore, type StoreApi } from "zustand"
 
-import type { InspectorTab, Lens, WorkspaceParams } from "@/lib/wadi/routes"
+import type { WorkspaceParams } from "@/lib/wadi/routes"
 
 /** Expanded-method state. `default` = the entry handler only (resolved
  * against the ICFG by the canvas); explicit sets round-trip the URL. */
@@ -30,8 +30,6 @@ export interface WorkspaceState {
   expand: ExpandState
   expandedRuns: ReadonlySet<string>
   focusMethodId: string | null
-  lens: Lens
-  inspectorTab: InspectorTab
   sourceTarget: SourceTarget | null
   search: string
   traceEnabled: boolean
@@ -46,8 +44,6 @@ export interface WorkspaceState {
   setExplicitExpand: (ids: Iterable<string>) => void
   toggleRun: (id: string) => void
   setFocus: (methodId: string | null) => void
-  setLens: (lens: Lens) => void
-  setInspectorTab: (tab: InspectorTab) => void
   revealSource: (file: string, line: number) => void
   setSearch: (query: string) => void
   setTraceEnabled: (enabled: boolean) => void
@@ -84,8 +80,6 @@ export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
     expand: expandFromParams(initial.expand),
     expandedRuns: new Set<string>(),
     focusMethodId: initial.focus,
-    lens: initial.lens,
-    inspectorTab: initial.tab,
     sourceTarget: initial.file
       ? { file: initial.file, line: 1, token: 0 }
       : null,
@@ -97,20 +91,10 @@ export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
     // `sourceSelection`), so a click on the graph IS the graph→source link —
     // no facts panel in between, no "open in source" step. Ghosts are the one
     // exception: they stand for a call leaving the system and have no source
-    // of their own, so they keep the Selection tab, the only place their
-    // target resolution, confidence, and provenance are stated (P10).
-    // The policy lives here, not in the canvas, so the call tree, the canvas,
-    // and call links inside source all behave the same way.
-    selectNode: (id) =>
-      set((state) => ({
-        selectedNodeId: id,
-        inspectorTab:
-          id === null
-            ? state.inspectorTab
-            : id.startsWith("ghost:")
-              ? ("selection" as const)
-              : ("source" as const),
-      })),
+    // of their own. Their target resolution, confidence and provenance are
+    // stated in the source header's selection strip, which is now the single
+    // place a selection explains itself (P10).
+    selectNode: (id) => set({ selectedNodeId: id }),
     hoverNode: (id) => set({ hoveredNodeId: id }),
     toggleMethod: (id, resolvedExpanded) =>
       set(() => {
@@ -132,15 +116,10 @@ export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
         return { expandedRuns: runs }
       }),
     setFocus: (methodId) => set({ focusMethodId: methodId }),
-    setLens: (lens) => set({ lens }),
-    setInspectorTab: (tab) => set({ inspectorTab: tab }),
     revealSource: (file, line) =>
       set((state) => ({
-        // Show the code in the inspector's Source tab rather than swapping the
-        // centre out from under the reader: source is always on screen now, so
-        // "open in source" means "point it at this", not "hide the graph". The
-        // lens toggle remains the explicit "give code the full width" control.
-        inspectorTab: "source" as const,
+        // Source is always on screen, so "open in source" means "point it at
+        // this" — never swapping the centre out from under the reader.
         sourceTarget: {
           file,
           line,
@@ -154,8 +133,6 @@ export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
         selectedNodeId: params.node,
         focusMethodId: params.focus,
         expand: expandFromParams(params.expand),
-        lens: params.lens,
-        inspectorTab: params.tab,
         // Re-scroll only when the URL names a different file than the one
         // already shown; otherwise keep the current line.
         sourceTarget:

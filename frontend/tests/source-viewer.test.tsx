@@ -94,7 +94,7 @@ describe("SourceViewer honesty states (§11 Phase 2.8)", () => {
     )
     expect(getAllByText(/FlowController\.java/).length).toBeGreaterThan(0)
     // The chips filter now; "all N files" is the unfiltered state.
-    expect(await findByText(/all 1 file/)).toBeInTheDocument()
+    expect(await findByText(/^All 1$/)).toBeInTheDocument()
     // Shiki may split the line into token spans — match on textContent.
     const codeLines = await findAllByText(
       (_, element) =>
@@ -117,8 +117,11 @@ describe("SourceViewer honesty states (§11 Phase 2.8)", () => {
     const { container } = renderWithQuery(
       <SourceViewer icfg={icfg} snapshotId="snap_1" serviceId="svc_1" active />
     )
+    // Counts the ScrollArea viewport (the real scrolling element) as well as
+    // any hand-rolled vertical scroller — the invariant is ONE of them, never
+    // a scroller nested inside a scroller, whichever mechanism provides it.
     const scrollers = container.querySelectorAll(
-      '[class*="overflow-y-auto"], [class*="overflow-auto"]'
+      '[data-radix-scroll-area-viewport], [class*="overflow-y-auto"], [class*="overflow-auto"]'
     )
     expect(scrollers.length).toBe(1)
   })
@@ -205,6 +208,159 @@ describe("SourceSnippet (drill-in peek)", () => {
         (element?.textContent?.includes("if (n < 0)") ?? false)
     )
     expect(highlighted.length).toBeGreaterThan(0)
+  })
+})
+
+// --- multiple files: one card each, opened on purpose ------------------------
+
+const CALLEE_FILE = "src/main/java/com/acme/FlowService.java"
+
+const twoFileIcfg = {
+  ...icfg,
+  nodes: [
+    ...icfg.nodes,
+    {
+      id: "m2:entry",
+      kind: "entry",
+      source_text: "<entry>",
+      method: { id: "m_2", signature: "com.acme.FlowService.run" },
+      anchor: {
+        file: CALLEE_FILE,
+        start_line: 1,
+        end_line: 1,
+        variant: "original",
+      },
+    },
+    {
+      id: "m2:n1",
+      kind: "call",
+      source_text: "repo.save(x)",
+      method: { id: "m_2", signature: "com.acme.FlowService.run" },
+      anchor: {
+        file: CALLEE_FILE,
+        start_line: 2,
+        end_line: 2,
+        variant: "original",
+      },
+    },
+    {
+      id: "m2:exit",
+      kind: "exit",
+      source_text: "<exit>",
+      method: { id: "m_2", signature: "com.acme.FlowService.run" },
+      anchor: {
+        file: CALLEE_FILE,
+        start_line: 3,
+        end_line: 3,
+        variant: "original",
+      },
+    },
+  ],
+} as unknown as Icfg
+
+/** Answers per file, so a test can tell WHICH file was fetched. */
+function stubFetchByFile(bodies: Record<string, unknown>) {
+  const spy = vi.fn(async (url: string) => {
+    const file = new URL(url, "http://localhost").searchParams.get("file") ?? ""
+    return { ok: true, status: 200, json: async () => bodies[file] ?? {} }
+  })
+  vi.stubGlobal("fetch", spy)
+  return spy
+}
+
+const window3 = (file: string, content: string) => ({
+  file,
+  start_line: 1,
+  end_line: 3,
+  variant: "original",
+  content,
+  total_lines: 3,
+  truncated: false,
+})
+
+const fetchedFiles = (spy: ReturnType<typeof stubFetchByFile>) =>
+  spy.mock.calls.map(
+    ([url]) => new URL(url, "http://localhost").searchParams.get("file") ?? ""
+  )
+
+describe("a flow's files are cards, not one continuous column", () => {
+  const bodies = {
+    [FILE]: window3(FILE, "class FlowController {\n  int go;\n}\n"),
+    [CALLEE_FILE]: window3(CALLEE_FILE, "class FlowService {\n  int run;\n}\n"),
+  }
+
+  /** The card's disclosure control — `data-source-card` is what separates a
+   *  file's own header from the tab that filters to it. */
+  const cardToggle = (container: HTMLElement, file: string) =>
+    container.querySelector<HTMLButtonElement>(
+      `[data-source-card="${file}"] button[aria-expanded]`
+    )
+
+  const renderTwo = (selection?: {
+    file: string
+    startLine: number
+    endLine: number
+    focusLine: number
+  }) =>
+    renderWithQuery(
+      <SourceViewer
+        icfg={twoFileIcfg}
+        snapshotId="snap_1"
+        serviceId="svc_1"
+        active
+        selection={selection}
+      />
+    )
+
+  test("every touched file gets its own card", () => {
+    stubFetchByFile(bodies)
+    const { container } = renderTwo()
+    // A closed card is still on screen and still says what it holds — that is
+    // the point of boxing them rather than concatenating their code.
+    expect(container.querySelectorAll("[data-source-card]").length).toBe(2)
+  })
+
+  test("the handler's file opens; the rest wait, and fetch nothing until asked", async () => {
+    const spy = stubFetchByFile(bodies)
+    const { container, findAllByText } = renderTwo()
+    await findAllByText(
+      (_, element) =>
+        element?.tagName === "CODE" &&
+        (element.textContent?.includes("class FlowController {") ?? false)
+    )
+    expect(cardToggle(container, FILE)).toHaveAttribute("aria-expanded", "true")
+    expect(cardToggle(container, CALLEE_FILE)).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    )
+    expect(fetchedFiles(spy)).not.toContain(CALLEE_FILE)
+  })
+
+  test("clicking a file's header opens it in place and loads its code", async () => {
+    const spy = stubFetchByFile(bodies)
+    const { container, findAllByText } = renderTwo()
+    fireEvent.click(cardToggle(container, CALLEE_FILE)!)
+    const opened = await findAllByText(
+      (_, element) =>
+        element?.tagName === "CODE" &&
+        (element.textContent?.includes("class FlowService {") ?? false)
+    )
+    expect(opened.length).toBeGreaterThan(0)
+    expect(fetchedFiles(spy)).toContain(CALLEE_FILE)
+  })
+
+  test("a selection in a closed file opens it — never a dead end", () => {
+    stubFetchByFile(bodies)
+    const { container } = renderTwo({
+      file: CALLEE_FILE,
+      startLine: 2,
+      endLine: 2,
+      focusLine: 2,
+    })
+    expect(cardToggle(container, CALLEE_FILE)).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
   })
 })
 
