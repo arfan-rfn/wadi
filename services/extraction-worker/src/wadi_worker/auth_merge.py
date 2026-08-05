@@ -413,10 +413,12 @@ def _expand_config_rules(
                             "access": access,
                         }
                         if access is not None
-                        # Scope known, effect unreadable: the site still exists,
-                        # and withholding beats inventing a grant.
+                        # Scope known, EFFECT unreadable. The pattern is kept —
+                        # it was read, and dropping it would tell the reader we
+                        # could not find the rule rather than could not
+                        # interpret it — while the confidence still withholds.
                         else {
-                            "pattern": None,
+                            "pattern": pattern,
                             "pattern_confidence": RulePatternConfidence.NONE,
                             "http_method": verb,
                         }
@@ -526,11 +528,15 @@ def _rule_evidence(
             effect, roles, authorities, resolution = _read_access(matched.access)
             if unresolvable or ambiguous:
                 resolution = AuthResolution.OPAQUE
-            detail = (
-                "a security rule's path could not be read"
-                if unresolvable
-                else f"{matched.pattern} -> {matched.access}"
-            )
+            # Which HALF was unreadable is what the reader needs: a rule whose
+            # scope is unknown might not govern this endpoint at all, while one
+            # whose scope is known and whose effect is not definitely does.
+            if not unresolvable:
+                detail = f"{matched.pattern} -> {matched.access}"
+            elif matched.pattern is None:
+                detail = "a security rule's path could not be read"
+            else:
+                detail = f"{matched.pattern} -> effect could not be read"
             evidence.append(
                 AuthEvidence(
                     kind=AuthEvidenceKind.SECURITY_DSL,

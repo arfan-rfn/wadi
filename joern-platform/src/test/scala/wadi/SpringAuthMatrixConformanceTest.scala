@@ -94,6 +94,92 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     }
   }
 
+  // ---- §5.2.10: the Spring Security 6 axis ----
+  //
+  // The rest of this fixture is Spring Security 5, which is what the corpora
+  // the pass was written against use. Those forms are deprecated in 6.1 and
+  // removed in 7, so a green suite over them alone certifies nothing about the
+  // dialect every new codebase is written in.
+
+  private def confidenceOf(pattern: String): String =
+    exportJson("security_rules").arr.toList
+      .find(_("pattern") match {
+        case ujson.Null => false
+        case other      => other.str == pattern
+      })
+      .map(_("pattern_confidence").str)
+      .getOrElse(fail(s"no rule with pattern $pattern"))
+
+  private def mechanism(kind: String, detail: String): ujson.Value =
+    exportJson("auth_mechanisms").arr.toList
+      .find(m => m("kind").str == kind && m("detail").str.contains(detail))
+      .getOrElse(fail(s"no $kind mechanism matching '$detail'"))
+
+  test("SS6: an AuthorizedUrl held in a local variable still yields its rules") {
+    // THE regression. Config-driven Spring must park the AuthorizedUrl in a
+    // variable, and doing so deleted the whole policy of 20 services.
+    val local = rules.filter { case (_, _, access) => access.contains("SS6LOCAL") }
+    local should not be empty
+    all(local.map(_._2)) should be("@security")
+  }
+
+  test("SS6: a FIELD-injected properties bean reaches its binding") {
+    // javasrc2cpg lifts a lambda's captured values into its parameters, so the
+    // parameter-injected form resolved and the field-injected one did not.
+    // 20 of 20 train-ticket-aitest services inject the field way.
+    confidenceOf("@security") shouldBe "config"
+  }
+
+  test("SS6: indirect receivers resolve — variable, ternary, helper return") {
+    ruleFor("/ss6/indirect/held", "*")._3 should include("SS6HELD")
+    // BOTH arms of the ternary are governed; naming one would be a guess and
+    // dropping the other would silently narrow the rule.
+    ruleFor("/ss6/indirect/strict", "*")._3 should include("SS6TERNARY")
+    ruleFor("/ss6/indirect/loose", "*")._3 should include("SS6TERNARY")
+    ruleFor("/ss6/indirect/helper", "*")._3 should include("SS6HELPER")
+  }
+
+  test("SS6: a @Value pattern passes its placeholder through, unresolved") {
+    // The exporter emits the symbol and the worker resolves it against config
+    // (§5.2.4). What must NOT happen is reporting `{?}`, which withholds an
+    // answer the config plainly contains.
+    ruleFor("${app.matrix.reports-path}", "*")._3 should include("SS6VALUE")
+  }
+
+  test("SS6: an array assembled into a local yields its paths") {
+    ruleFor("/ss6/patterns/assembled", "*")._3 should include("SS6ARRAY")
+  }
+
+  test("SS6: a RequestMatcher bean stays an honest hole") {
+    // The one shape here that must NOT resolve. A matcher bean names no path,
+    // and inventing one would be the fabrication this section exists to stop.
+    val opaque = rules.filter { case (_, _, access) => access.contains("SS6OPAQUE") }
+    opaque.map(_._2) shouldBe List("{?}")
+  }
+
+  test("SS6: .disable() is honoured in lambda and method-reference form") {
+    // Spring Security 6 made the lambda DSL mandatory. Reporting a mechanism
+    // the service explicitly switched off is a fabricated security fact, and
+    // every train-ticket-aitest service writes httpBasic(t -> t.disable()).
+    mechanism("http-basic", "Ss6LocalVariableChain")("active").bool shouldBe false
+    mechanism("form-login", "::disable")("active").bool shouldBe false
+  }
+
+  test("SS6: chain scope does not leak between chains in the same file") {
+    // Pooled per declaring TYPE, an unscoped chain inherited its siblings'
+    // patterns — a restriction invented where none exists, which withdraws
+    // every endpoint outside the borrowed scope.
+    val scopes = exportJson("security_rules").arr.toList
+      .filter(_("chain_id").str.contains("Ss6"))
+      .map(rule => rule("chain_pattern") match {
+        case ujson.Null => "<none>"
+        case other      => other.str
+      })
+      .distinct
+    all(scopes) should not include ","
+    scopes.foreach(scope => scope should startWith("/ss6/"))
+  }
+
   test("every endpoint in the fixture is extracted") {
     val endpoints = exportJson("endpoints").arr.map(e => s"${e("http_method").str} ${e("uri").str}")
     endpoints should contain allOf (

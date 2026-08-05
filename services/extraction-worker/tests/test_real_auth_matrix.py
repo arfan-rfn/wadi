@@ -169,3 +169,52 @@ class TestConfigDefinedPolicy:
         assert by_pattern["/config-driven/admin/**"].startswith("hasAnyRole")
         assert "ADMIN" in by_pattern["/config-driven/admin/**"]
         assert by_pattern["/config-driven/public/**"] == "permitAll()"
+
+
+class TestSpringSecurity6Axis:
+    """§5.2.10 across the language boundary, on a real CPG.
+
+    The Scala goldens prove the export carries these shapes. These prove the
+    worker turns them into the right ANSWER — the half that actually reaches a
+    reader, and the half where the verb restriction went missing.
+    """
+
+    def test_the_field_injected_binding_expands_against_the_yaml(self) -> None:
+        from wadi_worker.auth_merge import (
+            _expand_config_rules,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        export = ServiceExport.model_validate(json.loads(EXPORT.read_text()))
+        config = parse_app_config(FIXTURE_ROOT / "fixtures" / "spring-auth-matrix")
+        bound = [
+            rule
+            for rule in export.security_rules
+            if rule.pattern == "@security"
+            and rule.pattern_confidence is RulePatternConfidence.CONFIG
+        ]
+        assert bound, "the field-injected chain must reach its binding"
+
+        recovered = _expand_config_rules(bound[0], config.structured)
+        assert recovered is not None
+        by_pattern = {rule.pattern: rule for rule in recovered}
+
+        # The measured defect: a scalar `method: GET` was dropped, widening a
+        # GET-only permitAll onto every verb.
+        assert by_pattern["/ss6/local/open"].http_method == "GET"
+        assert by_pattern["/ss6/local/open"].access == "permitAll()"
+        # An entry naming no decision withholds rather than inventing a grant.
+        assert by_pattern["/ss6/local/admin"].pattern_confidence is RulePatternConfidence.NONE
+
+    def test_every_rule_row_carries_a_site(self) -> None:
+        # The no-drop invariant, asserted across the boundary too: a row with
+        # no site identity cannot be reconciled by the oracle.
+        export = ServiceExport.model_validate(json.loads(EXPORT.read_text()))
+        assert export.security_rules
+        assert all(rule.call_id != 0 for rule in export.security_rules)
+
+    def test_the_export_reports_what_the_vocabulary_saw(self) -> None:
+        export = ServiceExport.model_validate(json.loads(EXPORT.read_text()))
+        assert export.auth_extraction is not None
+        sites = {rule.call_id for rule in export.security_rules}
+        assert export.auth_extraction.rule_sites_emitted == len(sites)
+        assert export.auth_extraction.access_calls_seen >= len(sites)
