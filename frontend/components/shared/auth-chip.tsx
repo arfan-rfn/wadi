@@ -50,6 +50,38 @@ export function unreadLabel(kind: AuthEvidenceKind | string): string {
   return UNREAD_LABELS[kind] ?? kind
 }
 
+/** Evidence kinds that do NOT gate a request (§5.2.10 T7).
+ *
+ * An `authority-model` record says what a grant MEANS or where it is minted —
+ * a role hierarchy, a custom authority prefix, a JWT claim converter. Listing
+ * it beside the rules that gate would tell a reader this endpoint is guarded
+ * by its `UserDetailsService`, and would suppress the "nothing gates this"
+ * empty state on an endpoint that genuinely has no guard.
+ */
+const NON_GATING_KINDS: ReadonlySet<string> = new Set(["config", "authority-model"])
+
+export function gatesRequests(kind: AuthEvidenceKind | string): boolean {
+  return !NON_GATING_KINDS.has(kind)
+}
+
+/** What an authority-model record tells a reader about the ROLE LIST.
+ *
+ * `partial` is the load-bearing case: under `ROLE_ADMIN > ROLE_USER` an
+ * endpoint published as requiring `USER` is reachable by ADMIN too, so the
+ * list under-states who can get in. Anything else is provenance — useful, but
+ * it changes nothing about the answer.
+ */
+export function authorityModelNote(
+  resolution: string | null | undefined
+): { text: string; incomplete: boolean } {
+  return resolution === "partial"
+    ? {
+        text: "the roles above may be incomplete — a grant here is issued or widened elsewhere",
+        incomplete: true,
+      }
+    : { text: "where the grants come from", incomplete: false }
+}
+
 /** Why a claim was withheld, in a sentence a reader can act on. */
 export function withheldReason(unreadKinds: readonly string[]): string {
   const named = unreadKinds.map(unreadLabel)

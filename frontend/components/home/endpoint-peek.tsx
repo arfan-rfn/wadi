@@ -24,6 +24,10 @@ import { unopenableCopy } from "@/lib/wadi/unopenable"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MethodBadge } from "@/components/explorer/method-badge"
+import {
+  authorityModelNote,
+  gatesRequests,
+} from "@/components/shared/auth-chip"
 import { CollapsibleSection } from "@/components/shared/collapsible-section"
 import { EmptyState } from "@/components/shared/empty-state"
 
@@ -91,8 +95,14 @@ export function EndpointPeek({
     )
 
   const params = endpoint.params ?? []
-  const evidence = (endpoint.auth?.evidence ?? []).filter(
-    (item) => item.kind !== "config"
+  const allEvidence = endpoint.auth?.evidence ?? []
+  // Split by whether the record GATES. An authority-model says what a grant
+  // means, not who gets through, so listing it here would claim a
+  // UserDetailsService guards the endpoint — and would hide the "nothing gates
+  // this" state on a route that really has no guard (§5.2.10 T7).
+  const evidence = allEvidence.filter((item) => gatesRequests(item.kind))
+  const authorityModel = allEvidence.filter(
+    (item) => item.kind === "authority-model"
   )
   const mechanisms = endpoint.auth?.mechanisms ?? []
   const unopenable = detail.data?.unopenable_calls ?? []
@@ -252,6 +262,35 @@ export function EndpointPeek({
               ))}
             </ul>
           )}
+          {authorityModel.length > 0 ? (
+            <div className="mt-2.5 space-y-1 border-t pt-2.5">
+              {authorityModel.map((item, index) => {
+                const note = authorityModelNote(item.resolution)
+                return (
+                  <div key={`authority-${index}`} className="space-y-0.5">
+                    <p
+                      className={cn(
+                        "text-2xs",
+                        note.incomplete
+                          ? "text-amber-700 dark:text-amber-400"
+                          : "text-muted-foreground/70"
+                      )}
+                    >
+                      {note.text}
+                    </p>
+                    <p className="font-mono text-[11px] break-all text-muted-foreground">
+                      {item.detail}
+                    </p>
+                    {item.anchor ? (
+                      <p className="font-mono text-[10px] text-muted-foreground/75">
+                        ↳ {item.anchor.file}:{item.anchor.start_line}
+                      </p>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
           {mechanisms.length > 0 ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
               <span className="text-2xs text-muted-foreground/70">
