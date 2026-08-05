@@ -175,7 +175,8 @@ object WadiExport {
       "config_refs"           -> configRefObjs(cpg),
       "analysis_coverage"     -> coverageObj,
       "auth_extraction"       -> authExtractionObj(cpg, securityRules),
-      "auth_policies"         -> authPolicyObjs(cpg)
+      "auth_policies"         -> authPolicyObjs(cpg),
+      "auth_authorities"      -> authAuthorityObjs(cpg)
     )
 
     val target: Path = Paths.get(outDir)
@@ -1657,6 +1658,31 @@ object WadiExport {
             "anchor" -> ujson.Obj(
               "file" -> call.file.name.headOption.getOrElse("<unknown>"),
               "line" -> lineOf(call.lineNumber)
+            )
+          )
+        }
+      }
+
+  /** Authority-model facts from `auth-authority=` tags (§5.2.10 T7).
+    *
+    * What a grant MEANS and where it is minted. Never an input to the claim —
+    * these gate nothing — but a `RoleHierarchy` makes every role list on the
+    * service incomplete, which the worker marks rather than hides.
+    */
+  private def authAuthorityObjs(cpg: Cpg): List[ujson.Obj] =
+    (cpg.call.where(_.tag.nameExact("auth-authority")).l ++
+      cpg.method.where(_.tag.nameExact("auth-authority")).l)
+      .sortBy(node => (lineOf(node.lineNumber), node.id))
+      .flatMap { node =>
+        node.tag.nameExact("auth-authority").value.l.sorted.map { encoded =>
+          val Array(kind, detail) =
+            encoded.split('|').take(1) :+ encoded.split('|').drop(1).mkString("|")
+          ujson.Obj(
+            "kind"   -> kind,
+            "detail" -> detail,
+            "anchor" -> ujson.Obj(
+              "file" -> node.file.name.headOption.getOrElse("<unknown>"),
+              "line" -> lineOf(node.lineNumber)
             )
           )
         }

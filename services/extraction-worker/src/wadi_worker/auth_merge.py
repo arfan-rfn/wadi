@@ -39,6 +39,7 @@ from wadi_joern_client.export import (
     UNRESOLVABLE_PATTERN,
     ExportAuthEnforcement,
     ExportAuthMechanism,
+    ExportAuthorityModel,
     ExportMethodSecurity,
     ExportSecurityRule,
     RulePatternConfidence,
@@ -86,6 +87,7 @@ def merge_endpoint_auth(
     auth_mechanisms: list[ExportAuthMechanism] | None = None,
     method_security: ExportMethodSecurity | None = None,
     config_structured: dict[str, list[dict[str, object]]] | None = None,
+    authority_models: list[ExportAuthorityModel] | None = None,
 ) -> EndpointAuth:
     """Collect every enforcement in scope, then derive the claim from it."""
     evidence: list[AuthEvidence] = []
@@ -96,6 +98,7 @@ def merge_endpoint_auth(
         _rule_evidence(security_rules, full_uri, http_method, config_structured or {}, config_env)
     )
     evidence.extend(_config_evidence(config_env))
+    evidence.extend(_authority_model_evidence(authority_models or []))
 
     if not evidence:
         return EndpointAuth()  # honest unknown (P10)
@@ -168,8 +171,15 @@ def _opacity_could_change_the_answer(
 
 
 def _gates(item: AuthEvidence) -> bool:
-    """Config keys describe the service; they do not gate a request."""
-    return item.kind is not AuthEvidenceKind.CONFIG
+    """Which evidence actually decides whether a request gets through.
+
+    Config keys describe the service. An authority model says what a grant
+    MEANS — treating either as a gate would be worse than ignoring it: with a
+    non-permissive effect they would land in ``requiring`` and make every
+    service that merely declares a ``UserDetailsService`` claim that all its
+    endpoints demand authentication.
+    """
+    return item.kind not in (AuthEvidenceKind.CONFIG, AuthEvidenceKind.AUTHORITY_MODEL)
 
 
 # --------------------------------------------------------------------------
@@ -571,6 +581,46 @@ def _chains_governing(
         if scope is None or any(_ant_match(part, full_uri) for part in scope.split(",")):
             in_scope.append(rules)
     return in_scope
+
+
+#: Authority-model kinds that make a role list INCOMPLETE rather than merely
+#: explaining it. A hierarchy adds reachers the list does not name; a custom
+#: authority prefix rewires the hasRole→authority mapping the split assumes.
+_ROLE_LIST_ALTERING = frozenset({"role-hierarchy", "authority-defaults"})
+
+#: The prefix Spring uses when nobody overrides it. A `GrantedAuthorityDefaults`
+#: that restates it changes nothing and must not raise a flag.
+_DEFAULT_ROLE_PREFIX = "ROLE_"
+
+
+def _authority_model_evidence(models: list[ExportAuthorityModel]) -> list[AuthEvidence]:
+    """§5.2.10 T7: what a grant means, and whether the role list is complete.
+
+    These constructs gate nothing, so they never withhold — withholding on
+    them would be the blunt instrument §5.2.9 already rejected. They are
+    recorded as PARTIAL evidence, which is what marks the role list as
+    under-stating who can reach the endpoint without discarding the claim that
+    authentication is required.
+    """
+    evidence: list[AuthEvidence] = []
+    for model in models:
+        alters = model.kind in _ROLE_LIST_ALTERING
+        if model.kind == "authority-defaults" and _DEFAULT_ROLE_PREFIX in model.detail:
+            alters = False  # a restatement of the default rewires nothing
+        evidence.append(
+            AuthEvidence(
+                kind=AuthEvidenceKind.AUTHORITY_MODEL,
+                detail=f"{model.kind}: {model.detail}",
+                anchor=SourceAnchor(
+                    file=model.anchor.file,
+                    start_line=max(model.anchor.line, 1),
+                    end_line=max(model.anchor.line, 1),
+                ),
+                effect=AuthEffect.UNKNOWN,
+                resolution=AuthResolution.PARTIAL if alters else AuthResolution.RESOLVED,
+            )
+        )
+    return evidence
 
 
 def _config_evidence(config_env: dict[str, str]) -> list[AuthEvidence]:

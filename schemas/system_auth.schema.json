@@ -100,7 +100,8 @@
         "servlet-filter",
         "aspect",
         "in-handler",
-        "gateway"
+        "gateway",
+        "authority-model"
       ],
       "title": "AuthEvidenceKind",
       "type": "string"

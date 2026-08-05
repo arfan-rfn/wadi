@@ -5,6 +5,7 @@ from typing import ClassVar
 from wadi_contracts import (
     AuthEffect,
     AuthEvidenceKind,
+    AuthResolution,
     EndpointAuth,
     HttpMethod,
     SourceAnchor,
@@ -14,6 +15,7 @@ from wadi_joern_client.export import (
     ExportAnchor,
     ExportAuthEnforcement,
     ExportAuthMechanism,
+    ExportAuthorityModel,
     ExportMethodSecurity,
     ExportSecurityRule,
     RulePatternConfidence,
@@ -824,3 +826,71 @@ class TestConfigDefinedRuleShapes:
             },
         )
         assert auth.denied is True
+
+
+class TestAuthorityModel:
+    """§5.2.10 T7: what a grant means is not whether a request gets through."""
+
+    def _model(self, kind: str, detail: str) -> ExportAuthorityModel:
+        return ExportAuthorityModel(
+            kind=kind,
+            detail=detail,
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=30),
+        )
+
+    def _auth(self, *models: ExportAuthorityModel, **kwargs: object) -> EndpointAuth:
+        return merge_endpoint_auth(
+            full_uri="/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            handler_anchor=ANCHOR,
+            config_env={},
+            authority_models=list(models),
+            **kwargs,  # pyright: ignore[reportArgumentType]
+        )
+
+    def test_an_authority_model_never_gates_on_its_own(self) -> None:
+        # The trap. With effect UNKNOWN these land in `requiring` unless
+        # excluded, and every service that merely declares a UserDetailsService
+        # would claim all its endpoints demand authentication — a wrong fact
+        # invented by the machinery meant to prevent wrong facts.
+        auth = self._auth(
+            self._model("user-details-service", "userDetailsService"), security_rules=[]
+        )
+        assert auth.authenticated is None
+        assert auth.roles == []
+
+    def test_a_role_hierarchy_marks_the_role_list_incomplete(self) -> None:
+        # ROLE_ADMIN > ROLE_USER means ADMIN reaches a [USER] endpoint too, so
+        # the published list under-states who can get in.
+        auth = self._auth(
+            self._model("role-hierarchy", "RoleHierarchyImpl"),
+            security_rules=[_rule("/admin/**", 'hasRole("USER")')],
+        )
+        assert auth.authenticated is True, "the hierarchy must not cost the claim"
+        assert auth.roles == ["USER"]
+        partial = [
+            item
+            for item in auth.evidence
+            if item.kind is AuthEvidenceKind.AUTHORITY_MODEL
+            and item.resolution is AuthResolution.PARTIAL
+        ]
+        assert partial, "the incompleteness must be visible on the endpoint"
+
+    def test_a_default_authority_prefix_changes_nothing_and_says_so(self) -> None:
+        # A GrantedAuthorityDefaults that restates ROLE_ rewires nothing;
+        # flagging it would be crying wolf on a no-op bean.
+        auth = self._auth(
+            self._model("authority-defaults", 'GrantedAuthorityDefaults("ROLE_")'),
+            security_rules=[_rule("/admin/**", 'hasRole("ADMIN")')],
+        )
+        model = next(i for i in auth.evidence if i.kind is AuthEvidenceKind.AUTHORITY_MODEL)
+        assert model.resolution is AuthResolution.RESOLVED
+
+    def test_a_custom_authority_prefix_is_flagged(self) -> None:
+        auth = self._auth(
+            self._model("authority-defaults", 'GrantedAuthorityDefaults("")'),
+            security_rules=[_rule("/admin/**", 'hasRole("ADMIN")')],
+        )
+        model = next(i for i in auth.evidence if i.kind is AuthEvidenceKind.AUTHORITY_MODEL)
+        assert model.resolution is AuthResolution.PARTIAL

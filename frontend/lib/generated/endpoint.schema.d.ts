@@ -77,6 +77,7 @@ export type AuthEvidenceKind =
   | "aspect"
   | "in-handler"
   | "gateway"
+  | "authority-model"
 /**
  * Path pattern this is scoped to; '{?}' means read but unresolvable
  */

@@ -62,6 +62,7 @@ export type AuthEvidenceKind =
   | "aspect"
   | "in-handler"
   | "gateway"
+  | "authority-model"
 /**
  * Kinds of enforcement detected here but not readable — why a claim is withheld
  */

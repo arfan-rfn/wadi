@@ -454,6 +454,26 @@ class ExportAuthPolicy(ExportModelBase):
     anchor: ExportAnchor
 
 
+class ExportAuthorityModel(ExportModelBase):
+    """What a grant MEANS and where it is minted (2.8.0; §5.2.10 T7).
+
+    ``role-hierarchy`` | ``authority-defaults`` | ``jwt-claim-converter`` |
+    ``user-details-service``.
+
+    None of these gate a request, so none withholds a claim. Two of them can
+    still falsify a role list wadi already publishes: under
+    ``ROLE_ADMIN > ROLE_USER`` an endpoint reported as requiring ``[USER]`` is
+    also reachable by ADMIN, and a ``GrantedAuthorityDefaults`` prefix rewires
+    the very ``hasRole`` → authority mapping the role/authority split assumes.
+    A role list that under-states who can get in is a confident wrong security
+    fact, so the worker marks it incomplete rather than hiding the cause.
+    """
+
+    kind: str
+    detail: str
+    anchor: ExportAnchor
+
+
 class ExportAuthExtraction(ExportModelBase):
     """What the auth vocabulary saw versus what it emitted (2.8.0; §5.2.10).
 
@@ -595,6 +615,10 @@ class ServiceExport(ExportModelBase):
     auth_policies: list[ExportAuthPolicy] = Field(
         default_factory=list[ExportAuthPolicy],
         description="2.8.0 (§5.2.10): CORS / CSRF / rejection handling, service-level",
+    )
+    auth_authorities: list[ExportAuthorityModel] = Field(
+        default_factory=list[ExportAuthorityModel],
+        description="2.8.0 (§5.2.10 T7): what a grant means and where it is minted",
     )
 
     def compatible_with_reader(self) -> bool:

@@ -522,6 +522,79 @@ object SpringSecurityPack {
     }
   }
 
+  /** Where a grant comes from and what it means → `auth-authority=<kind>|<detail>`
+    * (§5.2.10 T7).
+    *
+    * Every layer above answers "what does this endpoint require?". This one
+    * answers the question underneath it: **what does the required grant
+    * actually mean, and where is it minted?** Two constructs can silently
+    * falsify a role list wadi already publishes:
+    *
+    *   - **`RoleHierarchy`.** `ROLE_ADMIN > ROLE_USER` means an endpoint
+    *     reported as requiring `[USER]` is ALSO reachable by ADMIN. The
+    *     published set is narrower than reality — an under-statement of who
+    *     can get in, which is the wrong direction for a security map.
+    *   - **`GrantedAuthorityDefaults`.** A custom prefix (or `""`) rewires
+    *     `hasRole("X")` from the authority `ROLE_X` to something else, which
+    *     is exactly the mapping the role/authority split in 0.6.0 assumes.
+    *
+    * Neither GATES a request, so neither withholds a claim — that would be the
+    * blunt-instrument error §5.2.9 already rejected. They mark the role list
+    * incomplete instead.
+    *
+    * Provenance is the other half: a JWT claim converter or a
+    * `UserDetailsService` says where `ADMIN` is minted, which is the first
+    * question a reader asks after "which roles reach this?".
+    */
+  class SpringAuthorityModelPass(cpg: Cpg) extends CpgPass(cpg) {
+
+    override def run(builder: DiffGraphBuilder): Unit = {
+      // A bean METHOD returning the type, or a construction of it — either way
+      // the model is in play for this service.
+      tagType("RoleHierarchy", "role-hierarchy", builder)
+      tagType("GrantedAuthorityDefaults", "authority-defaults", builder)
+      tagType("UserDetailsService", "user-details-service", builder)
+
+      cpg.call
+        .nameExact("jwtAuthenticationConverter", "setJwtGrantedAuthoritiesConverter")
+        .l
+        .foreach { call =>
+          Iterator(call)
+            .newTagNodePair("auth-authority", s"jwt-claim-converter|${firstLine(call.code)}")
+            .store()(using builder)
+        }
+    }
+
+    /** Beans and constructions that put `typeName` in play. */
+    private def tagType(typeName: String, kind: String, builder: DiffGraphBuilder): Unit = {
+      val constructions = cpg.call
+        .nameExact("<init>")
+        .filter(_.methodFullName.split("\\.<init>").head.split('.').last == typeName)
+        .l
+      val beans = cpg.method
+        .filterNot(_.isExternal)
+        .filter(_.methodReturn.typeFullName.split('.').last == typeName)
+        .l
+      constructions.foreach { call =>
+        // A `GrantedAuthorityDefaults("")` argument IS the new prefix, and the
+        // difference between a harmless restatement of the default and a
+        // rewiring of every hasRole in the service.
+        val detail = call.argument.argumentIndexGt(0).code.l match {
+          case Nil  => typeName
+          case args => s"$typeName(${args.mkString(", ")})"
+        }
+        Iterator(call).newTagNodePair("auth-authority", s"$kind|$detail").store()(using builder)
+      }
+      if (constructions.isEmpty) {
+        beans.foreach { method =>
+          Iterator(method)
+            .newTagNodePair("auth-authority", s"$kind|${method.name}")
+            .store()(using builder)
+        }
+      }
+    }
+  }
+
   /** Request-level policy → `auth-policy=<kind>|<scope>|<detail>` (§5.2.10 T6).
     *
     * The third category a `SecurityConfig` declares, after authorization rules

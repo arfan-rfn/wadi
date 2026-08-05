@@ -199,6 +199,7 @@ class Assembler:
                     auth_mechanisms=export.auth_mechanisms,
                     method_security=export.method_security,
                     config_structured=self._config_structured,
+                    authority_models=export.auth_authorities,
                 ),
             )
             artifacts.endpoints.append(endpoint)

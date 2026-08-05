@@ -81,6 +81,19 @@ class AuthEvidenceKind(StrEnum):
     IN_HANDLER = "in-handler"
     GATEWAY = "gateway"
 
+    AUTHORITY_MODEL = "authority-model"
+    """A construct that changes what a GRANT MEANS rather than gating a request
+    (§5.2.10 T7): a ``RoleHierarchy``, a ``GrantedAuthorityDefaults`` prefix, a
+    JWT claim→authority converter, a ``UserDetailsService``.
+
+    It never gates on its own, so it never withholds a claim. What it does is
+    make a reported role list *incomplete*: under ``ROLE_ADMIN > ROLE_USER`` an
+    endpoint published as requiring ``[USER]`` is also reachable by ADMIN, and
+    a role list that quietly under-states who can get in is exactly the kind of
+    confident-but-wrong security fact §12 rates worse than an absent one.
+    Carried as PARTIAL evidence so the incompleteness is visible on the
+    endpoint that has it."""
+
 
 class AuthEffect(StrEnum):
     """What an enforcement point does to a request that reaches it.
