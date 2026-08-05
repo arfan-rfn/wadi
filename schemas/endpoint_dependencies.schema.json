@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "Confidence tiers for recovered facts (\u00a75.4). Ordered EXACT > HIGH > HEURISTIC > NONE.",
+      "enum": [
+        "exact",
+        "high",
+        "heuristic",
+        "none"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "EndpointDependency": {
+      "additionalProperties": false,
+      "description": "One downstream target an endpoint reaches (\u00a75.4).\n\nDeliberately flattened to a label + how sure we are: the endpoint list\nneeds \"who does this call\", not the full edge. The confidence tier travels\nwith it because a HEURISTIC dependency is a different claim from an EXACT\none, and a list that hides the difference is the kind of quiet flattening\nP10 exists to prevent.",
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "label": {
+          "description": "Target service name, external host, or 'undetermined'",
+          "title": "Label",
+          "type": "string"
+        },
+        "target_kind": {
+          "$ref": "#/$defs/TargetKind"
+        }
+      },
+      "required": [
+        "label",
+        "target_kind",
+        "confidence"
+      ],
+      "title": "EndpointDependency",
+      "type": "object"
+    },
+    "TargetKind": {
+      "description": "What a stitched edge lands on (\u00a75.4.2) \u2014 the three target kinds that\nkeep partial coverage honest, plus the explicit undetermined fact (P10).",
+      "enum": [
+        "analyzed",
+        "external",
+        "placeholder",
+        "undetermined"
+      ],
+      "title": "TargetKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.15.0/endpoint_dependencies.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Per-endpoint downstream targets for one service (\u00a75.2.9 UI).\n\nCross-service calls are the product's core extracted fact, so the endpoint\nlist shows them inline rather than making the reader open each endpoint to\nfind out. Scoped to a service because that is the unit the list renders,\nand it keeps the ICFG join bounded.\n\n``stitched=False`` means the stitcher has not run: an empty map is then\n'not yet', never 'this endpoint calls nothing' (P10).",
+  "properties": {
+    "dependencies": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/$defs/EndpointDependency"
+        },
+        "type": "array"
+      },
+      "description": "endpoint_id -> its downstream targets, de-duplicated",
+      "title": "Dependencies",
+      "type": "object"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "stitched": {
+      "title": "Stitched",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "service_id",
+    "stitched"
+  ],
+  "title": "EndpointDependenciesView",
+  "type": "object"
+}

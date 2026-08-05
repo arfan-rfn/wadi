@@ -2,16 +2,9 @@
 // back works, links are shareable); within-page workspace state stays in
 // query params written with history.replaceState (zero re-renders — the URL
 // is an output of state after the initial read). Lens flips use pushState so
-// Back leaves the Source lens before leaving the page.
 
-export const HOME_VIEWS = ["coverage", "map", "services"] as const
+export const HOME_VIEWS = ["coverage", "map", "auth", "services"] as const
 export type HomeView = (typeof HOME_VIEWS)[number]
-
-export const LENSES = ["graph", "source"] as const
-export type Lens = (typeof LENSES)[number]
-
-export const INSPECTOR_TABS = ["source", "selection", "endpoint"] as const
-export type InspectorTab = (typeof INSPECTOR_TABS)[number]
 
 /**
  * The snapshot `/` lands on: the most recently created SUCCEEDED one.
@@ -58,8 +51,6 @@ export interface WorkspaceParams {
   node: string | null
   focus: string | null
   expand: "all" | "none" | string[] | null
-  lens: Lens
-  tab: InspectorTab
   file: string | null
 }
 
@@ -67,8 +58,6 @@ export const WORKSPACE_DEFAULTS: WorkspaceParams = {
   node: null,
   focus: null,
   expand: null,
-  lens: "graph",
-  tab: "source",
   file: null,
 }
 
@@ -83,8 +72,6 @@ export function parseWorkspaceParams(params: URLSearchParams): WorkspaceParams {
         : rawExpand === "all" || rawExpand === "none"
           ? rawExpand
           : rawExpand.split(",").filter(Boolean),
-    lens: constrain(params.get("lens"), LENSES, "graph"),
-    tab: constrain(params.get("tab"), INSPECTOR_TABS, "source"),
     file: params.get("file"),
   }
 }
@@ -105,16 +92,12 @@ export function serializeWorkspaceParams(
       : state.expand
     if (value) params.set("expand", value)
   }
-  if (state.lens && state.lens !== WORKSPACE_DEFAULTS.lens)
-    params.set("lens", state.lens)
-  if (state.tab && state.tab !== WORKSPACE_DEFAULTS.tab)
-    params.set("tab", state.tab)
   if (state.file) params.set("file", state.file)
   return params
 }
 
 /** Mirror workspace state onto the current URL. `push` creates a history
- * entry (lens flips); everything else replaces in place. */
+ * entry; everything else replaces in place. */
 export function writeWorkspaceParams(
   state: WorkspaceParams,
   options?: { push?: boolean }

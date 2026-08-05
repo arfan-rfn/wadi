@@ -1,57 +1,85 @@
 "use client"
 
-// The overview home (§11 Phase 2.8): orientation only — coverage first
-// (§5.4), the system map, and a 2-column services/endpoints browser. The
-// endpoint deep-dive lives on its own routed page; opening an endpoint is a
-// NAVIGATION, so browser back returns here.
+// The overview home (§11 Phase 2.8, §5.2.9 UI): orientation, and the first
+// two tiers of the endpoint read — skim the rows (security on line 2), then
+// peek the contract in place. The third tier, the flow, is its own routed
+// page; opening it is a NAVIGATION, so browser back returns here.
+//
+// Responsive shape: the SMALL layout is the baseline (one column at a time,
+// drilled into) and widens into services | endpoints | peek at xl. That
+// direction matters — `useMediaQuery` reports false until after hydration, so
+// the pre-hydration frame must be the narrow layout, never a broken wide one.
 import { useEffect, useMemo, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
+import { ArrowLeft } from "lucide-react"
 
+import { BREAKPOINT, useMediaQuery } from "@/lib/hooks/use-media-query"
 import { cn } from "@/lib/utils"
-import { useEndpoints, useServices } from "@/lib/wadi/hooks"
 import {
-  constrain,
-  endpointPath,
-  HOME_VIEWS,
-  type HomeView,
-} from "@/lib/wadi/routes"
+  useEndpointDependencies,
+  useEndpoints,
+  useServices,
+  useSystemAuth,
+} from "@/lib/wadi/hooks"
+import { RolePaletteProvider } from "@/lib/wadi/role-colors"
+import { constrain, HOME_VIEWS, type HomeView } from "@/lib/wadi/routes"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CoveragePane } from "@/components/coverage/coverage-pane"
 import { SystemMapPane } from "@/components/map/system-map"
 import { EmptyState } from "@/components/shared/empty-state"
 import { PanelHeader } from "@/components/shared/panel-header"
 
-import { EndpointRow } from "./endpoint-list"
+import { AuthPane } from "./auth-pane"
+import { EndpointRow, unreadKindsOf } from "./endpoint-list"
+import { EndpointPeek } from "./endpoint-peek"
+import { RoleLegend, rolesInSnapshot, type RoleFilter } from "./role-legend"
 
 export function OverviewHome({ snapshotId }: { snapshotId: string }) {
-  const router = useRouter()
   const searchParams = useSearchParams()
   // Read once (lazy useState): after mount the URL mirrors state, never
   // drives it — the pre-2.8 idiom, kept for the peer views of one scope.
   const [initial] = useState(() => ({
     view: constrain(searchParams.get("view"), HOME_VIEWS, "coverage"),
     service: searchParams.get("service"),
+    endpoint: searchParams.get("endpoint"),
   }))
   const [view, setView] = useState<HomeView>(initial.view)
   const [serviceId, setServiceId] = useState<string | null>(initial.service)
+  const [endpointId, setEndpointId] = useState<string | null>(initial.endpoint)
   const [serviceFilter, setServiceFilter] = useState("")
   const [endpointFilter, setEndpointFilter] = useState("")
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>(null)
+  // xl is where three columns stop being cramped; below it the peek is a
+  // sheet so it never squeezes the list it exists to annotate.
+  const inlinePeek = useMediaQuery(BREAKPOINT.xl)
 
   useEffect(() => {
     if (typeof window === "undefined") return
     const params = new URLSearchParams()
     if (view !== "coverage") params.set("view", view)
     if (serviceId) params.set("service", serviceId)
+    if (endpointId) params.set("endpoint", endpointId)
     const query = params.toString()
     const next = query
       ? `${window.location.pathname}?${query}`
       : window.location.pathname
     const current = `${window.location.pathname}${window.location.search}`
     if (next !== current) window.history.replaceState(null, "", next)
-  }, [view, serviceId])
+  }, [view, serviceId, endpointId])
 
   const services = useServices(snapshotId)
   const endpoints = useEndpoints(snapshotId, serviceId)
+  // The snapshot-wide role vocabulary powers the legend; it is the same read
+  // the Auth view uses, so switching between them costs nothing.
+  const auth = useSystemAuth(view === "services" || view === "auth", snapshotId)
+  // One read per service: cross-service calls are the core extracted fact, so
+  // the rows show them rather than hiding them behind a click.
+  const dependencies = useEndpointDependencies(
+    view === "services" ? snapshotId : null,
+    serviceId
+  )
 
   const filteredServices = useMemo(() => {
     const list = services.data ?? []
@@ -64,16 +92,42 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
   const filteredEndpoints = useMemo(() => {
     const list = endpoints.data ?? []
     const query = endpointFilter.trim().toLowerCase()
-    return query
+    const byText = query
       ? list.filter(
           (e) =>
             e.full_uri.toLowerCase().includes(query) ||
             e.http_method.toLowerCase().includes(query)
         )
       : list
-  }, [endpoints.data, endpointFilter])
+    if (!roleFilter) return byText
+    if (roleFilter.kind === "open")
+      return byText.filter(
+        (e) => e.auth?.authenticated === false && unreadKindsOf(e).length === 0
+      )
+    return byText.filter((e) => (e.auth?.roles ?? []).includes(roleFilter.role))
+  }, [endpoints.data, endpointFilter, roleFilter])
 
   const selectedService = services.data?.find((s) => s.service_id === serviceId)
+  const selectedEndpoint =
+    endpoints.data?.find((e) => e.id === endpointId) ?? null
+
+  // A selection from another service is stale the moment the service changes.
+  useEffect(() => {
+    setEndpointId(null)
+  }, [serviceId])
+
+  const snapshotRoles = useMemo(
+    () => rolesInSnapshot(auth.data).map((entry) => entry.role),
+    [auth.data]
+  )
+
+  const peek = (
+    <EndpointPeek
+      snapshotId={snapshotId}
+      endpoint={selectedEndpoint}
+      className="h-full"
+    />
+  )
 
   return (
     <>
@@ -89,7 +143,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
             key={id}
             onClick={() => setView(id)}
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              "cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
               view === id
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -103,12 +157,20 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
           <span className="ml-2 text-2xs text-muted-foreground">
             what the map knows it doesn&apos;t know — read this first
           </span>
+        ) : view === "auth" ? (
+          <span className="ml-2 text-2xs text-muted-foreground">
+            who can reach what — and where the answer is withheld
+          </span>
         ) : null}
       </div>
 
       {view === "coverage" ? (
         <div className="flex min-h-0 flex-1">
           <CoveragePane snapshotId={snapshotId} />
+        </div>
+      ) : view === "auth" ? (
+        <div className="flex min-h-0 flex-1">
+          <AuthPane snapshotId={snapshotId} active={view === "auth"} />
         </div>
       ) : view === "map" ? (
         <div className="flex min-h-0 flex-1">
@@ -122,118 +184,201 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
           />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 divide-x">
-          <section className="flex w-72 shrink-0 flex-col lg:w-80">
-            <PanelHeader
-              label="Services"
-              count={services.data?.length}
-              filter={serviceFilter}
-              onFilter={setServiceFilter}
-              placeholder="Filter services"
-            />
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {services.isPending ? <ListSkeleton /> : null}
-              {/* Without this the pane renders BLANK on a failed fetch: every
+        // One palette for the whole snapshot: colours are assigned against
+        // the full role SET, so a role never changes hue as you move between
+        // services (and two roles can never share one, §5.2.9 UI).
+        <RolePaletteProvider roles={snapshotRoles}>
+          <div className="flex min-h-0 flex-1 divide-x">
+            {/* Below md the services list yields entirely once a service is
+              picked — one column at a time is the only honest narrow layout,
+              and the picker in the endpoints header gets you back. */}
+            <section
+              className={cn(
+                "flex shrink-0 flex-col md:w-56 lg:w-64 xl:w-72",
+                serviceId ? "hidden md:flex" : "flex w-full"
+              )}
+            >
+              <PanelHeader
+                label="Services"
+                count={services.data?.length}
+                filter={serviceFilter}
+                onFilter={setServiceFilter}
+                placeholder="Filter services"
+              />
+              <ScrollArea className="min-h-0 flex-1">
+                {services.isPending ? <ListSkeleton /> : null}
+                {/* Without this the pane renders BLANK on a failed fetch: every
                   empty state below is guarded on `.data`, which is undefined,
                   and `isPending` is already false. */}
-              {services.isError ? (
-                <EmptyState>
-                  Could not load services — {(services.error as Error).message}
-                </EmptyState>
-              ) : null}
-              {filteredServices.map((service) => (
-                <button
-                  key={service.service_id}
-                  onClick={() => {
-                    setServiceId(service.service_id)
-                    setEndpointFilter("")
-                  }}
-                  className={cn(
-                    "flex w-full items-center gap-2 border-l-2 border-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
-                    serviceId === service.service_id &&
-                      "border-primary bg-muted/60"
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {service.name}
-                    </p>
-                    <p className="truncate font-mono text-2xs text-muted-foreground">
-                      {service.build_root}
-                      {(service.async_roots ?? []).length > 0 && (
-                        <span>
-                          {" · "}
-                          {(service.async_roots ?? []).length} async root
-                          {(service.async_roots ?? []).length === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <span
+                {services.isError ? (
+                  <EmptyState>
+                    Could not load services —{" "}
+                    {(services.error as Error).message}
+                  </EmptyState>
+                ) : null}
+                {filteredServices.map((service) => (
+                  <button
+                    key={service.service_id}
+                    onClick={() => {
+                      setServiceId(service.service_id)
+                      setEndpointFilter("")
+                    }}
+                    type="button"
+                    aria-current={
+                      serviceId === service.service_id ? "true" : undefined
+                    }
                     className={cn(
-                      "shrink-0 rounded-full px-2 py-0.5 font-mono text-2xs tabular-nums",
-                      service.endpoint_count
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted text-muted-foreground"
+                      // Symmetric selection: an inset rounded block, fill plus a
+                      // full ring. Never an edge bar.
+                      "mx-1.5 my-0.5 flex w-[calc(100%-0.75rem)] cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
+                      "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                      serviceId === service.service_id &&
+                        "bg-muted/80 ring-1 ring-primary/30 ring-inset"
                     )}
                   >
-                    {service.endpoint_count ?? 0}
-                  </span>
-                </button>
-              ))}
-              {services.data &&
-              filteredServices.length === 0 &&
-              services.data.length > 0 ? (
-                <EmptyState>
-                  No match for &ldquo;{serviceFilter}&rdquo;
-                </EmptyState>
-              ) : null}
-            </div>
-          </section>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {service.name}
+                      </p>
+                      <p className="truncate font-mono text-2xs text-muted-foreground">
+                        {service.build_root}
+                        {(service.async_roots ?? []).length > 0 && (
+                          <span>
+                            {" · "}
+                            {(service.async_roots ?? []).length} async root
+                            {(service.async_roots ?? []).length === 1
+                              ? ""
+                              : "s"}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full px-2 py-0.5 font-mono text-2xs tabular-nums",
+                        service.endpoint_count
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {service.endpoint_count ?? 0}
+                    </span>
+                  </button>
+                ))}
+                {services.data &&
+                filteredServices.length === 0 &&
+                services.data.length > 0 ? (
+                  <EmptyState>
+                    No match for &ldquo;{serviceFilter}&rdquo;
+                  </EmptyState>
+                ) : null}
+              </ScrollArea>
+            </section>
 
-          <section className="flex min-w-0 flex-1 flex-col">
-            <PanelHeader
-              label="Endpoints"
-              count={endpoints.data?.length}
-              filter={endpointFilter}
-              onFilter={setEndpointFilter}
-              placeholder="Filter endpoints"
-              hint={selectedService?.name}
-            />
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {endpoints.isPending && serviceId ? <ListSkeleton /> : null}
-              {endpoints.isError ? (
-                <EmptyState>
-                  Could not load endpoints —{" "}
-                  {(endpoints.error as Error).message}
-                </EmptyState>
+            <section
+              className={cn(
+                "flex min-w-0 flex-1 flex-col",
+                serviceId ? "flex" : "hidden md:flex"
+              )}
+            >
+              <PanelHeader
+                label="Endpoints"
+                count={endpoints.data?.length}
+                filter={endpointFilter}
+                onFilter={setEndpointFilter}
+                placeholder="Filter endpoints"
+                hint={selectedService?.name}
+              />
+              {/* Narrow only: the way back out of the drill-down. */}
+              {serviceId ? (
+                <button
+                  type="button"
+                  onClick={() => setServiceId(null)}
+                  className={cn(
+                    "flex items-center gap-1.5 border-b px-3 py-1.5 text-left text-2xs text-muted-foreground transition-colors md:hidden",
+                    "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  )}
+                >
+                  <ArrowLeft aria-hidden className="size-3" />
+                  All services
+                </button>
               ) : null}
-              {!serviceId ? (
-                <EmptyState>
-                  Select a service to browse its endpoints — open one for the
-                  full end-to-end flow.
-                </EmptyState>
-              ) : null}
-              {endpoints.data?.length === 0 ? (
-                <EmptyState>No endpoints extracted for this service</EmptyState>
-              ) : null}
-              {filteredEndpoints.map((endpoint) => (
-                <EndpointRow
-                  key={endpoint.id}
-                  endpoint={endpoint}
-                  onOpen={(e) => router.push(endpointPath(snapshotId, e.id))}
-                />
-              ))}
-              {endpoints.data &&
-              filteredEndpoints.length === 0 &&
-              endpoints.data.length > 0 ? (
-                <EmptyState>
-                  No match for &ldquo;{endpointFilter}&rdquo;
-                </EmptyState>
-              ) : null}
-            </div>
-          </section>
-        </div>
+              <RoleLegend
+                auth={auth.data}
+                value={roleFilter}
+                onChange={setRoleFilter}
+              />
+              <ScrollArea className="min-h-0 flex-1">
+                {endpoints.isPending && serviceId ? <ListSkeleton /> : null}
+                {endpoints.isError ? (
+                  <EmptyState>
+                    Could not load endpoints —{" "}
+                    {(endpoints.error as Error).message}
+                  </EmptyState>
+                ) : null}
+                {!serviceId ? (
+                  <EmptyState>
+                    Select a service to browse its endpoints — open one for the
+                    full end-to-end flow.
+                  </EmptyState>
+                ) : null}
+                {endpoints.data?.length === 0 ? (
+                  <EmptyState>
+                    No endpoints extracted for this service
+                  </EmptyState>
+                ) : null}
+                {filteredEndpoints.map((endpoint) => (
+                  <EndpointRow
+                    key={endpoint.id}
+                    endpoint={endpoint}
+                    dependencies={
+                      dependencies.data?.dependencies?.[endpoint.id]
+                    }
+                    selected={endpoint.id === endpointId}
+                    onOpen={(e) => setEndpointId(e.id)}
+                  />
+                ))}
+                {endpoints.data &&
+                filteredEndpoints.length === 0 &&
+                endpoints.data.length > 0 ? (
+                  <EmptyState>
+                    {roleFilter
+                      ? "No endpoint here matches that role filter."
+                      : `No match for \u201c${endpointFilter}\u201d`}
+                  </EmptyState>
+                ) : null}
+              </ScrollArea>
+            </section>
+
+            {/* The peek is one component in one place in the tree — only its
+              PRESENTATION changes with width, so selection, scroll position
+              and open sections survive a resize. */}
+            {inlinePeek ? (
+              <section className="flex w-[22rem] shrink-0 flex-col 2xl:w-[26rem]">
+                {peek}
+              </section>
+            ) : (
+              <Sheet
+                open={selectedEndpoint !== null}
+                onOpenChange={(open) => {
+                  if (!open) setEndpointId(null)
+                }}
+              >
+                <SheetContent
+                  side="right"
+                  className="w-full gap-0 p-0 sm:max-w-[26rem]"
+                >
+                  <SheetTitle className="sr-only">
+                    {selectedEndpoint
+                      ? `${selectedEndpoint.http_method} ${selectedEndpoint.full_uri}`
+                      : "Endpoint details"}
+                  </SheetTitle>
+                  {peek}
+                </SheetContent>
+              </Sheet>
+            )}
+          </div>
+        </RolePaletteProvider>
       )}
     </>
   )

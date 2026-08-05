@@ -33,6 +33,17 @@ export type Services = ServiceCoverageEntry[]
  * Reserved — stitching hints land in Phase 4
  */
 export type AppliedHintIds = string[]
+export type Authenticated = number
+export type Endpoints = number
+/**
+ * No claim because nothing that could gate was found
+ */
+export type NoEvidence = number
+export type Unauthenticated = number
+/**
+ * No claim because an in-scope guard could not be read
+ */
+export type Withheld = number
 export type Code = string
 /**
  * Occurrences across the service's methods
@@ -177,6 +188,10 @@ export interface CoverageReport {
   analysis_coverage?: AnalysisCoverageSection | null
   applied_hint_ids?: AppliedHintIds
   /**
+   * What the auth layer could and could not read (§5.2.9, schema 1.13.0). None only on reports written before the enforcement model existed
+   */
+  auth_coverage?: AuthCoverageSection | null
+  /**
    * ICFG structural-invariant violations (§5.2.8 M2, schema 1.8.0). None only on reports written before the invariants existed
    */
   cfg_anomalies?: CfgAnomalySection | null
@@ -218,6 +233,28 @@ export interface ServiceCoverageEntry {
   production_methods?: ProductionMethods1
   reachable_methods?: ReachableMethods1
   service_id: ServiceId
+}
+/**
+ * Snapshot rollup of what the auth layer could and could not read (§5.2.9).
+ *
+ * The standing tracking mechanism for auth blind spots, playing the role
+ * ``cfg_anomalies`` plays for control flow: an idiom wadi cannot interpret
+ * stays counted here rather than living in prose, so the next tranche is
+ * scheduled by measured demand rather than intuition.
+ */
+export interface AuthCoverageSection {
+  authenticated?: Authenticated
+  endpoints?: Endpoints
+  no_evidence?: NoEvidence
+  unauthenticated?: Unauthenticated
+  unread_by_kind?: UnreadByKind
+  withheld?: Withheld
+}
+/**
+ * Enforcement points detected but not readable, counted per AuthEvidenceKind
+ */
+export interface UnreadByKind {
+  [k: string]: number
 }
 /**
  * Snapshot rollup of ICFG structural-invariant violations (§5.2.8 M2).

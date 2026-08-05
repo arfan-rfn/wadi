@@ -1,7 +1,14 @@
 package wadi.packs
 
 import io.shiftleft.codepropertygraph.generated.{Cpg, DiffGraphBuilder}
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method, TypeDecl}
+import io.shiftleft.codepropertygraph.generated.nodes.{
+  Call,
+  FieldIdentifier,
+  Identifier,
+  Literal,
+  Method,
+  TypeDecl
+}
 import io.shiftleft.passes.CpgPass
 import io.shiftleft.semanticcpg.language.*
 
@@ -27,6 +34,9 @@ object SpringPacks {
     new SpringModelPass(cpg).createAndApply()
     new SpringSecurityPack.SpringSecurityAnnotationPass(cpg).createAndApply()
     new SpringSecurityPack.SpringSecurityDslPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringSecurityBypassPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringAuthMechanismPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringAuthEnforcementPass(cpg).createAndApply()
     new SpringSecurityPack.SpringTokenPropagationPass(cpg).createAndApply()
   }
 
@@ -74,32 +84,90 @@ object SpringPacks {
   private def constantPathFromCode(cpg: Cpg, code: String): Option[String] = {
     val inner = code.dropWhile(_ != '(').stripPrefix("(").takeWhile(_ != ')')
     val reference = inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
-    val segments  = reference.split('.').toList.filter(_.nonEmpty)
-    if (segments.sizeIs < 2 || !segments.forall(_.matches("[A-Za-z_$][\\w$]*"))) return None
-    val fieldName = segments.last
-    val className = segments(segments.length - 2)
-    cpg.assignment
-      .filter(a =>
-        a.target.ast.collectFirst {
-          case fi: io.shiftleft.codepropertygraph.generated.nodes.FieldIdentifier
-              if fi.canonicalName == fieldName =>
-            fi
-        }.nonEmpty
-      )
+    constantString(cpg, reference, owner = None)
+  }
+
+  /** Resolve a source-text reference to the string literal it names.
+    *
+    * Handles `FIELD`, `this.FIELD`, `Klass.FIELD` and nested
+    * `Outer.Inner.FIELD`, reading the constructor/clinit-lowered assignment.
+    * Shared by every pack that meets a non-literal where it wanted a string —
+    * mapping annotations, `@FeignClient` names, and SecurityConfig matcher
+    * patterns and role arguments (§5.2.9), which is why it lives here rather
+    * than being re-derived per pass.
+    *
+    * `owner` scopes a BARE name to the class that wrote it: member lookup is
+    * owner-scoped (§5.2.5), because two classes that both declare `order`
+    * would otherwise conflate into a false match. Returns None when the
+    * reference resolves to conflicting literals — an ambiguous constant is an
+    * honest unknown, never a pick (P10).
+    */
+  private[wadi] def constantString(
+      cpg: Cpg,
+      reference: String,
+      owner: Option[TypeDecl]
+  ): Option[String] = {
+    val normalized = reference.trim.stripPrefix("this.").trim
+    val segments   = normalized.split('.').toList.filter(_.nonEmpty)
+    if (segments.isEmpty || !segments.forall(_.matches("[A-Za-z_$][\\w$]*"))) return None
+    val fieldName  = segments.last
+    val qualifier  = Option.when(segments.sizeIs >= 2)(segments(segments.length - 2))
+
+    val named = cpg.assignment.filter(a =>
+      a.target.ast.exists {
+        case fi: FieldIdentifier => fi.canonicalName == fieldName
+        case id: Identifier      => id.name == fieldName
+        case _                   => false
+      }
+    )
+    val scoped = qualifier match {
       // Nested constant holders (yas `Constants.ApiConstant`): the lowered
       // assignment may sit in the inner OR outer class's initializer, and the
       // inner name only appears as a `$` segment of the fullName.
-      .filter(a =>
-        a.method.typeDecl.exists(td =>
-          td.name == className || td.fullName.split("[.$]").contains(className)
-        ) || a.target.code.contains(s"$className.")
-      )
+      case Some(className) =>
+        named.filter(a =>
+          a.method.typeDecl.exists(td =>
+            td.name == className || td.fullName.split("[.$]").contains(className)
+          ) || a.target.code.contains(s"$className.")
+        )
+      // A bare name belongs to the type that declared it (§5.2.5).
+      case None =>
+        owner match {
+          case Some(td) => named.filter(_.method.typeDecl.exists(_.fullName == td.fullName))
+          case None     => named
+        }
+    }
+    val literals = scoped
       .flatMap(_.source match {
-        case literal: io.shiftleft.codepropertygraph.generated.nodes.Literal =>
-          Some(literal.code.stripPrefix("\"").stripSuffix("\""))
-        case _ => None
+        case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
+        case _                => None
       })
-      .headOption
+      .l
+      .distinct
+    Option.when(literals.sizeIs == 1)(literals.head)
+  }
+
+  /** Every in-repo supertype of `typeDecl`, transitively (classes AND
+    * interfaces), cycle-guarded.
+    *
+    * Resolves by full name first and falls back to the short name for jar-less
+    * parses (§5.2.6). Shared by the feign shared-contract idiom and the
+    * security-annotation inheritance walk (§5.2.9) — both need "what did my
+    * ancestors declare", and re-deriving it per pass is how one of them ends
+    * up with the fallback and the other without it.
+    */
+  private[wadi] def transitiveParents(cpg: Cpg, typeDecl: TypeDecl): List[TypeDecl] = {
+    val visited = scala.collection.mutable.Set.empty[Long]
+    def walk(current: TypeDecl): List[TypeDecl] = {
+      if (visited.contains(current.id)) return Nil
+      visited.add(current.id)
+      val parents = current.inheritsFromTypeFullName.l.flatMap { parent =>
+        (cpg.typeDecl.fullNameExact(parent).l ++
+          cpg.typeDecl.nameExact(parent.split('.').last).filterNot(_.isExternal).l).distinct
+      }
+      parents.flatMap(p => p :: walk(p))
+    }
+    walk(typeDecl).distinctBy(_.id)
   }
 
   private[wadi] def joinPaths(prefix: String, path: String): String = {

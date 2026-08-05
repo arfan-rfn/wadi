@@ -201,6 +201,24 @@ export function fileBasename(file: string): string {
   return file.split("/").pop() ?? file
 }
 
+/** Everything before the basename — "" for a path with no directory part. */
+export function fileDirname(file: string): string {
+  const cut = file.lastIndexOf("/")
+  return cut === -1 ? "" : file.slice(0, cut)
+}
+
+/**
+ * A directory elided in the MIDDLE, keeping the root and the last two
+ * segments: `wadi-libs/…/common/entity`. Plain truncation cuts the tail, which
+ * is the half that says which package this is — the head is boilerplate
+ * (`src/main/java`) shared by every file in the repo.
+ */
+export function shortDirectory(directory: string): string {
+  const parts = directory.split("/").filter(Boolean)
+  if (parts.length <= 3) return directory
+  return `${parts[0]}/…/${parts.slice(-2).join("/")}`
+}
+
 /** A region of source that a canvas/tree selection maps onto. */
 export interface SourceSelection {
   file: string

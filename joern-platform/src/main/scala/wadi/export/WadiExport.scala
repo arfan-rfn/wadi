@@ -76,7 +76,7 @@ object WadiExport {
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
     */
-  val ExportSchemaVersion = "2.6.0"
+  val ExportSchemaVersion = "2.7.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -166,6 +166,9 @@ object WadiExport {
       "unreachable_sinks"     -> unreachableObjs,
       "data_models"           -> modelObjs,
       "security_rules"        -> securityRuleObjs(cpg),
+      "auth_enforcements"     -> authEnforcementObjs(cpg),
+      "method_security"       -> methodSecurityObj(cpg),
+      "auth_mechanisms"       -> authMechanismObjs(cpg),
       "config_refs"           -> configRefObjs(cpg),
       "analysis_coverage"     -> coverageObj
     )
@@ -1523,12 +1526,20 @@ object WadiExport {
       .sortBy(call => (lineOf(call.lineNumber), -call.id))
       .flatMap { call =>
         call.tag.nameExact("auth-rule").value.l.map { encoded =>
-          val Array(verb, pattern, access) = encoded.split('|')
+          // Limit to 3: an `access("a || b")` SpEL expression legitimately
+          // contains the separator, and an unlimited split would throw.
+          val Array(verb, pattern, access) = encoded.split('|').take(2) :+
+            encoded.split('|').drop(2).mkString("|")
           ujson.Obj(
             "pattern"     -> pattern,
             "http_method" -> (if (verb == "*") ujson.Null else ujson.Str(verb)),
             "access"      -> access,
             "kind"        -> "filter-chain",
+            // Chain scope (§5.2.9): rules belong to the bean/override that
+            // declared them. A service with several chains must not have its
+            // rules pooled into one flat first-match-wins list.
+            "chain_id"      -> chainIdOf(call),
+            "chain_pattern" -> chainPatternOf(cpg, call),
             "anchor" -> ujson.Obj(
               "file" -> call.file.name.headOption.getOrElse("<unknown>"),
               "line" -> lineOf(call.lineNumber)
@@ -1537,6 +1548,172 @@ object WadiExport {
           )
         }
       }
+
+  /** The chain a rule belongs to: its enclosing `SecurityFilterChain` bean or
+    * `configure(HttpSecurity)` override, identified by method full name.
+    */
+  private def chainIdOf(call: Call): ujson.Value = ujson.Str(call.method.fullName)
+
+  /** A chain-level `securityMatcher(...)`/`antMatcher(...)` scope, when the
+    * chain declares one — rules inside it only apply to requests it matches.
+    */
+  private def chainPatternOf(cpg: Cpg, call: Call): ujson.Value = {
+    val enclosing = call.method.fullName
+    // The modern DSL puts rules inside `authorizeHttpRequests(auth -> …)`, and
+    // javasrc2cpg lowers that lambda into its OWN method whose name keeps only
+    // the declaring type — so the chain's `securityMatcher`, which sits in the
+    // enclosing bean method, is not in the same method at all. Fall back to the
+    // declaring type for lambdas; several scopes on one type join rather than
+    // one being picked, since guessing which chain a scope belongs to would be
+    // exactly the fabrication this file avoids elsewhere.
+    val owner  = call.method.typeDecl.fullName.headOption
+    val lambda = call.method.name.startsWith("<lambda>")
+    val scopes = cpg.call
+      .nameExact("securityMatcher", "antMatcher")
+      .filter(scope =>
+        scope.method.fullName == enclosing ||
+          (lambda && owner.contains(scope.method.typeDecl.fullName.headOption.getOrElse("")))
+      )
+      .argument
+      .argumentIndexGt(0)
+      .isLiteral
+      .code
+      .l
+      .map(_.stripPrefix("\"").stripSuffix("\""))
+      .filter(_.startsWith("/"))
+      .distinct
+    scopes match {
+      case single :: Nil => ujson.Str(single)
+      case Nil           => ujson.Null
+      // Several scopes on one chain: the union is what governs, and picking
+      // one would be a guess. The worker treats it as chain-wide.
+      case many => ujson.Str(many.mkString(","))
+    }
+  }
+
+  /** How the service authenticates, from `auth-mechanism=` tags (§5.2.9 D4).
+    *
+    * A trailing `!<reason>` on the tag marks a mechanism that is present in
+    * source but switched off — it is exported as inactive rather than dropped,
+    * because "basic auth is explicitly disabled here" is a fact a reader wants.
+    */
+  private def authMechanismObjs(cpg: Cpg): List[ujson.Obj] =
+    cpg.call
+      .where(_.tag.nameExact("auth-mechanism"))
+      .l
+      .sortBy(call => (lineOf(call.lineNumber), -call.id))
+      .flatMap { call =>
+        call.tag.nameExact("auth-mechanism").value.l.map { encoded =>
+          val (kind, rest)      = encoded.span(_ != ':')
+          val payload           = rest.stripPrefix(":")
+          val (detail, disabled) = payload.span(_ != '!')
+          ujson.Obj(
+            "kind"   -> kind,
+            "detail" -> detail,
+            "active" -> disabled.isEmpty,
+            "inactive_reason" ->
+              (if (disabled.isEmpty) ujson.Null else ujson.Str(disabled.stripPrefix("!"))),
+            "anchor" -> ujson.Obj(
+              "file" -> call.file.name.headOption.getOrElse("<unknown>"),
+              "line" -> lineOf(call.lineNumber)
+            )
+          )
+        }
+      }
+      .distinctBy(obj => (obj("kind").str, obj("detail").str, obj("active").bool))
+
+  /** Whether method-security annotations are actually ENFORCED (§5.2.9 D6).
+    *
+    * `@PreAuthorize` on a handler means nothing unless the corresponding family
+    * is enabled, and the defaults differ by Spring generation:
+    * `@EnableGlobalMethodSecurity` (Spring Security 5) defaults every family
+    * OFF, while `@EnableMethodSecurity` (6+) defaults prePostEnabled ON and
+    * securedEnabled/jsr250Enabled OFF. Believing an inert annotation would
+    * publish enforcement that does not exist; dropping it would hide a policy
+    * the author clearly intended. The worker does neither — it marks it.
+    *
+    * `present=false` means no enabling annotation was found at all, which is
+    * NOT the same as "disabled": a service may enable it via XML or a parent
+    * config outside this CPG, so the worker treats it as unresolved.
+    */
+  private def methodSecurityObj(cpg: Cpg): ujson.Obj = {
+    val enabling = cpg.annotation
+      .nameExact("EnableMethodSecurity", "EnableGlobalMethodSecurity")
+      .l
+    enabling.headOption match {
+      case None => ujson.Obj("present" -> false)
+      case Some(annotation) =>
+        val modern = annotation.name == "EnableMethodSecurity"
+        def flag(name: String, default: Boolean): Boolean =
+          s"$name\\s*=\\s*(true|false)".r
+            .findFirstMatchIn(annotation.code)
+            .map(_.group(1) == "true")
+            .getOrElse(default)
+        ujson.Obj(
+          "present"        -> true,
+          "style"          -> annotation.name,
+          "pre_post"       -> flag("prePostEnabled", default = modern),
+          "secured"        -> flag("securedEnabled", default = false),
+          "jsr250"         -> flag("jsr250Enabled", default = false),
+          "evidence"       -> firstLine(annotation.code),
+          "anchor" -> ujson.Obj(
+            "file" -> annotation.file.name.headOption.getOrElse("<unknown>"),
+            "line" -> lineOf(annotation.lineNumber)
+          )
+        )
+    }
+  }
+
+  /** Gating constructs that carry no security-framework rule (§5.2.9):
+    * chain bypasses now, interceptors/filters/aspects as those passes land.
+    */
+  private def authEnforcementObjs(cpg: Cpg): List[ujson.Obj] = {
+    // Enforcement is tagged on a CALL when a registration site names it
+    // (addInterceptor, addUrlPatterns) and on a METHOD when the construct IS
+    // the code (an in-handler check, an aspect's advice).
+    val tagged: List[(String, String, Int, Long)] =
+      cpg.call
+        .where(_.tag.nameExact("auth-enforcement"))
+        .l
+        .flatMap(call =>
+          call.tag
+            .nameExact("auth-enforcement")
+            .value
+            .l
+            .map(v =>
+              (
+                v,
+                call.file.name.headOption.getOrElse("<unknown>"),
+                lineOf(call.lineNumber),
+                call.id
+              )
+            )
+        ) ++
+        cpg.method
+          .where(_.tag.nameExact("auth-enforcement"))
+          .l
+          .flatMap(method =>
+            method.tag
+              .nameExact("auth-enforcement")
+              .value
+              .l
+              .map(v => (v, method.filename, lineOf(method.lineNumber), method.id))
+          )
+
+    tagged
+      .sortBy { case (_, _, line, id) => (line, -id) }
+      .map { case (encoded, file, line, _) =>
+        val Array(kind, pattern, detail) = encoded.split('|').take(2) :+
+          encoded.split('|').drop(2).mkString("|")
+        ujson.Obj(
+          "kind"    -> kind,
+          "pattern" -> pattern,
+          "detail"  -> detail,
+          "anchor"  -> ujson.Obj("file" -> file, "line" -> line)
+        )
+      }
+      .distinctBy(obj => (obj("kind").str, obj("pattern").str, obj("detail").str))
+  }
 
   private val HttpVerbs = Set("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE")
   private val HttpMethodArgument = """(?:org\.springframework\.http\.)?HttpMethod\.([A-Z]+)""".r

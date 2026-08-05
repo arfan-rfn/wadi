@@ -63,39 +63,251 @@ class TypeShape(WadiModel):
 
 
 class AuthEvidenceKind(StrEnum):
+    """What kind of construct enforces (or could enforce) access (§5.2.9).
+
+    The first three are declarative sources; the rest are enforcement points
+    that gate requests without a security-framework rule behind them. All are
+    framework-neutral by construction — a FastAPI ``Security(...)`` dependency
+    or an Express middleware maps onto the same vocabulary (goal 9).
+    """
+
     ANNOTATION = "annotation"
     SECURITY_DSL = "security-dsl"
     CONFIG = "config"
+    CHAIN_BYPASS = "chain-bypass"
+    INTERCEPTOR = "interceptor"
+    SERVLET_FILTER = "servlet-filter"
+    ASPECT = "aspect"
+    IN_HANDLER = "in-handler"
+    GATEWAY = "gateway"
 
 
-class AuthEvidence(WadiModel):
-    """One piece of evidence behind an auth claim — every claim carries its source (§5.2)."""
+class AuthEffect(StrEnum):
+    """What an enforcement point does to a request that reaches it.
+
+    ``UNKNOWN`` is a first-class answer, not a placeholder: an enforcement we
+    can see but cannot interpret must say so, because the alternative is
+    leaving the endpoint reading as unprotected (§5.2.9).
+    """
+
+    REQUIRE_AUTHENTICATED = "require-authenticated"
+    REQUIRE_ROLES = "require-roles"
+    REQUIRE_AUTHORITIES = "require-authorities"
+    PERMIT_ALL = "permit-all"
+    DENY_ALL = "deny-all"
+    UNKNOWN = "unknown"
+
+
+class AuthResolution(StrEnum):
+    """How completely an enforcement point was read.
+
+    ``OPAQUE`` is what withholds an endpoint's claim (§5.2.9): the construct
+    was detected but its effect or scope could not be determined.
+    """
+
+    RESOLVED = "resolved"
+    PARTIAL = "partial"
+    OPAQUE = "opaque"
+
+
+class _ActiveFlagged(WadiModel):
+    """Mixin for facts that can be present but switched off.
+
+    A disabled mechanism (``httpBasic().disable()``) or an inert annotation
+    family (``@PreAuthorize`` without ``@EnableMethodSecurity``) is recorded
+    rather than dropped — but it never gates anything, and it never withholds
+    a claim. Turning something off always carries its reason (P10).
+    """
+
+    active: bool = Field(default=True, description="False when present in source but not in effect")
+    inactive_reason: str | None = Field(
+        default=None,
+        description="Why it is not in effect, e.g. 'disabled in chain' — required when inactive",
+    )
+
+    @model_validator(mode="after")
+    def _inactive_states_why(self) -> Self:
+        if self.active and self.inactive_reason is not None:
+            raise ValueError("inactive_reason is only meaningful when active=False")
+        if not self.active and not self.inactive_reason:
+            raise ValueError("active=False requires an inactive_reason (P10 — never a silent off)")
+        return self
+
+
+class AuthEvidence(_ActiveFlagged):
+    """One enforcement point that gates — or could gate — this endpoint (§5.2.9).
+
+    Every claim carries its source, and every construct that *could* gate a
+    request is recorded here whether or not its effect could be determined.
+    That is what makes the claim rule on :class:`EndpointAuth` safe: a rule we
+    failed to read is present as ``resolution=opaque`` rather than absent.
+
+    **Reader migration (pre-1.13.0 artifacts):** records written before the
+    enforcement model carry no ``effect``/``resolution``, so they default to
+    ``unknown``/``resolved`` — honest about what was recorded (the effect was
+    never stored) while preserving the claim those artifacts were written with.
+    """
 
     kind: AuthEvidenceKind
     detail: str = Field(min_length=1, description="e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'")
     anchor: SourceAnchor | None = None
+    effect: AuthEffect = Field(
+        default=AuthEffect.UNKNOWN, description="What this does to a request that reaches it"
+    )
+    resolution: AuthResolution = Field(
+        default=AuthResolution.RESOLVED, description="How completely it was read"
+    )
+    roles: list[str] = Field(
+        default_factory=list[str], description="Roles required, ROLE_ prefix stripped"
+    )
+    authorities: list[str] = Field(
+        default_factory=list[str], description="Authorities required, when distinct from roles"
+    )
+    expression: str | None = Field(
+        default=None, description="Raw access expression / SpEL, preserved verbatim"
+    )
+    pattern: str | None = Field(
+        default=None,
+        description="Path pattern this is scoped to; '{?}' means read but unresolvable",
+    )
+    http_method: HttpMethod | None = Field(
+        default=None, description="Verb restriction; None means the rule applies to every verb"
+    )
+
+
+class AuthMechanismKind(StrEnum):
+    """How a caller proves identity — distinct from what it is then allowed to do."""
+
+    JWT_BEARER = "jwt-bearer"
+    OPAQUE_TOKEN = "opaque-token"
+    HTTP_BASIC = "http-basic"
+    FORM_LOGIN = "form-login"
+    OAUTH2_LOGIN = "oauth2-login"
+    OAUTH2_RESOURCE_SERVER = "oauth2-resource-server"
+    SAML2 = "saml2"
+    X509 = "x509"
+    REMEMBER_ME = "remember-me"
+    CUSTOM_FILTER = "custom-filter"
+    STATELESS_SESSION = "stateless-session"
+
+
+class AuthMechanism(_ActiveFlagged):
+    """One authentication mechanism configured on the service that serves this endpoint.
+
+    A custom filter is only ever promoted past ``CUSTOM_FILTER`` on evidence
+    inside the filter itself — naming a mechanism from a class name would be
+    exactly the fabricated security fact §12 forbids.
+    """
+
+    kind: AuthMechanismKind
+    detail: str = Field(min_length=1, description="Raw source text or filter class name")
+    anchor: SourceAnchor | None = None
 
 
 class EndpointAuth(WadiModel):
-    """Structured authorization state of an endpoint.
+    """Structured authorization state of an endpoint (§5.2.9).
 
     ``authenticated`` is tri-state (P10): True/False are *claims backed by
-    evidence*; None means honestly unknown — never defaulted to False.
+    fully-read enforcement*; None means honestly unknown — never defaulted to
+    False. The distinction between None and False is load-bearing: None says
+    "we did not read everything that guards this", False says "we read it all
+    and nothing guards this". Collapsing them is the failure mode this model
+    exists to prevent.
+
+    ``denied`` refines the True case rather than replacing it. ``denyAll()``
+    admits nobody, so "a request must be authenticated to pass" is still true
+    of it — but a route no caller can reach is not the same fact as a working
+    protected route, and rendering the two identically tells an auditor a dead
+    endpoint is live. It is a separate boolean, not a fourth value of
+    ``authenticated``, so every existing reader of the tri-state keeps working.
     """
 
     authenticated: bool | None = None
-    roles: list[str] = Field(default_factory=list[str])
-    mechanism: str | None = Field(
-        default=None, description="e.g. 'spring-security'; None when no framework was detected"
+    denied: bool = Field(
+        default=False,
+        description="A read rule denies EVERY caller (denyAll); the endpoint is unreachable",
     )
-    evidence: list[AuthEvidence] = Field(default_factory=list[AuthEvidence])
+    roles: list[str] = Field(default_factory=list[str])
+    authorities: list[str] = Field(
+        default_factory=list[str],
+        description="Authorities required, when the rule names authorities rather than roles",
+    )
+    mechanism: str | None = Field(
+        default=None,
+        description="Framework family, e.g. 'spring-security'; see mechanisms[] for how auth works",
+    )
+    mechanisms: list[AuthMechanism] = Field(
+        default_factory=list[AuthMechanism],
+        description="How authentication is performed on this endpoint's service",
+    )
+    evidence: list[AuthEvidence] = Field(
+        default_factory=list[AuthEvidence],
+        description="Every enforcement point in scope — read or not (§5.2.9)",
+    )
+
+    @property
+    def unread_enforcement(self) -> list[AuthEvidence]:
+        """Active enforcement points whose effect could not be determined.
+
+        Non-empty is exactly the condition under which no claim may be made,
+        and it is what the UI renders to explain a withheld answer.
+        """
+        return [
+            item
+            for item in self.evidence
+            if item.active and item.resolution is AuthResolution.OPAQUE
+        ]
 
     @model_validator(mode="after")
-    def _claims_need_evidence(self) -> Self:
-        if self.authenticated is not None and not self.evidence:
+    def _claims_are_earned(self) -> Self:
+        """The §5.2.9 claim rule, as a contract guarantee.
+
+        Enforcement is a conjunction, so an unread gate can only ADD a
+        requirement — never remove one. That asymmetry is what makes this
+        checkable without re-deriving the claim here:
+
+        * ``authenticated=False`` — "we read everything and nothing guards
+          this" — is incompatible with ANY unread gate. This is the dangerous
+          direction and the one that produced real wrong answers.
+        * ``authenticated=True`` survives an unread gate, which could only make
+          the endpoint more restricted. The single exception is an unread
+          ``chain-bypass``: bypasses remove enforcement, so one could flip a
+          protected answer to open.
+        """
+        if self.authenticated is None:
+            return self
+        if not self.evidence:
             raise ValueError(
                 "an authenticated=True/False claim requires at least one piece of evidence; "
                 "use authenticated=None for unknown (P10)"
+            )
+        blocking = [
+            item
+            for item in self.unread_enforcement
+            if not self.authenticated or item.kind is AuthEvidenceKind.CHAIN_BYPASS
+        ]
+        if blocking:
+            raise ValueError(
+                f"an authenticated={self.authenticated} claim cannot coexist with enforcement "
+                f"that was detected but not read ({blocking[0].kind.value}: "
+                f"{blocking[0].detail!r}); §5.2.9 requires the claim be withheld "
+                "(authenticated=None) so an unreadable guard never falls through to a "
+                "permissive answer"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _denial_is_a_read_claim(self) -> Self:
+        """`denied` refines a positive claim; it can never stand on its own.
+
+        A denial is something we READ (`denyAll()` is as explicit as a rule
+        gets), so it cannot coexist with a withheld or open answer — those say
+        we could not read the guards, or read them all and found none.
+        """
+        if self.denied and self.authenticated is not True:
+            raise ValueError(
+                "denied=True requires authenticated=True: a denial is a rule that was read, "
+                f"so it cannot accompany authenticated={self.authenticated}"
             )
         return self
 

@@ -218,6 +218,7 @@ class ExtractionPipeline:
                     snapshot_id=snapshot.id,
                     service_id=svc_id,
                     config_env=service.config.env,
+                    config_structured=service.config.structured,
                 ).assemble(export)
                 # §5.2.8 M2: the invariant check runs during assembly, so the
                 # boundary write moves after it — cfg_anomalies is a

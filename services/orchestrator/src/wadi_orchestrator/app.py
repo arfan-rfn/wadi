@@ -22,9 +22,13 @@ from pydantic import BaseModel, Field
 
 from wadi_config import WadiSettings
 from wadi_contracts import (
+    AuthEndpointRow,
+    AuthTotals,
     CalleeUnboundReason,
     CoverageReport,
     Endpoint,
+    EndpointDependenciesView,
+    EndpointDependency,
     EndpointDetailView,
     EndpointTouchedFile,
     ExtractionJob,
@@ -41,6 +45,7 @@ from wadi_contracts import (
     SourceVariant,
     SourceView,
     System,
+    SystemAuthView,
     SystemGraphService,
     SystemGraphView,
     TargetKind,
@@ -525,6 +530,152 @@ def create_app(
             # Lets a consumer tell "every call opens" from "this graph predates
             # the accounting", which the empty list alone cannot say (P10).
             icfg_schema_version=icfg.schema_version if icfg is not None else None,
+        )
+
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/services/{{service_id}}/endpoint-dependencies",
+        response_model=EndpointDependenciesView,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def endpoint_dependencies(
+        snapshot_id: str, service_id: str, state: StateDep
+    ) -> EndpointDependenciesView:
+        """What each of a service's endpoints calls downstream (§5.2.9 UI).
+
+        Cross-service calls are the core extracted fact, so the endpoint list
+        shows them inline instead of hiding them one click deep. The join needs
+        the ICFGs (a remote call belongs to an endpoint only via its flow), so
+        it is scoped to ONE service — bounded by that service's endpoint count
+        rather than the snapshot's, and cached client-side per service.
+        """
+        if await state.artifacts.get_service_boundary(snapshot_id, service_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"service {service_id} not found in snapshot {snapshot_id}",
+            )
+        stitched = await state.stitch.get_coverage_report(snapshot_id) is not None
+        if not stitched:
+            # Empty here would read as "calls nothing"; the flag says "not yet".
+            return EndpointDependenciesView(
+                snapshot_id=snapshot_id, service_id=service_id, stitched=False
+            )
+
+        endpoint_ids = await state.artifacts.list_icfg_endpoint_ids(snapshot_id, service_id)
+        icfgs = await asyncio.gather(
+            *(state.artifacts.get_icfg(snapshot_id, eid) for eid in endpoint_ids)
+        )
+        calls_by_endpoint: dict[str, set[str]] = {}
+        for endpoint_id_, icfg in zip(endpoint_ids, icfgs, strict=True):
+            if icfg is None:
+                continue
+            ids = {call_id for node in icfg.nodes for call_id in node.remote_call_ids}
+            if ids:
+                calls_by_endpoint[endpoint_id_] = ids
+
+        every_call = sorted({call for ids in calls_by_endpoint.values() for call in ids})
+        edges = await state.graph.resolve_call_targets(snapshot_id, every_call)
+        by_call: dict[str, list[RemoteEdgeItem]] = {}
+        for edge in edges:
+            by_call.setdefault(edge.remote_call_id, []).append(edge)
+
+        dependencies: dict[str, list[EndpointDependency]] = {}
+        for endpoint_id_, ids in calls_by_endpoint.items():
+            seen: dict[str, EndpointDependency] = {}
+            for call_id in sorted(ids):
+                for edge in by_call.get(call_id, []):
+                    label = (
+                        edge.target_service_name
+                        or edge.external_host
+                        or edge.target_service_id
+                        or "undetermined"
+                    )
+                    # One row per distinct target: an endpoint calling the same
+                    # service from three sites depends on it once.
+                    seen.setdefault(
+                        label,
+                        EndpointDependency(
+                            label=label,
+                            target_kind=edge.target_kind,
+                            confidence=edge.confidence,
+                        ),
+                    )
+            if seen:
+                dependencies[endpoint_id_] = sorted(seen.values(), key=lambda d: d.label)
+
+        return EndpointDependenciesView(
+            snapshot_id=snapshot_id,
+            service_id=service_id,
+            stitched=True,
+            dependencies=dependencies,
+        )
+
+    # --- system auth (§5.2.9) ---------------------------------------------------------
+
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/auth",
+        response_model=SystemAuthView,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def system_auth(snapshot_id: str, state: StateDep) -> SystemAuthView:
+        """Every endpoint's auth state in one read (§5.2.9).
+
+        "Which endpoints here are unprotected?" is inherently system-wide, so it
+        is one route rather than a per-service fan-out — a client walking every
+        service to assemble it would make the honest answer the expensive one.
+        Read-only join over stored artifacts; no writer is involved (P4).
+        """
+        snapshot = await state.snapshots.get(snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
+        boundaries = await state.artifacts.list_service_boundaries(snapshot_id)
+        names = {boundary.service_id: boundary.name for boundary in boundaries}
+        endpoints = await state.artifacts.list_endpoints_for_snapshot(snapshot_id)
+
+        rows = [
+            AuthEndpointRow(
+                endpoint_id=endpoint.id,
+                service_id=endpoint.service_id,
+                service_name=names.get(endpoint.service_id, endpoint.service_id),
+                http_method=endpoint.http_method,
+                full_uri=endpoint.full_uri,
+                simplified_uri=endpoint.simplified_uri,
+                authenticated=endpoint.auth.authenticated,
+                denied=endpoint.auth.denied,
+                roles=endpoint.auth.roles,
+                authorities=endpoint.auth.authorities,
+                mechanism_kinds=sorted(
+                    {m.kind for m in endpoint.auth.mechanisms if m.active},
+                    key=lambda kind: kind.value,
+                ),
+                unread_kinds=sorted(
+                    {item.kind for item in endpoint.auth.unread_enforcement},
+                    key=lambda kind: kind.value,
+                ),
+            )
+            for endpoint in endpoints
+        ]
+        # withheld vs no_evidence both leave authenticated=None but call for
+        # opposite responses: one is a wadi gap, the other a possible hole in
+        # the system (§5.2.9).
+        withheld = sum(1 for row in rows if row.authenticated is None and row.unread_kinds)
+        # `denied` is carved OUT of `authenticated`, not added alongside it: a
+        # route nobody can reach is not part of the reachable protected surface,
+        # and counting it in both would break the partition.
+        return SystemAuthView(
+            snapshot_id=snapshot_id,
+            totals=AuthTotals(
+                endpoints=len(rows),
+                authenticated=sum(
+                    1 for row in rows if row.authenticated is True and not row.denied
+                ),
+                denied=sum(1 for row in rows if row.denied),
+                unauthenticated=sum(1 for row in rows if row.authenticated is False),
+                withheld=withheld,
+                no_evidence=sum(
+                    1 for row in rows if row.authenticated is None and not row.unread_kinds
+                ),
+            ),
+            rows=sorted(rows, key=lambda row: (row.service_name, row.simplified_uri)),
         )
 
     # --- system graph (§11 Phase 2.7 M4) ----------------------------------------------

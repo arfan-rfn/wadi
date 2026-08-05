@@ -72,6 +72,17 @@ class AppConfigFacts:
     notes: list[str] = field(default_factory=list[str])
     """Machine-readable parsing-gap notes (§5.4.2): what this parser knowingly
     skipped — queryable, never just prose (P10)."""
+    structured: dict[str, list[dict[str, object]]] = field(
+        default_factory=dict[str, list[dict[str, object]]]
+    )
+    """List-of-mapping nodes kept with their structure, keyed by dotted prefix.
+
+    ``_flatten`` collapses a list into a comma-joined string, which is fine for
+    scalars and destroys anything a consumer needs to read back — the gateway
+    routes needed a bespoke escape hatch for exactly that reason. Config-defined
+    authorization (§5.2.9 D5) is the second consumer, so the escape hatch is
+    general now: any list of mappings survives, and callers that only want the
+    flat view are unaffected."""
 
 
 _EMPTY = AppConfigFacts()
@@ -92,6 +103,7 @@ def parse_app_config(
     flat: dict[str, str] = {}
     routes: list[AppGatewayRoute] = []
     notes: list[str] = []
+    structured: dict[str, list[dict[str, object]]] = {}
 
     base_found = False
     for candidate in ("application.yml", "application.yaml", "application.properties"):
@@ -101,7 +113,11 @@ def parse_app_config(
             if candidate.endswith(".properties"):
                 _merge_flat(flat, _parse_properties(config_path))
             else:
-                routes.extend(_merge_yaml_documents(config_path, flat, active_profiles, notes))
+                routes.extend(
+                    _merge_yaml_documents(
+                        config_path, flat, active_profiles, notes, structured=structured
+                    )
+                )
             break
 
     profile_files = (
@@ -121,11 +137,15 @@ def parse_app_config(
         if path.suffix == ".properties":
             _merge_flat(flat, _parse_properties(path))
         else:
-            routes.extend(_merge_yaml_documents(path, flat, None, notes, profile_docs_apply=True))
+            routes.extend(
+                _merge_yaml_documents(
+                    path, flat, None, notes, profile_docs_apply=True, structured=structured
+                )
+            )
 
     if not base_found and not flat:
         return _EMPTY if not notes else AppConfigFacts(notes=notes)
-    return _from_flat(flat, routes, notes)
+    return _from_flat(flat, routes, notes, structured)
 
 
 def _select_profile_files(
@@ -148,6 +168,7 @@ def _merge_yaml_documents(
     notes: list[str],
     *,
     profile_docs_apply: bool = False,
+    structured: dict[str, list[dict[str, object]]] | None = None,
 ) -> list[AppGatewayRoute]:
     """Merge a YAML file's documents (T3): the base document always applies;
     profile-activated documents (``spring.config.activate.on-profile`` /
@@ -169,7 +190,11 @@ def _merge_yaml_documents(
             continue
         doc_flat: dict[str, str] = {}
         doc_routes = _flatten(
-            cast(dict[object, object], document), prefix="", into=doc_flat, notes=notes
+            cast(dict[object, object], document),
+            prefix="",
+            into=doc_flat,
+            notes=notes,
+            structured=structured,
         )
         marker = doc_flat.pop("spring.config.activate.on-profile", None) or (
             doc_flat.pop("spring.profiles", None) if index > 0 else None
@@ -195,6 +220,7 @@ def _flatten(
     prefix: str,
     into: dict[str, str],
     notes: list[str] | None = None,
+    structured: dict[str, list[dict[str, object]]] | None = None,
 ) -> list[AppGatewayRoute]:
     """Flatten to dotted keys; gateway route lists get structured parsing."""
     routes: list[AppGatewayRoute] = []
@@ -204,9 +230,14 @@ def _flatten(
             routes.extend(_parse_gateway_routes(cast(list[object], value), notes))
             continue
         if isinstance(value, dict):
-            routes.extend(_flatten(cast(dict[object, object], value), f"{key}.", into, notes))
+            routes.extend(
+                _flatten(cast(dict[object, object], value), f"{key}.", into, notes, structured)
+            )
         elif isinstance(value, list):
-            into[key] = ",".join(str(item) for item in cast(list[object], value))
+            items = cast(list[object], value)
+            if structured is not None and items and all(isinstance(i, dict) for i in items):
+                structured[key] = [cast(dict[str, object], i) for i in items]
+            into[key] = ",".join(str(item) for item in items)
         elif value is not None:
             into[key] = str(value)
     return routes
@@ -318,6 +349,7 @@ def _from_flat(
     flat: dict[str, str],
     routes: list[AppGatewayRoute] | None = None,
     notes: list[str] | None = None,
+    structured: dict[str, list[dict[str, object]]] | None = None,
 ) -> AppConfigFacts:
     env = {
         key: value
@@ -347,6 +379,7 @@ def _from_flat(
         gateway_discovery_locator=locator,
         discovery_names=discovery_names,
         notes=all_notes,
+        structured=dict(structured or {}),
     )
 
 

@@ -11,6 +11,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useNewestSnapshot, useSnapshots } from "@/lib/wadi/hooks"
 import { endpointPath, newestSucceeded, snapshotPath } from "@/lib/wadi/routes"
 import { Skeleton } from "@/components/ui/skeleton"
+import { AppHeader } from "@/components/app-header"
 import { EmptyState } from "@/components/shared/empty-state"
 
 function RootResolver() {
@@ -63,7 +64,8 @@ function RootResolver() {
   if (global.noSystems) {
     return (
       <EmptyState className="p-8">
-        No systems yet — run <code className="font-mono">wadi analyze .</code>{" "}
+        No systems yet — run{" "}
+        <code className="rounded bg-muted px-1 font-mono">wadi analyze .</code>{" "}
         to create the first snapshot.
       </EmptyState>
     )
@@ -74,7 +76,7 @@ function RootResolver() {
         {requestedSystem
           ? "This system has no snapshots yet — run "
           : "No snapshots yet in any system — run "}
-        <code className="font-mono">wadi analyze .</code>
+        <code className="rounded bg-muted px-1 font-mono">wadi analyze .</code>
       </EmptyState>
     )
   }
@@ -88,8 +90,11 @@ function RootResolver() {
 
 export default function RootPage() {
   return (
-    <Suspense>
-      <RootResolver />
-    </Suspense>
+    <>
+      <AppHeader />
+      <Suspense>
+        <RootResolver />
+      </Suspense>
+    </>
   )
 }

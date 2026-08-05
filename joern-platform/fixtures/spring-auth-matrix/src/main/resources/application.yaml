@@ -1,0 +1,17 @@
+# The authorization policy for the config-driven chain lives HERE, not in the
+# Java (§5.2.9 D5). This is the yas shape: `@ConfigurationProperties` binds the
+# list, the SecurityConfig loops over it, and no literal path appears in code.
+spring:
+  application:
+    name: spring-auth-matrix
+
+app:
+  api-security:
+    rules:
+      - patterns:
+          - "/config-driven/public/**"
+        permit-all: true
+      - patterns:
+          - "/config-driven/admin/**"
+        roles:
+          - "ADMIN"

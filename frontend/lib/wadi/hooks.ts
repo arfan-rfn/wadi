@@ -133,6 +133,34 @@ export function useSystemGraph(enabled: boolean, snapshotId: string | null) {
   })
 }
 
+/** What each of a service's endpoints calls downstream (§5.2.9 UI). One read
+ *  per service, cached — the alternative is a detail fetch per visible row. */
+export function useEndpointDependencies(
+  snapshotId: string | null,
+  serviceId: string | null
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.endpointDependencies(
+      snapshotId ?? "none",
+      serviceId ?? "none"
+    ),
+    queryFn: () =>
+      wadiApi.endpointDependencies(snapshotId as string, serviceId as string),
+    enabled: snapshotId !== null && serviceId !== null,
+  })
+}
+
+/** Every endpoint's auth state in one read (§5.2.9). One request rather than a
+ *  per-service fan-out: "which endpoints are unprotected?" is system-wide, and
+ *  making the honest answer the expensive one is how it stops being asked. */
+export function useSystemAuth(enabled: boolean, snapshotId: string | null) {
+  return useQuery({
+    queryKey: QUERY_KEYS.systemAuth(snapshotId ?? "none"),
+    queryFn: () => wadiApi.systemAuth(snapshotId as string),
+    enabled: enabled && snapshotId !== null,
+  })
+}
+
 /** Whole-file source-on-demand (§11 Phase 2.7): fetched only while the Flow
  * tab is active, never preloaded; the server caps the window and says so. */
 export function useSourceFile(

@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest"
 
 import type { Icfg } from "@/lib/generated/icfg.schema"
-import { buildSourceMap, isTouched } from "@/lib/wadi/source-map"
+import {
+  buildSourceMap,
+  fileBasename,
+  fileDirname,
+  isTouched,
+  shortDirectory,
+} from "@/lib/wadi/source-map"
 
 const CONTROLLER = "src/main/java/com/acme/CancelController.java"
 const IMPL = "src/main/java/com/acme/CancelServiceImpl.java"
@@ -143,5 +149,43 @@ describe("buildSourceMap (§11 Phase 2.7 M1)", () => {
     const [controller] = buildSourceMap(icfg)
     expect(isTouched(controller, 30)).toBe(false)
     expect(isTouched(controller, 40)).toBe(false)
+  })
+})
+
+// How a file card names itself. The panel is narrow and user-resizable, so
+// which half of a path survives is a real decision: the tail names the package,
+// the head (`src/main/java`) is boilerplate every file in the repo shares.
+describe("path display", () => {
+  test("splits a path into its name and its directory", () => {
+    expect(fileBasename(CONTROLLER)).toBe("CancelController.java")
+    expect(fileDirname(CONTROLLER)).toBe("src/main/java/com/acme")
+  })
+
+  test("a bare filename has no directory part", () => {
+    expect(fileBasename("Main.java")).toBe("Main.java")
+    expect(fileDirname("Main.java")).toBe("")
+  })
+
+  test("elides the MIDDLE of a deep path, keeping root and last two", () => {
+    expect(
+      shortDirectory(
+        "wadi-libs/ts-common/src/main/java/edu/fudan/common/entity"
+      )
+    ).toBe("wadi-libs/…/common/entity")
+    expect(shortDirectory("src/main/java/cancel/controller")).toBe(
+      "src/…/cancel/controller"
+    )
+  })
+
+  test("leaves a short path alone rather than eliding nothing", () => {
+    expect(shortDirectory("src/main/java")).toBe("src/main/java")
+    expect(shortDirectory("src/main")).toBe("src/main")
+    expect(shortDirectory("src")).toBe("src")
+    expect(shortDirectory("")).toBe("")
+  })
+
+  test("survives a leading slash without producing an empty first segment", () => {
+    // `/a/b/c/d` split naively yields a leading "" and renders as "/…/c/d".
+    expect(shortDirectory("/a/b/c/d")).toBe("a/…/c/d")
   })
 })

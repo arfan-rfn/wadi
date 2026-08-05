@@ -11,7 +11,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EXPORT_SCHEMA_VERSION = "2.6.0"
+EXPORT_SCHEMA_VERSION = "2.7.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -53,7 +53,16 @@ label corrections — a semantics change inside the existing edge vocabulary,
 so no field moves: an ``if`` whose arm holds no statements labels its join
 edge for that arm instead of dropping to ``flow`` (both arms empty stays
 ``flow``, a recorded non-representable), and an empty try body routes its
-handlers as ``exception`` plus an explicit normal-completion edge."""
+handlers as ``exception`` plus an explicit normal-completion edge.
+
+2.7.0 (additive, §5.2.9): security rules gained ``chain_id``/``chain_pattern``
+so first-match-wins applies within a chain rather than across a pooled list,
+and a rule whose pattern could not be read now arrives with ``pattern="{?}"``
+instead of being dropped — the change that stops an unreadable rule from
+falling through to a later ``permitAll``. New top-level ``auth_enforcements``
+section for gating constructs that carry no rule at all (chain bypasses,
+interceptors, servlet filters, aspects, in-handler checks). Readers of 2.6.0
+still parse: both additions default to empty/None."""
 
 
 class ExportModelBase(BaseModel):
@@ -285,6 +294,24 @@ class ExportUnreachableSink(ExportSink):
     line: int = Field(ge=0)
 
 
+CONFIG_PREFIX = "@"
+"""A rule whose patterns live in config, not code (§5.2.9 D5).
+
+The value is ``@<@ConfigurationProperties prefix>``. Distinct from
+``UNRESOLVABLE_PATTERN`` on purpose: one says "unreadable", this says
+"readable, but not from the Java" — the worker correlates it against the
+parsed config tree and recovers the real rules.
+"""
+
+UNRESOLVABLE_PATTERN = "{?}"
+"""A rule that was READ but whose path could not be resolved (§5.2.9).
+
+Emitted instead of dropping the rule, because dropping does not degrade to
+"unknown": the endpoint falls through to whatever permissive rule comes next.
+The worker turns this into a withheld claim.
+"""
+
+
 class ExportSecurityRule(ExportModelBase):
     """One SecurityFilterChain DSL rule (collected CPG-wide; §5.1).
 
@@ -292,12 +319,84 @@ class ExportSecurityRule(ExportModelBase):
     security facts are worse than absent ones (§12); the worker matches.
     """
 
-    pattern: str = Field(description="Ant-style pattern, e.g. '/admin/**'")
+    pattern: str = Field(
+        description="Ant-style pattern, e.g. '/admin/**'; '{?}' = read but unresolvable"
+    )
     http_method: str | None = Field(default=None, description="Verb restriction, when present")
     access: str = Field(description="Raw access expression, e.g. \"hasRole('ADMIN')\"")
     kind: str = Field(description="'filter-chain'")
+    chain_id: str | None = Field(
+        default=None,
+        description=(
+            "2.7.0: the bean/override that declared this rule. First-match-wins "
+            "applies WITHIN a chain — a service with several chains must not have "
+            "its rules pooled into one list (§5.2.9)"
+        ),
+    )
+    chain_pattern: str | None = Field(
+        default=None,
+        description="2.7.0: chain-level securityMatcher/antMatcher scope, when declared",
+    )
     anchor: ExportAnchor
     evidence: str = Field(description="First line of the rule's source text")
+
+    @property
+    def resolvable(self) -> bool:
+        """False when the rule was seen but its scope could not be read.
+
+        A ``@prefix`` pattern counts as UNresolvable here: until the worker has
+        correlated it against config it is exactly as unreadable as ``{?}``, and
+        treating it otherwise would let it match nothing and fall through.
+        """
+        return self.pattern != UNRESOLVABLE_PATTERN and not self.pattern.startswith(CONFIG_PREFIX)
+
+
+class ExportAuthEnforcement(ExportModelBase):
+    """A gating construct with no security-framework rule behind it (§5.2.9).
+
+    Chain bypasses, interceptors, servlet filters, aspects and in-handler
+    checks. These carry no access call, which is precisely why the rule pass
+    cannot see them — and an endpoint guarded by something wadi cannot read is
+    the one a reader most needs told about.
+    """
+
+    kind: str = Field(description="An AuthEvidenceKind value, e.g. 'chain-bypass'")
+    pattern: str = Field(description="Path scope; '{?}' = read but unresolvable")
+    detail: str = Field(description="Source text or the implementing class")
+    anchor: ExportAnchor
+
+
+class ExportAuthMechanism(ExportModelBase):
+    """How the service authenticates (§5.2.9 D4).
+
+    ``active=False`` is a mechanism present in source but switched off
+    (``httpBasic().disable()``) — recorded rather than dropped, because "basic
+    auth is explicitly off here" is a fact a reader wants.
+    """
+
+    kind: str = Field(description="An AuthMechanismKind value, e.g. 'jwt-bearer'")
+    detail: str = Field(description="Source text or the implementing filter class")
+    active: bool = True
+    inactive_reason: str | None = None
+    anchor: ExportAnchor
+
+
+class ExportMethodSecurity(ExportModelBase):
+    """Whether method-security annotations are ENFORCED (§5.2.9 D6).
+
+    ``present=False`` means no enabling annotation was found, which is NOT the
+    same as disabled: enablement could live in XML or a parent config outside
+    this CPG. The worker treats that as unresolved and withholds, rather than
+    either believing an inert annotation or dismissing a real one.
+    """
+
+    present: bool
+    style: str | None = None
+    pre_post: bool = False
+    secured: bool = False
+    jsr250: bool = False
+    evidence: str | None = None
+    anchor: ExportAnchor | None = None
 
 
 class ExportConfigRef(ExportModelBase):
@@ -351,6 +450,18 @@ class ServiceExport(ExportModelBase):
     )
     data_models: list[ExportDataModel] = Field(default_factory=list[ExportDataModel])
     security_rules: list[ExportSecurityRule] = Field(default_factory=list[ExportSecurityRule])
+    auth_enforcements: list[ExportAuthEnforcement] = Field(
+        default_factory=list[ExportAuthEnforcement],
+        description="2.7.0 (§5.2.9): gating constructs with no security rule behind them",
+    )
+    auth_mechanisms: list[ExportAuthMechanism] = Field(
+        default_factory=list[ExportAuthMechanism],
+        description="2.7.0 (§5.2.9): how the service authenticates",
+    )
+    method_security: ExportMethodSecurity | None = Field(
+        default=None,
+        description="2.7.0 (§5.2.9): whether security annotations are enforced; None pre-2.7.0",
+    )
     config_refs: list[ExportConfigRef] = Field(default_factory=list[ExportConfigRef])
     analysis_coverage: ExportAnalysisCoverage | None = Field(
         default=None, description="None = exporter predates 2.2.0 (unknown, not zero — P10)"

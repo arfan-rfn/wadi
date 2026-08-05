@@ -194,7 +194,8 @@ class GraphRepository:
             "MERGE (rc:RemoteCall {snapshot_id: $snapshot_id, remote_call_id: row.remote_call_id}) "
             "SET rc.service_id = row.service_id, rc.mechanism = row.mechanism, "
             "    rc.http_verb = row.http_verb, rc.url = row.url, "
-            "    rc.url_confidence = row.url_confidence, rc.file = row.file, rc.line = row.line "
+            "    rc.url_confidence = row.url_confidence, rc.file = row.file, rc.line = row.line, "
+            "    rc.auth_propagation = row.auth_propagation "
             "WITH rc, row "
             "MATCH (s:Service {snapshot_id: $snapshot_id, service_id: row.service_id}) "
             "MERGE (s)-[:HAS_CALL_SITE]->(rc)",
@@ -207,6 +208,10 @@ class GraphRepository:
                     "http_verb": c.http_verb.value if c.http_verb else None,
                     "url": c.url,
                     "url_confidence": c.url_confidence.value,
+                    # §5.2.9: the field has always been on the artifact and
+                    # was dropped at the graph boundary, so the UI could
+                    # never show whether a call forwards the caller token.
+                    "auth_propagation": c.auth_propagation,
                     "file": c.site.file,
                     "line": c.site.start_line,
                 }
@@ -311,6 +316,7 @@ class GraphRepository:
         "e.mechanism AS mechanism, e.http_verb AS http_verb, e.url AS url, "
         "e.target_kind AS target_kind, e.confidence AS confidence, "
         "e.provenance AS provenance, e.evidence AS evidence, "
+        "rc.auth_propagation AS auth_propagation, "
         "CASE WHEN target:Endpoint THEN target.service_id "
         "     WHEN target:PlaceholderService THEN target.placeholder_id END AS target_service_id, "
         "CASE WHEN target:Endpoint THEN target_svc.name "
@@ -390,4 +396,5 @@ class GraphRepository:
             confidence=Confidence(row["confidence"]),
             provenance=Provenance(row["provenance"]),
             evidence=row.get("evidence"),
+            auth_propagation=row.get("auth_propagation"),
         )

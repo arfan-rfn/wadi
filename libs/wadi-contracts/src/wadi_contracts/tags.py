@@ -17,7 +17,20 @@ Grammar: ``<namespace>=<value>``. Registered namespaces and value grammars:
                         Raw text is preserved verbatim (§5.2 step 5 evidence).
 ``auth-rule``           ``<verb>|<pattern>|<access>`` — one SecurityFilterChain
                         DSL rule; verb is an HTTP method or ``*`` — e.g.
-                        ``auth-rule=*|/admin/**|hasRole('ADMIN')``
+                        ``auth-rule=*|/admin/**|hasRole('ADMIN')``. A pattern of
+                        ``{?}`` means the rule was READ but its path could not
+                        be resolved — it withholds the claim rather than being
+                        dropped (§5.2.9); a ``${…}``/``@prefix`` pattern names
+                        the config source the worker correlates.
+``auth-mechanism``      ``<kind>:<raw>`` — how authentication is performed;
+                        kind is one of ``AUTH_MECHANISM_KINDS`` — e.g.
+                        ``auth-mechanism=oauth2-resource-server:oauth2ResourceServer(…)``.
+                        A trailing ``!<reason>`` marks it present but disabled.
+``auth-enforcement``    ``<kind>|<pattern>|<detail>`` — a gating construct that
+                        is not a security-framework rule (interceptor, servlet
+                        filter, aspect, in-handler check, chain bypass); kind is
+                        one of ``AUTH_ENFORCEMENT_KINDS`` and ``{?}`` is a
+                        pattern that could not be resolved (§5.2.9)
 ``token-propagation``   ``authorization-header`` | ``feign-interceptor`` —
                         how auth crosses an outbound call site (§5.1)
 ``async-root``          non-endpoint reachability root kind (§5.4.2 T4):
@@ -40,10 +53,13 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from wadi_contracts.endpoint import AuthEvidenceKind, AuthMechanismKind
 from wadi_contracts.version import TAG_REGISTRY_VERSION
 
 __all__ = [
     "ASYNC_ROOT_KINDS",
+    "AUTH_ENFORCEMENT_KINDS",
+    "AUTH_MECHANISM_KINDS",
     "TAG_REGISTRY_VERSION",
     "Tag",
     "TagValidationError",
@@ -62,6 +78,25 @@ _AUTH_RULE_VALUE = re.compile(
     r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|\*)\|[^|]+\|.+$", re.DOTALL
 )
 _TOKEN_PROPAGATION_VALUES = frozenset({"authorization-header", "feign-interceptor"})
+
+AUTH_MECHANISM_KINDS = frozenset(kind.value for kind in AuthMechanismKind)
+"""Authentication-mechanism vocabulary — the enum IS the registry (one source)."""
+
+AUTH_ENFORCEMENT_KINDS = frozenset(
+    kind.value
+    for kind in AuthEvidenceKind
+    # The declarative sources travel as `auth=` / `auth-rule=` / config keys;
+    # this namespace exists for the gating constructs that have no rule behind
+    # them and would otherwise be invisible (§5.2.9).
+    if kind
+    not in (AuthEvidenceKind.ANNOTATION, AuthEvidenceKind.SECURITY_DSL, AuthEvidenceKind.CONFIG)
+)
+"""Gating constructs carried by the ``auth-enforcement`` namespace."""
+
+_AUTH_MECHANISM_VALUE = re.compile(r"^(?P<kind>[a-z0-9-]+):(?P<rest>.+)$", re.DOTALL)
+_AUTH_ENFORCEMENT_VALUE = re.compile(
+    r"^(?P<kind>[a-z0-9-]+)\|(?P<pattern>[^|]*)\|(?P<detail>.+)$", re.DOTALL
+)
 ASYNC_ROOT_KINDS = frozenset(
     {
         "scheduled",
@@ -131,6 +166,26 @@ def _validate_auth_rule(value: str) -> None:
         )
 
 
+def _validate_auth_mechanism(value: str) -> None:
+    match = _AUTH_MECHANISM_VALUE.match(value)
+    if match is None or match.group("kind") not in AUTH_MECHANISM_KINDS:
+        allowed = " | ".join(sorted(AUTH_MECHANISM_KINDS))
+        raise TagValidationError(
+            f"auth-mechanism tag value must be '<kind>:<raw>' where kind is {allowed}, "
+            f"got {value!r}"
+        )
+
+
+def _validate_auth_enforcement(value: str) -> None:
+    match = _AUTH_ENFORCEMENT_VALUE.match(value)
+    if match is None or match.group("kind") not in AUTH_ENFORCEMENT_KINDS:
+        allowed = " | ".join(sorted(AUTH_ENFORCEMENT_KINDS))
+        raise TagValidationError(
+            f"auth-enforcement tag value must be '<kind>|<pattern>|<detail>' where kind is "
+            f"{allowed}, got {value!r}"
+        )
+
+
 def _validate_token_propagation(value: str) -> None:
     if value not in _TOKEN_PROPAGATION_VALUES:
         allowed = " | ".join(sorted(_TOKEN_PROPAGATION_VALUES))
@@ -149,6 +204,8 @@ _VALIDATORS: dict[str, Callable[[str], None]] = {
     "model": _validate_model,
     "auth": _validate_auth,
     "auth-rule": _validate_auth_rule,
+    "auth-mechanism": _validate_auth_mechanism,
+    "auth-enforcement": _validate_auth_enforcement,
     "token-propagation": _validate_token_propagation,
     "async-root": _validate_async_root,
 }

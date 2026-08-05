@@ -6,6 +6,18 @@
  */
 
 export type Authenticated = boolean | null
+/**
+ * Authorities required, when the rule names authorities rather than roles
+ */
+export type Authorities = string[]
+/**
+ * A read rule denies EVERY caller (denyAll); the endpoint is unreachable
+ */
+export type Denied = boolean
+/**
+ * False when present in source but not in effect
+ */
+export type Active = boolean
 export type EndLine = number
 /**
  * Path relative to the service build root
@@ -20,16 +32,103 @@ export type StartLine = number
  */
 export type SourceVariant = "original" | "generated"
 /**
+ * Authorities required, when distinct from roles
+ */
+export type Authorities1 = string[]
+/**
  * e.g. '@PreAuthorize("hasRole('ADMIN')")'
  */
 export type Detail = string
-export type AuthEvidenceKind = "annotation" | "security-dsl" | "config"
+/**
+ * What this does to a request that reaches it
+ */
+export type AuthEffect =
+  | "require-authenticated"
+  | "require-roles"
+  | "require-authorities"
+  | "permit-all"
+  | "deny-all"
+  | "unknown"
+/**
+ * Raw access expression / SpEL, preserved verbatim
+ */
+export type Expression = string | null
+export type HttpMethod =
+  "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
+/**
+ * Why it is not in effect, e.g. 'disabled in chain' — required when inactive
+ */
+export type InactiveReason = string | null
+/**
+ * What kind of construct enforces (or could enforce) access (§5.2.9).
+ *
+ * The first three are declarative sources; the rest are enforcement points
+ * that gate requests without a security-framework rule behind them. All are
+ * framework-neutral by construction — a FastAPI ``Security(...)`` dependency
+ * or an Express middleware maps onto the same vocabulary (goal 9).
+ */
+export type AuthEvidenceKind =
+  | "annotation"
+  | "security-dsl"
+  | "config"
+  | "chain-bypass"
+  | "interceptor"
+  | "servlet-filter"
+  | "aspect"
+  | "in-handler"
+  | "gateway"
+/**
+ * Path pattern this is scoped to; '{?}' means read but unresolvable
+ */
+export type Pattern = string | null
+/**
+ * How completely it was read
+ */
+export type AuthResolution = "resolved" | "partial" | "opaque"
+/**
+ * Roles required, ROLE_ prefix stripped
+ */
+export type Roles = string[]
+/**
+ * Every enforcement point in scope — read or not (§5.2.9)
+ */
 export type Evidence = AuthEvidence[]
 /**
- * e.g. 'spring-security'; None when no framework was detected
+ * Framework family, e.g. 'spring-security'; see mechanisms[] for how auth works
  */
 export type Mechanism = string | null
-export type Roles = string[]
+/**
+ * False when present in source but not in effect
+ */
+export type Active1 = boolean
+/**
+ * Raw source text or filter class name
+ */
+export type Detail1 = string
+/**
+ * Why it is not in effect, e.g. 'disabled in chain' — required when inactive
+ */
+export type InactiveReason1 = string | null
+/**
+ * How a caller proves identity — distinct from what it is then allowed to do.
+ */
+export type AuthMechanismKind =
+  | "jwt-bearer"
+  | "opaque-token"
+  | "http-basic"
+  | "form-login"
+  | "oauth2-login"
+  | "oauth2-resource-server"
+  | "saml2"
+  | "x509"
+  | "remember-me"
+  | "custom-filter"
+  | "stateless-session"
+/**
+ * How authentication is performed on this endpoint's service
+ */
+export type Mechanisms = AuthMechanism[]
+export type Roles1 = string[]
 export type CreatedAt = string
 /**
  * Route as written, e.g. /orders/{orderId}
@@ -40,8 +139,6 @@ export type Id = string
  * Fully-qualified method signature
  */
 export type Signature = string
-export type HttpMethod =
-  "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
 export type Id1 = string
 export type ParamLocation = "path" | "query" | "body" | "header"
 export type Name = string
@@ -87,6 +184,10 @@ export type IcfgAvailable = boolean
  * 1.12.0: the schema version of the ICFG `touched_files` and `unopenable_calls` were derived from; None when no ICFG exists. Reason codes arrived in 1.12.0, so an older graph yields an empty `unopenable_calls` that means 'not recorded', not 'none' (P10).
  */
 export type IcfgSchemaVersion = string | null
+/**
+ * 1.13.0: how auth crosses this call when statically visible — 'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall artifact, which has always recorded it. None is NOT 'does not forward': detection currently misses the inbound-HttpHeaders pass-through idiom (§5.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present.
+ */
+export type AuthPropagation = string | null
 export type CallerServiceId = string
 export type CallerServiceName = string | null
 /**
@@ -226,24 +327,60 @@ export interface Endpoint {
   trigger?: TriggerKind
 }
 /**
- * Structured authorization state of an endpoint.
+ * Structured authorization state of an endpoint (§5.2.9).
  *
  * ``authenticated`` is tri-state (P10): True/False are *claims backed by
- * evidence*; None means honestly unknown — never defaulted to False.
+ * fully-read enforcement*; None means honestly unknown — never defaulted to
+ * False. The distinction between None and False is load-bearing: None says
+ * "we did not read everything that guards this", False says "we read it all
+ * and nothing guards this". Collapsing them is the failure mode this model
+ * exists to prevent.
+ *
+ * ``denied`` refines the True case rather than replacing it. ``denyAll()``
+ * admits nobody, so "a request must be authenticated to pass" is still true
+ * of it — but a route no caller can reach is not the same fact as a working
+ * protected route, and rendering the two identically tells an auditor a dead
+ * endpoint is live. It is a separate boolean, not a fourth value of
+ * ``authenticated``, so every existing reader of the tri-state keeps working.
  */
 export interface EndpointAuth {
   authenticated?: Authenticated
+  authorities?: Authorities
+  denied?: Denied
   evidence?: Evidence
   mechanism?: Mechanism
-  roles?: Roles
+  mechanisms?: Mechanisms
+  roles?: Roles1
 }
 /**
- * One piece of evidence behind an auth claim — every claim carries its source (§5.2).
+ * One enforcement point that gates — or could gate — this endpoint (§5.2.9).
+ *
+ * Every claim carries its source, and every construct that *could* gate a
+ * request is recorded here whether or not its effect could be determined.
+ * That is what makes the claim rule on :class:`EndpointAuth` safe: a rule we
+ * failed to read is present as ``resolution=opaque`` rather than absent.
+ *
+ * **Reader migration (pre-1.13.0 artifacts):** records written before the
+ * enforcement model carry no ``effect``/``resolution``, so they default to
+ * ``unknown``/``resolved`` — honest about what was recorded (the effect was
+ * never stored) while preserving the claim those artifacts were written with.
  */
 export interface AuthEvidence {
+  active?: Active
   anchor?: SourceAnchor | null
+  authorities?: Authorities1
   detail: Detail
+  effect?: AuthEffect
+  expression?: Expression
+  /**
+   * Verb restriction; None means the rule applies to every verb
+   */
+  http_method?: HttpMethod | null
+  inactive_reason?: InactiveReason
   kind: AuthEvidenceKind
+  pattern?: Pattern
+  resolution?: AuthResolution
+  roles?: Roles
 }
 /**
  * A file + line range in the text that was actually analyzed.
@@ -257,6 +394,20 @@ export interface SourceAnchor {
   file: File
   start_line: StartLine
   variant?: SourceVariant
+}
+/**
+ * One authentication mechanism configured on the service that serves this endpoint.
+ *
+ * A custom filter is only ever promoted past ``CUSTOM_FILTER`` on evidence
+ * inside the filter itself — naming a mechanism from a class name would be
+ * exactly the fabricated security fact §12 forbids.
+ */
+export interface AuthMechanism {
+  active?: Active1
+  anchor?: SourceAnchor | null
+  detail: Detail1
+  inactive_reason?: InactiveReason1
+  kind: AuthMechanismKind
 }
 /**
  * Reference to a method: stable content-derived id + human-readable signature.
@@ -296,6 +447,7 @@ export interface FieldShape {
  * One stitched edge enriched for display (read-time join over the graph).
  */
 export interface RemoteEdgeItem {
+  auth_propagation?: AuthPropagation
   caller_service_id: CallerServiceId
   caller_service_name?: CallerServiceName
   confidence: Confidence
