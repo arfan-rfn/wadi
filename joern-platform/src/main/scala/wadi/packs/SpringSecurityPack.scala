@@ -1,10 +1,11 @@
 package wadi.packs
 
-import io.shiftleft.codepropertygraph.generated.{Cpg, DiffGraphBuilder}
+import io.shiftleft.codepropertygraph.generated.{Cpg, DiffGraphBuilder, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{
   AstNode,
   Call,
   Expression,
+  Identifier,
   Literal,
   Method,
   TypeDecl
@@ -218,11 +219,21 @@ object SpringSecurityPack {
       candidates
         .filterNot(call => nested.contains(call.id))
         .foreach { accessCall =>
-          val matcher  = matcherOf(accessCall)
-          val verb     = matcher.flatMap(verbOf).getOrElse("*")
           val access   = accessText(accessCall)
-          val patterns = matcher.map(patternsOf).getOrElse(List(Unresolvable))
-          patterns.foreach { pattern =>
+          val matchers = matchersOf(accessCall)
+          // Verb and patterns are read PER MATCHER, not once per access call.
+          // A receiver assigned in both arms of an if/else really does have two
+          // matchers — train-ticket-aitest picks the verb-scoped one or the
+          // bare one that way — and they can carry different verbs, so a single
+          // verb for the site would stamp one arm's restriction on the other.
+          val resolved =
+            if (matchers.isEmpty) List(("*", Unresolvable))
+            else
+              matchers.flatMap { matcher =>
+                val verb = verbOf(matcher).getOrElse("*")
+                patternsOf(matcher).map(pattern => (verb, pattern))
+              }
+          resolved.distinct.foreach { case (verb, pattern) =>
             Iterator(accessCall)
               .newTagNodePair("auth-rule", s"$verb|$pattern|$access")
               .store()(using builder)
@@ -256,9 +267,83 @@ object SpringSecurityPack {
       declaring ++ lambdas ++ matchers
     }
 
-    /** The rule matcher this access call is scoped by, when one can be read. */
-    private def matcherOf(accessCall: Call): Option[Call] =
-      receiverCall(accessCall).filter(receiver => MatcherCalls.contains(receiver.name))
+    /** How far to chase a receiver before giving up and reporting a hole. */
+    private val MaxReceiverDepth = 6
+
+    /** The rule matchers this access call is scoped by (§5.2.10 T3).
+      *
+      * The predecessor accepted only a receiver that WAS a matcher call, which
+      * is a syntactic test on one shape of a fluent chain. Config-driven Spring
+      * cannot be written that way — the access verb is chosen by an if/else, so
+      * the `AuthorizedUrl` has to live in a variable — and the whole policy of
+      * 20 train-ticket-aitest services disappeared into that gap.
+      *
+      * The receiver is now RESOLVED rather than pattern-matched, the way
+      * `UrlSlicer` resolves a URL argument: follow assignments, both arms of a
+      * ternary, and a helper method's returns. Several matchers is the correct
+      * answer, not an ambiguity — a receiver assigned in two branches really is
+      * governed by two matchers, and each keeps its own verb and patterns.
+      *
+      * Returning an empty list is still a legitimate outcome (a `RequestMatcher`
+      * bean, a receiver built somewhere unreadable); it degrades the site to a
+      * hole rather than deleting it.
+      */
+    private def matchersOf(accessCall: Call): List[Call] =
+      accessCall.argument
+        .argumentIndexLte(0)
+        .headOption
+        .toList
+        .flatMap(receiver => resolveMatchers(receiver, 0))
+        .distinctBy(_.id)
+
+    private def resolveMatchers(expression: Expression, depth: Int): List[Call] =
+      if (depth > MaxReceiverDepth) Nil
+      else
+        expression match {
+          case call: Call if MatcherCalls.contains(call.name) => List(call)
+          // `(flag ? a.requestMatchers(x) : a.requestMatchers(y)).hasRole(R)`:
+          // both arms are governed, so both are matchers. Arguments 2 and 3 are
+          // the branches; argument 1 is the condition.
+          case call: Call if call.name == Operators.conditional =>
+            call.argument.argumentIndexGt(1).l.flatMap(arm => resolveMatchers(arm, depth + 1))
+          // Any other operator (field access, cast, …) is plumbing, not a
+          // matcher, and following it would wander into the whole expression.
+          case call: Call if call.name.startsWith("<operator>") => Nil
+          case call: Call => calleeReturns(call).flatMap(value => resolveMatchers(value, depth + 1))
+          case identifier: Identifier =>
+            assignedValues(identifier).flatMap(value => resolveMatchers(value, depth + 1))
+          case _ => Nil
+        }
+
+    /** Every value assigned to this local within its own method.
+      *
+      * Name-scoped rather than SSA-resolved: javasrc2cpg leaves these types
+      * unresolved (the fixtures build without jars), so reaching-def is not
+      * dependable here, and a chain configurator is small enough that every
+      * assignment to the name really is a candidate. Over-approximating ADDS
+      * matchers, which adds rules — the safe direction, since each carries its
+      * own access expression rather than widening an existing one.
+      */
+    private def assignedValues(identifier: Identifier): List[Expression] =
+      identifier.method.ast.isCall
+        .nameExact(Operators.assignment)
+        .filter(_.argument.argumentIndex(1).isIdentifier.name.exists(_ == identifier.name))
+        .flatMap(_.argument.argumentIndex(2))
+        .l
+
+    /** What a helper method hands back — `pick(auth).hasRole(R)`.
+      *
+      * Matched by NAME, never by resolved full name: unresolved signatures are
+      * the norm in this file's world, and `<unresolvedSignature>` would match
+      * nothing at all.
+      */
+    private def calleeReturns(call: Call): List[Expression] =
+      cpg.method
+        .nameExact(call.name)
+        .filterNot(_.isExternal)
+        .l
+        .take(MaxReceiverDepth)
+        .flatMap(_.ast.isReturn.astChildren.collectAll[Expression].l)
 
     /** The verb restriction, read from the matcher's own arguments. */
     private def verbOf(matcher: Call): Option[String] =
@@ -280,8 +365,14 @@ object SpringSecurityPack {
         .l
         .filterNot(argument => VerbArgument.matches(argument.code.trim))
       if (arguments.isEmpty) return List(Unresolvable) // e.g. requestMatchers(someMatcherBean())
-      val resolved = arguments.flatMap(argument => patternOf(argument, owner)).distinct
-      if (resolved.sizeIs == arguments.size) resolved
+      // Per ARGUMENT, because one argument can name several paths: a `String[]`
+      // built from a list, or an array initializer, is a single argument
+      // carrying many patterns. Counting resolved VALUES against argument count
+      // (the predecessor) declared such a matcher unread the moment it resolved
+      // more paths than it had arguments.
+      val perArgument = arguments.map(argument => patternsFrom(argument, owner))
+      val resolved    = perArgument.flatten.distinct
+      if (perArgument.forall(_.nonEmpty)) resolved
       // Nothing in the Java names a path — but the rule still has patterns,
       // they just live in config. Naming the binding beats `{?}`: the worker
       // can read the YAML and recover the real policy (§5.2.9 D5).
@@ -299,8 +390,20 @@ object SpringSecurityPack {
       */
     private def configPrefixOf(matcher: Call): Option[String] = {
       val enclosing = matcher.method
+      // Parameters and locals only was a shape assumption too (§5.2.10 T3):
+      // javasrc2cpg lifts a lambda's CAPTURED values into its parameters, so
+      // `SecurityFilterChain chain(HttpSecurity http, Props props)` resolved
+      // while `@Autowired private Props props` did not — and all 20
+      // train-ticket-aitest services inject the field way, against yas's 15
+      // that inject the parameter way. The fixture happened to model yas.
+      // Members of the enclosing type (and its outer types, since a chain bean
+      // is often a nested @Configuration) are now candidates too.
+      val owners = enclosing.typeDecl.l ++ enclosing.typeDecl.l.flatMap(td =>
+        cpg.typeDecl.fullNameExact(td.fullName.split('$').head).l
+      )
+      val members = owners.flatMap(td => td.member.typeFullName.l)
       val candidateTypes =
-        (enclosing.parameter.typeFullName.l ++ enclosing.local.typeFullName.l).distinct
+        (enclosing.parameter.typeFullName.l ++ enclosing.local.typeFullName.l ++ members).distinct
       candidateTypes
         .flatMap(typeName =>
           cpg.typeDecl.fullNameExact(typeName).l ++
@@ -321,19 +424,59 @@ object SpringSecurityPack {
         .headOption
     }
 
-    /** One matcher argument → the path it names.
+    /** One matcher argument → every path it names.
       *
       * A `${key}` placeholder is passed through verbatim rather than resolved
       * here: config lives worker-side, and §5.2.4 already fixes that split for
       * `@Value` — the exporter emits the symbol, the worker resolves it.
+      *
+      * Three sources beyond a bare literal (§5.2.10 T3), each of which was a
+      * hole the argument could fall into:
+      *   - a constant field, via the shared resolver;
+      *   - a `@Value("${…}")` member, whose placeholder is the honest answer —
+      *     the predecessor's comment promised this passthrough, but nothing
+      *     read the annotation, so it reported `{?}`;
+      *   - an array or collection assembled into a local, whose path literals
+      *     are right there in the assignment.
       */
-    private def patternOf(argument: Expression, owner: Option[TypeDecl]): Option[String] = {
+    private def patternsFrom(argument: Expression, owner: Option[TypeDecl]): List[String] = {
       val direct = argument match {
-        case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
-        case _                => SpringPacks.constantString(cpg, argument.code, owner)
+        case literal: Literal => List(literal.code.stripPrefix("\"").stripSuffix("\""))
+        case _                => SpringPacks.constantString(cpg, argument.code, owner).toList
       }
-      direct.filter(value => value.startsWith("/") || value.startsWith("${"))
+      val symbolic = memberNameOf(argument).toList.flatMap(valuePlaceholderOf)
+      val assembled = argument match {
+        case identifier: Identifier =>
+          assignedValues(identifier)
+            .flatMap(value => value.ast.isLiteral.code.l)
+            .map(code => code.stripPrefix("\"").stripSuffix("\""))
+        case _ => Nil
+      }
+      (direct ++ symbolic ++ assembled).distinct
+        .filter(value => value.startsWith("/") || value.startsWith("${"))
     }
+
+    /** The simple name a pattern argument refers to, through a field access. */
+    private def memberNameOf(argument: Expression): Option[String] = argument match {
+      case identifier: Identifier => Some(identifier.name)
+      case call: Call if call.name == Operators.fieldAccess =>
+        call.argument.argumentIndex(2).isFieldIdentifier.canonicalName.headOption
+      case _ => None
+    }
+
+    /** A `@Value("${key}")` member's placeholder, verbatim. */
+    private def valuePlaceholderOf(name: String): Option[String] =
+      cpg.member
+        .nameExact(name)
+        .l
+        .flatMap(member =>
+          member.astChildren.isAnnotation
+            .nameExact("Value")
+            .code
+            .l
+            .flatMap(code => "\"([^\"]+)\"".r.findFirstMatchIn(code).map(_.group(1)))
+        )
+        .headOption
 
     private def receiverCall(call: Call): Option[Call] =
       call.argument.argumentIndexLte(0).headOption.collect { case receiver: Call => receiver }
@@ -449,20 +592,48 @@ object SpringSecurityPack {
         .store()(using builder)
     }
 
-    /** `httpBasic().disable()` — the mechanism call is the receiver of a
-      * `disable()`, so the configured mechanism is switched off.
+    /** Is this mechanism switched off? (§5.2.10 T3)
+      *
+      * Spring Security 5 wrote `httpBasic().disable()`, where `disable()`'s
+      * receiver IS the mechanism call — the only form the predecessor knew.
+      * Spring Security 6 made the lambda DSL mandatory, so the same intent is
+      * written `httpBasic(t -> t.disable())` or `httpBasic(X::disable)`, where
+      * the receiver is the lambda's parameter and the old test sees nothing.
+      *
+      * Reporting HTTP Basic as ACTIVE on a service that explicitly disabled it
+      * is a fabricated security fact, which §12 rates worse than a missing one
+      * — and every one of the 20 train-ticket-aitest services writes the lambda
+      * form, so this was not an edge case but the whole corpus.
       */
-    private def disabledReasonOf(call: Call): Option[String] =
-      Option.when(
-        cpg.call
-          .nameExact("disable")
-          .exists(off =>
-            off.argument.argumentIndexLte(0).headOption.exists {
-              case receiver: Call => receiver.id == call.id
-              case _              => false
-            }
-          )
-      )("disabled in chain")
+    private def disabledReasonOf(call: Call): Option[String] = {
+      val disabledFluently = cpg.call
+        .nameExact("disable")
+        .exists(off =>
+          off.argument.argumentIndexLte(0).headOption.exists {
+            case receiver: Call => receiver.id == call.id
+            case _              => false
+          }
+        )
+      // The lambda body is its own method; javasrc2cpg renders the argument's
+      // code as that method's full name, and a method reference as its literal
+      // text. Both are answered by asking whether the configurer this call
+      // hands off to does nothing but disable.
+      val disabledByLambda = call.argument
+        .argumentIndexGt(0)
+        .code
+        .exists(argument =>
+          MethodRefDisable.matches(argument.trim) ||
+            cpg.method
+              .fullNameExact(argument)
+              .exists(_.ast.isCall.nameExact("disable").nonEmpty)
+        )
+      Option.when(disabledFluently || disabledByLambda)("disabled in chain")
+    }
+
+    /** `AbstractHttpConfigurer::disable` and friends — the Spring Security 6.1
+      * shorthand, which carries no lambda body to inspect.
+      */
+    private val MethodRefDisable = "^[\\w.]*::disable$".r
 
     /** The filter class a registration installs: `new JwtAuthFilter()`.
       *

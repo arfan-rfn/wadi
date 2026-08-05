@@ -86,7 +86,9 @@ def merge_endpoint_auth(
     evidence.extend(_annotation_evidence(auth_tags, handler_anchor, method_security))
     evidence.extend(_bypass_evidence(auth_enforcements or [], full_uri))
     evidence.extend(_enforcement_evidence(auth_enforcements or [], full_uri))
-    evidence.extend(_rule_evidence(security_rules, full_uri, http_method, config_structured or {}))
+    evidence.extend(
+        _rule_evidence(security_rules, full_uri, http_method, config_structured or {}, config_env)
+    )
     evidence.extend(_config_evidence(config_env))
 
     if not evidence:
@@ -365,11 +367,42 @@ def _expand_config_rules(
     return expanded or None
 
 
+#: Spring property placeholder, with its optional `:default`.
+_PLACEHOLDER = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
+
+
+def _resolve_placeholders(pattern: str, config_env: dict[str, str]) -> str | None:
+    """``/api/${admin.path}/**`` → the real path, or None if a key is unknown.
+
+    Returning None (rather than the raw text) is the whole point. A pattern
+    still holding ``${…}`` matches no endpoint literally, so leaving it
+    "resolved" would make the rule govern nothing and let the endpoint fall
+    through to whatever permissive rule comes next — the §5.2.9 failure mode
+    reached by a new road. An unresolved placeholder is an unread scope, and
+    unread scopes withhold.
+    """
+    missing = False
+
+    def _substitute(match: re.Match[str]) -> str:
+        nonlocal missing
+        # group(2) is absent when the placeholder declares no `:default`.
+        default: str | None = match.group(2)
+        value = config_env.get(match.group(1), default)
+        if value is None:
+            missing = True
+            return match.group(0)
+        return value
+
+    resolved = _PLACEHOLDER.sub(_substitute, pattern)
+    return None if missing else resolved
+
+
 def _rule_evidence(
     security_rules: list[ExportSecurityRule],
     full_uri: str,
     http_method: HttpMethod,
     config_structured: dict[str, list[dict[str, object]]],
+    config_env: dict[str, str],
 ) -> list[AuthEvidence]:
     """The governing filter-chain rule, resolved per chain (§5.2.9).
 
@@ -386,6 +419,7 @@ def _rule_evidence(
             expanded.extend(recovered if recovered is not None else [rule])
         else:
             expanded.append(rule)
+    expanded = [_with_resolved_placeholders(rule, config_env) for rule in expanded]
     chains = _chains_governing(expanded, full_uri)
     if not chains:
         return []
@@ -423,6 +457,20 @@ def _rule_evidence(
                 )
             )
     return evidence
+
+
+def _with_resolved_placeholders(
+    rule: ExportSecurityRule, config_env: dict[str, str]
+) -> ExportSecurityRule:
+    """A ``${…}`` pattern resolved against config, or downgraded to unread."""
+    if rule.pattern is None or "${" not in rule.pattern:
+        return rule
+    resolved = _resolve_placeholders(rule.pattern, config_env)
+    if resolved is None:
+        return rule.model_copy(
+            update={"pattern": None, "pattern_confidence": RulePatternConfidence.NONE}
+        )
+    return rule.model_copy(update={"pattern": resolved})
 
 
 def _chains_governing(

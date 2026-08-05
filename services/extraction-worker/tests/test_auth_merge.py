@@ -647,3 +647,63 @@ class TestRuleScoping:
             config_env={},
         )
         assert auth.denied is True
+
+
+class TestPropertyPlaceholderScopes:
+    """§5.2.10: a `${…}` pattern is a scope, not a string.
+
+    The exporter now passes placeholders through instead of reporting `{?}`,
+    which is more informative — and would be actively dangerous if the worker
+    compared them literally. A pattern still holding `${…}` matches no
+    endpoint, so the rule would govern nothing and the endpoint would fall
+    through to whatever comes next. These pin the two halves apart.
+    """
+
+    def test_a_resolvable_placeholder_governs_the_endpoint_it_names(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("${app.admin-path}/**", 'hasRole("ADMIN")'),
+                _rule("/**", "permitAll()", line=22),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={"app.admin-path": "/api/admin"},
+        )
+        assert auth.authenticated is True
+        assert auth.roles == ["ADMIN"]
+
+    def test_a_placeholder_default_is_used_when_config_is_silent(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("${app.admin-path:/api/admin}/**", 'hasRole("ADMIN")'),
+                _rule("/**", "permitAll()", line=22),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is True
+        assert auth.roles == ["ADMIN"]
+
+    def test_an_unresolvable_placeholder_withholds_instead_of_falling_through(self) -> None:
+        # The regression that matters. Left as a literal `${…}` this rule
+        # matches nothing, the endpoint reaches `permitAll()`, and wadi
+        # publishes "no authentication, evidenced" for a route that may well
+        # require ADMIN — the exact §5.2.9 wrong answer by a new road.
+        auth = merge_endpoint_auth(
+            full_uri="/api/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("${app.admin-path}/**", 'hasRole("ADMIN")'),
+                _rule("/**", "permitAll()", line=22),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is None, "an unread scope must withhold, never fall through"
+        assert auth.unread_enforcement, "and it must say which construct it could not read"
