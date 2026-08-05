@@ -526,6 +526,21 @@ Five tranches implement it, sequenced so the structural guarantee lands before t
 
 *Tracked, not fixed here:* `chainPatternOf` pools `securityMatcher` scopes **per declaring type**, so several chains in one class cross-contaminate — reproduced: an *unscoped* chain inherited its siblings' `"/fluent/**,/literal/**"`. It is a restriction added where none exists, which withdraws endpoints, and is the same over-approximation error the rule-scoping fix corrected in 0.6.0. It did not contribute to the measurement above (train-ticket-aitest declares one chain per class) and is scheduled with T6, where chain identity is already being touched. Also unswept and therefore unclaimed: `@PreAuthorize` meta-annotation and interface-inheritance shapes, interceptor/servlet-filter/aspect detection, and `WebSecurity.ignoring()` variants — the annotation pass matches on annotation names rather than call shapes and is *expected* to hold up, but that is a prediction and this section does not record predictions as coverage.
 
+**Measured on re-analysis (2026-08-05).** `train-ticket-aitest`, 365 endpoints / 20 services, against a baseline where **all 365 were identical** (`authenticated=true, roles=[], withheld=0`):
+
+| | before | after |
+|---|---|---|
+| endpoints with a role named | **0** | **173** (83 `[ADMIN, USER]`, 66 `[ADMIN]`, 24 `[USER]`) |
+| `authenticated=false` (evidenced open) | 0 | 185 |
+| distinct auth answers across the system | **1** | 5 |
+| `unread_by_kind` / `extraction_gaps` | `{}` (nothing to report) | `{}` (nothing left unread) |
+
+Spot-checked line-by-line against the YAML rather than only against the previous run: `GET /adminbasic/configs` open by its GET-only `permitAll`, `POST`/`PUT`/`DELETE` on the same path `[ADMIN]`, `POST /api/v1/orderservice/order` `[ADMIN, USER]`, `GET /api/v1/userservice/users` open. The verb distinction on one path is the T4 defect made visible: before, the GET-only rule widened to every verb.
+
+*Regression check on the Spring Security 5 corpus.* `train-ticket` (FudanSELab, 262 endpoints) is the dialect that already worked, so the real risk was breaking it. **261 of 262 answers are byte-identical; one changed, and it is a correction:** `DELETE /api/v1/users/{userId}` went from an evidenced `false` to `true [ADMIN]`, which `ts-auth-service/WebSecurityConfig.java:89` declares as `antMatchers(HttpMethod.DELETE, "/api/v1/users/*").hasRole("ADMIN")`. A false-negative of exactly the class §5.2.9 exists to remove, surviving in the corpus 2.9 was measured on.
+
+*Not measured:* `yas` still cannot be built — its checkout carries the corrupt `refs/heads/evosuit` ref recorded in §5.2.9, a defect in that repo. Its reactive modules are therefore covered by fixture only, and the reactive claim above rests on the matrix fixture rather than on the corpus.
+
 **Validation layers.** The §5.2.9 layers, plus the one whose absence let this ship: the shape matrix above lands as pinned goldens spanning both DSL eras; the T2 oracle diffs an independent count against emitted records on **every** snapshot; and — amending P8 — **goldens assert the absence of drops (site counts), not only the presence of expected rules.** A presence-only golden can never fail on a shape nobody imagined, which is precisely how eight shapes and a whole reactive stack passed CI.
 
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**
