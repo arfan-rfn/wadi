@@ -3,6 +3,95 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.6.0 — 2026-08-05 (Phase 2.9: auth fidelity — the enforcement model)
+
+An audit against the live train-ticket snapshot found the auth layer publishing
+`authenticated: false` — "no authentication, evidenced" — for endpoints that
+require `ROLE_ADMIN`. A `SecurityConfig` rule wadi could not read was *dropped*,
+so the endpoint fell through to a later `permitAll()` and a wrong security fact
+went out with full confidence. That is the outcome §12 exists to prevent.
+
+The model now asks a different question: **what could gate a request to this
+endpoint, and did we read all of it?** Every gating construct — annotation,
+filter-chain rule, chain bypass, interceptor, servlet filter, aspect, in-handler
+check — is one enforcement record, and the claim is withheld when an unread guard
+could change it. That rule is a contract validator, not a convention.
+
+**Re-analysis is worth it:** stored contracts moved to 1.15.0 and the Joern
+export to 2.7.0. Measured on train-ticket (262 endpoints / 41 services), `null`
+claims went **48 → 0**, and every remaining no-claim now names the guard it could
+not read.
+
+### Added
+- **The system auth view** (`?view=auth`) — every endpoint's auth state on one
+  screen, with totals and filters for protected / unprotected / denied /
+  withheld / no-evidence. "Which endpoints here are unprotected?" stopped being
+  a walk over every service.
+- **Enforcement outside Spring Security is visible** — gating interceptors,
+  servlet filters, aspects and checks written inline in a handler are detected
+  narrowly, on evidence that they can answer 401/403, so a logging interceptor
+  never withholds a claim while a real guard does.
+- **Config-defined authorization** — `@ConfigurationProperties`-bound rule sets
+  are correlated against the parsed YAML, so a service whose policy lives
+  entirely in `application.yaml` (no literal path anywhere in the Java) reports
+  its real rules. All 15 yas modules recovered.
+- **How authentication happens, per endpoint** — jwt-bearer, oauth2-resource-server,
+  http-basic, form-login, x509 and the rest, with `.disable()` honored. A custom
+  filter is promoted past "custom-filter" only on evidence *inside* the filter;
+  naming a mechanism from a class name would be a fabricated fact.
+- **A fourth honest state, `withheld`** — distinct from "no evidence" everywhere
+  it appears. Both mean "no claim", but one is a gap in wadi and the other a
+  possible hole in your system, and they call for opposite responses.
+- **`denied`** — a route behind `denyAll()` is unreachable, not protected, and
+  now reads that way instead of counting as live surface.
+- **Auth coverage on every report** — claim states and unreadable guards by kind,
+  so blind spots stay queryable rather than prose.
+
+### Changed
+- **The overview and the endpoint workspace were rebuilt.** Endpoint rows carry a
+  second line naming who can reach them, coloured from a snapshot-wide role
+  palette; clicking one opens a peek with the contract — cross-service calls
+  first, then access, parameters, and request/response shapes — and a single way
+  into the flow. The workspace is call tree | flow | source, permanently: the
+  Graph/Source toggle and the inspector tabs are gone, the contract having moved
+  one screen earlier.
+- **The source panel shows one card per file** — its own edges, its own header,
+  numbered by where the flow first reaches it. The handler's file opens on
+  arrival and the rest open on click, or on their own when a selection lands
+  inside them. A closed file fetches nothing, so a ten-file endpoint no longer
+  pays ten whole-file requests before you read the first one.
+- **Roles and authorities are separate facts.** `hasRole("X")` and
+  `hasAuthority("X")` match different grants in Spring; both now reach the UI
+  without either being renamed as the other.
+
+### Fixed
+- **Security rules stopped inheriting the wrong HTTP verb.** The verb was read
+  from the whole fluent chain, so the first `HttpMethod.X` in a config stamped
+  every later rule — 12 endpoints in `ts-travel-service` alone went unknown
+  because of it.
+- **A rule that could not be read is no longer dropped.** It is emitted as a
+  hole, so the walk stops there instead of falling through to whatever permissive
+  rule comes next. This is the defect that produced the wrong `false`.
+- **Non-literal rule patterns resolve** — constants, arrays and `${placeholders}`
+  — instead of vanishing.
+- **A literal rule no longer governs a templated sibling.** Path matching treats
+  an endpoint's `{orderId}` as matching any literal, which is safe for a rule
+  that adds restriction and wrong for one that removes an endpoint: a
+  `denyAll()` on `/orders/legacy` was withdrawing `/orders/{orderId}`.
+- **Inert security annotations are marked, not counted.** Spring Security 6
+  defaults `securedEnabled` and `jsr250Enabled` to false, so a `@Secured` that
+  enforces nothing was being reported as enforcement.
+- **Custom composed annotations and inherited policies resolve** — `@IsAdmin`
+  declared as `@PreAuthorize(...)`, and a rule declared on a parent class or an
+  implemented interface, were both invisible.
+- **Code in the source panel keeps its syntax colours in every theme.** Leftover
+  template stylesheet rules overrode the highlighter and keyed their dark variant
+  off the OS preference while the app themes by class — so choosing the dark
+  theme on a light-mode machine gave you black text on a white pill over dark
+  code.
+- **Every button reports itself to the keyboard and the pointer.** The auth
+  view's filters had neither a focus ring nor a pointer cursor.
+
 ## 0.5.3 — 2026-08-04
 
 Local-stack reliability. The stack could take itself down while idling, and
