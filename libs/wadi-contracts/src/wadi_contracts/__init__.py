@@ -14,6 +14,7 @@ from wadi_contracts.boundary import (
     GatewayRoute,
     NetworkIdentity,
     QuarantinedFact,
+    RequestPolicy,
     ServiceBoundary,
 )
 from wadi_contracts.comms import MqInteraction, Reachability, RemoteCall
@@ -98,6 +99,7 @@ from wadi_contracts.stitching import (
 )
 from wadi_contracts.system import RepoSource, Snapshot, System
 from wadi_contracts.tags import (
+    REQUEST_POLICY_KINDS,
     TAG_REGISTRY_VERSION,
     Tag,
     TagValidationError,
@@ -130,6 +132,7 @@ __all__ = [
     "CONTRACT_MODELS",
     "KNOWN_CLIENT_LIBRARIES",
     "MODELLED_CLIENT_LIBRARIES",
+    "REQUEST_POLICY_KINDS",
     "SCHEMA_VERSION",
     "TAG_REGISTRY_VERSION",
     "AnalysisCoverage",
@@ -198,6 +201,7 @@ __all__ = [
     "RemoteEdgeItem",
     "RemoteEdgesView",
     "RepoSource",
+    "RequestPolicy",
     "ServiceBoundary",
     "ServiceCfgAnomalyEntry",
     "ServiceCoverageEntry",

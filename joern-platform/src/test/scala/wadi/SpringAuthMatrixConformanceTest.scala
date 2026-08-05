@@ -423,4 +423,41 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     legacy.indexOf("/api/v1/orders") should be < legacy.indexOf("/api/v1/orders/**")
     legacy.indexOf("/api/v1/orders/**") should be < legacy.indexOf("/**")
   }
+
+  // ---- the third category: policy that gates REACH, not principal ----
+
+  test("every request-policy kind the pack models is emitted (T6)") {
+    // P8 as amended: the fixture enumerates the FRAMEWORK's shape space, not
+    // the corpus's. train-ticket happens to use only csrf-disabled, which is
+    // exactly why a corpus-shaped fixture would leave four kinds unexercised.
+    val kinds = exportJson("auth_policies").arr.map(_("kind").str).toSet
+    kinds shouldBe Set("cors", "csrf-disabled", "csrf-exempt", "entry-point", "access-denied")
+  }
+
+  test("a csrf exemption is a per-path fact, not a global one") {
+    val exempt = exportJson("auth_policies").arr.toList
+      .filter(_("kind").str == "csrf-exempt")
+      .map(_("scope").str)
+    // Two paths on ONE ignoringRequestMatchers call: one row each, because a
+    // reader asking "is /webhooks/** exempt" needs the path, not the call.
+    exempt should contain allOf ("/webhooks/**", "/api/v1/public")
+  }
+
+  test("cors carries the scope its origin list hangs off") {
+    val cors = exportJson("auth_policies").arr.toList.filter(_("kind").str == "cors")
+    cors.map(_("scope").str) should contain("/api/v1/**")
+    cors.map(_("detail").str) should contain("https://app.acme.test")
+  }
+
+  test("request policy never becomes an authorization rule") {
+    // The load-bearing separation: these decide which ORIGIN or request shape
+    // may reach the service. Folding one into a rule would answer a different
+    // question than the one asked, and would move a claim it has no business
+    // moving (§5.2.10 T6).
+    val rulePatterns = exportJson("security_rules").arr.toList.map(_("pattern") match {
+      case ujson.Null => "{?}"
+      case other      => other.str
+    })
+    rulePatterns should not contain "/webhooks/**"
+  }
 }

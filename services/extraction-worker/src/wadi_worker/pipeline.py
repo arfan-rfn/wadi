@@ -25,6 +25,7 @@ from wadi_contracts import (
     ExtractionJob,
     GatewayRoute,
     NetworkIdentity,
+    RequestPolicy,
     ServiceBoundary,
     ServiceKind,
     Snapshot,
@@ -215,6 +216,30 @@ class ExtractionPipeline:
                         if (method := methods_by_id.get(root.method_id)) is not None
                     ]
                     boundary = boundary.model_copy(update={"async_roots": roots})
+                # §5.2.10 T6 / §5.2.11 T3: CORS, CSRF and rejection handling.
+                # The pack has emitted these since export 2.8.0 and the client
+                # has parsed them just as long — nothing consumed them, so they
+                # were read and discarded. Service-level by nature, and
+                # deliberately never merged into an endpoint's auth claim:
+                # they decide which ORIGIN may call, not which principal.
+                if export.auth_policies:
+                    boundary = boundary.model_copy(
+                        update={
+                            "request_policies": [
+                                RequestPolicy(
+                                    kind=policy.kind,
+                                    scope=policy.scope,
+                                    detail=policy.detail,
+                                    anchor=SourceAnchor(
+                                        file=policy.anchor.file,
+                                        start_line=max(policy.anchor.line, 1),
+                                        end_line=max(policy.anchor.line, 1),
+                                    ),
+                                )
+                                for policy in export.auth_policies
+                            ]
+                        }
+                    )
                 assembled = Assembler(
                     snapshot_id=snapshot.id,
                     service_id=svc_id,

@@ -77,6 +77,14 @@
           "title": "No Evidence",
           "type": "integer"
         },
+        "request_policies": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "\u00a75.2.10 T6: CORS/CSRF/rejection-handling declarations per kind, across all services. Counted apart from every claim counter above because they gate REACH, not principal \u2014 a system with `csrf disabled` everywhere is a fact worth reading, and it changes none of the authenticated/withheld numbers",
+          "title": "Request Policies",
+          "type": "object"
+        },
         "unauthenticated": {
           "default": 0,
           "minimum": 0,

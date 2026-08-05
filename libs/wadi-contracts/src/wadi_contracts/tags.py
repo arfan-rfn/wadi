@@ -60,6 +60,7 @@ __all__ = [
     "ASYNC_ROOT_KINDS",
     "AUTH_ENFORCEMENT_KINDS",
     "AUTH_MECHANISM_KINDS",
+    "REQUEST_POLICY_KINDS",
     "TAG_REGISTRY_VERSION",
     "Tag",
     "TagValidationError",
@@ -109,6 +110,24 @@ ASYNC_ROOT_KINDS = frozenset(
         "framework-callback",
     }
 )
+
+REQUEST_POLICY_KINDS = frozenset(
+    {
+        "cors",
+        "csrf-disabled",
+        "csrf-exempt",
+        "entry-point",
+        "access-denied",
+    }
+)
+"""Request-level policy that is NOT an authorization rule (§5.2.10 T6).
+
+The third category a ``SecurityConfig`` declares. Deliberately kept out of
+``EndpointAuth``: CORS decides which ORIGIN may call and CSRF which requests
+need a token — neither decides which PRINCIPAL may, so folding either into
+``authenticated`` would answer a different question than the one asked. These
+exist so the question is answerable at all (P10).
+"""
 
 
 class TagValidationError(ValueError):

@@ -273,6 +273,22 @@ export type QuarantinedFacts = QuarantinedFact[]
  * Normalized repo source this service lives in
  */
 export type Repo = string
+/**
+ * Origins, or the source text of the decision
+ */
+export type Detail1 = string
+/**
+ * Registry kind, e.g. 'cors' (tags.py)
+ */
+export type Kind1 = string
+/**
+ * Path scope; '{?}' = read but unresolvable
+ */
+export type Scope = string
+/**
+ * CORS/CSRF/rejection-handling policy declared by this service (§5.2.10 T6). Never merged into any endpoint's auth claim — these decide which ORIGIN or request shape may reach the service, not which principal. Empty also for pre-1.20 snapshots: absence of the fact, not proof of none
+ */
+export type RequestPolicies = RequestPolicy[]
 export type SchemaVersion = string
 export type ServiceId1 = string
 export type SnapshotId = string
@@ -302,6 +318,7 @@ export interface ServiceSummary {
   network?: NetworkIdentity
   quarantined_facts?: QuarantinedFacts
   repo: Repo
+  request_policies?: RequestPolicies
   schema_version?: SchemaVersion
   service_id: ServiceId1
   snapshot_id: SnapshotId
@@ -469,4 +486,23 @@ export interface QuarantinedFact {
   sample_anchor?: SourceAnchor | null
   service_id?: ServiceId
   value: Value
+}
+/**
+ * Request-level policy that gates reach without deciding principal (§5.2.10 T6).
+ *
+ * CORS, CSRF and rejection handling — the third category a ``SecurityConfig``
+ * declares. A service-level fact by nature: these are configured once per
+ * chain and shape who can reach the service at all.
+ *
+ * Deliberately NOT an input to ``EndpointAuth``. A CORS policy decides which
+ * ORIGIN may call and CSRF which requests need a token; neither decides which
+ * PRINCIPAL may, so merging either into ``authenticated`` would answer a
+ * different question than the one asked. Published so the question becomes
+ * answerable at all — absent facts made present, never facts made wrong.
+ */
+export interface RequestPolicy {
+  anchor: SourceAnchor
+  detail: Detail1
+  kind: Kind1
+  scope: Scope
 }

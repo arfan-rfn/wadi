@@ -414,6 +414,40 @@
       "title": "QuarantinedFact",
       "type": "object"
     },
+    "RequestPolicy": {
+      "additionalProperties": false,
+      "description": "Request-level policy that gates reach without deciding principal (\u00a75.2.10 T6).\n\nCORS, CSRF and rejection handling \u2014 the third category a ``SecurityConfig``\ndeclares. A service-level fact by nature: these are configured once per\nchain and shape who can reach the service at all.\n\nDeliberately NOT an input to ``EndpointAuth``. A CORS policy decides which\nORIGIN may call and CSRF which requests need a token; neither decides which\nPRINCIPAL may, so merging either into ``authenticated`` would answer a\ndifferent question than the one asked. Published so the question becomes\nanswerable at all \u2014 absent facts made present, never facts made wrong.",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "detail": {
+          "description": "Origins, or the source text of the decision",
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Registry kind, e.g. 'cors' (tags.py)",
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Path scope; '{?}' = read but unresolvable",
+          "minLength": 1,
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "scope",
+        "detail",
+        "anchor"
+      ],
+      "title": "RequestPolicy",
+      "type": "object"
+    },
     "ServiceKind": {
       "description": "v1: service | library. Reserved for Phase 9 (\u00a77): function, edge-worker, firmware.\n\n``library`` (\u00a75.2.6): an in-repo module other services depend on \u2014 never\nanalyzed as a service (no endpoints, no own CPG); its sources join each\ndependent service's staged parse. Recorded so classification is queryable.",
       "enum": [
@@ -615,6 +649,14 @@
       "minLength": 1,
       "title": "Repo",
       "type": "string"
+    },
+    "request_policies": {
+      "description": "CORS/CSRF/rejection-handling policy declared by this service (\u00a75.2.10 T6). Never merged into any endpoint's auth claim \u2014 these decide which ORIGIN or request shape may reach the service, not which principal. Empty also for pre-1.20 snapshots: absence of the fact, not proof of none",
+      "items": {
+        "$ref": "#/$defs/RequestPolicy"
+      },
+      "title": "Request Policies",
+      "type": "array"
     },
     "schema_version": {
       "default": "1.19.0",

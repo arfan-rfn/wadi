@@ -314,6 +314,7 @@ export interface AuthCoverageSection {
   endpoints?: Endpoints
   extraction_gaps?: ExtractionGaps
   no_evidence?: NoEvidence
+  request_policies?: RequestPolicies
   unauthenticated?: Unauthenticated
   unread_by_kind?: UnreadByKind
   withheld?: Withheld
@@ -322,6 +323,12 @@ export interface AuthCoverageSection {
  * §5.2.10: independent-oracle findings per AuthGapCode. Every other counter here is derived from evidence the auth layer EMITTED, so a construct dropped before emission is invisible to them — this is the one that can see a miss
  */
 export interface ExtractionGaps {
+  [k: string]: number
+}
+/**
+ * §5.2.10 T6: CORS/CSRF/rejection-handling declarations per kind, across all services. Counted apart from every claim counter above because they gate REACH, not principal — a system with `csrf disabled` everywhere is a fact worth reading, and it changes none of the authenticated/withheld numbers
+ */
+export interface RequestPolicies {
   [k: string]: number
 }
 /**

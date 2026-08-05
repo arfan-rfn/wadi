@@ -7,7 +7,7 @@ from pydantic import Field, field_validator, model_validator
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.enums import AuthGapCode, CfgAnomalyCode, ClientLibrary, ServiceKind
 from wadi_contracts.source import SourceAnchor
-from wadi_contracts.tags import ASYNC_ROOT_KINDS
+from wadi_contracts.tags import ASYNC_ROOT_KINDS, REQUEST_POLICY_KINDS
 
 KNOWN_CLIENT_LIBRARIES: frozenset[str] = frozenset(lib.value for lib in ClientLibrary)
 """Value view of :class:`ClientLibrary`, derived so the two cannot drift."""
@@ -270,6 +270,34 @@ class AsyncRoot(WadiModel):
         return value
 
 
+class RequestPolicy(WadiModel):
+    """Request-level policy that gates reach without deciding principal (§5.2.10 T6).
+
+    CORS, CSRF and rejection handling — the third category a ``SecurityConfig``
+    declares. A service-level fact by nature: these are configured once per
+    chain and shape who can reach the service at all.
+
+    Deliberately NOT an input to ``EndpointAuth``. A CORS policy decides which
+    ORIGIN may call and CSRF which requests need a token; neither decides which
+    PRINCIPAL may, so merging either into ``authenticated`` would answer a
+    different question than the one asked. Published so the question becomes
+    answerable at all — absent facts made present, never facts made wrong.
+    """
+
+    kind: str = Field(min_length=1, description="Registry kind, e.g. 'cors' (tags.py)")
+    scope: str = Field(min_length=1, description="Path scope; '{?}' = read but unresolvable")
+    detail: str = Field(description="Origins, or the source text of the decision")
+    anchor: SourceAnchor
+
+    @field_validator("kind")
+    @classmethod
+    def _known_kind(cls, value: str) -> str:
+        if value not in REQUEST_POLICY_KINDS:
+            allowed = " | ".join(sorted(REQUEST_POLICY_KINDS))
+            raise ValueError(f"request-policy kind must be {allowed}, got {value!r}")
+        return value
+
+
 class ServiceBoundary(ArtifactEnvelope):
     """One discovered service within a snapshot.
 
@@ -323,6 +351,16 @@ class ServiceBoundary(ArtifactEnvelope):
         description=(
             "Non-endpoint reachability roots (§5.4.2 T4). Empty also for "
             "pre-1.7 snapshots — absence of the fact, not proof of none"
+        ),
+    )
+    request_policies: list[RequestPolicy] = Field(
+        default_factory=list[RequestPolicy],
+        description=(
+            "CORS/CSRF/rejection-handling policy declared by this service "
+            "(§5.2.10 T6). Never merged into any endpoint's auth claim — these "
+            "decide which ORIGIN or request shape may reach the service, not "
+            "which principal. Empty also for pre-1.20 snapshots: absence of "
+            "the fact, not proof of none"
         ),
     )
     cfg_anomalies: list[CfgAnomaly] | None = Field(
@@ -429,6 +467,13 @@ class ServiceBoundary(ArtifactEnvelope):
         if "async_roots" in payload:
             payload["async_roots"] = _keep(
                 payload["async_roots"], "async-root", "kind", frozenset(ASYNC_ROOT_KINDS)
+            )
+        if "request_policies" in payload:
+            payload["request_policies"] = _keep(
+                payload["request_policies"],
+                "request-policy",
+                "kind",
+                frozenset(REQUEST_POLICY_KINDS),
             )
         if isinstance(libraries := payload.get("client_libraries"), list):
             recognized = [

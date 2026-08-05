@@ -434,6 +434,16 @@ class AuthCoverageSection(WadiModel):
             "is the one that can see a miss"
         ),
     )
+    request_policies: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "§5.2.10 T6: CORS/CSRF/rejection-handling declarations per kind, "
+            "across all services. Counted apart from every claim counter above "
+            "because they gate REACH, not principal — a system with `csrf "
+            "disabled` everywhere is a fact worth reading, and it changes none "
+            "of the authenticated/withheld numbers"
+        ),
+    )
 
 
 class CoverageReport(SnapshotEnvelope):

@@ -192,9 +192,14 @@ def build_auth_coverage(
         else:
             no_evidence += 1
     extraction_gaps: dict[str, int] = {}
+    # §5.2.10 T6: counted apart from every claim counter — these gate REACH,
+    # not principal, so they must never move an authenticated/withheld number.
+    request_policies: dict[str, int] = {}
     for boundary in boundaries:
         for gap in boundary.auth_extraction_gaps or ():
             extraction_gaps[gap.code.value] = extraction_gaps.get(gap.code.value, 0) + gap.count
+        for policy in boundary.request_policies:
+            request_policies[policy.kind] = request_policies.get(policy.kind, 0) + 1
     return AuthCoverageSection(
         endpoints=len(endpoints),
         authenticated=authenticated,
@@ -203,6 +208,7 @@ def build_auth_coverage(
         no_evidence=no_evidence,
         unread_by_kind=dict(sorted(unread_by_kind.items())),
         extraction_gaps=dict(sorted(extraction_gaps.items())),
+        request_policies=dict(sorted(request_policies.items())),
     )
 
 

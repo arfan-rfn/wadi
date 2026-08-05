@@ -16,7 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from wadi_contracts import AuthEvidenceKind, AuthResolution, Endpoint
+from wadi_contracts import (
+    AuthEvidenceKind,
+    AuthResolution,
+    Endpoint,
+    RequestPolicy,
+    SourceAnchor,
+)
 from wadi_joern_client.export import RulePatternConfidence, ServiceExport
 from wadi_worker.appconfig import parse_app_config
 from wadi_worker.assembler import Assembler
@@ -218,3 +224,59 @@ class TestSpringSecurity6Axis:
         sites = {rule.call_id for rule in export.security_rules}
         assert export.auth_extraction.rule_sites_emitted == len(sites)
         assert export.auth_extraction.access_calls_seen >= len(sites)
+
+
+@pytest.fixture(scope="module")
+def policies() -> list[RequestPolicy]:
+    """The worker's export->contract mapping, exactly as pipeline.py performs it."""
+    export = ServiceExport.model_validate(json.loads(EXPORT.read_text()))
+    return [
+        RequestPolicy(
+            kind=policy.kind,
+            scope=policy.scope,
+            detail=policy.detail,
+            anchor=SourceAnchor(
+                file=policy.anchor.file,
+                start_line=max(policy.anchor.line, 1),
+                end_line=max(policy.anchor.line, 1),
+            ),
+        )
+        for policy in export.auth_policies
+    ]
+
+
+class TestRequestPolicies:
+    """§5.2.11 T3 — the producer shipped in 2.8.0; nothing consumed it.
+
+    The pack has tagged CORS/CSRF/rejection handling and the export has carried
+    it since export 2.8.0, and `wadi-joern-client` parsed it into
+    `ExportAuthPolicy` just as long — into a model no service read. Read and
+    discarded is indistinguishable from never extracted to every consumer, so
+    this pins the full pipe: Java source → pack → export → contract artifact.
+    """
+
+    def test_every_modelled_kind_survives_into_contract_vocabulary(
+        self, policies: list[RequestPolicy]
+    ) -> None:
+        assert {p.kind for p in policies} == {
+            "cors",
+            "csrf-disabled",
+            "csrf-exempt",
+            "entry-point",
+            "access-denied",
+        }
+
+    def test_each_policy_is_source_anchored(self, policies: list[RequestPolicy]) -> None:
+        # A policy a reader cannot go look at is an assertion, not evidence.
+        for policy in policies:
+            assert policy.anchor.file.endswith(".java")
+            assert policy.anchor.start_line >= 1
+
+    def test_policies_never_touch_an_endpoint_claim(
+        self, endpoints: dict[tuple[str, str], Endpoint]
+    ) -> None:
+        # The separation these exist to preserve: CORS decides which ORIGIN may
+        # call, CSRF which request shape — neither decides which principal, so
+        # no endpoint's evidence may cite one.
+        kinds = {e.kind.value for endpoint in endpoints.values() for e in endpoint.auth.evidence}
+        assert not kinds & {"cors", "csrf-disabled", "csrf-exempt", "entry-point", "access-denied"}
