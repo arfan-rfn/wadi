@@ -139,7 +139,9 @@ def build_quarantined_facts(boundaries: Sequence[ServiceBoundary]) -> list[Quara
     return [folded[key] for key in sorted(folded, key=lambda k: (k[0], k[1], k[2] or ""))]
 
 
-def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
+def build_auth_coverage(
+    endpoints: Sequence[Endpoint], boundaries: Sequence[ServiceBoundary] = ()
+) -> AuthCoverageSection:
     """Snapshot rollup of what the auth layer could and could not read (§5.2.9).
 
     The standing tracking mechanism for auth blind spots, playing the role
@@ -148,6 +150,14 @@ def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
     is scheduled by measured demand. `withheld` and `no_evidence` are split
     because they call for opposite responses — one is a gap in wadi, the other
     a possible hole in the system.
+
+    *Corrected 2026-08-05 (§5.2.10).* Every counter below except
+    ``extraction_gaps`` is derived from evidence the auth layer EMITTED, which
+    made this section blind to the one failure it was built to catch: a
+    construct dropped before emission raises none of them and leaves its
+    endpoint reading as cleanly authenticated. ``extraction_gaps`` carries the
+    independent oracle's findings from the service boundaries, so a miss is
+    countable rather than invisible.
     """
     unread_by_kind: dict[str, int] = {}
     authenticated = unauthenticated = withheld = no_evidence = 0
@@ -163,6 +173,10 @@ def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
             withheld += 1
         else:
             no_evidence += 1
+    extraction_gaps: dict[str, int] = {}
+    for boundary in boundaries:
+        for gap in boundary.auth_extraction_gaps or ():
+            extraction_gaps[gap.code.value] = extraction_gaps.get(gap.code.value, 0) + gap.count
     return AuthCoverageSection(
         endpoints=len(endpoints),
         authenticated=authenticated,
@@ -170,6 +184,7 @@ def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
         withheld=withheld,
         no_evidence=no_evidence,
         unread_by_kind=dict(sorted(unread_by_kind.items())),
+        extraction_gaps=dict(sorted(extraction_gaps.items())),
     )
 
 

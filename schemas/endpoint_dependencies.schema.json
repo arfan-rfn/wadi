@@ -47,7 +47,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.16.0/endpoint_dependencies.schema.json",
+  "$id": "https://trywadi.com/schemas/1.17.0/endpoint_dependencies.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Per-endpoint downstream targets for one service (\u00a75.2.9 UI).\n\nCross-service calls are the product's core extracted fact, so the endpoint\nlist shows them inline rather than making the reader open each endpoint to\nfind out. Scoped to a service because that is the unit the list renders,\nand it keeps the ICFG join bounded.\n\n``stitched=False`` means the stitcher has not run: an empty map is then\n'not yet', never 'this endpoint calls nothing' (P10).",

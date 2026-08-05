@@ -2,11 +2,13 @@
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
 from wadi_contracts.boundary import (
+    AUTH_GAP_CODES,
     CFG_ANOMALY_CODES,
     KNOWN_CLIENT_LIBRARIES,
     MODELLED_CLIENT_LIBRARIES,
     AnalysisCoverage,
     AsyncRoot,
+    AuthExtractionGap,
     CfgAnomaly,
     GatewayRoute,
     NetworkIdentity,
@@ -31,6 +33,7 @@ from wadi_contracts.endpoint import (
     TypeShape,
 )
 from wadi_contracts.enums import (
+    AuthGapCode,
     CalleeUnboundReason,
     CfgAnomalyCode,
     ClientLibrary,
@@ -120,6 +123,7 @@ from wadi_contracts.views import (
 )
 
 __all__ = [
+    "AUTH_GAP_CODES",
     "CFG_ANOMALY_CODES",
     "CONTRACT_MODELS",
     "KNOWN_CLIENT_LIBRARIES",
@@ -135,6 +139,8 @@ __all__ = [
     "AuthEndpointRow",
     "AuthEvidence",
     "AuthEvidenceKind",
+    "AuthExtractionGap",
+    "AuthGapCode",
     "AuthMechanism",
     "AuthMechanismKind",
     "AuthResolution",

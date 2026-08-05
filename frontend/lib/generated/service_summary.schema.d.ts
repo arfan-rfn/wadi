@@ -39,6 +39,54 @@ export type MethodSignature = string
  */
 export type AsyncRoots = AsyncRoot[]
 /**
+ * §5.2.10 independent-oracle findings: auth constructs the source names that the export did not carry. None = never checked (library, extraction failed, pre-1.17 snapshot); [] = checked and clean — never conflated (P10)
+ */
+export type AuthExtractionGaps = AuthExtractionGap[] | null
+/**
+ * §5.2.10 auth-extraction gap codes — the independent oracle's findings.
+ *
+ * ``AuthCoverageSection`` counts what the auth layer *emitted*, so it can
+ * only see enforcement wadi already read; a construct dropped before
+ * emission contributes to none of its counters and leaves the endpoint
+ * looking cleanly authenticated. That is how 365 train-ticket-aitest
+ * endpoints published a confident wrong claim while the tracker read zero.
+ *
+ * These codes come from a second, deliberately dumb reading of the SOURCE
+ * TEXT that shares no code path with the CPG — so a gap here means "the file
+ * says something the graph did not", which no emission-derived counter can
+ * express. Never fatal: a gap is a queryable fact about how far to trust the
+ * auth answer (P10).
+ *
+ * An enum rather than a string registry (§7): pyright catches producer /
+ * registry drift in CI, which a runtime validator could only catch on a
+ * user's repository.
+ */
+export type AuthGapCode =
+  | "unemitted-access-site"
+  | "unread-security-config"
+  | "unresolved-scope"
+  | "reactive-chain"
+/**
+ * Occurrences across the service's sources
+ */
+export type Count = number
+/**
+ * What the oracle saw versus what the export carried
+ */
+export type Detail = string | null
+/**
+ * Up to 5 example sites — examples, never the exhaustive list
+ *
+ * @maxItems 5
+ */
+export type SampleSites =
+  | []
+  | [SourceAnchor]
+  | [SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+/**
  * Path of the build root relative to the repo root ('.' = root)
  */
 export type BuildRoot = string
@@ -72,13 +120,13 @@ export type CfgAnomalyCode =
 /**
  * Occurrences across the service's methods
  */
-export type Count = number
+export type Count1 = number
 /**
  * Up to 5 example sites — examples, never the exhaustive list
  *
  * @maxItems 5
  */
-export type SampleSites =
+export type SampleSites1 =
   | []
   | [SourceAnchor]
   | [SourceAnchor, SourceAnchor]
@@ -181,7 +229,7 @@ export type ServerPort = number | null
 /**
  * Occurrences of this value
  */
-export type Count1 = number
+export type Count2 = number
 /**
  * Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'
  */
@@ -215,6 +263,7 @@ export interface ServiceSummary {
    */
   analysis_coverage?: AnalysisCoverage | null
   async_roots?: AsyncRoots
+  auth_extraction_gaps?: AuthExtractionGaps
   build_root: BuildRoot
   build_system: BuildSystem
   cfg_anomalies?: CfgAnomalies
@@ -275,6 +324,22 @@ export interface SourceAnchor {
   variant?: SourceVariant
 }
 /**
+ * One auth-extraction gap family on a service (§5.2.10, schema 1.17.0).
+ *
+ * The independent oracle's finding: what the SOURCE TEXT says the auth layer
+ * should have read, minus what it emitted. Deliberately separate from
+ * ``EndpointAuth.evidence`` — evidence records enforcement wadi *found*,
+ * while this records enforcement it appears to have *missed*, and folding
+ * the second into the first would make a miss indistinguishable from a
+ * clean service.
+ */
+export interface AuthExtractionGap {
+  code: AuthGapCode
+  count: Count
+  detail?: Detail
+  sample_sites?: SampleSites
+}
+/**
  * One structural-invariant violation family on a service's CFGs
  * (§5.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real
  * repos, and a violated invariant is a queryable fact about how much the
@@ -282,8 +347,8 @@ export interface SourceAnchor {
  */
 export interface CfgAnomaly {
   code: CfgAnomalyCode
-  count: Count
-  sample_sites?: SampleSites
+  count: Count1
+  sample_sites?: SampleSites1
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.
@@ -343,7 +408,7 @@ export interface GatewayRoute {
  * benchmarks fails CI, while a user's run only ever loses the one footnote.
  */
 export interface QuarantinedFact {
-  count?: Count1
+  count?: Count2
   registry: Registry
   /**
    * One example site, when the rejected fact carried one

@@ -5,7 +5,7 @@ from typing import Self, cast
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
-from wadi_contracts.enums import CfgAnomalyCode, ClientLibrary, ServiceKind
+from wadi_contracts.enums import AuthGapCode, CfgAnomalyCode, ClientLibrary, ServiceKind
 from wadi_contracts.source import SourceAnchor
 from wadi_contracts.tags import ASYNC_ROOT_KINDS
 
@@ -154,6 +154,35 @@ class CfgAnomaly(WadiModel):
     )
 
 
+AUTH_GAP_CODES: frozenset[str] = frozenset(code.value for code in AuthGapCode)
+"""Value view of :class:`AuthGapCode`, derived so the two cannot drift."""
+
+
+class AuthExtractionGap(WadiModel):
+    """One auth-extraction gap family on a service (§5.2.10, schema 1.17.0).
+
+    The independent oracle's finding: what the SOURCE TEXT says the auth layer
+    should have read, minus what it emitted. Deliberately separate from
+    ``EndpointAuth.evidence`` — evidence records enforcement wadi *found*,
+    while this records enforcement it appears to have *missed*, and folding
+    the second into the first would make a miss indistinguishable from a
+    clean service.
+    """
+
+    code: AuthGapCode
+    count: int = Field(ge=1, description="Occurrences across the service's sources")
+    sample_sites: list[SourceAnchor] = Field(
+        default_factory=list[SourceAnchor],
+        max_length=5,
+        description="Up to 5 example sites — examples, never the exhaustive list",
+    )
+    detail: str | None = Field(
+        default=None,
+        max_length=500,
+        description="What the oracle saw versus what the export carried",
+    )
+
+
 class QuarantinedFact(WadiModel):
     """A diagnostic fact whose vocabulary this build does not recognize
     (§7, recorded 2026-08-05, schema 1.16.0).
@@ -270,6 +299,15 @@ class ServiceBoundary(ArtifactEnvelope):
             "pre-1.8 snapshot); [] = checked and clean — never conflated (P10)"
         ),
     )
+    auth_extraction_gaps: list[AuthExtractionGap] | None = Field(
+        default=None,
+        description=(
+            "§5.2.10 independent-oracle findings: auth constructs the source "
+            "names that the export did not carry. None = never checked "
+            "(library, extraction failed, pre-1.17 snapshot); [] = checked and "
+            "clean — never conflated (P10)"
+        ),
+    )
     quarantined_facts: list[QuarantinedFact] = Field(
         default_factory=list[QuarantinedFact],
         description=(
@@ -341,6 +379,10 @@ class ServiceBoundary(ArtifactEnvelope):
         if "cfg_anomalies" in payload:
             payload["cfg_anomalies"] = _keep(
                 payload["cfg_anomalies"], "CfgAnomalyCode", "code", CFG_ANOMALY_CODES
+            )
+        if "auth_extraction_gaps" in payload:
+            payload["auth_extraction_gaps"] = _keep(
+                payload["auth_extraction_gaps"], "AuthGapCode", "code", AUTH_GAP_CODES
             )
         if "async_roots" in payload:
             payload["async_roots"] = _keep(

@@ -284,10 +284,17 @@ export interface ServiceCoverageEntry {
 export interface AuthCoverageSection {
   authenticated?: Authenticated
   endpoints?: Endpoints
+  extraction_gaps?: ExtractionGaps
   no_evidence?: NoEvidence
   unauthenticated?: Unauthenticated
   unread_by_kind?: UnreadByKind
   withheld?: Withheld
+}
+/**
+ * §5.2.10: independent-oracle findings per AuthGapCode. Every other counter here is derived from evidence the auth layer EMITTED, so a construct dropped before emission is invisible to them — this is the one that can see a miss
+ */
+export interface ExtractionGaps {
+  [k: string]: number
 }
 /**
  * Enforcement points detected but not readable, counted per AuthEvidenceKind

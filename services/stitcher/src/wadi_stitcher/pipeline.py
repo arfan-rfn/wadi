@@ -121,7 +121,7 @@ class StitchPipeline:
             analysis_coverage=build_analysis_coverage(boundaries),
             cfg_anomalies=build_cfg_anomalies(boundaries),
             quarantined_facts=build_quarantined_facts(boundaries),
-            auth_coverage=build_auth_coverage(endpoints),
+            auth_coverage=build_auth_coverage(endpoints, boundaries),
         )
         await self._stitch.write_coverage_report(report)
 

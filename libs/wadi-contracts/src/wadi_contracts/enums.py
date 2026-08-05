@@ -186,6 +186,50 @@ class CfgAnomalyCode(StrEnum):
     the method (a pure cycle) — either dead code or a graph bug."""
 
 
+class AuthGapCode(StrEnum):
+    """§5.2.10 auth-extraction gap codes — the independent oracle's findings.
+
+    ``AuthCoverageSection`` counts what the auth layer *emitted*, so it can
+    only see enforcement wadi already read; a construct dropped before
+    emission contributes to none of its counters and leaves the endpoint
+    looking cleanly authenticated. That is how 365 train-ticket-aitest
+    endpoints published a confident wrong claim while the tracker read zero.
+
+    These codes come from a second, deliberately dumb reading of the SOURCE
+    TEXT that shares no code path with the CPG — so a gap here means "the file
+    says something the graph did not", which no emission-derived counter can
+    express. Never fatal: a gap is a queryable fact about how far to trust the
+    auth answer (P10).
+
+    An enum rather than a string registry (§7): pyright catches producer /
+    registry drift in CI, which a runtime validator could only catch on a
+    user's repository.
+    """
+
+    UNEMITTED_ACCESS_SITE = "unemitted-access-site"
+    """A security config names more access calls than the export produced rule
+    sites for. The signature of a chain shape the pass cannot read — the
+    variable-receiver drop that this whole section exists for."""
+
+    UNREAD_SECURITY_CONFIG = "unread-security-config"
+    """A file that configures a filter chain produced NO rules at all. The
+    strongest form of the gap above, and worth its own code: a partially-read
+    config still governs, while a wholly-unread one means every endpoint under
+    it is answered from some other chain — or from nothing."""
+
+    UNRESOLVED_SCOPE = "unresolved-scope"
+    """Sites that emitted but whose pattern could not be read
+    (``pattern_confidence = none``). Not a drop — this is the system working —
+    but it is the measured demand that schedules the next resolution tranche,
+    and it must stay visible rather than being absorbed into ``withheld``."""
+
+    REACTIVE_CHAIN = "reactive-chain"
+    """WebFlux security (``ServerHttpSecurity`` / ``authorizeExchange`` /
+    ``pathMatchers``) present in source. Tracked separately because a reactive
+    service's rules are a different vocabulary, and counting them as ordinary
+    unresolved scope would hide an entire stack behind a generic number."""
+
+
 class ClientLibrary(StrEnum):
     """Client-library census vocabulary (§5.4.2).
 

@@ -9,9 +9,9 @@ The check lives in the *service*, not in wadi-contracts: contracts must not
 import a service (P1), so the dependency has to point this way.
 """
 
-from wadi_contracts.enums import CfgAnomalyCode, ClientLibrary
+from wadi_contracts.enums import AuthGapCode, CfgAnomalyCode, ClientLibrary
 from wadi_testing.vocabulary import assert_registry_is_live
-from wadi_worker import boundary, cfg_invariants
+from wadi_worker import auth_oracle, boundary, cfg_invariants
 
 
 def test_every_cfg_anomaly_code_is_emitted() -> None:
@@ -20,3 +20,7 @@ def test_every_cfg_anomaly_code_is_emitted() -> None:
 
 def test_every_client_library_is_detected() -> None:
     assert_registry_is_live(ClientLibrary, boundary)
+
+
+def test_every_auth_gap_code_is_emitted() -> None:
+    assert_registry_is_live(AuthGapCode, auth_oracle)

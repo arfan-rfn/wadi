@@ -62,6 +62,14 @@
           "title": "Endpoints",
           "type": "integer"
         },
+        "extraction_gaps": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "\u00a75.2.10: independent-oracle findings per AuthGapCode. Every other counter here is derived from evidence the auth layer EMITTED, so a construct dropped before emission is invisible to them \u2014 this is the one that can see a miss",
+          "title": "Extraction Gaps",
+          "type": "object"
+        },
         "no_evidence": {
           "default": 0,
           "description": "No claim because nothing that could gate was found",
@@ -573,7 +581,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.16.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.17.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What the map knows it doesn't know (\u00a75.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
@@ -666,7 +674,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.16.0",
+      "default": "1.17.0",
       "title": "Schema Version",
       "type": "string"
     },

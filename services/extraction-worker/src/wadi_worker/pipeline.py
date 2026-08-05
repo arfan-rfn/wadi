@@ -37,6 +37,7 @@ from wadi_joern_client import JoernClient, ServiceExport
 from wadi_repo import RepoCache
 from wadi_storage import ArtifactRepository, SnapshotRepository, SystemRepository
 from wadi_worker.assembler import Assembler
+from wadi_worker.auth_oracle import scan_auth_extraction
 from wadi_worker.boundary import DiscoveredService, discover_services
 
 logger = logging.getLogger(__name__)
@@ -226,6 +227,17 @@ class ExtractionPipeline:
                 # checked and clean; the failed-extraction path above keeps
                 # None (never checked).
                 boundary = boundary.model_copy(update={"cfg_anomalies": assembled.cfg_anomalies})
+                # §5.2.10: the independent oracle runs against the STAGED tree
+                # the extractor parsed, so a divergence is a reading failure
+                # rather than a staging one. Its findings are the only auth
+                # counter not derived from what the auth layer emitted.
+                boundary = boundary.model_copy(
+                    update={
+                        "auth_extraction_gaps": await asyncio.to_thread(
+                            scan_auth_extraction, parse_root, export
+                        )
+                    }
+                )
                 await self._artifacts.write_service_boundaries([boundary])
                 await self._artifacts.write_endpoints(assembled.endpoints)
                 for icfg in assembled.icfgs:
