@@ -254,7 +254,7 @@ export function EndpointPeek({
                     </p>
                   ) : null}
                   {item.anchor ? (
-                    <p className="font-mono text-[10px] text-muted-foreground/75">
+                    <p className="font-mono text-[10px] break-all text-muted-foreground/75">
                       ↳ {item.anchor.file}:{item.anchor.start_line}
                     </p>
                   ) : null}
@@ -282,7 +282,7 @@ export function EndpointPeek({
                       {item.detail}
                     </p>
                     {item.anchor ? (
-                      <p className="font-mono text-[10px] text-muted-foreground/75">
+                      <p className="font-mono text-[10px] break-all text-muted-foreground/75">
                         ↳ {item.anchor.file}:{item.anchor.start_line}
                       </p>
                     ) : null}

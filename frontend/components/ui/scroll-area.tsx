@@ -40,7 +40,23 @@ const ScrollArea = React.forwardRef<
     >
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
-        className={cn("size-full rounded-[inherit]", viewportClassName)}
+        className={cn(
+          "size-full rounded-[inherit]",
+          // Radix wraps children in `display: table; min-width: 100%`. A table
+          // box is shrink-to-fit, so it GROWS past the viewport for any
+          // unbreakable string — a long URI, an access rule, a deep file path.
+          // Children then size against that wider box, so `truncate` and
+          // `break-all` measure the wrong width and the overflow is clipped by
+          // Root's `overflow-hidden` with no bar to scroll it back. Content
+          // simply disappears off the right edge.
+          //
+          // Only correct when there is no horizontal bar: with one, the table
+          // box is exactly what makes wide content reachable. So this follows
+          // the orientation the caller already declared rather than being a
+          // blanket override.
+          orientation === "vertical" && "[&>div]:!block",
+          viewportClassName
+        )}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

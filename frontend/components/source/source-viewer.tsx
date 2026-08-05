@@ -557,7 +557,6 @@ export function SourceViewer({
         // The muted ground is what makes each file card read as a raised
         // object rather than as another band in a continuous column.
         className="min-h-0 flex-1 bg-muted/25"
-        viewportClassName="[&>div]:!block"
       >
         {visibleSections.map((section) => (
           <SourceFileView
