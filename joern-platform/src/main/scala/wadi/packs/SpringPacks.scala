@@ -74,9 +74,26 @@ object SpringPacks {
     }
     if (arrayPaths.nonEmpty) arrayPaths
     else
-      pathFromAnnotationCode(code)
+      // Concatenation is tried BEFORE the first-quoted-string reader, and the
+      // order is the whole fix: `@RequestMapping(PREFIX + "/api")` contains a
+      // quoted literal, so first-quoted-string answered `/api` and every URI
+      // in the service silently lost the prefix that told two controllers
+      // apart. A truncated path is worse than an unresolved one — it collides
+      // with real routes elsewhere in the system.
+      concatenatedPathFromCode(cpg, code)
+        .orElse(pathFromAnnotationCode(code))
         .map(List(_))
         .getOrElse(constantPathFromCode(cpg, code).toList)
+  }
+
+  /** `@RequestMapping(PREFIX + "/api")` → the joined path, when every operand
+    * resolves. Returns None for annotations with no top-level `+`, leaving the
+    * existing readers untouched.
+    */
+  private def concatenatedPathFromCode(cpg: Cpg, code: String): Option[String] = {
+    val inner     = code.dropWhile(_ != '(').stripPrefix("(").reverse.dropWhile(_ != ')').drop(1).reverse
+    val reference = inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
+    stringExpression(cpg, reference, owner = None)
   }
 
   /** Resolve `Klass.FIELD` (possibly nested, `Constants.ApiConstant.X`) to its
@@ -86,7 +103,11 @@ object SpringPacks {
   private def constantPathFromCode(cpg: Cpg, code: String): Option[String] = {
     val inner = code.dropWhile(_ != '(').stripPrefix("(").takeWhile(_ != ')')
     val reference = inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
+    // `@RequestMapping(PREFIX + "/x")` — without the concatenation reader the
+    // path truncates to its tail, and every URI in the service silently loses
+    // the segment that told two controllers apart.
     constantString(cpg, reference, owner = None)
+      .orElse(stringExpression(cpg, reference, owner = None))
   }
 
   /** Resolve a source-text reference to the string literal it names.
@@ -147,6 +168,64 @@ object SpringPacks {
       .l
       .distinct
     Option.when(literals.sizeIs == 1)(literals.head)
+  }
+
+  /** A source-text string EXPRESSION → its value, concatenation included.
+    *
+    * `PREFIX + "/public/x"` is the prevailing way a codebase
+    * writes a route once and reuses it, and it defeated every reader here:
+    * `constantString` resolves a bare reference and a literal is a literal,
+    * but neither handles the `+` between them. The cost is paid twice, which
+    * is why this lives in the shared resolver rather than in either caller —
+    * the endpoint pass loses its URI prefix (paths truncate to the tail) and
+    * the security pass loses its pattern (the rule reads as unscoped, which
+    * §5.2.10 then has to withhold on).
+    *
+    * All-or-nothing by design: a concatenation with one unresolvable operand
+    * yields None rather than a partial path, because half a pattern silently
+    * matches the wrong endpoints (P10 — an honest hole beats a plausible
+    * string).
+    */
+  private[wadi] def stringExpression(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl]
+  ): Option[String] = {
+    val operands = splitTopLevelConcat(text)
+    if (operands.isEmpty) return None
+    val resolved = operands.map { operand =>
+      val trimmed = operand.trim
+      if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\""))
+        Some(trimmed.substring(1, trimmed.length - 1))
+      else constantString(cpg, trimmed, owner)
+    }
+    Option.when(resolved.forall(_.isDefined))(resolved.flatten.mkString)
+  }
+
+  /** Split on `+` that sits OUTSIDE string literals. A `+` inside a quoted
+    * segment is part of the path (`"/a+b"`), not an operator.
+    */
+  private def splitTopLevelConcat(text: String): List[String] = {
+    val parts    = scala.collection.mutable.ListBuffer.empty[String]
+    val current  = new StringBuilder
+    var inString = false
+    var escaped  = false
+    text.foreach { char =>
+      if (escaped) { current.append(char); escaped = false }
+      else
+        char match {
+          case '\\' if inString      => current.append(char); escaped = true
+          case '"'                   => inString = !inString; current.append(char)
+          case '+' if !inString      => parts += current.toString; current.clear()
+          case other                 => current.append(other)
+        }
+    }
+    parts += current.toString
+    val cleaned = parts.toList.map(_.trim).filter(_.nonEmpty)
+    // Nothing to do for a single operand — the caller's own resolvers already
+    // handle a bare literal or reference, and returning it here would make
+    // this function a second, competing path to the same answer.
+    if (cleaned.sizeIs <= 1) Nil else cleaned
   }
 
   /** Every in-repo supertype of `typeDecl`, transitively (classes AND

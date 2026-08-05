@@ -894,3 +894,79 @@ class TestAuthorityModel:
         )
         model = next(i for i in auth.evidence if i.kind is AuthEvidenceKind.AUTHORITY_MODEL)
         assert model.resolution is AuthResolution.PARTIAL
+
+
+class TestOrderedAlternativesAreNotConjunctive:
+    """§5.2.10: the §5.2.9 defect, mirrored.
+
+    "Enforcement is a conjunction — an unknown gate can add a requirement,
+    never remove one" is true for LAYERED enforcement (a chain rule and method
+    security both run). It is false for ORDERED ALTERNATIVES inside one chain:
+    authorizeHttpRequests is first-match-wins, so an earlier match means the
+    later rules never execute.
+
+    An unread-scope permitAll() ahead of a readable anyRequest().authenticated()
+    therefore leaves the endpoint genuinely uncertain, and discounting it
+    published a confident `True` — the same root shape as the original defect
+    (an unread rule not permitted to withhold), pointing the other way.
+    """
+
+    def _opaque(self, access: str, line: int) -> ExportSecurityRule:
+        return ExportSecurityRule(
+            call_id=line,
+            pattern=None,
+            pattern_confidence=RulePatternConfidence.NONE,
+            access=access,
+            kind="filter-chain",
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=line),
+            evidence=access,
+        )
+
+    def _claim(self, *rules: ExportSecurityRule) -> EndpointAuth:
+        return merge_endpoint_auth(
+            full_uri="/contest/public/list",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=list(rules),
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+
+    def test_an_unread_permit_all_withholds_a_protected_answer(self) -> None:
+        auth = self._claim(
+            self._opaque("permitAll()", 10),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert auth.authenticated is None, (
+            "a permitAll whose scope is unknown can remove enforcement exactly "
+            "as a chain bypass can; claiming protected here is a false positive"
+        )
+        assert auth.unread_enforcement
+
+    def test_an_unread_restrictive_rule_still_leaves_the_claim_standing(self) -> None:
+        # The control that keeps the fix from becoming a wall of unknowns: an
+        # unread hasRole can only ADD restriction, so protected either way.
+        auth = self._claim(
+            self._opaque('hasRole("AUDITOR")', 10),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert auth.authenticated is True
+
+    def test_an_unread_restrictive_rule_before_permit_all_still_withholds(self) -> None:
+        auth = self._claim(
+            self._opaque('hasRole("AUDITOR")', 10),
+            _rule("/**", "permitAll()", line=20),
+        )
+        assert auth.authenticated is None
+
+    def test_fully_readable_chains_are_unaffected(self) -> None:
+        opened = self._claim(
+            _rule("/contest/public/**", "permitAll()"),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert opened.authenticated is False
+        guarded = self._claim(
+            _rule("/admin/**", 'hasRole("ADMIN")'),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert guarded.authenticated is True

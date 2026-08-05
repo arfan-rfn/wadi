@@ -180,6 +180,18 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     scopes.foreach(scope => scope should startWith("/ss6/"))
   }
 
+  test("a concatenated prefix survives in BOTH the URI and the pattern") {
+    // Two defects that compound. The endpoint pass took the first quoted
+    // string, so `@RequestMapping(PREFIX + "/api")` truncated to `/api` and
+    // collided with other controllers' routes; the security pass could not
+    // read the matching pattern at all, so the rule had no scope. While the
+    // URI is wrong the auth answer is not even measurable.
+    val uris = exportJson("endpoints").arr.map(e => e("uri").str)
+    uris should contain("/contest/api/public/list")
+    uris should contain("/contest/api/secret")
+    ruleFor("/contest/api/public/**", "*")._3 should include("permitAll")
+  }
+
   test("every endpoint in the fixture is extracted") {
     val endpoints = exportJson("endpoints").arr.map(e => s"${e("http_method").str} ${e("uri").str}")
     endpoints should contain allOf (

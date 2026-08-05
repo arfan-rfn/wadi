@@ -154,18 +154,43 @@ def _opacity_could_change_the_answer(
     role list is uncertain. Enforcement is a conjunction — an unknown gate can
     add a requirement, never remove one.
 
-    So opacity is decisive in exactly two shapes:
+    So opacity is decisive in exactly three shapes:
 
     * nothing readable requires auth yet, so an unread guard is the difference
       between "open" and "protected" — this is the train-ticket case, where a
-      dropped rule let a route publish as evidenced-open; and
+      dropped rule let a route publish as evidenced-open;
     * the unread guard is a chain BYPASS, the one construct that *removes*
-      enforcement and so could flip a protected answer to open.
+      enforcement and so could flip a protected answer to open; and
+    * the unread guard PERMITS — see below.
+
+    *Corrected 2026-08-05 (§5.2.10).* The conjunction premise is true for
+    LAYERED enforcement, which is what it was written for: a filter chain and
+    method security both run, so an unread annotation can only add to a chain
+    rule. It is false for ORDERED ALTERNATIVES inside one chain.
+    ``authorizeHttpRequests`` is first-match-wins, so a rule matching earlier
+    means the later ones never execute — they are mutually exclusive, not
+    conjunctive. An unread-scope ``permitAll()`` ahead of a readable
+    ``anyRequest().authenticated()`` therefore leaves the endpoint genuinely
+    uncertain between open and protected, and the old test discounted it and
+    published a confident ``True``.
+
+    That is the §5.2.9 defect mirrored: there, an unreadable rule was dropped
+    and the endpoint fell through to a later ``permitAll()``, claiming open
+    when protected. Here an unreadable rule is discounted and the endpoint
+    falls through to a later ``authenticated()``, claiming protected when
+    open. Same root shape — an unread rule not permitted to withhold — in the
+    other direction. A permissive effect and a chain bypass remove enforcement
+    by different mechanisms; only the mechanism differed, so only the bypass
+    was caught.
     """
     opaque = [item for item in gating if item.resolution is AuthResolution.OPAQUE]
     if not opaque:
         return False
-    if any(item.kind is AuthEvidenceKind.CHAIN_BYPASS for item in opaque):
+    removes_enforcement = any(
+        item.kind is AuthEvidenceKind.CHAIN_BYPASS or item.effect is AuthEffect.PERMIT_ALL
+        for item in opaque
+    )
+    if removes_enforcement:
         return True
     return not (requiring and not bypassed)
 

@@ -7,6 +7,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
   CfgNode,
   ControlStructure,
   JumpTarget,
+  Literal,
   Method,
   TypeDecl
 }
@@ -15,7 +16,7 @@ import io.shiftleft.semanticcpg.language.*
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import scala.collection.mutable
 
-import wadi.packs.SpringSecurityPack
+import wadi.packs.{SpringPacks, SpringSecurityPack}
 import wadi.slicing.UrlSlicer
 
 /** Bulk subgraph export (§5.1): the endpoint-reachable closure as JSON.
@@ -1713,15 +1714,27 @@ object WadiExport {
     // javasrc2cpg makes recoverable: the argument's code is the lambda's own
     // full name.
     val home = chainHomeOf(cpg, call.method)
+    // Non-literal scopes resolve through the shared reader too. Reading only
+    // literals made `securityMatcher(PREFIX + "/api/**")` look like NO scope,
+    // which does not degrade to "unknown": an unscoped chain governs every
+    // request, so it joins the candidates for endpoints it has nothing to do
+    // with and makes them ambiguous between chains.
     val scopes = cpg.call
       .nameExact("securityMatcher", "antMatcher")
       .filter(scope => chainHomeOf(cpg, scope.method) == home)
       .argument
       .argumentIndexGt(0)
-      .isLiteral
-      .code
       .l
-      .map(_.stripPrefix("\"").stripSuffix("\""))
+      .flatMap { argument =>
+        val owner = argument.method.typeDecl.headOption
+        argument match {
+          case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
+          case _ =>
+            SpringPacks
+              .constantString(cpg, argument.code, owner)
+              .orElse(SpringPacks.stringExpression(cpg, argument.code, owner))
+        }
+      }
       .filter(_.startsWith("/"))
       .distinct
     scopes match {

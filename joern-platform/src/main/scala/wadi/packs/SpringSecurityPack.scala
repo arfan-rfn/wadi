@@ -459,7 +459,15 @@ object SpringSecurityPack {
     private def patternsFrom(argument: Expression, owner: Option[TypeDecl]): List[String] = {
       val direct = argument match {
         case literal: Literal => List(literal.code.stripPrefix("\"").stripSuffix("\""))
-        case _                => SpringPacks.constantString(cpg, argument.code, owner).toList
+        case _ =>
+          SpringPacks
+            .constantString(cpg, argument.code, owner)
+            // `requestMatchers(PREFIX + "/public/x")`: without this the rule
+            // has no readable scope, and §5.2.10 then correctly withholds the
+            // claim on every endpoint it could cover — an honest answer to a
+            // question that did not need to be uncertain.
+            .orElse(SpringPacks.stringExpression(cpg, argument.code, owner))
+            .toList
       }
       val symbolic = memberNameOf(argument).toList.flatMap(valuePlaceholderOf)
       val assembled = argument match {
