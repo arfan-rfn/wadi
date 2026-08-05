@@ -277,6 +277,16 @@ class CoverageTotals(WadiModel):
             "(§5.2.5; detail rows live in remote_calls with reachable=false)"
         ),
     )
+    async_rooted_call_sites: int = Field(
+        ge=0,
+        default=0,
+        description=(
+            "Subset of unreachable_call_sites reached from a NON-HTTP root "
+            "(startup runner, scheduled task, listener). These really execute "
+            "— they are not stitched because no request is behind them, not "
+            "because they are dead (§5.2.11 T2)"
+        ),
+    )
     suspected_call_sites: int = Field(
         ge=0,
         default=0,

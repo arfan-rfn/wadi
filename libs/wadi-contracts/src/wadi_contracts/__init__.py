@@ -16,7 +16,7 @@ from wadi_contracts.boundary import (
     QuarantinedFact,
     ServiceBoundary,
 )
-from wadi_contracts.comms import MqInteraction, RemoteCall
+from wadi_contracts.comms import MqInteraction, Reachability, RemoteCall
 from wadi_contracts.datamodel import DataModel, DataModelField, DataModelRelation
 from wadi_contracts.endpoint import (
     AuthEffect,
@@ -193,6 +193,7 @@ __all__ = [
     "PlaceholderEntry",
     "Provenance",
     "QuarantinedFact",
+    "Reachability",
     "RemoteCall",
     "RemoteEdgeItem",
     "RemoteEdgesView",

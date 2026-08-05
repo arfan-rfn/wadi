@@ -194,6 +194,10 @@ export type SnapshotId = string
 export type StaleHintIds = string[]
 export type Analyzed = number
 /**
+ * Subset of unreachable_call_sites reached from a NON-HTTP root (startup runner, scheduled task, listener). These really execute — they are not stitched because no request is behind them, not because they are dead (§5.2.11 T2)
+ */
+export type AsyncRootedCallSites = number
+/**
  * Distinct remote-call facts considered
  */
 export type CallSites = number
@@ -458,6 +462,7 @@ export interface QuarantinedFact {
  */
 export interface CoverageTotals {
   analyzed: Analyzed
+  async_rooted_call_sites?: AsyncRootedCallSites
   by_confidence?: ByConfidence
   call_sites: CallSites
   edges: Edges

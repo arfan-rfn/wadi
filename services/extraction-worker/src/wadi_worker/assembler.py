@@ -37,6 +37,7 @@ from wadi_contracts import (
     MqDirection,
     MqInteraction,
     ParamLocation,
+    Reachability,
     RemoteCall,
     ShapeKind,
     ShapeOrigin,
@@ -542,6 +543,9 @@ class Assembler:
             calls.append(call)
         # Sinks outside the endpoint closure (§5.2.5): excluded from the map by
         # design, inventoried so the exclusion is a queryable fact (P10).
+        # §5.2.11 T2: "outside the endpoint closure" is two different facts —
+        # startup/scheduled code that really runs, and code nothing reaches.
+        async_rooted = self._async_root_closure(export, methods)
         for unreachable in export.unreachable_sinks:
             kind = self._sink_kind(unreachable.kind)
             if kind not in self._HTTP_SINK_KINDS:
@@ -556,6 +560,11 @@ class Assembler:
                 ),
                 suspected=kind is SinkKind.HTTP_CLIENT_SUSPECTED,
                 reachable=False,
+                reachability=(
+                    Reachability.ASYNC_ROOT
+                    if unreachable.method_full_name in async_rooted
+                    else Reachability.UNREACHED
+                ),
             )
             if call.id in seen:
                 continue
@@ -572,6 +581,7 @@ class Assembler:
         method_ref: MethodRef,
         suspected: bool,
         reachable: bool,
+        reachability: Reachability = Reachability.ENDPOINT,
     ) -> RemoteCall:
         return RemoteCall(
             snapshot_id=self._snapshot_id,
@@ -589,7 +599,31 @@ class Assembler:
             auth_propagation=sink.auth_propagation,
             suspected=suspected,
             reachable=reachable,
+            reachability=reachability,
         )
+
+    def _async_root_closure(
+        self, export: ServiceExport, methods: dict[int, ExportMethod]
+    ) -> set[str]:
+        """Method full names reachable from a non-HTTP root (§5.2.11 T2).
+
+        The Scala closure is already rooted at endpoints + async roots, so
+        every method involved is in the export — what was missing is the
+        walk that says WHICH root got there. Returns full names because an
+        unreachable sink carries its enclosing method by name, not by id (its
+        method is inventoried inline rather than exported).
+        """
+        cfgs = {cfg.method_id: cfg for cfg in export.cfgs}
+        reached: set[str] = set()
+        for root in export.async_roots:
+            for reached_id in self._reachable_closure(root.method_id, methods, cfgs):
+                # The BFS seeds with the root id unconditionally, so a root the
+                # export did not carry would KeyError here rather than simply
+                # contributing nothing.
+                reached_method = methods.get(reached_id)
+                if reached_method is not None:
+                    reached.add(reached_method.full_name)
+        return reached
 
     def _build_mq_interactions(
         self, export: ServiceExport, methods: dict[int, ExportMethod]

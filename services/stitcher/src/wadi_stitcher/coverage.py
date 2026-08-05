@@ -19,6 +19,7 @@ from wadi_contracts import (
     ExternalApiEntry,
     PlaceholderEntry,
     QuarantinedFact,
+    Reachability,
     RemoteCall,
     ServiceBoundary,
     ServiceCfgAnomalyEntry,
@@ -267,6 +268,12 @@ def build_coverage_report(
     # Inventory facts (§5.2.5): excluded from matching by design, counted so
     # the exclusion is queryable. `call_sites` stays the stitchable population.
     unreachable_count = sum(1 for call in remote_calls if not call.reachable)
+    # §5.2.11 T2: of the excluded sites, the ones a startup/scheduled root DOES
+    # reach. Counting them together with dead code made real production traffic
+    # read as unwired.
+    async_rooted_count = sum(
+        1 for call in remote_calls if call.reachability is Reachability.ASYNC_ROOT
+    )
     suspected_count = sum(1 for call in remote_calls if call.reachable and call.suspected)
     stitchable_count = sum(1 for call in remote_calls if call.reachable and not call.suspected)
 
@@ -280,6 +287,7 @@ def build_coverage_report(
             placeholder=len(by_kind[TargetKind.PLACEHOLDER]),
             undetermined=len(by_kind[TargetKind.UNDETERMINED]),
             unreachable_call_sites=unreachable_count,
+            async_rooted_call_sites=async_rooted_count,
             suspected_call_sites=suspected_count,
             by_confidence=dict(sorted(by_confidence.items())),
         ),

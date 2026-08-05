@@ -49,6 +49,16 @@
       "title": "MethodRef",
       "type": "object"
     },
+    "Reachability": {
+      "description": "WHICH root reaches this call site (\u00a75.2.11 T2).\n\n``reachable`` answers \"is it on the map\"; this answers \"why\". The\ndistinction is load-bearing because the two false-ish cases are not the\nsame fact: a call reached only from a ``CommandLineRunner`` or\n``@Scheduled`` method genuinely runs in production \u2014 it seeds data, it hits\nother services \u2014 while a call in a vendored class no root reaches is dead.\nPublishing both as ``reachable=False`` made the first invisible and the\nsecond look identical to it.",
+      "enum": [
+        "endpoint",
+        "async-root",
+        "unreached"
+      ],
+      "title": "Reachability",
+      "type": "string"
+    },
     "SourceAnchor": {
       "additionalProperties": false,
       "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
@@ -154,9 +164,14 @@
       "$ref": "#/$defs/MethodRef",
       "description": "Method containing the call site"
     },
+    "reachability": {
+      "$ref": "#/$defs/Reachability",
+      "default": "endpoint",
+      "description": "Which root reaches this call: endpoint | async-root | unreached (\u00a75.2.11 T2). Refines `reachable`, never contradicts it"
+    },
     "reachable": {
       "default": true,
-      "description": "False = the call site exists but no endpoint-reachable path leads to it (dead/unwired code). Excluded from stitching by design; inventoried so the exclusion is queryable (\u00a75.2.5)",
+      "description": "False = no ENDPOINT-reachable path leads here. Excluded from stitching by design; inventoried so the exclusion is queryable (\u00a75.2.5). See `reachability` for which root reaches it \u2014 False alone does not mean dead",
       "title": "Reachable",
       "type": "boolean"
     },

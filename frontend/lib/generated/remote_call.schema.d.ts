@@ -27,7 +27,11 @@ export type Id1 = string
  */
 export type Signature = string
 /**
- * False = the call site exists but no endpoint-reachable path leads to it (dead/unwired code). Excluded from stitching by design; inventoried so the exclusion is queryable (§5.2.5)
+ * Which root reaches this call: endpoint | async-root | unreached (§5.2.11 T2). Refines `reachable`, never contradicts it
+ */
+export type Reachability = "endpoint" | "async-root" | "unreached"
+/**
+ * False = no ENDPOINT-reachable path leads here. Excluded from stitching by design; inventoried so the exclusion is queryable (§5.2.5). See `reachability` for which root reaches it — False alone does not mean dead
  */
 export type Reachable = boolean
 export type SchemaVersion = string
@@ -70,6 +74,7 @@ export interface RemoteCall {
   id: Id
   mechanism: Mechanism
   method: MethodRef
+  reachability?: Reachability
   reachable?: Reachable
   schema_version?: SchemaVersion
   service_id: ServiceId

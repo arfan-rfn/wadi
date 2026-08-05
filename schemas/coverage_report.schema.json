@@ -178,6 +178,13 @@
           "title": "Analyzed",
           "type": "integer"
         },
+        "async_rooted_call_sites": {
+          "default": 0,
+          "description": "Subset of unreachable_call_sites reached from a NON-HTTP root (startup runner, scheduled task, listener). These really execute \u2014 they are not stitched because no request is behind them, not because they are dead (\u00a75.2.11 T2)",
+          "minimum": 0,
+          "title": "Async Rooted Call Sites",
+          "type": "integer"
+        },
         "by_confidence": {
           "additionalProperties": {
             "type": "integer"

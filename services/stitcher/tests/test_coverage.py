@@ -14,6 +14,7 @@ from wadi_contracts import (
     HttpMethod,
     MethodRef,
     Provenance,
+    Reachability,
     ServiceKind,
     SourceAnchor,
     StitchedEdge,
@@ -405,3 +406,43 @@ class TestAuthCoverage:
         section = build_auth_coverage([])
         assert section.unread_by_kind == {}
         assert section.endpoints == 0
+
+
+def test_async_rooted_sites_are_split_out_of_the_unreachable_count() -> None:
+    """§5.2.11 T2: startup traffic is excluded from stitching, not dead.
+
+    Rolling both into one number is what made 430 real async roots on
+    train-ticket-aitest read as unwired code.
+    """
+    snapshot = make_snapshot(make_system())
+    caller = make_service(snapshot, "services/petstore")
+    calls = [
+        make_remote_call(snapshot, caller, url="http://a/1", line=1),
+        make_remote_call(
+            snapshot,
+            caller,
+            url="http://a/2",
+            line=2,
+            reachable=False,
+            reachability=Reachability.ASYNC_ROOT,
+        ),
+        make_remote_call(
+            snapshot,
+            caller,
+            url="http://a/3",
+            line=3,
+            reachable=False,
+            reachability=Reachability.UNREACHED,
+        ),
+    ]
+    report = build_coverage_report(
+        snapshot.id,
+        remote_calls=calls,
+        edges=[],
+        unresolved=[],
+        phonebook_conflicts=(),
+        placeholder_names={},
+    )
+    assert report.totals.unreachable_call_sites == 2
+    assert report.totals.async_rooted_call_sites == 1
+    assert report.totals.call_sites == 1

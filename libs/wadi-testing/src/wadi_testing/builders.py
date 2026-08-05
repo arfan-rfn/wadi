@@ -14,6 +14,7 @@ from wadi_contracts import (
     MethodInfo,
     MethodRef,
     Provenance,
+    Reachability,
     RemoteCall,
     RepoSource,
     ServiceBoundary,
@@ -145,6 +146,7 @@ def make_remote_call(
     mechanism: str = "resttemplate",
     http_verb: HttpMethod | None = HttpMethod.GET,
     reachable: bool = True,
+    reachability: Reachability | None = None,
     suspected: bool = False,
 ) -> RemoteCall:
     return RemoteCall(
@@ -158,6 +160,8 @@ def make_remote_call(
         url=url,
         url_confidence=confidence if url is not None else Confidence.NONE,
         reachable=reachable,
+        reachability=reachability
+        or (Reachability.ENDPOINT if reachable else Reachability.UNREACHED),
         suspected=suspected,
     )
 

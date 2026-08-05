@@ -15,10 +15,13 @@ from wadi_contracts import (
     IcfgEdgeKind,
     IcfgNode,
     IcfgNodeKind,
+    Reachability,
+    RemoteCall,
     SinkKind,
 )
 from wadi_joern_client.export import (
     CfgNodeKind,
+    ExportAsyncRoot,
     ExportCall,
     ExportCfg,
     ExportCfgEdge,
@@ -27,6 +30,7 @@ from wadi_joern_client.export import (
     ExportEndpoint,
     ExportMethod,
     ExportSink,
+    ExportUnreachableSink,
     ServiceExport,
     SinkValueConfidence,
 )
@@ -532,3 +536,87 @@ class TestArmsLeavingTheMethod:
             ],
         )
         assert not [e for e in edges if e[0] == "m1:n1" and e[1] == "m1:exit"]
+
+
+class TestReachabilityProvenance:
+    """§5.2.11 T2 — "outside the endpoint closure" is two different facts.
+
+    A call reached only from a `CommandLineRunner` or `@Scheduled` method
+    genuinely runs in production; a call in a vendored class no root reaches is
+    dead. Both were published as `reachable=False`, which made the first
+    invisible and the second indistinguishable from it. Measured on
+    train-ticket-aitest: 430 async roots contributed no edges at all.
+    """
+
+    SEEDER = 900
+    SEEDER_SINK_NODE = 905
+    ORPHAN = 950
+
+    def _export_with_async_root(self) -> ServiceExport:
+        export = petstore_like_export()
+        seeder = _minimal_method(self.SEEDER, "pets.PetSeeder.run")
+        helper = _minimal_method(910, "pets.PetSeeder.push")
+        orphan = _minimal_method(self.ORPHAN, "pets.Vendored.push")
+        export.methods.extend([seeder, helper, orphan])
+        export.cfgs.append(
+            ExportCfg(
+                method_id=self.SEEDER,
+                nodes=[_call_node(self.SEEDER_SINK_NODE, 910, "pets.PetSeeder.push")],
+                edges=[],
+            )
+        )
+        export.async_roots.append(ExportAsyncRoot(method_id=self.SEEDER, kind="application-runner"))
+        # Two sinks outside the ENDPOINT closure. One is reached by the runner
+        # (transitively, via push); the other by nothing at all.
+        export.unreachable_sinks.extend(
+            [
+                ExportUnreachableSink(
+                    node_id=9001,
+                    call_id=9001,
+                    method_id=910,
+                    kind="http-client",
+                    value="http://inventory/seed",
+                    value_confidence=SinkValueConfidence.EXACT,
+                    http_verb="POST",
+                    mechanism="resttemplate",
+                    method_full_name="com.acme.pets.PetSeeder.push:void()",
+                    file="src/main/java/com/acme/pets/PetSeeder.java",
+                    line=22,
+                ),
+                ExportUnreachableSink(
+                    node_id=9002,
+                    call_id=9002,
+                    method_id=self.ORPHAN,
+                    kind="http-client",
+                    value="http://inventory/dead",
+                    value_confidence=SinkValueConfidence.EXACT,
+                    http_verb="GET",
+                    mechanism="resttemplate",
+                    method_full_name="com.acme.pets.Vendored.push:void()",
+                    file="src/main/java/com/acme/pets/Vendored.java",
+                    line=9,
+                ),
+            ]
+        )
+        return export
+
+    def _calls_by_url(self, assembler: Assembler) -> dict[str, RemoteCall]:
+        artifacts = assembler.assemble(self._export_with_async_root())
+        return {c.url: c for c in artifacts.remote_calls if c.url}
+
+    def test_a_startup_reached_call_is_async_rooted_not_dead(self, assembler: Assembler) -> None:
+        call = self._calls_by_url(assembler)["http://inventory/seed"]
+        assert call.reachability is Reachability.ASYNC_ROOT
+        # Still excluded from stitching — no request is behind it — but the
+        # exclusion now carries its reason.
+        assert call.reachable is False
+
+    def test_a_call_no_root_reaches_stays_unreached(self, assembler: Assembler) -> None:
+        call = self._calls_by_url(assembler)["http://inventory/dead"]
+        assert call.reachability is Reachability.UNREACHED
+        assert call.reachable is False
+
+    def test_endpoint_reached_calls_keep_their_provenance(self, assembler: Assembler) -> None:
+        call = self._calls_by_url(assembler)["{?}/stock/{?}"]
+        assert call.reachability is Reachability.ENDPOINT
+        assert call.reachable is True
