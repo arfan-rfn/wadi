@@ -123,10 +123,12 @@ class Assembler:
         snapshot_id: str,
         service_id: str,
         config_env: dict[str, str] | None = None,
+        config_structured: dict[str, list[dict[str, object]]] | None = None,
     ) -> None:
         self._snapshot_id = snapshot_id
         self._service_id = service_id
         self._config_env = config_env or {}
+        self._config_structured = config_structured or {}
 
     def assemble(self, export: ServiceExport) -> AssembledArtifacts:
         if not export.compatible_with_reader():
@@ -193,6 +195,10 @@ class Assembler:
                     security_rules=export.security_rules,
                     handler_anchor=self._anchor(handler.filename, handler.line, handler.line_end),
                     config_env=self._config_env,
+                    auth_enforcements=export.auth_enforcements,
+                    auth_mechanisms=export.auth_mechanisms,
+                    method_security=export.method_security,
+                    config_structured=self._config_structured,
                 ),
             )
             artifacts.endpoints.append(endpoint)
