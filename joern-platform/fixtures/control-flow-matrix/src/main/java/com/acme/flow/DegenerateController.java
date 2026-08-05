@@ -175,4 +175,62 @@ public class DegenerateController {
             hits += n;
         }
     }
+
+    /** An arrow switch in EXPRESSION position, with STATEMENT-bodied arms.
+     *
+     * `yieldForm` above pins the block-bodied default; this pins two ordinary
+     * case arms. javasrc2cpg emits arm→carrier — the arm's VALUE flowing into
+     * the assignment — and no carrier→arm, so before 2026-08-05 every arm had
+     * no incoming edge and read as unreachable. Statement position was always
+     * correct; this is the same shape given the same wiring. */
+    @GetMapping("/degenerate/expression-switch/{n}")
+    public String expressionSwitchArms(@PathVariable int n) {
+        String label = switch (n) {
+            case 0 -> low(n);
+            case 1 -> high(n);
+            default -> other(n);
+        };
+        return label;
+    }
+
+    /** An anonymous class opening a try body.
+     *
+     * `Runnable r = new Runnable() { ... };` puts the allocation call and the
+     * declaration on ONE line. The container's entry was picked by (line, id),
+     * the tie fell to node id, and javasrc2cpg numbered the call lower — so the
+     * container was wired to the call while the enclosing arm still pointed at
+     * the declaration. The reroute matched nothing and the TRY was left with no
+     * incoming edge at all. */
+    @GetMapping("/degenerate/anon-in-try/{n}")
+    public String anonymousOpensTry(@PathVariable int n) {
+        if (n > 0) {
+            try {
+                Runnable r = new Runnable() {
+                    @Override
+                    public void run() {
+                        marker = 1;
+                    }
+                };
+                r.run();
+            } finally {
+                marker = 0;
+            }
+            return "ran";
+        }
+        return "skipped";
+    }
+
+    private int marker;
+
+    private String low(int n) {
+        return "low" + n;
+    }
+
+    private String high(int n) {
+        return "high" + n;
+    }
+
+    private String other(int n) {
+        return "other" + n;
+    }
 }

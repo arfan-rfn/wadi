@@ -574,6 +574,7 @@ object WadiExport {
     semantics.labelLoopEdges()
     semantics.routeContainers()
     semantics.labelSwitchEdges()
+    semantics.labelExpressionMatchEdges()
     semantics.fixJumpEdges()
 
     ujson.Obj(
@@ -725,10 +726,26 @@ object WadiExport {
         // its own CATCH and present the handler as normal flow (§5.2.8 T3).
         val entryScope =
           if (container.controlStructureType == "TRY") bodyInteriorOf(container) else interior
-        val entry = entryScope.minByOption { id =>
-          val s = statementById(id)
-          (lineOf(s.lineNumber), id)
+        // Prefer the body statement control actually ARRIVES at from outside.
+        // Ranking the whole body by (line, id) breaks when two statements share
+        // a line, because the tiebreak is node id — arbitrary with respect to
+        // source order. `Runnable r = new Runnable() { ... };` opening a try
+        // puts the allocation call and the declaration on one line, javasrc2cpg
+        // numbered the call lower, and the container was wired to the call
+        // while the enclosing `if` arm still pointed at the declaration: the
+        // reroute matched nothing and the TRY was left with no incoming edge,
+        // reported as `disconnected-node`. (Third instance of this shape in one
+        // pass — the CFG invariant's own entry pick had it too.) Falling back
+        // to positional order keeps a container that opens its method working,
+        // where nothing outside points in.
+        val arrivesFromOutside = entryScope.filter { id =>
+          edges.exists(e => e._2 == id && e._1 != container.id && !interior.contains(e._1))
         }
+        val entry = (if (arrivesFromOutside.nonEmpty) arrivesFromOutside else entryScope)
+          .minByOption { id =>
+            val s = statementById(id)
+            (lineOf(s.lineNumber), id)
+          }
         entry.foreach { entryId =>
           rerouteThroughContainer(container, interior, entryId)
           // Always connect container→entry — a try that opens the method has
@@ -961,6 +978,78 @@ object WadiExport {
       * a fabricated cycle) into an explicit body→next-arm `fallthrough` edge;
       * drop the phantom selector→join edge when a `default` arm exists.
       */
+    /** An arrow switch in EXPRESSION position wires its arms (§5.2.8, 2026-08-05).
+      *
+      * `Set<Long> x = switch (role) { case "a" -> ...; }` puts the MATCH inside
+      * an expression, so the control structure is not itself a statement — its
+      * CARRIER is (`x = switch(role) {`, already marked `switch-arrow`).
+      * `labelSwitchEdges` filters edges by the control structure's own id and
+      * therefore found none, leaving every arm with no incoming edge: reported
+      * as `disconnected-node`, and read as unreachable code on the map.
+      *
+      * What javasrc2cpg emits is arm→carrier — the arm's VALUE flowing into the
+      * assignment — with no carrier→arm to match. Statement position gets the
+      * shape right, so the fix is to give expression position the same one:
+      * carrier→arm labeled `case`/`default`, and each arm continuing to
+      * whatever follows the carrier instead of pointing back at it. Fallthrough
+      * is deliberately not synthesised — arrow arms do not fall through.
+      */
+    def labelExpressionMatchEdges(): Unit =
+      // Driven from the STATEMENTS, not from `controlStructures`: that helper
+      // collects control structures that ARE statements, and the whole point
+      // of an expression-position MATCH is that it is not one. Filtering its
+      // result for non-statements searched an already-empty list.
+      statements.foreach { statement =>
+        statement.ast
+          .collectAll[ControlStructure]
+          .find(m =>
+            m.controlStructureType == "MATCH" && enclosing.get(m.id).contains(statement.id)
+          )
+          .foreach { matchS =>
+            val carrier = statement.id
+            val groups   = caseGroupsOf(matchS)
+            val interior = interiorOf(matchS)
+            // NOT `firstStatementId`: it walks outward to the nearest enclosing
+            // STATEMENT, and an arrow arm's nearest enclosing statement is the
+            // carrier itself — which produced a `case` self-edge on the carrier
+            // and left the arm as unreachable as before. The arm's own entry is
+            // the lowest-positioned statement the arm and the match interior
+            // share, with the carrier excluded by construction.
+            val armEntry = groups.flatMap { group =>
+              group.statementIds
+                .intersect(interior)
+                .filter(_ != carrier)
+                .toList
+                .sortBy(id => (lineOf(statementById(id).lineNumber), id))
+                .headOption
+                .map(group -> _)
+            }
+            val armIds = armEntry.map(_._2).toSet
+            // Read BEFORE adding arm edges: what the carrier already reaches
+            // that is not an arm is where control resumes after the switch.
+            val continuations =
+              edges.filter(e => e._1 == carrier && !armIds.contains(e._2)).map(_._2).toSet
+
+            armEntry.foreach { case (group, entry) =>
+              val edge = (carrier, entry)
+              edges += edge
+              if (group.isDefault) labels(edge) = "default"
+              else {
+                labels(edge) = "case"
+                caseValues(edge) = group.values
+              }
+            }
+
+            edges.toList.filter(e => e._2 == carrier && interior.contains(e._1)).foreach { edge =>
+              edges -= edge
+              labels.remove(edge)
+              continuations.foreach { target =>
+                if (target != edge._1) edges += ((edge._1, target))
+              }
+            }
+          }
+      }
+
     def labelSwitchEdges(): Unit =
       controlStructures(Set("SWITCH", "MATCH")).foreach { switch =>
         val interior = interiorOf(switch)

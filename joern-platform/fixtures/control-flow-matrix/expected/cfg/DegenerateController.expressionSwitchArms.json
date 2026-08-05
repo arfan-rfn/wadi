@@ -1,0 +1,96 @@
+{
+  "nodes": [
+    {
+      "key": "statement@188",
+      "kind": "statement",
+      "code": "String label = switch(n) {",
+      "line": 188,
+      "line_end": 191,
+      "construct_kind": "switch-arrow",
+      "condition_code": "n"
+    },
+    {
+      "key": "call@189",
+      "kind": "call",
+      "code": "this.low(n)",
+      "line": 189,
+      "line_end": 189,
+      "call": {
+        "callee": "com.acme.flow.DegenerateController.low",
+        "resolved": true
+      }
+    },
+    {
+      "key": "call@190",
+      "kind": "call",
+      "code": "this.high(n)",
+      "line": 190,
+      "line_end": 190,
+      "call": {
+        "callee": "com.acme.flow.DegenerateController.high",
+        "resolved": true
+      }
+    },
+    {
+      "key": "call@191",
+      "kind": "call",
+      "code": "this.other(n)",
+      "line": 191,
+      "line_end": 191,
+      "call": {
+        "callee": "com.acme.flow.DegenerateController.other",
+        "resolved": true
+      }
+    },
+    {
+      "key": "return@193",
+      "kind": "return",
+      "code": "return label;",
+      "line": 193,
+      "line_end": 193
+    }
+  ],
+  "edges": [
+    {
+      "source": "call@189",
+      "target": "return@193",
+      "label": "flow"
+    },
+    {
+      "source": "call@190",
+      "target": "return@193",
+      "label": "flow"
+    },
+    {
+      "source": "call@191",
+      "target": "return@193",
+      "label": "flow"
+    },
+    {
+      "source": "statement@188",
+      "target": "call@189",
+      "label": "case",
+      "case_values": [
+        "0"
+      ]
+    },
+    {
+      "source": "statement@188",
+      "target": "call@190",
+      "label": "case",
+      "case_values": [
+        "1"
+      ]
+    },
+    {
+      "source": "statement@188",
+      "target": "call@191",
+      "label": "default"
+    },
+    {
+      "source": "statement@188",
+      "target": "return@193",
+      "label": "flow"
+    }
+  ]
+}

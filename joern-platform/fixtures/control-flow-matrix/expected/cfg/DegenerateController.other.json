@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {
+      "key": "return@234",
+      "kind": "return",
+      "code": "return \"other\" + n;",
+      "line": 234,
+      "line_end": 234
+    }
+  ],
+  "edges": []
+}
