@@ -1,28 +1,8 @@
 [
   {
     "http_method": "GET",
-    "full_uri": "/pets/{id}",
-    "simplified_uri": "/pets/{?}"
-  },
-  {
-    "http_method": "GET",
-    "full_uri": "/pets",
-    "simplified_uri": "/pets"
-  },
-  {
-    "http_method": "PUT",
-    "full_uri": "/pets/{id}/reserve/{count}",
-    "simplified_uri": "/pets/{?}/reserve/{?}"
-  },
-  {
-    "http_method": "POST",
-    "full_uri": "/pets/{id}/alert",
-    "simplified_uri": "/pets/{?}/alert"
-  },
-  {
-    "http_method": "GET",
-    "full_uri": "/pets/summary/{id}",
-    "simplified_uri": "/pets/summary/{?}"
+    "full_uri": "/admin/pets/report",
+    "simplified_uri": "/admin/pets/report"
   },
   {
     "http_method": "GET",
@@ -31,18 +11,8 @@
   },
   {
     "http_method": "GET",
-    "full_uri": "/admin/pets/report",
-    "simplified_uri": "/admin/pets/report"
-  },
-  {
-    "http_method": "GET",
-    "full_uri": "/vet/pets/checkups",
-    "simplified_uri": "/vet/pets/checkups"
-  },
-  {
-    "http_method": "GET",
-    "full_uri": "/catalog/pets/{id}",
-    "simplified_uri": "/catalog/pets/{?}"
+    "full_uri": "/base/chained/pets/list",
+    "simplified_uri": "/base/chained/pets/list"
   },
   {
     "http_method": "GET",
@@ -56,8 +26,8 @@
   },
   {
     "http_method": "GET",
-    "full_uri": "/catalog/tree",
-    "simplified_uri": "/catalog/tree"
+    "full_uri": "/catalog/pets/{id}",
+    "simplified_uri": "/catalog/pets/{?}"
   },
   {
     "http_method": "GET",
@@ -66,7 +36,52 @@
   },
   {
     "http_method": "GET",
+    "full_uri": "/catalog/tree",
+    "simplified_uri": "/catalog/tree"
+  },
+  {
+    "http_method": "GET",
     "full_uri": "/catalog/vendor",
     "simplified_uri": "/catalog/vendor"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/pets",
+    "simplified_uri": "/pets"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/pets/summary/{id}",
+    "simplified_uri": "/pets/summary/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/pets/{id}",
+    "simplified_uri": "/pets/{?}"
+  },
+  {
+    "http_method": "POST",
+    "full_uri": "/pets/{id}/alert",
+    "simplified_uri": "/pets/{?}/alert"
+  },
+  {
+    "http_method": "PUT",
+    "full_uri": "/pets/{id}/reserve/{count}",
+    "simplified_uri": "/pets/{?}/reserve/{?}"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "/vet/pets/checkups",
+    "simplified_uri": "/vet/pets/checkups"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "{?}/pets/fetch",
+    "simplified_uri": "/{?}/pets/fetch"
+  },
+  {
+    "http_method": "GET",
+    "full_uri": "{?}/pets/list",
+    "simplified_uri": "/{?}/pets/list"
   }
 ]

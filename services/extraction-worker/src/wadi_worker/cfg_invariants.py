@@ -131,7 +131,21 @@ def check_cfg(cfg: ExportCfg, method: ExportMethod) -> list[tuple[CfgAnomalyCode
         # The method's entry statement legitimately has no incoming edge;
         # every other in-degree-0 node is a disconnection the downstream
         # patching would disguise as an extra entry point.
-        entry = min(cfg.nodes, key=lambda n: (n.line, n.id))
+        #
+        # The entry is chosen from the in-degree-0 nodes, NOT from all nodes by
+        # position (measured 2026-08-05). Ranking every node by (line, id) picks
+        # a node that already HAS an incoming edge whenever two statements share
+        # a line, and the tiebreak is node id — arbitrary with respect to source
+        # order. `if (x == null) x = false;` on one line is ordinary Java, and
+        # javasrc2cpg gave the assignment a lower id than its enclosing branch:
+        # the assignment was crowned entry and the BRANCH was reported
+        # disconnected, on a graph structurally identical to the same code
+        # written across two lines, which passed. Six of one benchmark's
+        # findings were this false positive. Falling back to all nodes keeps a
+        # pure cycle (no in-degree-0 node at all) reporting as before — that
+        # shape is caught by `exit-unreachable`.
+        sources = [node for node in cfg.nodes if node.id not in incoming]
+        entry = min(sources or cfg.nodes, key=lambda n: (n.line, n.id))
         for node in cfg.nodes:
             if node.id != entry.id and node.id not in incoming:
                 findings.append((CfgAnomalyCode.DISCONNECTED_NODE, _anchor(method, node)))

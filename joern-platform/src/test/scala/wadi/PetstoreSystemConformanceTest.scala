@@ -38,6 +38,7 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers with Fixtu
       // one id and destroyed an endpoint.
       "GET /base/chained/pets/list",
       "GET {?}/pets/list",
+      "GET {?}/pets/fetch",
       "PUT /pets/{id}/reserve/{count}",
       "POST /pets/{id}/alert",
       "GET /pets/summary/{id}",

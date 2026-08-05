@@ -78,7 +78,11 @@ class AmbiguousPrefixController {
 @RequestMapping(ExternalRoutes.OFFSITE + "/pets")
 class ExternalPrefixController {
 
-    @GetMapping("/list")
+    // A distinct tail from the ambiguous controller: both prefixes hole, and
+    // identical tails would make the two holes collide with each other. That
+    // collision is real and the detector reports it (§7), but it belongs in a
+    // test about collisions, not in the fixture that pins prefix resolution.
+    @GetMapping("/fetch")
     public String list() {
         return "external";
     }
