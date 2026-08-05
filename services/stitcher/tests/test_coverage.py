@@ -7,6 +7,7 @@ from wadi_contracts import (
     AuthEvidenceKind,
     AuthResolution,
     CfgAnomaly,
+    CfgAnomalyCode,
     Confidence,
     Endpoint,
     EndpointAuth,
@@ -310,8 +311,8 @@ def test_cfg_anomalies_rollup_and_unchecked_services() -> None:
     noisy = make_service(snapshot, "services/noisy").model_copy(
         update={
             "cfg_anomalies": [
-                CfgAnomaly(code="disconnected-node", count=3, sample_sites=[anchor]),
-                CfgAnomaly(code="branch-arity", count=1),
+                CfgAnomaly(code=CfgAnomalyCode.DISCONNECTED_NODE, count=3, sample_sites=[anchor]),
+                CfgAnomaly(code=CfgAnomalyCode.BRANCH_ARITY, count=1),
             ]
         }
     )

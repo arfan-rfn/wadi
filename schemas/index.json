@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.15.0",
+  "schema_version": "1.16.0",
   "schemas": {
     "coverage_report": "coverage_report.schema.json",
     "data_model": "data_model.schema.json",
@@ -21,5 +21,8 @@
     "system_auth": "system_auth.schema.json",
     "system_graph": "system_graph.schema.json"
   },
-  "tag_registry_version": "1.4.0"
+  "tag_registry_version": "1.4.0",
+  "vocabularies": {
+    "async_root_kinds": "vocabulary/async_root_kinds.json"
+  }
 }

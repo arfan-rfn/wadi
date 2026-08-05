@@ -491,16 +491,46 @@ class SpringDataSinkPass(cpg: Cpg) extends CpgPass(cpg) {
   * listener kinds stay with the Phase 3 MQ packs — this tag only roots
   * reachability.
   */
+/** The `async-root` tag vocabulary this pack may emit (§7, recorded
+  * 2026-08-05). Enumerated in ONE place so the pack has a set to conform with:
+  * the vocabulary is owned by `wadi-contracts` (`ASYNC_ROOT_KINDS`) and
+  * published to `schemas/vocabulary/async_root_kinds.json`, which
+  * `AsyncRootVocabularyTest` diffs against `All` in both directions. Nothing
+  * else spans the Scala/Python boundary — a kind added here and not there is
+  * exactly the drift that took a snapshot down on 2026-08-05.
+  */
+object AsyncRootKind {
+  val Scheduled         = "scheduled"
+  val EventListener     = "event-listener"
+  val KafkaListener     = "kafka-listener"
+  val RabbitListener    = "rabbit-listener"
+  val JmsListener       = "jms-listener"
+  val ApplicationRunner = "application-runner"
+  val Bean              = "bean"
+  val FrameworkCallback = "framework-callback"
+
+  val All: Set[String] = Set(
+    Scheduled,
+    EventListener,
+    KafkaListener,
+    RabbitListener,
+    JmsListener,
+    ApplicationRunner,
+    Bean,
+    FrameworkCallback
+  )
+}
+
 class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
 
   private val AnnotationKinds: Map[String, String] = Map(
-    "Scheduled"                  -> "scheduled",
-    "Schedules"                  -> "scheduled",
-    "EventListener"              -> "event-listener",
-    "TransactionalEventListener" -> "event-listener",
-    "KafkaListener"              -> "kafka-listener",
-    "RabbitListener"             -> "rabbit-listener",
-    "JmsListener"                -> "jms-listener"
+    "Scheduled"                  -> AsyncRootKind.Scheduled,
+    "Schedules"                  -> AsyncRootKind.Scheduled,
+    "EventListener"              -> AsyncRootKind.EventListener,
+    "TransactionalEventListener" -> AsyncRootKind.EventListener,
+    "KafkaListener"              -> AsyncRootKind.KafkaListener,
+    "RabbitListener"             -> AsyncRootKind.RabbitListener,
+    "JmsListener"                -> AsyncRootKind.JmsListener
   )
 
   /** Both spellings: fully-qualified when javasrc2cpg resolves the import,
@@ -527,7 +557,7 @@ class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
         }
         // @Bean factory methods run at context startup (§5.4.2 T4).
         if (annotation.name == "Bean") {
-          Iterator(method).newTagNodePair("async-root", "bean").store()(using builder)
+          Iterator(method).newTagNodePair("async-root", AsyncRootKind.Bean).store()(using builder)
         }
       }
     }
@@ -539,7 +569,7 @@ class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
       .filterNot(_.isExternal)
       .l
       .foreach { method =>
-        Iterator(method).newTagNodePair("async-root", "application-runner").store()(using builder)
+        Iterator(method).newTagNodePair("async-root", AsyncRootKind.ApplicationRunner).store()(using builder)
       }
     // A stereotype component implementing an EXTERNAL supertype is a framework
     // callback: the container constructs it and invokes its overrides through
@@ -569,7 +599,7 @@ class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
       .filterNot(_.modifier.modifierType.l.contains("PRIVATE"))
       .l
       .foreach { method =>
-        Iterator(method).newTagNodePair("async-root", "framework-callback").store()(using builder)
+        Iterator(method).newTagNodePair("async-root", AsyncRootKind.FrameworkCallback).store()(using builder)
       }
   }
 }

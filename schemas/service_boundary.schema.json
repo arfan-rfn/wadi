@@ -57,8 +57,7 @@
       "description": "One structural-invariant violation family on a service's CFGs\n(\u00a75.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real\nrepos, and a violated invariant is a queryable fact about how much the\ngraph can be trusted (P10).",
       "properties": {
         "code": {
-          "title": "Code",
-          "type": "string"
+          "$ref": "#/$defs/CfgAnomalyCode"
         },
         "count": {
           "description": "Occurrences across the service's methods",
@@ -82,6 +81,36 @@
       ],
       "title": "CfgAnomaly",
       "type": "object"
+    },
+    "CfgAnomalyCode": {
+      "description": "\u00a75.2.8 M2 structural-invariant violation codes.\n\nEvaluated against the RAW exported CFG of every method on every snapshot \u2014\nbefore the assembler's synthetic entry/exit patching, which would make\nreachability invariants vacuously true. Additive changes bump\n``SCHEMA_VERSION`` minor.\n\nAn enum rather than a string registry (\u00a77, recorded 2026-08-05): pyright\ncatches producer/registry drift in CI, which a runtime validator could\nonly catch on a user's repository.",
+      "enum": [
+        "disconnected-node",
+        "branch-arity",
+        "unlabeled-arm",
+        "loop-no-back-edge",
+        "dangling-edge",
+        "exit-unreachable"
+      ],
+      "title": "CfgAnomalyCode",
+      "type": "string"
+    },
+    "ClientLibrary": {
+      "description": "Client-library census vocabulary (\u00a75.4.2).\n\nThe worker detects these by deterministic import scan; presence is a fact,\ncall counts are not claimed (an import is not a call \u2014 P10). See\n``MODELLED_CLIENT_LIBRARIES`` for the subset wadi's sink passes model.",
+      "enum": [
+        "resttemplate",
+        "webclient",
+        "feign",
+        "restclient",
+        "http-interface",
+        "jdk-httpclient",
+        "okhttp",
+        "retrofit",
+        "apache-httpclient",
+        "unirest"
+      ],
+      "title": "ClientLibrary",
+      "type": "string"
     },
     "GatewayRoute": {
       "additionalProperties": false,
@@ -227,6 +256,62 @@
       "title": "NetworkIdentity",
       "type": "object"
     },
+    "QuarantinedFact": {
+      "additionalProperties": false,
+      "description": "A diagnostic fact whose vocabulary this build does not recognize\n(\u00a77, recorded 2026-08-05, schema 1.16.0).\n\nNever fatal and never dropped. Diagnostic facts describe how well analysis\nread the code, not the code itself, so an unreadable one must not cost the\nmap \u2014 but silently discarding it would be the exact gap the registries\nexist to prevent (P10, turned on wadi's own pipeline: a self-observation we\ncannot parse is itself a queryable fact).\n\nExpected **empty in all healthy operation**, unlike ``cfg_anomalies``,\nwhich is expected non-zero on real code forever. That difference is why it\nhas its own home rather than sharing one: an always-zero signal folded into\nan always-noisy one stops being a signal. Non-empty on the fixtures or\nbenchmarks fails CI, while a user's run only ever loses the one footnote.",
+      "properties": {
+        "count": {
+          "default": 1,
+          "description": "Occurrences of this value",
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "registry": {
+          "description": "Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'",
+          "minLength": 1,
+          "title": "Registry",
+          "type": "string"
+        },
+        "sample_anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One example site, when the rejected fact carried one"
+        },
+        "service_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning service; None on a snapshot-level artifact",
+          "title": "Service Id"
+        },
+        "value": {
+          "description": "The raw unrecognized value, verbatim",
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "registry",
+        "value"
+      ],
+      "title": "QuarantinedFact",
+      "type": "object"
+    },
     "ServiceKind": {
       "description": "v1: service | library. Reserved for Phase 9 (\u00a77): function, edge-worker, firmware.\n\n``library`` (\u00a75.2.6): an in-repo module other services depend on \u2014 never\nanalyzed as a service (no endpoints, no own CPG); its sources join each\ndependent service's staged parse. Recorded so classification is queryable.",
       "enum": [
@@ -282,7 +367,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.15.0/service_boundary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.16.0/service_boundary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One discovered service within a snapshot.\n\nThe envelope's ``service_id`` is this service's own stable id\n(content-derived from repo + build root, \u00a77).",
@@ -336,9 +421,9 @@
       "title": "Cfg Anomalies"
     },
     "client_libraries": {
-      "description": "HTTP client libraries detected by import scan (\u00a75.4.2 census, KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only \u2014 an import is not a call (P10)",
+      "description": "HTTP client libraries detected by import scan (\u00a75.4.2 census, ClientLibrary vocabulary). Presence facts only \u2014 an import is not a call (P10)",
       "items": {
-        "type": "string"
+        "$ref": "#/$defs/ClientLibrary"
       },
       "title": "Client Libraries",
       "type": "array"
@@ -391,6 +476,14 @@
     "network": {
       "$ref": "#/$defs/NetworkIdentity"
     },
+    "quarantined_facts": {
+      "description": "Diagnostic facts whose vocabulary this build does not recognize (\u00a77). Expected empty; non-empty means version drift, never a property of the analyzed code",
+      "items": {
+        "$ref": "#/$defs/QuarantinedFact"
+      },
+      "title": "Quarantined Facts",
+      "type": "array"
+    },
     "repo": {
       "description": "Normalized repo source this service lives in",
       "minLength": 1,
@@ -398,7 +491,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.15.0",
+      "default": "1.16.0",
       "title": "Schema Version",
       "type": "string"
     },

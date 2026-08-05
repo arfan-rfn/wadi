@@ -50,7 +50,25 @@ export type BuildSystem = string
  * §5.2.8 M2 structural-invariant violations across this service's method CFGs. None = never checked (library, extraction failed, pre-1.8 snapshot); [] = checked and clean — never conflated (P10)
  */
 export type CfgAnomalies = CfgAnomaly[] | null
-export type Code = string
+/**
+ * §5.2.8 M2 structural-invariant violation codes.
+ *
+ * Evaluated against the RAW exported CFG of every method on every snapshot —
+ * before the assembler's synthetic entry/exit patching, which would make
+ * reachability invariants vacuously true. Additive changes bump
+ * ``SCHEMA_VERSION`` minor.
+ *
+ * An enum rather than a string registry (§7, recorded 2026-08-05): pyright
+ * catches producer/registry drift in CI, which a runtime validator could
+ * only catch on a user's repository.
+ */
+export type CfgAnomalyCode =
+  | "disconnected-node"
+  | "branch-arity"
+  | "unlabeled-arm"
+  | "loop-no-back-edge"
+  | "dangling-edge"
+  | "exit-unreachable"
 /**
  * Occurrences across the service's methods
  */
@@ -68,9 +86,27 @@ export type SampleSites =
   | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
   | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
 /**
- * HTTP client libraries detected by import scan (§5.4.2 census, KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an import is not a call (P10)
+ * Client-library census vocabulary (§5.4.2).
+ *
+ * The worker detects these by deterministic import scan; presence is a fact,
+ * call counts are not claimed (an import is not a call — P10). See
+ * ``MODELLED_CLIENT_LIBRARIES`` for the subset wadi's sink passes model.
  */
-export type ClientLibraries = string[]
+export type ClientLibrary =
+  | "resttemplate"
+  | "webclient"
+  | "feign"
+  | "restclient"
+  | "http-interface"
+  | "jdk-httpclient"
+  | "okhttp"
+  | "retrofit"
+  | "apache-httpclient"
+  | "unirest"
+/**
+ * HTTP client libraries detected by import scan (§5.4.2 census, ClientLibrary vocabulary). Presence facts only — an import is not a call (P10)
+ */
+export type ClientLibraries = ClientLibrary[]
 export type CreatedAt = string
 export type EndpointCount = number
 /**
@@ -143,11 +179,31 @@ export type Ports = number[]
  */
 export type ServerPort = number | null
 /**
+ * Occurrences of this value
+ */
+export type Count1 = number
+/**
+ * Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'
+ */
+export type Registry = string
+/**
+ * Owning service; None on a snapshot-level artifact
+ */
+export type ServiceId = string | null
+/**
+ * The raw unrecognized value, verbatim
+ */
+export type Value = string
+/**
+ * Diagnostic facts whose vocabulary this build does not recognize (§7). Expected empty; non-empty means version drift, never a property of the analyzed code
+ */
+export type QuarantinedFacts = QuarantinedFact[]
+/**
  * Normalized repo source this service lives in
  */
 export type Repo = string
 export type SchemaVersion = string
-export type ServiceId = string
+export type ServiceId1 = string
 export type SnapshotId = string
 
 /**
@@ -171,9 +227,10 @@ export interface ServiceSummary {
   library_roots?: LibraryRoots
   name: Name
   network?: NetworkIdentity
+  quarantined_facts?: QuarantinedFacts
   repo: Repo
   schema_version?: SchemaVersion
-  service_id: ServiceId
+  service_id: ServiceId1
   snapshot_id: SnapshotId
 }
 /**
@@ -224,7 +281,7 @@ export interface SourceAnchor {
  * graph can be trusted (P10).
  */
 export interface CfgAnomaly {
-  code: Code
+  code: CfgAnomalyCode
   count: Count
   sample_sites?: SampleSites
 }
@@ -268,4 +325,30 @@ export interface GatewayRoute {
   route_id?: RouteId
   strip_prefix?: StripPrefix
   target_uri: TargetUri
+}
+/**
+ * A diagnostic fact whose vocabulary this build does not recognize
+ * (§7, recorded 2026-08-05, schema 1.16.0).
+ *
+ * Never fatal and never dropped. Diagnostic facts describe how well analysis
+ * read the code, not the code itself, so an unreadable one must not cost the
+ * map — but silently discarding it would be the exact gap the registries
+ * exist to prevent (P10, turned on wadi's own pipeline: a self-observation we
+ * cannot parse is itself a queryable fact).
+ *
+ * Expected **empty in all healthy operation**, unlike ``cfg_anomalies``,
+ * which is expected non-zero on real code forever. That difference is why it
+ * has its own home rather than sharing one: an always-zero signal folded into
+ * an always-noisy one stops being a signal. Non-empty on the fixtures or
+ * benchmarks fails CI, while a user's run only ever loses the one footnote.
+ */
+export interface QuarantinedFact {
+  count?: Count1
+  registry: Registry
+  /**
+   * One example site, when the rejected fact carried one
+   */
+  sample_anchor?: SourceAnchor | null
+  service_id?: ServiceId
+  value: Value
 }

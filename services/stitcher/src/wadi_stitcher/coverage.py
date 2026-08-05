@@ -17,6 +17,7 @@ from wadi_contracts import (
     Endpoint,
     ExternalApiEntry,
     PlaceholderEntry,
+    QuarantinedFact,
     RemoteCall,
     ServiceBoundary,
     ServiceCfgAnomalyEntry,
@@ -117,6 +118,27 @@ def build_cfg_anomalies(boundaries: Sequence[ServiceBoundary]) -> CfgAnomalySect
     return CfgAnomalySection(total_by_code=dict(sorted(total_by_code.items())), services=entries)
 
 
+def build_quarantined_facts(boundaries: Sequence[ServiceBoundary]) -> list[QuarantinedFact]:
+    """§7: roll up diagnostic facts whose vocabulary this build cannot read.
+
+    Expected empty. Non-empty means a producer emitted vocabulary its registry
+    does not carry — version drift between the pack, the contracts, and the
+    stored artifact — never a property of the analyzed code. Identical values
+    from one service fold into one entry so the count means occurrences, not
+    rows. Libraries are included: a library boundary carries a census too, and
+    unreadable vocabulary is a fact about wadi regardless of what emitted it.
+    """
+    folded: dict[tuple[str, str, str | None], QuarantinedFact] = {}
+    for boundary in sorted(boundaries, key=lambda b: (b.name, b.service_id)):
+        for fact in boundary.quarantined_facts:
+            key = (fact.registry, fact.value, fact.service_id)
+            if (existing := folded.get(key)) is None:
+                folded[key] = fact
+            else:
+                folded[key] = existing.model_copy(update={"count": existing.count + fact.count})
+    return [folded[key] for key in sorted(folded, key=lambda k: (k[0], k[1], k[2] or ""))]
+
+
 def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
     """Snapshot rollup of what the auth layer could and could not read (§5.2.9).
 
@@ -163,6 +185,7 @@ def build_coverage_report(
     analysis_coverage: AnalysisCoverageSection | None = None,
     cfg_anomalies: CfgAnomalySection | None = None,
     auth_coverage: AuthCoverageSection | None = None,
+    quarantined_facts: Sequence[QuarantinedFact] = (),
 ) -> CoverageReport:
     by_kind: dict[TargetKind, list[StitchedEdge]] = {kind: [] for kind in TargetKind}
     by_confidence: dict[str, int] = {}
@@ -236,4 +259,5 @@ def build_coverage_report(
         analysis_coverage=analysis_coverage,
         cfg_anomalies=cfg_anomalies,
         auth_coverage=auth_coverage,
+        quarantined_facts=list(quarantined_facts),
     )

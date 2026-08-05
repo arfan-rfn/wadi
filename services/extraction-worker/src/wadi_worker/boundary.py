@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 
 import yaml
 
+from wadi_contracts.enums import ClientLibrary
 from wadi_worker.appconfig import AppConfigFacts, parse_app_config
 
 logger = logging.getLogger(__name__)
@@ -33,17 +34,17 @@ _SERVICE_MARKER_PATTERN = re.compile(
 # Client-library census (§5.4.2): import-line markers -> KNOWN_CLIENT_LIBRARIES
 # labels. Deterministic text scan; presence facts only (an import is not a
 # call, P10). The stitcher flags labels outside MODELLED_CLIENT_LIBRARIES.
-_CLIENT_IMPORT_MARKERS: dict[str, tuple[str, ...]] = {
-    "resttemplate": ("org.springframework.web.client.RestTemplate",),
-    "restclient": ("org.springframework.web.client.RestClient",),
-    "webclient": ("org.springframework.web.reactive.function.client.WebClient",),
-    "feign": ("org.springframework.cloud.openfeign", "feign."),
-    "http-interface": ("org.springframework.web.service.annotation",),
-    "jdk-httpclient": ("java.net.http.HttpClient",),
-    "okhttp": ("okhttp3.",),
-    "retrofit": ("retrofit2.",),
-    "apache-httpclient": ("org.apache.http.client", "org.apache.hc.client5"),
-    "unirest": ("kong.unirest", "com.mashape.unirest"),
+_CLIENT_IMPORT_MARKERS: dict[ClientLibrary, tuple[str, ...]] = {
+    ClientLibrary.RESTTEMPLATE: ("org.springframework.web.client.RestTemplate",),
+    ClientLibrary.RESTCLIENT: ("org.springframework.web.client.RestClient",),
+    ClientLibrary.WEBCLIENT: ("org.springframework.web.reactive.function.client.WebClient",),
+    ClientLibrary.FEIGN: ("org.springframework.cloud.openfeign", "feign."),
+    ClientLibrary.HTTP_INTERFACE: ("org.springframework.web.service.annotation",),
+    ClientLibrary.JDK_HTTPCLIENT: ("java.net.http.HttpClient",),
+    ClientLibrary.OKHTTP: ("okhttp3.",),
+    ClientLibrary.RETROFIT: ("retrofit2.",),
+    ClientLibrary.APACHE_HTTPCLIENT: ("org.apache.http.client", "org.apache.hc.client5"),
+    ClientLibrary.UNIREST: ("kong.unirest", "com.mashape.unirest"),
 }
 _IMPORT_LINE = re.compile(r"^\s*import\s+(?:static\s+)?([\w.]+)", re.MULTILINE)
 
@@ -60,7 +61,7 @@ class DiscoveredService:
     kind: str = "service"  # 'service' | 'library' (§5.2.6)
     library_roots: list[str] = field(default_factory=list[str])
     """Build roots of transitive in-repo library deps to stage into the parse."""
-    client_libraries: list[str] = field(default_factory=list[str])
+    client_libraries: list[ClientLibrary] = field(default_factory=list[ClientLibrary])
     """§5.4.2 census: HTTP client libraries detected by import scan."""
 
 
@@ -150,14 +151,14 @@ def _has_java_sources(module_dir: Path) -> bool:
     return main.is_dir() and any(main.rglob("*.java"))
 
 
-def _client_library_census(module_dir: Path) -> list[str]:
+def _client_library_census(module_dir: Path) -> list[ClientLibrary]:
     """§5.4.2: which known HTTP client libraries this module's production
     sources import. Deterministic, sorted; presence only.
     """
     main = module_dir / "src" / "main" / "java"
     if not main.is_dir():
         return []
-    found: set[str] = set()
+    found: set[ClientLibrary] = set()
     for source in main.rglob("*.java"):
         try:
             text = source.read_text(errors="replace")

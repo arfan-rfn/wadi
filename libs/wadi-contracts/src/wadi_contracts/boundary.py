@@ -1,35 +1,25 @@
 """ServiceBoundary — the discovered unit of analysis (§4, §7)."""
 
-from typing import Self
+from typing import Self, cast
 
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
-from wadi_contracts.enums import ServiceKind
+from wadi_contracts.enums import CfgAnomalyCode, ClientLibrary, ServiceKind
 from wadi_contracts.source import SourceAnchor
 from wadi_contracts.tags import ASYNC_ROOT_KINDS
 
-KNOWN_CLIENT_LIBRARIES: frozenset[str] = frozenset(
+KNOWN_CLIENT_LIBRARIES: frozenset[str] = frozenset(lib.value for lib in ClientLibrary)
+"""Value view of :class:`ClientLibrary`, derived so the two cannot drift."""
+
+MODELLED_CLIENT_LIBRARIES: frozenset[ClientLibrary] = frozenset(
     {
-        "resttemplate",
-        "webclient",
-        "feign",
-        "restclient",
-        "http-interface",
-        "jdk-httpclient",
-        "okhttp",
-        "retrofit",
-        "apache-httpclient",
-        "unirest",
+        ClientLibrary.RESTTEMPLATE,
+        ClientLibrary.WEBCLIENT,
+        ClientLibrary.FEIGN,
+        ClientLibrary.RESTCLIENT,
+        ClientLibrary.HTTP_INTERFACE,
     }
-)
-"""Client-library census vocabulary (§5.4.2) — versioned like the tag registry.
-
-The worker detects these by deterministic import scan; presence is a fact,
-call counts are not claimed (an import is not a call — P10)."""
-
-MODELLED_CLIENT_LIBRARIES: frozenset[str] = frozenset(
-    {"resttemplate", "webclient", "feign", "restclient", "http-interface"}
 )
 """The subset wadi's sink passes currently model. A census hit outside this
 set becomes an ``unmodelled_mechanisms`` coverage entry — a zero-edge system
@@ -140,31 +130,11 @@ class AnalysisCoverage(WadiModel):
         return self
 
 
-CFG_ANOMALY_CODES: frozenset[str] = frozenset(
-    {
-        # A node (beyond the method's entry statement) with no incoming raw
-        # edge: the assembler's synthetic patching would silently present it
-        # as a second entry point (§5.2.8 — the pre-M1 synchronized class).
-        "disconnected-node",
-        # An if node missing a true or false successor, or a switch node with
-        # no case/default arm edge — the branch cannot be read as a branch.
-        "branch-arity",
-        # A loop with body edges but no cycle-closing back edge. Suppressed
-        # for empty-body loops (recorded §5.2.8 non-representable).
-        "loop-no-back-edge",
-        # An edge endpoint that references no exported node.
-        "dangling-edge",
-        # No return statement and every node has a successor: flow can never
-        # leave the method (a pure cycle) — either dead code or a graph bug.
-        "exit-unreachable",
-    }
-)
-"""§5.2.8 M2 structural-invariant violation codes.
+CFG_ANOMALY_CODES: frozenset[str] = frozenset(code.value for code in CfgAnomalyCode)
+"""Value view of :class:`CfgAnomalyCode`, derived so the two cannot drift.
 
-Evaluated against the RAW exported CFG of every method on every snapshot —
-before the assembler's synthetic entry/exit patching, which would make
-reachability invariants vacuously true. Additive changes bump
-``SCHEMA_VERSION`` minor.
+The enum is the vocabulary (§7, recorded 2026-08-05); this alias exists for
+callers that want the raw strings.
 """
 
 
@@ -175,7 +145,7 @@ class CfgAnomaly(WadiModel):
     graph can be trusted (P10).
     """
 
-    code: str
+    code: CfgAnomalyCode
     count: int = Field(ge=1, description="Occurrences across the service's methods")
     sample_sites: list[SourceAnchor] = Field(
         default_factory=list[SourceAnchor],
@@ -183,13 +153,36 @@ class CfgAnomaly(WadiModel):
         description="Up to 5 example sites — examples, never the exhaustive list",
     )
 
-    @field_validator("code")
-    @classmethod
-    def _registered_code(cls, value: str) -> str:
-        if value not in CFG_ANOMALY_CODES:
-            allowed = " | ".join(sorted(CFG_ANOMALY_CODES))
-            raise ValueError(f"cfg-anomaly code must be {allowed}, got {value!r}")
-        return value
+
+class QuarantinedFact(WadiModel):
+    """A diagnostic fact whose vocabulary this build does not recognize
+    (§7, recorded 2026-08-05, schema 1.16.0).
+
+    Never fatal and never dropped. Diagnostic facts describe how well analysis
+    read the code, not the code itself, so an unreadable one must not cost the
+    map — but silently discarding it would be the exact gap the registries
+    exist to prevent (P10, turned on wadi's own pipeline: a self-observation we
+    cannot parse is itself a queryable fact).
+
+    Expected **empty in all healthy operation**, unlike ``cfg_anomalies``,
+    which is expected non-zero on real code forever. That difference is why it
+    has its own home rather than sharing one: an always-zero signal folded into
+    an always-noisy one stops being a signal. Non-empty on the fixtures or
+    benchmarks fails CI, while a user's run only ever loses the one footnote.
+    """
+
+    registry: str = Field(
+        min_length=1,
+        description="Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'",
+    )
+    value: str = Field(min_length=1, description="The raw unrecognized value, verbatim")
+    count: int = Field(default=1, ge=1, description="Occurrences of this value")
+    service_id: str | None = Field(
+        default=None, description="Owning service; None on a snapshot-level artifact"
+    )
+    sample_anchor: SourceAnchor | None = Field(
+        default=None, description="One example site, when the rejected fact carried one"
+    )
 
 
 class AsyncRoot(WadiModel):
@@ -247,12 +240,12 @@ class ServiceBoundary(ArtifactEnvelope):
             "never silence"
         ),
     )
-    client_libraries: list[str] = Field(
-        default_factory=list[str],
+    client_libraries: list[ClientLibrary] = Field(
+        default_factory=list[ClientLibrary],
         description=(
             "HTTP client libraries detected by import scan (§5.4.2 census, "
-            "KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an "
-            "import is not a call (P10)"
+            "ClientLibrary vocabulary). Presence facts only — an import is "
+            "not a call (P10)"
         ),
     )
     analysis_coverage: AnalysisCoverage | None = Field(
@@ -277,14 +270,103 @@ class ServiceBoundary(ArtifactEnvelope):
             "pre-1.8 snapshot); [] = checked and clean — never conflated (P10)"
         ),
     )
+    quarantined_facts: list[QuarantinedFact] = Field(
+        default_factory=list[QuarantinedFact],
+        description=(
+            "Diagnostic facts whose vocabulary this build does not recognize "
+            "(§7). Expected empty; non-empty means version drift, never a "
+            "property of the analyzed code"
+        ),
+    )
 
-    @field_validator("client_libraries")
+    @model_validator(mode="before")
     @classmethod
-    def _registered_client_libraries(cls, value: list[str]) -> list[str]:
-        unknown = [v for v in value if v not in KNOWN_CLIENT_LIBRARIES]
-        if unknown:
-            raise ValueError(
-                f"unregistered client libraries {unknown!r}; the vocabulary is "
-                "KNOWN_CLIENT_LIBRARIES"
+    def _quarantine_unknown_vocabulary(cls, data: object) -> object:
+        """Partition registry-governed diagnostic fields into recognized and
+        quarantined, at BOTH doors, before field validation runs (§7).
+
+        The write door is the Scala export: ``async-root`` kinds cross a
+        language boundary no type system spans, so a pack newer than this
+        contract would otherwise abort the snapshot — the exact 2026-08-05
+        failure. The read door is a stored artifact or an imported export
+        written by a different build: snapshots are immutable and permanent,
+        so a 1.16 document must stay readable by 1.15 code (rollback) and by
+        third-party consumers of ``wadi export``.
+
+        Strictness stays where it belongs — the enum-typed fields still reject
+        unknown values, and pyright still rejects unregistered producers. This
+        only decides what happens to a value that has already crossed a
+        boundary we do not control: it is set aside and named, never dropped.
+        """
+        if not isinstance(data, dict):
+            return data
+        payload = cast(dict[str, object], data)
+        quarantined: list[dict[str, object]] = []
+        service_id = payload.get("service_id")
+        service_id = service_id if isinstance(service_id, str) else None
+
+        def _keep(items: object, registry: str, key: str, known: frozenset[str]) -> object:
+            if not isinstance(items, list):
+                return items
+            kept: list[object] = []
+            for item in cast(list[dict[str, object] | object], items):
+                # Only dict-shaped input can carry unrecognized vocabulary: a
+                # value constructed in Python is enum-typed and pyright-checked,
+                # so it cannot be unregistered by the time it reaches here.
+                if not isinstance(item, dict):
+                    kept.append(item)
+                    continue
+                as_dict = cast(dict[str, object], item)
+                raw: object = as_dict.get(key)
+                if isinstance(raw, str) and raw not in known:
+                    anchor: object = None
+                    sites = as_dict.get("sample_sites")
+                    if isinstance(sites, list) and (listed := cast(list[object], sites)):
+                        anchor = listed[0]
+                    else:
+                        anchor = as_dict.get("anchor")
+                    quarantined.append(
+                        {
+                            "registry": registry,
+                            "value": raw,
+                            "count": 1,
+                            "service_id": service_id,
+                            "sample_anchor": anchor,
+                        }
+                    )
+                    continue
+                kept.append(as_dict)
+            return kept
+
+        if "cfg_anomalies" in payload:
+            payload["cfg_anomalies"] = _keep(
+                payload["cfg_anomalies"], "CfgAnomalyCode", "code", CFG_ANOMALY_CODES
             )
-        return value
+        if "async_roots" in payload:
+            payload["async_roots"] = _keep(
+                payload["async_roots"], "async-root", "kind", frozenset(ASYNC_ROOT_KINDS)
+            )
+        if isinstance(libraries := payload.get("client_libraries"), list):
+            recognized = [
+                lib
+                for lib in cast(list[object], libraries)
+                if not (isinstance(lib, str) and lib not in KNOWN_CLIENT_LIBRARIES)
+            ]
+            for lib in cast(list[object], libraries):
+                if isinstance(lib, str) and lib not in KNOWN_CLIENT_LIBRARIES:
+                    quarantined.append(
+                        {
+                            "registry": "ClientLibrary",
+                            "value": lib,
+                            "count": 1,
+                            "service_id": service_id,
+                            "sample_anchor": None,
+                        }
+                    )
+            payload["client_libraries"] = recognized
+
+        if quarantined:
+            existing = payload.get("quarantined_facts")
+            prior = cast(list[object], existing) if isinstance(existing, list) else []
+            payload["quarantined_facts"] = [*prior, *quarantined]
+        return payload

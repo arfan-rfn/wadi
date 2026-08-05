@@ -223,6 +223,13 @@ class TestTwoServiceSystem:
             "sweeper": True,
         }
         assert anomalies["total_by_code"] == {}
+        # §7 (2026-08-05): quarantine is an alarm, not a metric. Non-empty here
+        # means a producer emitted vocabulary its registry does not carry —
+        # version drift between the pack, the contracts, and the stored
+        # artifact — never a property of the fixture. Asserting empty on the
+        # conformance stack is what turns a crash on a user's repository into
+        # a red build, which is the whole point of the mechanism.
+        assert coverage["quarantined_facts"] == []
         assert section["coverage_percent"] == 93.8
 
         # 4b. Source-on-demand hardening (§11 Phase 2.7 M1): whole-file

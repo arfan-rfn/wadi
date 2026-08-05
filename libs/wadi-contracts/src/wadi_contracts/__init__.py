@@ -10,6 +10,7 @@ from wadi_contracts.boundary import (
     CfgAnomaly,
     GatewayRoute,
     NetworkIdentity,
+    QuarantinedFact,
     ServiceBoundary,
 )
 from wadi_contracts.comms import MqInteraction, RemoteCall
@@ -31,6 +32,8 @@ from wadi_contracts.endpoint import (
 )
 from wadi_contracts.enums import (
     CalleeUnboundReason,
+    CfgAnomalyCode,
+    ClientLibrary,
     Confidence,
     HttpMethod,
     IcfgEdgeKind,
@@ -45,6 +48,7 @@ from wadi_contracts.enums import (
     SourceVariant,
     TargetKind,
     TriggerKind,
+    UnresolvedReasonCode,
 )
 from wadi_contracts.export import ExportManifest
 from wadi_contracts.icfg import (
@@ -138,7 +142,9 @@ __all__ = [
     "BranchCondition",
     "CalleeUnboundReason",
     "CfgAnomaly",
+    "CfgAnomalyCode",
     "CfgAnomalySection",
+    "ClientLibrary",
     "Confidence",
     "CoverageReport",
     "CoverageTotals",
@@ -177,6 +183,7 @@ __all__ = [
     "ParamLocation",
     "PlaceholderEntry",
     "Provenance",
+    "QuarantinedFact",
     "RemoteCall",
     "RemoteEdgeItem",
     "RemoteEdgesView",
@@ -207,6 +214,7 @@ __all__ = [
     "UnmodelledMechanismEntry",
     "UnopenableCallCount",
     "UnresolvedCallEntry",
+    "UnresolvedReasonCode",
     "UtcDatetime",
     "WadiModel",
     "data_model_id",

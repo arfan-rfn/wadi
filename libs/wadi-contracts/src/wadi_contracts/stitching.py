@@ -18,8 +18,14 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
-from wadi_contracts.boundary import CfgAnomaly
-from wadi_contracts.enums import Confidence, HttpMethod, Provenance, TargetKind
+from wadi_contracts.boundary import CfgAnomaly, QuarantinedFact
+from wadi_contracts.enums import (
+    Confidence,
+    HttpMethod,
+    Provenance,
+    TargetKind,
+    UnresolvedReasonCode,
+)
 from wadi_contracts.ids import remote_edge_id
 from wadi_contracts.source import SourceAnchor
 from wadi_contracts.version import SCHEMA_VERSION
@@ -210,26 +216,12 @@ class ExternalApiEntry(WadiModel):
     caller_service_ids: list[str] = Field(min_length=1)
 
 
-UNRESOLVED_REASON_CODES: frozenset[str] = frozenset(
-    {
-        "url-undetermined",
-        "url-unparseable",
-        "no-endpoint-match",
-        "lombok-generated-interior",
-        "slice-budget-truncated",
-        "unresolved-receiver-type",
-        "base-undetermined",
-    }
-)
-"""Versioned reason-code vocabulary (§5.4.2) — the queryable-gap registry.
+UNRESOLVED_REASON_CODES: frozenset[str] = frozenset(code.value for code in UnresolvedReasonCode)
+"""Value view of :class:`UnresolvedReasonCode`, derived so the two cannot drift.
 
-Additive changes bump ``SCHEMA_VERSION`` minor. ``host-unresolvable`` was
-removed in 1.2.0: documented since Phase 2 but never emitted — unresolved
-hosts classify as external/placeholder nodes instead (recorded correction).
-1.5.0 adds ``base-undetermined`` (a relative URL whose client base is not
-statically recoverable — the rootUri/baseUrl split, T2) and the
-``unsupported-idiom:<name>`` prefix family (a *named* unmodelled construct;
-the slicer marks the idiom, the matcher lifts it into the code)."""
+The enum is the vocabulary (§7, recorded 2026-08-05); the
+``unsupported-idiom:<name>`` prefix family is dynamic and validated
+separately by :class:`UnresolvedCallEntry`."""
 
 UNSUPPORTED_IDIOM_PREFIX = "unsupported-idiom:"
 """Prefix family of reason codes: dynamic slugs name the unmodelled idiom."""
@@ -471,6 +463,16 @@ class CoverageReport(SnapshotEnvelope):
         description=(
             "What the auth layer could and could not read (§5.2.9, schema 1.13.0). "
             "None only on reports written before the enforcement model existed"
+        ),
+    )
+    quarantined_facts: list[QuarantinedFact] = Field(
+        default_factory=list[QuarantinedFact],
+        description=(
+            "Diagnostic facts whose vocabulary this build does not recognize "
+            "(§7, schema 1.16.0), rolled up across services. **Expected empty**: "
+            "non-empty means version drift between a producer and its registry, "
+            "never a property of the analyzed code. CI fails on non-empty for "
+            "the fixtures and benchmarks; a user's run only loses the footnote"
         ),
     )
     applied_hint_ids: list[str] = Field(

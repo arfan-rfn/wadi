@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from wadi_contracts.boundary import CFG_ANOMALY_CODES, AnalysisCoverage, CfgAnomaly
-from wadi_contracts.enums import Confidence, Provenance, TargetKind
+from wadi_contracts.enums import CfgAnomalyCode, Confidence, Provenance, TargetKind
 from wadi_contracts.ids import (
     endpoint_id,
     placeholder_service_id,
@@ -309,17 +309,20 @@ class TestCfgAnomalies:
     """§5.2.8 M2: registered codes only; unchecked is never conflated with clean."""
 
     def test_registered_code_accepted(self) -> None:
-        anomaly = CfgAnomaly(code="loop-no-back-edge", count=2)
+        anomaly = CfgAnomaly(code=CfgAnomalyCode.LOOP_NO_BACK_EDGE, count=2)
         assert anomaly.code in CFG_ANOMALY_CODES
 
     def test_unregistered_code_rejected(self) -> None:
-        with pytest.raises(ValidationError, match="cfg-anomaly code must be"):
-            CfgAnomaly(code="made-up-code", count=1)
+        # The write path is enum-typed, so pyright rejects an unregistered code
+        # before it can run (§7, recorded 2026-08-05). This asserts the runtime
+        # half — the same rejection for untyped input arriving as a raw mapping.
+        with pytest.raises(ValidationError):
+            CfgAnomaly.model_validate({"code": "made-up-code", "count": 1})
 
     def test_sample_sites_capped_at_five(self) -> None:
         anchor = SourceAnchor(file="src/A.java", start_line=1, end_line=1)
         with pytest.raises(ValidationError, match="at most 5"):
-            CfgAnomaly(code="branch-arity", count=6, sample_sites=[anchor] * 6)
+            CfgAnomaly(code=CfgAnomalyCode.BRANCH_ARITY, count=6, sample_sites=[anchor] * 6)
 
     def test_unchecked_service_cannot_carry_anomalies(self) -> None:
         with pytest.raises(ValidationError, match="unchecked service"):
@@ -327,7 +330,7 @@ class TestCfgAnomalies:
                 service_id="svc_x",
                 name="x",
                 checked=False,
-                anomalies=[CfgAnomaly(code="branch-arity", count=1)],
+                anomalies=[CfgAnomaly(code=CfgAnomalyCode.BRANCH_ARITY, count=1)],
             )
 
     def test_checked_and_clean_is_valid(self) -> None:

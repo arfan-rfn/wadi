@@ -44,7 +44,25 @@ export type Unauthenticated = number
  * No claim because an in-scope guard could not be read
  */
 export type Withheld = number
-export type Code = string
+/**
+ * §5.2.8 M2 structural-invariant violation codes.
+ *
+ * Evaluated against the RAW exported CFG of every method on every snapshot —
+ * before the assembler's synthetic entry/exit patching, which would make
+ * reachability invariants vacuously true. Additive changes bump
+ * ``SCHEMA_VERSION`` minor.
+ *
+ * An enum rather than a string registry (§7, recorded 2026-08-05): pyright
+ * catches producer/registry drift in CI, which a runtime validator could
+ * only catch on a user's repository.
+ */
+export type CfgAnomalyCode =
+  | "disconnected-node"
+  | "branch-arity"
+  | "unlabeled-arm"
+  | "loop-no-back-edge"
+  | "dangling-edge"
+  | "exit-unreachable"
 /**
  * Occurrences across the service's methods
  */
@@ -125,6 +143,26 @@ export type PlaceholderId = string
  */
 export type ResolvedVia = string
 export type Placeholders = PlaceholderEntry[]
+/**
+ * Occurrences of this value
+ */
+export type Count1 = number
+/**
+ * Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'
+ */
+export type Registry = string
+/**
+ * Owning service; None on a snapshot-level artifact
+ */
+export type ServiceId2 = string | null
+/**
+ * The raw unrecognized value, verbatim
+ */
+export type Value = string
+/**
+ * Diagnostic facts whose vocabulary this build does not recognize (§7, schema 1.16.0), rolled up across services. **Expected empty**: non-empty means version drift between a producer and its registry, never a property of the analyzed code. CI fails on non-empty for the fixtures and benchmarks; a user's run only loses the footnote
+ */
+export type QuarantinedFacts = QuarantinedFact[]
 export type SchemaVersion = string
 export type SnapshotId = string
 /**
@@ -171,7 +209,7 @@ export type Reason = string
  */
 export type ReasonCode = string
 export type RemoteCallId = string
-export type ServiceId2 = string
+export type ServiceId3 = string
 export type Unresolved = UnresolvedCallEntry[]
 
 /**
@@ -200,6 +238,7 @@ export interface CoverageReport {
   low_confidence_edge_ids?: LowConfidenceEdgeIds
   phonebook_conflicts?: PhonebookConflicts
   placeholders?: Placeholders
+  quarantined_facts?: QuarantinedFacts
   schema_version?: SchemaVersion
   snapshot_id: SnapshotId
   stale_hint_ids?: StaleHintIds
@@ -286,7 +325,7 @@ export interface ServiceCfgAnomalyEntry {
  * graph can be trusted (P10).
  */
 export interface CfgAnomaly {
-  code: Code
+  code: CfgAnomalyCode
   count: Count
   sample_sites?: SampleSites
 }
@@ -327,6 +366,32 @@ export interface PlaceholderEntry {
   name: Name2
   placeholder_id: PlaceholderId
   resolved_via: ResolvedVia
+}
+/**
+ * A diagnostic fact whose vocabulary this build does not recognize
+ * (§7, recorded 2026-08-05, schema 1.16.0).
+ *
+ * Never fatal and never dropped. Diagnostic facts describe how well analysis
+ * read the code, not the code itself, so an unreadable one must not cost the
+ * map — but silently discarding it would be the exact gap the registries
+ * exist to prevent (P10, turned on wadi's own pipeline: a self-observation we
+ * cannot parse is itself a queryable fact).
+ *
+ * Expected **empty in all healthy operation**, unlike ``cfg_anomalies``,
+ * which is expected non-zero on real code forever. That difference is why it
+ * has its own home rather than sharing one: an always-zero signal folded into
+ * an always-noisy one stops being a signal. Non-empty on the fixtures or
+ * benchmarks fails CI, while a user's run only ever loses the one footnote.
+ */
+export interface QuarantinedFact {
+  count?: Count1
+  registry: Registry
+  /**
+   * One example site, when the rejected fact carried one
+   */
+  sample_anchor?: SourceAnchor | null
+  service_id?: ServiceId2
+  value: Value
 }
 /**
  * Aggregate counts for a snapshot's stitched graph.
@@ -371,6 +436,6 @@ export interface UnresolvedCallEntry {
   reason: Reason
   reason_code: ReasonCode
   remote_call_id: RemoteCallId
-  service_id: ServiceId2
+  service_id: ServiceId3
   site: SourceAnchor
 }
