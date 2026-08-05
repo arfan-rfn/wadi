@@ -1178,23 +1178,101 @@ object SpringSecurityPack {
 
       cpg.call.where(_.tag.nameExact("sink").valueExact("http-client")).l.foreach { sink =>
         val isFeign = sink.tag.nameExact("wadi-feign").nonEmpty
-        if (isFeign && hasFeignInterceptor) {
-          Iterator(sink)
-            .newTagNodePair("token-propagation", "feign-interceptor")
-            .store()(using builder)
-        } else if (forwardsAuthorizationHeader(sink.method)) {
-          Iterator(sink)
-            .newTagNodePair("token-propagation", "authorization-header")
-            .store()(using builder)
+        val mechanism =
+          if (isFeign && hasFeignInterceptor) Some("feign-interceptor")
+          else if (carriesInboundHeaders(sink) || setsAuthorizationHeader(sink.method))
+            Some("authorization-header")
+          else None
+        mechanism.foreach { value =>
+          Iterator(sink).newTagNodePair("token-propagation", value).store()(using builder)
         }
+        Iterator(sink)
+          .newTagNodePair("token-propagation-state", stateOf(sink, mechanism.isDefined))
+          .store()(using builder)
       }
     }
 
-    private def forwardsAuthorizationHeader(method: Method): Boolean =
+    /** Three states, because "no evidence of forwarding" is not "does not forward".
+      *
+      * `forwarded` rests on evidence. `not-forwarded` is only claimed where the
+      * absence is PROVABLE — the request entity this call site passes was built
+      * with no headers argument at all (`new HttpEntity(null)`, 98 sites on
+      * train-ticket-aitest). Everything else is `undetermined`: over-approximating
+      * toward "forwarded" would tell a reader that credentials propagate when
+      * they may not, and toward "not-forwarded" would invent a finding. Same
+      * rule the response-shape recovery uses — when the evidence disagrees, say
+      * so rather than electing a winner (P10).
+      */
+    private def stateOf(sink: Call, forwarded: Boolean): String =
+      if (forwarded) "forwarded"
+      else {
+        val entities = requestEntitiesOf(sink)
+        if (entities.isEmpty) "undetermined"
+        else if (entities.forall(headerArgumentOf(_).isEmpty)) "not-forwarded"
+        else "undetermined"
+      }
+
+    /** The inbound `HttpHeaders` reach the request this call site sends.
+      *
+      * `new HttpEntity(body, headers)` — the TrainTicket idiom, and the shape
+      * that actually forwards a caller's bearer token onward. Resolved at the
+      * CALL SITE rather than method-wide: one method routinely builds both a
+      * bare entity and a header-carrying one (`ConsignServiceImpl` does, at
+      * lines 62 and 95), so a method-level answer would smear the two together.
+      */
+    private def carriesInboundHeaders(sink: Call): Boolean =
+      requestEntitiesOf(sink).exists(headerArgumentOf(_).nonEmpty)
+
+    /** `new HttpEntity(...)` constructions feeding this call site's arguments. */
+    private def requestEntitiesOf(sink: Call): List[Call] =
+      sink.argument.l.flatMap {
+        case call: Call if isEntityInit(call) => List(call)
+        case identifier: Identifier =>
+          // `HttpEntity e = new HttpEntity(null, headers); …exchange(…, e, …)`
+          // javasrc2cpg lowers that to `e = <alloc>` FOLLOWED BY
+          // `<init>(e, null, headers)` — the constructor takes the variable as
+          // its receiver, so it is a sibling of the assignment rather than a
+          // child of it, and walking the assignment's AST finds nothing.
+          identifier.method.ast.isCall
+            .filter(isEntityInit)
+            .filter(_.argument.l.exists {
+              case receiver: Identifier =>
+                receiver.argumentIndex == 0 && receiver.name == identifier.name
+              case _ => false
+            })
+            .l
+        case _ => Nil
+      }.distinctBy(_.id)
+
+    private def isEntityInit(call: Call): Boolean =
+      call.name == "<init>" && {
+        val owner = call.methodFullName.split("\\.<init>").head
+        owner.endsWith("HttpEntity") || owner.endsWith("RequestEntity")
+      }
+
+    /** The headers argument of an entity construction, when one is present.
+      *
+      * `new HttpEntity(body)` carries no headers — that is the provable
+      * negative. Argument index 0 is the allocation, 1 the body.
+      */
+    private def headerArgumentOf(init: Call): Option[AstNode] =
+      init.argument.l
+        .filter(_.argumentIndex >= 1)
+        .find(argument => argument.argumentIndex >= 2 || looksLikeHeaders(argument))
+
+    private def looksLikeHeaders(argument: AstNode): Boolean = argument match {
+      case identifier: Identifier => identifier.typeFullName.endsWith("HttpHeaders")
+      case _                      => false
+    }
+
+    /** An `Authorization` header set explicitly on the outbound request. */
+    private def setsAuthorizationHeader(method: Method): Boolean =
       method.ast.isCall.exists(call =>
-        call.argument.exists(arg =>
-          arg.label == "LITERAL" && arg.code.stripPrefix("\"").stripSuffix("\"") == "Authorization"
-        )
+        call.name == "setBearerAuth" ||
+          (call.name.startsWith("set") || call.name == "add") && call.argument.exists(argument =>
+            argument.label == "LITERAL" &&
+              argument.code.stripPrefix("\"").stripSuffix("\"") == "Authorization"
+          )
       )
   }
 

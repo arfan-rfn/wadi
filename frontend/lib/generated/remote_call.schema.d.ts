@@ -6,9 +6,13 @@
  */
 
 /**
- * How auth crosses this call, when statically visible: 'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence)
+ * How auth crosses this call, when statically visible: 'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence). See `auth_propagation_state` for WHETHER it crosses at all
  */
 export type AuthPropagation = string | null
+/**
+ * Whether the caller's credentials cross this call (§5.2.11 T4). Refines `auth_propagation`: a named mechanism implies 'forwarded'
+ */
+export type TokenPropagation = "forwarded" | "not-forwarded" | "undetermined"
 export type CreatedAt = string
 /**
  * Raw slice evidence behind the recovered URL
@@ -68,6 +72,7 @@ export type Confidence = "exact" | "high" | "heuristic" | "none"
  */
 export interface RemoteCall {
   auth_propagation?: AuthPropagation
+  auth_propagation_state?: TokenPropagation
   created_at?: CreatedAt
   evidence?: Evidence
   http_verb?: HttpMethod | null

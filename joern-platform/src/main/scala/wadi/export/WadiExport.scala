@@ -78,7 +78,7 @@ object WadiExport {
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
     */
-  val ExportSchemaVersion = "2.9.0"
+  val ExportSchemaVersion = "2.10.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -1678,6 +1678,10 @@ object WadiExport {
         }
     }
     val authPropagation = call.tag.nameExact("token-propagation").value.headOption
+    // §5.2.11 T4: the mechanism answers HOW auth crosses; the state answers
+    // WHETHER, including the case where we can prove it does not.
+    val propagationState =
+      call.tag.nameExact("token-propagation-state").value.headOption.getOrElse("undetermined")
     candidates.map { case (value, confidence, evidence) =>
       ujson.Obj(
         "node_id"          -> num(statementId),
@@ -1689,7 +1693,8 @@ object WadiExport {
         "http_verb"        -> verb.map(ujson.Str(_)).getOrElse(ujson.Null),
         "mechanism"        -> mechanism.map(ujson.Str(_)).getOrElse(ujson.Null),
         "evidence"         -> evidence.map(ujson.Str(_)).getOrElse(ujson.Null),
-        "auth_propagation" -> authPropagation.map(ujson.Str(_)).getOrElse(ujson.Null)
+        "auth_propagation"       -> authPropagation.map(ujson.Str(_)).getOrElse(ujson.Null),
+        "auth_propagation_state" -> propagationState
       )
     }
   }

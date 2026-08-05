@@ -41,6 +41,32 @@ class Reachability(StrEnum):
     """No root reaches it. Dead or unwired code (P10: recorded, not dropped)."""
 
 
+class TokenPropagation(StrEnum):
+    """WHETHER the caller's credentials cross this call (§5.2.11 T4).
+
+    ``auth_propagation`` names the mechanism when there is one; this says
+    whether there is one at all, and — the part a nullable string could not
+    express — distinguishes "we proved it does not" from "we could not tell".
+    The difference decides whether a downstream 401 is a finding or a shrug.
+    """
+
+    FORWARDED = "forwarded"
+    """Evidence found: inbound headers reach the outbound request, an
+    ``Authorization`` header is set explicitly, or a Feign interceptor adds one."""
+
+    NOT_FORWARDED = "not-forwarded"
+    """PROVABLE absence: the request this site sends was built with no headers
+    argument at all (``new HttpEntity(null)`` — 98 sites on
+    train-ticket-aitest). Claimed only where it is provable, never inferred
+    from silence."""
+
+    UNDETERMINED = "undetermined"
+    """A header-bearing argument exists but could not be traced. Neither
+    direction is over-approximated: claiming forwarding would say credentials
+    propagate when they may not, and claiming its absence would invent a
+    finding (P10)."""
+
+
 class RemoteCall(ArtifactEnvelope):
     """One candidate outbound HTTP call from one call site."""
 
@@ -61,7 +87,15 @@ class RemoteCall(ArtifactEnvelope):
         default=None,
         description=(
             "How auth crosses this call, when statically visible: "
-            "'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence)"
+            "'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence). "
+            "See `auth_propagation_state` for WHETHER it crosses at all"
+        ),
+    )
+    auth_propagation_state: TokenPropagation = Field(
+        default=TokenPropagation.UNDETERMINED,
+        description=(
+            "Whether the caller's credentials cross this call (§5.2.11 T4). "
+            "Refines `auth_propagation`: a named mechanism implies 'forwarded'"
         ),
     )
     reachable: bool = Field(
@@ -120,6 +154,20 @@ class RemoteCall(ArtifactEnvelope):
                 Reachability.ENDPOINT.value if reachable else Reachability.UNREACHED.value
             )
         return payload
+
+    @model_validator(mode="after")
+    def _a_named_mechanism_means_forwarded(self) -> Self:
+        """A mechanism IS the evidence of forwarding — the two cannot disagree.
+
+        Naming ``authorization-header`` while claiming ``not-forwarded`` would
+        publish both halves of a contradiction and let a reader pick.
+        """
+        if self.auth_propagation and self.auth_propagation_state is not TokenPropagation.FORWARDED:
+            raise ValueError(
+                f"auth_propagation={self.auth_propagation!r} names a mechanism, so the "
+                f"state must be 'forwarded', not {self.auth_propagation_state.value!r}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _reachability_refines_reachable(self) -> Self:

@@ -12,7 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.9.0"
+EXPORT_SCHEMA_VERSION = "2.10.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -87,7 +87,20 @@ read from the return expression (``ok(expr)``, ``new ResponseEntity<>(expr,
 …)``), and ``origin`` keeps that inference distinguishable from a shape the
 signature actually declared (P7). Recovery never overrides a declared generic
 and yields nothing unless every return agrees. Pre-2.9.0 documents still
-parse: ``origin`` defaults to ``declared``, which is what they were."""
+parse: ``origin`` defaults to ``declared``, which is what they were.
+
+2.10.0 (additive, §5.2.11 T4): http-client sinks carry
+``auth_propagation_state`` (``forwarded`` | ``not-forwarded`` |
+``undetermined``). ``auth_propagation`` names the MECHANISM and was null on
+382/382 train-ticket-aitest calls, because the only detector looked for a
+literal ``"Authorization"`` anywhere in the enclosing method — which on that
+corpus appears solely inside ``JWTUtil``, where inbound tokens are READ and no
+outbound sink exists. The forwarding idiom it missed is
+``new HttpEntity(body, headers)`` (5 sites), and the far more common shape is
+``new HttpEntity(null)`` (98 sites): a provable NEGATIVE, which the old
+nullable field could not express apart from "we did not look". Resolution is
+per CALL SITE, because one method routinely builds both. Pre-2.10.0 documents
+still parse as ``undetermined``, which is what a null meant."""
 
 
 class ExportModelBase(BaseModel):
@@ -296,6 +309,13 @@ class ExportSink(ExportModelBase):
     mechanism: str | None = Field(default=None, description="e.g. 'resttemplate'")
     evidence: str | None = Field(
         default=None, description="Human-readable slice trace behind this candidate"
+    )
+    auth_propagation_state: str = Field(
+        default="undetermined",
+        description=(
+            "forwarded | not-forwarded | undetermined (§5.2.11 T4). "
+            "'undetermined' on pre-2.10.0 exports, which is what they meant"
+        ),
     )
     auth_propagation: str | None = Field(
         default=None,

@@ -17,7 +17,12 @@ from wadi_contracts.boundary import (
     RequestPolicy,
     ServiceBoundary,
 )
-from wadi_contracts.comms import MqInteraction, Reachability, RemoteCall
+from wadi_contracts.comms import (
+    MqInteraction,
+    Reachability,
+    RemoteCall,
+    TokenPropagation,
+)
 from wadi_contracts.datamodel import DataModel, DataModelField, DataModelRelation
 from wadi_contracts.endpoint import (
     AuthEffect,
@@ -224,6 +229,7 @@ __all__ = [
     "Tag",
     "TagValidationError",
     "TargetKind",
+    "TokenPropagation",
     "TriggerKind",
     "TypeShape",
     "UnmodelledMechanismEntry",

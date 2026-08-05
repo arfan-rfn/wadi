@@ -33,6 +33,11 @@ Grammar: ``<namespace>=<value>``. Registered namespaces and value grammars:
                         pattern that could not be resolved (§5.2.9)
 ``token-propagation``   ``authorization-header`` | ``feign-interceptor`` —
                         how auth crosses an outbound call site (§5.1)
+``token-propagation-state``
+                        ``forwarded`` | ``not-forwarded`` | ``undetermined`` —
+                        WHETHER it crosses (§5.2.11 T4); the negative is
+                        claimed only where provable, never inferred from
+                        silence
 ``async-root``          non-endpoint reachability root kind (§5.4.2 T4):
                         ``scheduled`` | ``event-listener`` | ``kafka-listener``
                         | ``rabbit-listener`` | ``jms-listener`` |
@@ -79,6 +84,7 @@ _AUTH_RULE_VALUE = re.compile(
     r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|\*)\|[^|]+\|.+$", re.DOTALL
 )
 _TOKEN_PROPAGATION_VALUES = frozenset({"authorization-header", "feign-interceptor"})
+_TOKEN_PROPAGATION_STATES = frozenset({"forwarded", "not-forwarded", "undetermined"})
 
 AUTH_MECHANISM_KINDS = frozenset(kind.value for kind in AuthMechanismKind)
 """Authentication-mechanism vocabulary — the enum IS the registry (one source)."""
@@ -205,6 +211,14 @@ def _validate_auth_enforcement(value: str) -> None:
         )
 
 
+def _validate_token_propagation_state(value: str) -> None:
+    if value not in _TOKEN_PROPAGATION_STATES:
+        allowed = " | ".join(sorted(_TOKEN_PROPAGATION_STATES))
+        raise TagValidationError(
+            f"token-propagation-state tag value must be {allowed}, got {value!r}"
+        )
+
+
 def _validate_token_propagation(value: str) -> None:
     if value not in _TOKEN_PROPAGATION_VALUES:
         allowed = " | ".join(sorted(_TOKEN_PROPAGATION_VALUES))
@@ -226,6 +240,7 @@ _VALIDATORS: dict[str, Callable[[str], None]] = {
     "auth-mechanism": _validate_auth_mechanism,
     "auth-enforcement": _validate_auth_enforcement,
     "token-propagation": _validate_token_propagation,
+    "token-propagation-state": _validate_token_propagation_state,
     "async-root": _validate_async_root,
 }
 
