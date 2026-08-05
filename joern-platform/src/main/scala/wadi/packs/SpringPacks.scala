@@ -61,9 +61,21 @@ object SpringPacks {
     *     array entry (the yas multi-path idiom; first-string-only lost the rest)
     *   - `@RequestMapping(Constants.ApiConstant.COUNTRIES_URL)` — a static
     *     final constant reference, resolved from the in-CPG initializer (the
-    *     yas prefix idiom; unresolvable constants fall back to no prefix —
-    *     honest truncation, and CIMET's raw-text alternative emits garbage
-    *     paths, which is worse)
+    *     yas prefix idiom)
+    *   - `@RequestMapping(PREFIX + "/api")` — a concatenation, resolved
+    *     operand by operand (§5.4.2, 2026-08-05)
+    *
+    * A constant that does NOT resolve falls back to the literal tail. That
+    * fallback was once recorded as "honest truncation, better than CIMET's
+    * raw constant text" — and a production system falsified it: two
+    * controllers whose prefixes both truncated to `/search` produced identical
+    * URIs, and since endpoint ids are content-derived from the URI, the store
+    * upsert REPLACED one with the other and three endpoints vanished. A
+    * truncated path is not merely less precise; under content-derived identity
+    * it is destructive, while unresolved constant text is at least unique.
+    * Endpoint-id collisions are now recorded (§7) so the loss cannot recur
+    * silently, and the remaining work is to hole the path rather than truncate
+    * it.
     */
   private[wadi] def pathsFromAnnotationCode(cpg: Cpg, code: String): List[String] = {
     // Greedy across nested `{id}` template braces: the array block is the
@@ -136,13 +148,19 @@ object SpringPacks {
     val fieldName  = segments.last
     val qualifier  = Option.when(segments.sizeIs >= 2)(segments(segments.length - 2))
 
-    val named = cpg.assignment.filter(a =>
-      a.target.ast.exists {
-        case fi: FieldIdentifier => fi.canonicalName == fieldName
-        case id: Identifier      => id.name == fieldName
-        case _                   => false
-      }
-    )
+    // Materialised: these are LAZY traversals, and the owner fallback below
+    // has to ask whether a candidate set is empty before choosing it. Asking
+    // an iterator that question consumes it, so a lazy `named` would answer
+    // the question and then hand back nothing — the fix would silently no-op.
+    val named = cpg.assignment
+      .filter(a =>
+        a.target.ast.exists {
+          case fi: FieldIdentifier => fi.canonicalName == fieldName
+          case id: Identifier      => id.name == fieldName
+          case _                   => false
+        }
+      )
+      .l
     val scoped = qualifier match {
       // Nested constant holders (yas `Constants.ApiConstant`): the lowered
       // assignment may sit in the inner OR outer class's initializer, and the
@@ -153,11 +171,26 @@ object SpringPacks {
             td.name == className || td.fullName.split("[.$]").contains(className)
           ) || a.target.code.contains(s"$className.")
         )
-      // A bare name belongs to the type that declared it (§5.2.5).
+      // A bare name belongs to the type that declared it (§5.2.5) — UNLESS the
+      // owner did not declare it, in which case the name came from elsewhere
+      // and owner scoping would answer "unresolvable" for a constant sitting
+      // in plain sight.
+      //
+      // Measured 2026-08-05: `SecurityConfig` references `REST_PERSON_PREFIX`
+      // through `import static ...RestConstants.*`. The same constant in the
+      // same CPG resolved for endpoint paths (which pass owner = None) and
+      // failed for matcher patterns (which pass the owner), leaving 9 rules
+      // without scope and withholding the auth claim on 729 endpoints. The
+      // scoping is still right when the owner DOES declare the name — that is
+      // what keeps two classes declaring `order` apart — so it keeps
+      // precedence and only yields when it has nothing to say.
       case None =>
         owner match {
-          case Some(td) => named.filter(_.method.typeDecl.exists(_.fullName == td.fullName))
-          case None     => named
+          case Some(td) =>
+            val declaredHere =
+              named.filter(_.method.typeDecl.exists(_.fullName == td.fullName))
+            if (declaredHere.nonEmpty) declaredHere else named
+          case None => named
         }
     }
     val literals = scoped
@@ -165,7 +198,6 @@ object SpringPacks {
         case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
         case _                => None
       })
-      .l
       .distinct
     Option.when(literals.sizeIs == 1)(literals.head)
   }

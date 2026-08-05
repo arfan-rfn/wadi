@@ -18,7 +18,7 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
-from wadi_contracts.boundary import CfgAnomaly, QuarantinedFact
+from wadi_contracts.boundary import CfgAnomaly, EndpointCollision, QuarantinedFact
 from wadi_contracts.enums import (
     Confidence,
     HttpMethod,
@@ -472,6 +472,16 @@ class CoverageReport(SnapshotEnvelope):
         description=(
             "What the auth layer could and could not read (§5.2.9, schema 1.13.0). "
             "None only on reports written before the enforcement model existed"
+        ),
+    )
+    endpoint_collisions: list[EndpointCollision] = Field(
+        default_factory=list[EndpointCollision],
+        description=(
+            "Endpoints that derived the same content-derived id and so could "
+            "not all be stored (§7, schema 1.18.0), rolled up across services. "
+            "**Expected empty**: non-empty means the inventory is missing "
+            "endpoints the analysis actually found — the loss happens at the "
+            "storage key, downstream of every other counter here"
         ),
     )
     quarantined_facts: list[QuarantinedFact] = Field(

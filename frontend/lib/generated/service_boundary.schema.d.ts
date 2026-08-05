@@ -157,6 +157,29 @@ export type ClientLibrary =
 export type ClientLibraries = ClientLibrary[]
 export type CreatedAt = string
 /**
+ * Handler signatures whose endpoints were lost to the collision
+ *
+ * @minItems 1
+ */
+export type DroppedHandlers = [string, ...string[]]
+/**
+ * The id both endpoints derived
+ */
+export type EndpointId = string
+export type HttpMethod = string
+/**
+ * Handler signature of the endpoint that was stored
+ */
+export type KeptHandler = string
+/**
+ * The simplified URI they collapsed onto
+ */
+export type Uri = string
+/**
+ * Endpoints of this service that derived the same content-derived id and so could not all be stored (§7). Expected empty; non-empty means endpoints were dropped
+ */
+export type EndpointCollisions = EndpointCollision[]
+/**
  * Set when this service's CPG extraction failed (§5.2.6 per-service isolation): the error, recorded as a queryable fact (P10). The service then has no endpoints/calls — absence with a stated cause, never silence
  */
 export type ExtractionError = string | null
@@ -271,6 +294,7 @@ export interface ServiceBoundary {
   cfg_anomalies?: CfgAnomalies
   client_libraries?: ClientLibraries
   created_at?: CreatedAt
+  endpoint_collisions?: EndpointCollisions
   extraction_error?: ExtractionError
   kind?: ServiceKind
   languages: Languages
@@ -350,6 +374,35 @@ export interface CfgAnomaly {
   code: CfgAnomalyCode
   count: Count1
   sample_sites?: SampleSites1
+}
+/**
+ * Two endpoints of one service derived the SAME content-derived id
+ * (§7, recorded 2026-08-05, schema 1.18.0).
+ *
+ * Endpoint ids are ``hash(service, verb, simplified_uri)`` and the store
+ * upserts on ``(snapshot_id, service_id, id)``, so a collision does not
+ * merge — the second row *replaces* the first and the endpoint is gone. That
+ * is how three handlers of a real controller vanished with every honesty
+ * surface reading clean: the loss happens at the storage key, downstream of
+ * everything that counts.
+ *
+ * Recorded as a fact rather than resolved silently, because the alternatives
+ * are both worse. Failing the service would cost a whole map to one duplicate
+ * pair; picking a winner quietly is exactly the behaviour that hid the bug.
+ * A deterministic winner is kept so the snapshot stays reproducible, and the
+ * losers are named here with their handlers so the cause is one click away.
+ *
+ * **Cause-independent by design.** The 2026-08-05 instance came from URI
+ * truncation, but any future defect that makes two URIs equal — a bad
+ * normalizer, an over-eager simplification — lands here too. Expected empty
+ * in healthy operation; non-empty means endpoints were dropped.
+ */
+export interface EndpointCollision {
+  dropped_handlers: DroppedHandlers
+  endpoint_id: EndpointId
+  http_method: HttpMethod
+  kept_handler: KeptHandler
+  uri: Uri
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.

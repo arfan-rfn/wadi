@@ -167,6 +167,53 @@
       "title": "ClientLibrary",
       "type": "string"
     },
+    "EndpointCollision": {
+      "additionalProperties": false,
+      "description": "Two endpoints of one service derived the SAME content-derived id\n(\u00a77, recorded 2026-08-05, schema 1.18.0).\n\nEndpoint ids are ``hash(service, verb, simplified_uri)`` and the store\nupserts on ``(snapshot_id, service_id, id)``, so a collision does not\nmerge \u2014 the second row *replaces* the first and the endpoint is gone. That\nis how three handlers of a real controller vanished with every honesty\nsurface reading clean: the loss happens at the storage key, downstream of\neverything that counts.\n\nRecorded as a fact rather than resolved silently, because the alternatives\nare both worse. Failing the service would cost a whole map to one duplicate\npair; picking a winner quietly is exactly the behaviour that hid the bug.\nA deterministic winner is kept so the snapshot stays reproducible, and the\nlosers are named here with their handlers so the cause is one click away.\n\n**Cause-independent by design.** The 2026-08-05 instance came from URI\ntruncation, but any future defect that makes two URIs equal \u2014 a bad\nnormalizer, an over-eager simplification \u2014 lands here too. Expected empty\nin healthy operation; non-empty means endpoints were dropped.",
+      "properties": {
+        "dropped_handlers": {
+          "description": "Handler signatures whose endpoints were lost to the collision",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Dropped Handlers",
+          "type": "array"
+        },
+        "endpoint_id": {
+          "description": "The id both endpoints derived",
+          "minLength": 1,
+          "title": "Endpoint Id",
+          "type": "string"
+        },
+        "http_method": {
+          "minLength": 1,
+          "title": "Http Method",
+          "type": "string"
+        },
+        "kept_handler": {
+          "description": "Handler signature of the endpoint that was stored",
+          "minLength": 1,
+          "title": "Kept Handler",
+          "type": "string"
+        },
+        "uri": {
+          "description": "The simplified URI they collapsed onto",
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "endpoint_id",
+        "http_method",
+        "uri",
+        "kept_handler",
+        "dropped_handlers"
+      ],
+      "title": "EndpointCollision",
+      "type": "object"
+    },
     "GatewayRoute": {
       "additionalProperties": false,
       "description": "One gateway routing rule extracted from config (\u00a75.4.1 phone-book input).\n\nOnly populated on services that ARE gateways (Spring Cloud Gateway routes\nin application.yml). The stitcher re-resolves ``target_uri`` through the\nphone book after applying the prefix rewrite.",
@@ -422,7 +469,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.17.0/service_boundary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.18.0/service_boundary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One discovered service within a snapshot.\n\nThe envelope's ``service_id`` is this service's own stable id\n(content-derived from repo + build root, \u00a77).",
@@ -504,6 +551,14 @@
       "title": "Created At",
       "type": "string"
     },
+    "endpoint_collisions": {
+      "description": "Endpoints of this service that derived the same content-derived id and so could not all be stored (\u00a77). Expected empty; non-empty means endpoints were dropped",
+      "items": {
+        "$ref": "#/$defs/EndpointCollision"
+      },
+      "title": "Endpoint Collisions",
+      "type": "array"
+    },
     "extraction_error": {
       "anyOf": [
         {
@@ -562,7 +617,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.17.0",
+      "default": "1.18.0",
       "title": "Schema Version",
       "type": "string"
     },

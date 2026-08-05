@@ -1,5 +1,5 @@
 {
-  "$id": "https://trywadi.com/schemas/1.17.0/export_manifest.schema.json",
+  "$id": "https://trywadi.com/schemas/1.18.0/export_manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The last record of the NDJSON export stream, written as ``manifest.json``.\n\nStreaming it LAST is the integrity mechanism (\u00a714): a consumer that never\nsees the manifest knows the stream was truncated. ``artifact_counts`` is\nauthoritative \u2014 a reader can verify it received every record.\n``produced_at`` is the only field allowed to differ between two exports of\nthe same snapshot (the determinism rule).",
@@ -18,7 +18,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.17.0",
+      "default": "1.18.0",
       "title": "Schema Version",
       "type": "string"
     },

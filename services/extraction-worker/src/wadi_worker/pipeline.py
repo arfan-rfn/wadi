@@ -226,7 +226,15 @@ class ExtractionPipeline:
                 # worker-owned per-service fact like analysis_coverage. [] =
                 # checked and clean; the failed-extraction path above keeps
                 # None (never checked).
-                boundary = boundary.model_copy(update={"cfg_anomalies": assembled.cfg_anomalies})
+                boundary = boundary.model_copy(
+                    update={
+                        "cfg_anomalies": assembled.cfg_anomalies,
+                        # §7: endpoints lost to an id collision are named
+                        # here because the loss itself happens at the
+                        # storage key, past every other counter.
+                        "endpoint_collisions": assembled.endpoint_collisions,
+                    }
+                )
                 # §5.2.10: the independent oracle runs against the STAGED tree
                 # the extractor parsed, so a divergence is a reading failure
                 # rather than a staging one. Its findings are the only auth

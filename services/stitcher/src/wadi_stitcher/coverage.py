@@ -15,6 +15,7 @@ from wadi_contracts import (
     CoverageReport,
     CoverageTotals,
     Endpoint,
+    EndpointCollision,
     ExternalApiEntry,
     PlaceholderEntry,
     QuarantinedFact,
@@ -139,6 +140,22 @@ def build_quarantined_facts(boundaries: Sequence[ServiceBoundary]) -> list[Quara
     return [folded[key] for key in sorted(folded, key=lambda k: (k[0], k[1], k[2] or ""))]
 
 
+def build_endpoint_collisions(
+    boundaries: Sequence[ServiceBoundary],
+) -> list[EndpointCollision]:
+    """§7: endpoints that could not all be stored because their ids collided.
+
+    Expected empty. Non-empty means the endpoint inventory — product goal 1 —
+    is missing routes the analysis actually found, which no other counter in
+    this report can express: the loss happens at the storage key, downstream
+    of everything else here.
+    """
+    collisions: list[EndpointCollision] = []
+    for boundary in sorted(boundaries, key=lambda b: (b.name, b.service_id)):
+        collisions.extend(boundary.endpoint_collisions)
+    return collisions
+
+
 def build_auth_coverage(
     endpoints: Sequence[Endpoint], boundaries: Sequence[ServiceBoundary] = ()
 ) -> AuthCoverageSection:
@@ -201,6 +218,7 @@ def build_coverage_report(
     cfg_anomalies: CfgAnomalySection | None = None,
     auth_coverage: AuthCoverageSection | None = None,
     quarantined_facts: Sequence[QuarantinedFact] = (),
+    endpoint_collisions: Sequence[EndpointCollision] = (),
 ) -> CoverageReport:
     by_kind: dict[TargetKind, list[StitchedEdge]] = {kind: [] for kind in TargetKind}
     by_confidence: dict[str, int] = {}
@@ -275,4 +293,5 @@ def build_coverage_report(
         cfg_anomalies=cfg_anomalies,
         auth_coverage=auth_coverage,
         quarantined_facts=list(quarantined_facts),
+        endpoint_collisions=list(endpoint_collisions),
     )

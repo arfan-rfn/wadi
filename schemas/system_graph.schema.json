@@ -304,7 +304,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.17.0/system_graph.schema.json",
+  "$id": "https://trywadi.com/schemas/1.18.0/system_graph.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The whole snapshot's service graph in one read (\u00a711 Phase 2.7 M4).\n\n``stitched=False`` means the stitcher has not run: services render,\nand the empty edge list is 'not yet', never 'none' (P10).",

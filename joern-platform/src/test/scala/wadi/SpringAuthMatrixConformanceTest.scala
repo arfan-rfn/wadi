@@ -192,6 +192,21 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     ruleFor("/contest/api/public/**", "*")._3 should include("permitAll")
   }
 
+  test("a STATICALLY IMPORTED prefix resolves in both the URI and the pattern") {
+    // The sibling case above reaches its constant by qualifier
+    // (`Routes.CONTEST_PREFIX`), which resolves by class name and never
+    // depended on the owner. A bare statically-imported name is owner-scoped
+    // to its declaring type (§5.2.5), and the config class declares nothing —
+    // so the same constant in the same graph resolved for endpoint paths
+    // (owner = None) and failed for matcher patterns (owner = the config).
+    // Measured on a real system: nine rules without scope, 729 endpoints
+    // withheld.
+    val uris = exportJson("endpoints").arr.map(e => e("uri").str)
+    uris should contain("/secured/api/public/ping")
+    uris should contain("/secured/api/private/data")
+    ruleFor("/secured/api/public/**", "GET")._3 should include("permitAll")
+  }
+
   test("every endpoint in the fixture is extracted") {
     val endpoints = exportJson("endpoints").arr.map(e => s"${e("http_method").str} ${e("uri").str}")
     endpoints should contain allOf (

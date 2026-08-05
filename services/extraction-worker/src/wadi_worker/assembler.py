@@ -22,6 +22,7 @@ from wadi_contracts import (
     DataModel,
     DataModelField,
     Endpoint,
+    EndpointCollision,
     EndpointParam,
     FieldShape,
     HttpMethod,
@@ -110,10 +111,63 @@ class AssembledArtifacts:
     mq_interactions: list[MqInteraction] = field(default_factory=list[MqInteraction])
     data_models: list[DataModel] = field(default_factory=list[DataModel])
     cfg_anomalies: list[CfgAnomaly] = field(default_factory=list[CfgAnomaly])
+    endpoint_collisions: list[EndpointCollision] = field(default_factory=list[EndpointCollision])
 
 
 class ExportIncompatibleError(RuntimeError):
     """The export's schema major version doesn't match this reader."""
+
+
+def resolve_id_collisions(artifacts: AssembledArtifacts) -> None:
+    """Endpoints sharing a content-derived id cannot all be stored (§7).
+
+    The store upserts on ``(snapshot_id, service_id, id)``, so a duplicate
+    id does not merge — the later write REPLACES the earlier one and the
+    endpoint is gone. Left alone that is silent: the loss happens at the
+    storage key, downstream of the coverage report and every other counter,
+    which is exactly how three handlers of a real controller disappeared
+    while every honesty surface read clean.
+
+    So the collision is resolved HERE, where it is still visible: a
+    deterministic winner is kept (lowest handler signature, so the snapshot
+    stays reproducible), the losers and their ICFGs are dropped together —
+    an ICFG whose endpoint was not stored would be an orphan — and the whole
+    event is recorded as a queryable fact (P10).
+    """
+    by_id: dict[str, list[Endpoint]] = {}
+    for endpoint in artifacts.endpoints:
+        by_id.setdefault(endpoint.id, []).append(endpoint)
+
+    dropped_ids: set[int] = set()
+    for endpoint_id, group in sorted(by_id.items()):
+        if len(group) == 1:
+            continue
+        ordered = sorted(group, key=lambda e: e.handler.signature)
+        kept, losers = ordered[0], ordered[1:]
+        artifacts.endpoint_collisions.append(
+            EndpointCollision(
+                endpoint_id=endpoint_id,
+                http_method=kept.http_method.value,
+                uri=kept.simplified_uri,
+                kept_handler=kept.handler.signature,
+                dropped_handlers=[e.handler.signature for e in losers],
+            )
+        )
+        dropped_ids.update(id(e) for e in losers)
+        logger.warning(
+            "endpoint id collision on %s %s (%s): kept %s, dropped %s",
+            kept.http_method.value,
+            kept.simplified_uri,
+            endpoint_id,
+            kept.handler.signature,
+            ", ".join(e.handler.signature for e in losers),
+        )
+
+    if not dropped_ids:
+        return
+    artifacts.endpoints = [e for e in artifacts.endpoints if id(e) not in dropped_ids]
+    kept_endpoint_ids = {e.id for e in artifacts.endpoints}
+    artifacts.icfgs = [i for i in artifacts.icfgs if i.endpoint_id in kept_endpoint_ids]
 
 
 class Assembler:
@@ -206,6 +260,7 @@ class Assembler:
             artifacts.icfgs.append(
                 self._assemble_icfg(endpoint, handler, methods, cfgs, sinks_by_node)
             )
+        resolve_id_collisions(artifacts)
         return artifacts
 
     # --- ICFG construction -----------------------------------------------------

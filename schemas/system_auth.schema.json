@@ -185,7 +185,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.17.0/system_auth.schema.json",
+  "$id": "https://trywadi.com/schemas/1.18.0/system_auth.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Every endpoint's auth state across the snapshot in one read (\u00a75.2.9).\n\nOne route rather than a per-service fan-out: the question this answers \u2014\n\"which endpoints here are unprotected?\" \u2014 is inherently system-wide, and a\nclient walking 42 services to assemble it would make the honest answer the\nexpensive one.",
