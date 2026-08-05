@@ -50,6 +50,26 @@ export function unreadLabel(kind: AuthEvidenceKind | string): string {
   return UNREAD_LABELS[kind] ?? kind
 }
 
+/** What each auth-extraction gap means, in a sentence a reader can act on.
+ *
+ * These come from the independent source-text oracle (§5.2.10 T2), not from
+ * what analysis emitted — so unlike every other auth counter they describe a
+ * MISS rather than an unknown, and the wording has to keep that distinction
+ * visible or they read as more of the same.
+ */
+const AUTH_GAP_LABELS: Record<string, string> = {
+  "unemitted-access-site":
+    "access rules named in a security config that the map does not carry",
+  "unread-security-config":
+    "filter-chain configurations that produced no rules at all",
+  "reactive-chain": "reactive (WebFlux) security configurations present",
+  "unresolved-scope": "rules whose path could not be resolved",
+}
+
+export function authGapLabel(code: string): string {
+  return AUTH_GAP_LABELS[code] ?? code
+}
+
 /** Evidence kinds that do NOT gate a request (§5.2.10 T7).
  *
  * An `authority-model` record says what a grant MEANS or where it is minted —

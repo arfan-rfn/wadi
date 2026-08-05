@@ -10,6 +10,7 @@ import { AlertTriangle, ExternalLink, HelpCircle } from "lucide-react"
 import type { CoverageReport } from "@/lib/wadi/api"
 import { useCoverage } from "@/lib/wadi/hooks"
 import { Skeleton } from "@/components/ui/skeleton"
+import { authGapLabel, unreadLabel } from "@/components/shared/auth-chip"
 import { SectionHeading } from "@/components/shared/section-heading"
 import { SourceSnippet } from "@/components/source/source-viewer"
 
@@ -356,6 +357,100 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                     .join(", ")}
                 </p>
               )}
+            </div>
+          </section>
+        )}
+
+      {(report.endpoint_collisions ?? []).length > 0 && (
+        <section className="space-y-3">
+          <SectionHeading>Endpoints that could not all be stored</SectionHeading>
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+            <p className="mb-2 text-xs text-muted-foreground">
+              These handlers derived the same content-derived id, so only one of
+              each pair could be stored — the rest are{" "}
+              <span className="font-medium">missing from the inventory</span>.
+              Unlike everything else on this page, which reports what analysis
+              could not read, this reports what it read and then lost: the
+              collision happens at the storage key, downstream of every other
+              counter here.
+            </p>
+            <ul className="space-y-2">
+              {(report.endpoint_collisions ?? []).map((collision) => (
+                <li key={collision.endpoint_id} className="text-xs">
+                  <span className="font-mono">
+                    {collision.http_method} {collision.uri}
+                  </span>
+                  <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                    kept {collision.kept_handler}
+                  </p>
+                  {(collision.dropped_handlers ?? []).map((handler) => (
+                    <p
+                      key={handler}
+                      className="font-mono text-[11px] text-amber-700 dark:text-amber-400"
+                    >
+                      dropped {handler}
+                    </p>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+
+      {report.auth_coverage &&
+        Object.keys(report.auth_coverage.unread_by_kind ?? {}).length > 0 && (
+          <section className="space-y-3">
+            <SectionHeading>Guards that could not be read</SectionHeading>
+            <div className="rounded-lg border p-3">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Constructs that gate a request but whose effect analysis could
+                not determine. Each one withholds an endpoint&rsquo;s auth
+                answer rather than letting it fall through to whatever rule
+                comes next — the count is how much of this system&rsquo;s
+                access policy is still unreadable.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(report.auth_coverage.unread_by_kind ?? {}).map(
+                  ([kind, count]) => (
+                    <span
+                      key={kind}
+                      className="rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                    >
+                      {count} {unreadLabel(kind)}
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+      {report.auth_coverage &&
+        Object.keys(report.auth_coverage.extraction_gaps ?? {}).length > 0 && (
+          <section className="space-y-3">
+            <SectionHeading>Auth the source names but the map lacks</SectionHeading>
+            <div className="rounded-lg border p-3">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Found by reading the source text independently of the code
+                graph, then diffing. Every other auth counter is derived from
+                what the analysis <em>emitted</em>, so none of them can see a
+                construct that was dropped before emission — this one can, and
+                it is the only number here that reports a miss rather than an
+                unknown.
+              </p>
+              <ul className="space-y-1">
+                {Object.entries(report.auth_coverage.extraction_gaps ?? {}).map(
+                  ([code, count]) => (
+                    <li key={code} className="text-xs">
+                      <span className="font-mono">{count}</span>{" "}
+                      <span className="text-muted-foreground">
+                        {authGapLabel(code)}
+                      </span>
+                    </li>
+                  )
+                )}
+              </ul>
             </div>
           </section>
         )}
