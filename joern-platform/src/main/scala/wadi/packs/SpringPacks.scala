@@ -93,6 +93,12 @@ object SpringPacks {
       // apart. A truncated path is worse than an unresolved one — it collides
       // with real routes elsewhere in the system.
       concatenatedPathFromCode(cpg, code)
+        // A concatenation whose operands do not ALL resolve is holed, never
+        // truncated. Falling through to the first quoted string here is what
+        // collapsed `/person/search` and `/team/search` onto `/search`, and
+        // since ids derive from the path, one endpoint replaced the other.
+        // `{?}/search` is imprecise; `/search` was destructive.
+        .orElse(holedConcatPathFromCode(cpg, code))
         .orElse(pathFromAnnotationCode(code))
         .map(List(_))
         .getOrElse(constantPathFromCode(cpg, code).toList)
@@ -102,6 +108,15 @@ object SpringPacks {
     * resolves. Returns None for annotations with no top-level `+`, leaving the
     * existing readers untouched.
     */
+  private def holedConcatPathFromCode(cpg: Cpg, code: String): Option[String] =
+    holedStringExpression(cpg, annotationArgument(code), owner = None)
+
+  private def annotationArgument(code: String): String = {
+    val inner =
+      code.dropWhile(_ != '(').stripPrefix("(").reverse.dropWhile(_ != ')').drop(1).reverse
+    inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
+  }
+
   private def concatenatedPathFromCode(cpg: Cpg, code: String): Option[String] = {
     val inner     = code.dropWhile(_ != '(').stripPrefix("(").reverse.dropWhile(_ != ')').drop(1).reverse
     val reference = inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
@@ -141,6 +156,20 @@ object SpringPacks {
       cpg: Cpg,
       reference: String,
       owner: Option[TypeDecl]
+  ): Option[String] = constantString(cpg, reference, owner, depth = 0)
+
+  /** `depth` bounds the recursion when a constant's initializer is ITSELF an
+    * expression (`static final String B = A + "/x"`). Java allows that chain to
+    * any length and the JLS keeps every link a compile-time constant, so the
+    * only real risks are a cycle (illegal in Java, but a malformed graph can
+    * still present one) and pathological depth. Four links is far past any
+    * observed idiom and costs nothing to allow.
+    */
+  private def constantString(
+      cpg: Cpg,
+      reference: String,
+      owner: Option[TypeDecl],
+      depth: Int
   ): Option[String] = {
     val normalized = reference.trim.stripPrefix("this.").trim
     val segments   = normalized.split('.').toList.filter(_.nonEmpty)
@@ -196,7 +225,12 @@ object SpringPacks {
     val literals = scoped
       .flatMap(_.source match {
         case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
-        case _                => None
+        // `static final String B = A + "/x"` — the initializer is a constant
+        // EXPRESSION, not a literal. Reading only literals answered
+        // "unresolvable" for a value the graph fully determines.
+        case other if depth < MaxConstantDepth =>
+          stringExpression(cpg, other.code, owner, depth + 1)
+        case _ => None
       })
       .distinct
     Option.when(literals.sizeIs == 1)(literals.head)
@@ -218,20 +252,65 @@ object SpringPacks {
     * matches the wrong endpoints (P10 — an honest hole beats a plausible
     * string).
     */
+  private[wadi] val MaxConstantDepth = 4
+
+  /** The marker a path carries where an operand could not be resolved (§5.4.2).
+    *
+    * Deliberately NOT an empty string. Dropping the operand shortens the path
+    * onto whatever other routes share the tail, and endpoint ids are derived
+    * from the path — a production system lost three endpoints to exactly that
+    * collapse. A hole keeps the path unique, so an unresolved prefix costs
+    * precision and never a row.
+    */
+  private[wadi] val PathHole = "{?}"
+
   private[wadi] def stringExpression(
       cpg: Cpg,
       text: String,
       owner: Option[TypeDecl]
+  ): Option[String] = stringExpression(cpg, text, owner, depth = 0)
+
+  private def stringExpression(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl],
+      depth: Int
   ): Option[String] = {
+    val resolved = concatOperands(cpg, text, owner, depth)
+    if (resolved.isEmpty) return None
+    Option.when(resolved.forall(_.isDefined))(resolved.flatten.mkString)
+  }
+
+  /** The same evaluation, but rendering unresolved operands as holes.
+    *
+    * Only meaningful for an expression that IS a concatenation — a bare
+    * unresolvable reference has nothing to anchor a hole against, and the
+    * existing readers already answer honestly there.
+    */
+  private[wadi] def holedStringExpression(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl]
+  ): Option[String] = {
+    val resolved = concatOperands(cpg, text, owner, depth = 0)
+    if (resolved.isEmpty || resolved.forall(_.isDefined)) return None
+    Some(resolved.map(_.getOrElse(PathHole)).mkString)
+  }
+
+  private def concatOperands(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl],
+      depth: Int
+  ): List[Option[String]] = {
     val operands = splitTopLevelConcat(text)
-    if (operands.isEmpty) return None
-    val resolved = operands.map { operand =>
+    if (operands.isEmpty) return Nil
+    operands.map { operand =>
       val trimmed = operand.trim
       if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\""))
         Some(trimmed.substring(1, trimmed.length - 1))
-      else constantString(cpg, trimmed, owner)
+      else constantString(cpg, trimmed, owner, depth)
     }
-    Option.when(resolved.forall(_.isDefined))(resolved.flatten.mkString)
   }
 
   /** Split on `+` that sits OUTSIDE string literals. A `+` inside a quoted

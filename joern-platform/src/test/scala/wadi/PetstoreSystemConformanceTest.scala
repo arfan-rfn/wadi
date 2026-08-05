@@ -27,10 +27,17 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers with Fixtu
 
   // --- endpoint sets per module ----------------------------------------------------
 
-  test("petstore serves exactly its fourteen controller endpoints") {
+  test("petstore serves exactly its seventeen controller endpoints") {
     endpoints(petstore) shouldBe Set(
       "GET /pets/{id}",
       "GET /pets",
+      // §5.4.2 prefix-expression resolution (2026-08-05). A chained constant
+      // is fully determined and must resolve; an ambiguous bare name and a
+      // constant declared outside the analyzed source must HOLE. Truncating
+      // to the tail — `/pets/list` — is what collapsed two controllers onto
+      // one id and destroyed an endpoint.
+      "GET /base/chained/pets/list",
+      "GET {?}/pets/list",
       "PUT /pets/{id}/reserve/{count}",
       "POST /pets/{id}/alert",
       "GET /pets/summary/{id}",
@@ -90,8 +97,8 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers with Fixtu
     // CurrentRequest.bearerToken) is now rooted (`framework-callback`).
     // The denominator grew by the T4 fixture methods AND the lambda body
     // (`NightlySweepJob.<lambda>0` counts — real source; §5.4.3 refinement).
-    petstoreCoverage("production_methods").num.toInt shouldBe 53
-    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 50
+    petstoreCoverage("production_methods").num.toInt shouldBe 56
+    petstoreCoverage("reachable_production_methods").num.toInt shouldBe 53
 
     val inventoryCoverage = inventory("analysis_coverage")
     // SecurityConfig.filterChain is now rooted as a `bean` — inventory walks

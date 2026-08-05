@@ -51,8 +51,8 @@ class TestPetstoreModule:
         """§5.4.3: the counts pinned in PetstoreSystemConformanceTest arrive
         intact across the language boundary."""
         assert petstore.analysis_coverage is not None
-        assert petstore.analysis_coverage.production_methods == 53
-        assert petstore.analysis_coverage.reachable_production_methods == 50
+        assert petstore.analysis_coverage.production_methods == 56
+        assert petstore.analysis_coverage.reachable_production_methods == 53
         assert inventory.analysis_coverage is not None
         assert inventory.analysis_coverage.production_methods == 10
         assert inventory.analysis_coverage.reachable_production_methods == 10
