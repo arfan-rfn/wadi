@@ -1206,11 +1206,78 @@ object SpringSecurityPack {
     private def stateOf(sink: Call, forwarded: Boolean): String =
       if (forwarded) "forwarded"
       else {
-        val entities = requestEntitiesOf(sink)
-        if (entities.isEmpty) "undetermined"
-        else if (entities.forall(headerArgumentOf(_).isEmpty)) "not-forwarded"
+        val verdicts = requestEntitiesOf(sink).map(headerVerdictOf)
+        if (verdicts.isEmpty) "undetermined"
+        else if (verdicts.forall(_ == NoHeaders)) "not-forwarded"
         else "undetermined"
       }
+
+    private val Headers   = "headers"
+    private val NoHeaders = "no-headers"
+    private val Unknown   = "unknown"
+
+    /** Does THIS entity construction carry headers: yes, no, or unknown.
+      *
+      * Three-way rather than boolean because the corpus makes the middle case
+      * common and explicit: `new HttpEntity(info, null)` passes a null in the
+      * headers position (81+ sites), which is a stronger negative than omitting
+      * the argument. Treating "an argument is present at the headers position"
+      * as forwarding — the first cut — reported 299 of 382 calls as forwarding
+      * credentials, when the corpus contains 10 such sites.
+      */
+    private def headerVerdictOf(init: Call): String = {
+      // Every real argument, not just the second: `new HttpEntity(headers)` is
+      // Spring's headers-ONLY constructor and forwards, while
+      // `new HttpEntity(body)` is the body-only one and does not. Position
+      // cannot tell them apart — only the argument's TYPE can, which is why
+      // reading from index 2 called a genuine forwarding a provable negative.
+      val candidates = init.argument.l.filter(_.argumentIndex >= 1)
+      if (candidates.isEmpty) NoHeaders // `new HttpEntity()`
+      else if (candidates.exists(isHeaders)) Headers
+      else if (candidates.forall(isDefinitelyNotHeaders)) NoHeaders
+      else Unknown
+    }
+
+    /** The argument's type IS `HttpHeaders` — by declaration or by what the
+      * helper that builds it returns (`HeadersUtils.prepareForSent(headers)`).
+      */
+    private def isHeaders(argument: AstNode): Boolean = argument match {
+      case identifier: Identifier => identifier.typeFullName.endsWith("HttpHeaders")
+      case call: Call =>
+        call.typeFullName.endsWith("HttpHeaders") ||
+        cpg.method
+          .fullNameExact(call.methodFullName)
+          .methodReturn
+          .typeFullName
+          .exists(_.endsWith("HttpHeaders"))
+      case _ => false
+    }
+
+    /** This argument provably is NOT headers.
+      *
+      * A literal `null` states it outright; a typed argument whose type is
+      * known and is something else settles it too. An argument javasrc2cpg
+      * could not type settles nothing, so it yields `unknown` rather than
+      * either verdict (P10).
+      */
+    private def isDefinitelyNotHeaders(argument: AstNode): Boolean = argument match {
+      // No literal is ever an HttpHeaders instance — `null` states it outright
+      // and every other literal settles it by construction.
+      case _: Literal             => true
+      case identifier: Identifier => isKnownNonHeaderType(identifier.typeFullName)
+      case call: Call =>
+        isKnownNonHeaderType(call.typeFullName) ||
+        cpg.method
+          .fullNameExact(call.methodFullName)
+          .methodReturn
+          .typeFullName
+          .exists(isKnownNonHeaderType)
+      case _ => false
+    }
+
+    private def isKnownNonHeaderType(typeName: String): Boolean =
+      typeName.nonEmpty && !typeName.startsWith("<") && typeName != "ANY" &&
+        !typeName.endsWith("HttpHeaders")
 
     /** The inbound `HttpHeaders` reach the request this call site sends.
       *
@@ -1221,7 +1288,7 @@ object SpringSecurityPack {
       * lines 62 and 95), so a method-level answer would smear the two together.
       */
     private def carriesInboundHeaders(sink: Call): Boolean =
-      requestEntitiesOf(sink).exists(headerArgumentOf(_).nonEmpty)
+      requestEntitiesOf(sink).exists(headerVerdictOf(_) == Headers)
 
     /** `new HttpEntity(...)` constructions feeding this call site's arguments. */
     private def requestEntitiesOf(sink: Call): List[Call] =
@@ -1249,21 +1316,6 @@ object SpringSecurityPack {
         val owner = call.methodFullName.split("\\.<init>").head
         owner.endsWith("HttpEntity") || owner.endsWith("RequestEntity")
       }
-
-    /** The headers argument of an entity construction, when one is present.
-      *
-      * `new HttpEntity(body)` carries no headers — that is the provable
-      * negative. Argument index 0 is the allocation, 1 the body.
-      */
-    private def headerArgumentOf(init: Call): Option[AstNode] =
-      init.argument.l
-        .filter(_.argumentIndex >= 1)
-        .find(argument => argument.argumentIndex >= 2 || looksLikeHeaders(argument))
-
-    private def looksLikeHeaders(argument: AstNode): Boolean = argument match {
-      case identifier: Identifier => identifier.typeFullName.endsWith("HttpHeaders")
-      case _                      => false
-    }
 
     /** An `Authorization` header set explicitly on the outbound request. */
     private def setsAuthorizationHeader(method: Method): Boolean =

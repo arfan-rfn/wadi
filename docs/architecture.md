@@ -572,6 +572,24 @@ Two constraints found while implementing it, both binding. **Root-anchoring is a
 - **T5 — the unbound-callee residue.** Full census over every ICFG node: `third-party` 6,648 · `lombok-generated` 1,163 · **`unresolved-receiver` 682** · `inherited-external` 98 · `compiler-generated` 9. The first two are correct terminals; the 682 are the genuine holes in the map and warrant their own audit before any fix (the §5.2.5 precedent — classify the class, then decide).
 - **T6 — unexercised vocabulary is indistinguishable from proven-absent.** `authorities` 0/365, `denied` 0/365, `withheld` 0/365 — each correct (the corpus uses only `hasAnyRole`, has no `denyAll()` route, and every idiom in it is now readable), but a reader cannot tell "measured zero" from "never exercised". The role/authority split and the `denied` state shipped in 0.6.0 are fixture-proven only.
 
+**Measured after implementation (recorded 2026-08-05; snapshot `snap_60bfdb62…`, same corpus and commit, analyzer rebuilt).** Every tranche re-measured against `train-ticket-aitest` end to end — image rebuilt, stack redeployed, corpus re-analyzed:
+
+| | Before | After |
+|---|---|---|
+| T0 slash-less `full_uri` | 14 | **0** — and **365/365 endpoint ids unchanged**, confirming the no-churn claim empirically rather than by argument |
+| T1 `response_schema` unresolved | 274 | **11** (263 recovered from the return expression, 102 declared) |
+| T2 async-rooted calls | not expressible | **0 on this corpus** — mechanism landed, see below |
+| T3 request policies | 0 published | **40 across 20 services** (20 `cors`, 20 `csrf-disabled`) |
+| T4 `auth_propagation` | `null` on 382/382 | **207 forwarded · 158 not-forwarded · 17 undetermined** |
+| T5 `unresolved-receiver` | 682 pooled | **585 `declared-not-bound` · 77 `unresolved-receiver` · 20 `not-declared`** |
+| T6 unexercised vocabulary | indistinguishable from measured | **5 idioms named** (`authorities`, `denied`, `withheld`, `no-evidence`, `unread-enforcement`) |
+
+*T0 corrected two auth claims, which was not the point of the tranche and is the most consequential thing in this table.* `POST` and `PUT /api/v1/configservice/configs` moved from an evidenced `false` to `true [ADMIN]`. `ts-security-service`'s YAML declares both as `ROLE_ADMIN`, but a wildcard-free pattern requires an EXACT match (the §5.2.9 over-approximation fix), so the slash-less `api/v1/configservice/configs` matched neither and fell through to the later `/api/v1/configservice/** → permitAll`. Wadi was publishing two admin-only config-write endpoints as confidently public — the §5.2.9 failure mode entering through a URI-spelling door nothing was watching. A cosmetic-looking fidelity defect was a live auth defect.
+
+*T2 landed its mechanism and measured zero, for a reason worth more than the tranche.* All 24 `application-runner` roots are detected, and `InsidePaymentInitData.run` IS in the export closure — but `InsidePaymentServiceImpl.pay` is NOT, verified by running the pipeline against that single service. The call from a `CommandLineRunner` into its `@Autowired` **interface** does not bind, so there is no edge for the traversal to follow. The reporting is correct and tested; the blocker is call binding, which **T5 has now quantified: 585 `declared-not-bound` sites** — calls where a first-party type declares exactly the method and the call still failed to connect. That is the next tranche, and it is the same defect in both places.
+
+*Two errors in the T4 detector, both found by checking individual claims against source rather than trusting the aggregate.* The first cut read `forwarded` on **299 of 382** calls; the corpus contains ten header-forwarding sites. Treating "an argument occupies the headers position" as forwarding counted `new HttpEntity(info, null)` — an explicit null, the commonest two-argument form at 81+ sites — as carrying credentials. Tightened to require the argument's TYPE, it then reported `not-forwarded` on `new HttpEntity(headers)`: Spring's headers-ONLY constructor, which forwards every inbound header and is indistinguishable by position from the body-only form. Both now carry fixture cases. The lesson is procedural: an aggregate that moves in the expected direction is not evidence — 299 looked like a working detector until three claims were read against the code they describe.
+
 *Confirmation that Phase 2.9.1 landed.* The corpus that produced §5.2.10's defect — all 365 endpoints identical at `authenticated=true, roles=[]`, zero withheld — now reads **180 protected · 185 evidenced-open · 0 withheld · 0 null**: 173 endpoints carry roles, 7 carry `authenticated()` with no role requirement, and **358 of 365 cite the config key their rule was declared in**, each anchored on the branch that *applies* the rule rather than the chain head. The remaining 7 rest on in-Java rules only. Zero endpoints carry a `{?}`-holed URI.
 
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**
@@ -1028,6 +1046,8 @@ Triggered by the same discipline as 2.9.1 — a full re-measurement rather than 
 6. **T5/T6 — the `unresolved-receiver` audit (682 sites), and marking unexercised vocabulary** so a zero is readable as measured-zero rather than proven-absent.
 
 *Rejected: folding T1 into Phase 3* — response shapes are §5.2.7's subject and an accuracy refinement, which §11 assigns to the 2.x line by construction; Phase 3 is where new analysis *semantics* appear. *Rejected: opening a tranche against the 222 unstitched remote calls* — the audit showed `reachable` is a perfect predictor of stitching and the unstitched set is dead code, so the apparent 58% "stitch gap" is the corpus, not a defect; T2 addresses the genuine remainder (startup roots) and nothing else needs fixing there.
+
+**Complete (T0–T6), measured end to end in §5.2.11.** Contracts 1.20.0, export 2.10.0. The phase closes having produced its own successor: **T7 — call binding.** T5's split shows 585 `declared-not-bound` sites (a first-party type declares exactly the called method and the call still does not connect), and that same failure is why T2's traversal finds nothing — a `CommandLineRunner` reaching its `@Autowired` interface is one instance of it. Both the largest remaining unbound bucket and the one tranche that measured zero point at the same defect, which is the strongest scheduling signal this audit produced. *Sequenced ahead of Phase 3 on the §2.9 precedent:* Phase 3's async work walks exactly the edges that do not currently bind.
 
 ### Phase 3 — New analysis depth on Java: async + security analysis
 

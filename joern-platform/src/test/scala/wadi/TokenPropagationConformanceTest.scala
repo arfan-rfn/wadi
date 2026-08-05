@@ -63,6 +63,33 @@ class TokenPropagationConformanceTest extends AnyFunSuite with Matchers with Fix
     stateOf("/public/1") shouldBe "not-forwarded"
   }
 
+  test("a null in the headers position is a stated negative, not a forwarding") {
+    // The shape that broke the first cut. Treating "an argument occupies the
+    // headers slot" as forwarding reported 299 of 382 corpus calls as carrying
+    // credentials, when `new HttpEntity(info, null)` — which sends none — is
+    // the commonest two-argument form there (81+ sites). Publishing that would
+    // tell a reader auth propagates across calls that demonstrably send none:
+    // the exact over-approximation the three-state model exists to prevent.
+    stateOf("/nulled/1") shouldBe "not-forwarded"
+  }
+
+  test("the headers-ONLY constructor forwards, despite its single argument") {
+    // `new HttpEntity(headers)` and `new HttpEntity(body)` are the same shape
+    // in every respect but the argument's TYPE, and they mean opposite things.
+    // Reading position instead of type published "provably does not forward"
+    // about a call that forwards every inbound header — caught by checking a
+    // claim against its source rather than trusting the aggregate.
+    stateOf("/headers-only/1") shouldBe "forwarded"
+    // ...and the body-only form must not drift into forwarding with it.
+    stateOf("/reserved/1") shouldBe "not-forwarded"
+  }
+
+  test("headers reaching the entity through a helper still count as forwarded") {
+    // `HeadersUtils.prepareForSent(headers)` — 22 sites on the corpus. The
+    // argument is a call, so its RETURN type is what says whether headers ride.
+    stateOf("/helper/1") shouldBe "forwarded"
+  }
+
   test("every http sink carries a state — silence is not one of the answers") {
     sinks should not be empty
     all(sinks.map(_._2)) should (be("forwarded") or be("not-forwarded") or be("undetermined"))
