@@ -432,6 +432,28 @@ class ExportSecurityRule(ExportModelBase):
         return self.pattern_confidence is RulePatternConfidence.EXACT
 
 
+class ExportAuthPolicy(ExportModelBase):
+    """Request-level policy that is not an authorization rule (2.8.0; §5.2.10).
+
+    CORS, CSRF and rejection handling — the third category a ``SecurityConfig``
+    declares, and the one wadi had no vocabulary for. CORS alone is the second
+    most common construct across the 76 security configs measured.
+
+    Deliberately NOT an input to ``EndpointAuth``: a CORS policy decides which
+    ORIGIN may call, not which principal, and folding it into ``authenticated``
+    would answer a different question than the one asked. These are published
+    so the question becomes answerable at all (P10) — absent facts made
+    present, never facts made wrong.
+    """
+
+    kind: str = Field(
+        description="cors | csrf-disabled | csrf-exempt | entry-point | access-denied"
+    )
+    scope: str = Field(description="Path scope; '{?}' = read but unresolvable")
+    detail: str = Field(description="Origins, or the source text of the decision")
+    anchor: ExportAnchor
+
+
 class ExportAuthExtraction(ExportModelBase):
     """What the auth vocabulary saw versus what it emitted (2.8.0; §5.2.10).
 
@@ -569,6 +591,10 @@ class ServiceExport(ExportModelBase):
     auth_extraction: ExportAuthExtraction | None = Field(
         default=None,
         description="2.8.0 (§5.2.10): detected-vs-emitted auth sites; None pre-2.8.0",
+    )
+    auth_policies: list[ExportAuthPolicy] = Field(
+        default_factory=list[ExportAuthPolicy],
+        description="2.8.0 (§5.2.10): CORS / CSRF / rejection handling, service-level",
     )
 
     def compatible_with_reader(self) -> bool:

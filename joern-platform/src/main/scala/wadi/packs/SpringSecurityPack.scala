@@ -173,9 +173,26 @@ object SpringSecurityPack {
     /** Rule-scoped matchers. `securityMatcher`/`antMatcher` are deliberately
       * absent: they scope a whole CHAIN, not one rule, and are read as chain
       * scope by the exporter instead.
+      *
+      * `pathMatchers`/`anyExchange` are the REACTIVE spellings (§5.2.10 T6).
+      * Their absence was not a partial answer but a total one: a WebFlux
+      * service's every rule failed the matcher test, so the whole chain
+      * vanished and the service read as having no authorization at all. yas
+      * ships two such modules.
       */
     private val MatcherCalls =
-      Set("requestMatchers", "antMatchers", "mvcMatchers", "regexMatchers", "anyRequest")
+      Set(
+        "requestMatchers",
+        "antMatchers",
+        "mvcMatchers",
+        "regexMatchers",
+        "anyRequest",
+        "pathMatchers",
+        "anyExchange"
+      )
+
+    /** Matchers that mean "everything this chain governs". */
+    private val CatchAllMatchers = Set("anyRequest", "anyExchange")
 
     /** An argument that IS an HTTP verb reference, whole — anchored so a
       * chain's text can never leak a verb into a rule that has none.
@@ -358,7 +375,7 @@ object SpringSecurityPack {
       * withholds the claim everywhere else.
       */
     private def patternsOf(matcher: Call): List[String] = {
-      if (matcher.name == "anyRequest") return List("/**")
+      if (CatchAllMatchers.contains(matcher.name)) return List("/**")
       val owner = matcher.method.typeDecl.headOption
       val arguments = matcher.argument
         .argumentIndexGt(0)
@@ -502,6 +519,131 @@ object SpringSecurityPack {
         }
         .mkString(", ")
       s"${call.name}($args)"
+    }
+  }
+
+  /** Request-level policy → `auth-policy=<kind>|<scope>|<detail>` (§5.2.10 T6).
+    *
+    * The third category a `SecurityConfig` declares, after authorization rules
+    * and authentication mechanisms, and the one wadi had no vocabulary for at
+    * all: CORS is the SECOND most common construct in the 76 security configs
+    * measured (58 uses), and CSRF the most common after `disable` itself.
+    *
+    * These are **service-level facts, never inputs to the endpoint claim.** A
+    * CORS policy decides which ORIGIN may call, not which principal — folding
+    * it into `authenticated` would answer a different question than the one
+    * asked. They are published so the question can be asked at all (P10),
+    * which is the whole of the improvement: absent facts, not wrong ones.
+    *
+    * Nothing here is scored. `csrf().disable()` is near-universal on stateless
+    * APIs and reporting it as a finding would train readers to ignore the
+    * category; the fact is recorded and the judgement left to the reader.
+    */
+  class SpringRequestPolicyPass(cpg: Cpg) extends CpgPass(cpg) {
+
+    /** CORS builders, whichever API the project reached for. */
+    private val CorsOrigins = Set("allowedOrigins", "allowedOriginPatterns", "addAllowedOrigin")
+
+    override def run(builder: DiffGraphBuilder): Unit = {
+      tagCors(builder)
+      tagCsrf(builder)
+      tagHandlers(builder)
+    }
+
+    /** `registry.addMapping(path).allowedOrigins(ALL)` and the bean form. */
+    private def tagCors(builder: DiffGraphBuilder): Unit =
+      cpg.call.nameExact(CorsOrigins.toSeq*).l.foreach { origins =>
+        val declared = literalArgs(origins)
+        // `CorsConfiguration.ALL` and `"*"` are the same decision written two
+        // ways; the constant resolves through the shared resolver, and an
+        // unreadable origin stays `{?}` rather than being called restrictive.
+        val values = if (declared.isEmpty) List(Unresolvable) else declared
+        val scope  = corsScopeOf(origins).getOrElse("/**")
+        Iterator(origins)
+          .newTagNodePair("auth-policy", s"cors|$scope|${values.mkString(",")}")
+          .store()(using builder)
+      }
+
+    /** The `addMapping(...)` this origin list hangs off, when there is one. */
+    private def corsScopeOf(call: Call): Option[String] =
+      call.method.ast.isCall
+        .nameExact("addMapping")
+        .flatMap(mapping => literalArgs(mapping))
+        .headOption
+
+    /** CSRF: off, or on with exemptions. Both are facts a reader wants. */
+    private def tagCsrf(builder: DiffGraphBuilder): Unit = {
+      cpg.call.nameExact("csrf").l.foreach { csrf =>
+        val disabled = csrf.argument
+          .argumentIndexGt(0)
+          .code
+          .exists(argument =>
+            argument.contains("disable") ||
+              cpg.method.fullNameExact(argument).exists(_.ast.isCall.nameExact("disable").nonEmpty)
+          ) || cpg.call
+          .nameExact("disable")
+          .exists(_.argument.argumentIndexLte(0).headOption.exists {
+            case receiver: Call => receiver.id == csrf.id
+            case _              => false
+          })
+        if (disabled) {
+          Iterator(csrf)
+            .newTagNodePair("auth-policy", s"csrf-disabled|/**|${firstLine(csrf.code)}")
+            .store()(using builder)
+        }
+      }
+      cpg.call
+        .nameExact("ignoringRequestMatchers", "ignoringAntMatchers")
+        .l
+        .foreach { ignoring =>
+          val paths = literalArgs(ignoring)
+          (if (paths.isEmpty) List(Unresolvable) else paths).foreach { path =>
+            Iterator(ignoring)
+              .newTagNodePair("auth-policy", s"csrf-exempt|$path|${firstLine(ignoring.code)}")
+              .store()(using builder)
+          }
+        }
+    }
+
+    /** How rejection is answered — a 401 challenge or a 403 page. */
+    private def tagHandlers(builder: DiffGraphBuilder): Unit =
+      cpg.call
+        .nameExact("authenticationEntryPoint", "accessDeniedHandler", "accessDeniedPage")
+        .l
+        .foreach { handler =>
+          val kind = if (handler.name == "authenticationEntryPoint") "entry-point" else "access-denied"
+          Iterator(handler)
+            .newTagNodePair("auth-policy", s"$kind|/**|${firstLine(handler.code)}")
+            .store()(using builder)
+        }
+
+    /** Framework constants whose value is a published part of the API.
+      *
+      * `CorsConfiguration.ALL` lives in a jar, so the in-graph constant
+      * resolver cannot see it and every one of the 58 measured CORS configs
+      * would report `{?}`. Resolving a documented framework constant is
+      * reading the framework, not guessing a value — the line this stays on is
+      * that only constants whose meaning is fixed by the library appear here.
+      */
+    private val FrameworkConstants = Map(
+      "ALL"                    -> "*",
+      "CorsConfiguration.ALL"  -> "*",
+      "CorsConfiguration.ALL_PATTERN" -> "*"
+    )
+
+    private def literalArgs(call: Call): List[String] = {
+      val owner = call.method.typeDecl.headOption
+      call.argument
+        .argumentIndexGt(0)
+        .l
+        .flatMap {
+          case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
+          case argument =>
+            SpringPacks
+              .constantString(cpg, argument.code, owner)
+              .orElse(FrameworkConstants.get(argument.code.trim))
+        }
+        .distinct
     }
   }
 

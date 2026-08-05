@@ -37,6 +37,7 @@ object SpringPacks {
     new SpringSecurityPack.SpringSecurityBypassPass(cpg).createAndApply()
     new SpringSecurityPack.SpringAuthMechanismPass(cpg).createAndApply()
     new SpringSecurityPack.SpringAuthEnforcementPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringRequestPolicyPass(cpg).createAndApply()
     new SpringSecurityPack.SpringTokenPropagationPass(cpg).createAndApply()
   }
 

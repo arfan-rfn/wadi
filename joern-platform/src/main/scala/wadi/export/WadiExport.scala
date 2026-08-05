@@ -174,7 +174,8 @@ object WadiExport {
       "auth_mechanisms"       -> authMechanismObjs(cpg),
       "config_refs"           -> configRefObjs(cpg),
       "analysis_coverage"     -> coverageObj,
-      "auth_extraction"       -> authExtractionObj(cpg, securityRules)
+      "auth_extraction"       -> authExtractionObj(cpg, securityRules),
+      "auth_policies"         -> authPolicyObjs(cpg)
     )
 
     val target: Path = Paths.get(outDir)
@@ -1634,6 +1635,33 @@ object WadiExport {
     )
   }
 
+  /** Request-level policy from `auth-policy=` tags (§5.2.10 T6).
+    *
+    * CORS, CSRF and rejection handling: service-level facts that shape who can
+    * reach an endpoint without deciding which principal may. Published so the
+    * question is answerable, never merged into the endpoint's auth claim.
+    */
+  private def authPolicyObjs(cpg: Cpg): List[ujson.Obj] =
+    cpg.call
+      .where(_.tag.nameExact("auth-policy"))
+      .l
+      .sortBy(call => (lineOf(call.lineNumber), call.id))
+      .flatMap { call =>
+        call.tag.nameExact("auth-policy").value.l.sorted.map { encoded =>
+          val Array(kind, scope, detail) = encoded.split('|').take(2) :+
+            encoded.split('|').drop(2).mkString("|")
+          ujson.Obj(
+            "kind"   -> kind,
+            "scope"  -> scope,
+            "detail" -> detail,
+            "anchor" -> ujson.Obj(
+              "file" -> call.file.name.headOption.getOrElse("<unknown>"),
+              "line" -> lineOf(call.lineNumber)
+            )
+          )
+        }
+      }
+
   /** The chain a rule belongs to: its enclosing `SecurityFilterChain` bean or
     * `configure(HttpSecurity)` override, identified by method full name.
     */
@@ -1643,22 +1671,25 @@ object WadiExport {
     * chain declares one — rules inside it only apply to requests it matches.
     */
   private def chainPatternOf(cpg: Cpg, call: Call): ujson.Value = {
-    val enclosing = call.method.fullName
     // The modern DSL puts rules inside `authorizeHttpRequests(auth -> …)`, and
-    // javasrc2cpg lowers that lambda into its OWN method whose name keeps only
-    // the declaring type — so the chain's `securityMatcher`, which sits in the
-    // enclosing bean method, is not in the same method at all. Fall back to the
-    // declaring type for lambdas; several scopes on one type join rather than
-    // one being picked, since guessing which chain a scope belongs to would be
-    // exactly the fabrication this file avoids elsewhere.
-    val owner  = call.method.typeDecl.fullName.headOption
-    val lambda = call.method.name.startsWith("<lambda>")
+    // javasrc2cpg lowers that lambda into its OWN method — so the chain's
+    // `securityMatcher`, which sits in the enclosing bean method, is not in the
+    // same method at all.
+    //
+    // The predecessor fell back to the declaring TYPE, which pools every scope
+    // on that type (§5.2.10). Reproduced: three chains in one class gave an
+    // UNSCOPED chain its siblings' `"/fluent/**,/literal/**"`. That is a
+    // restriction invented where none exists, and it withdraws every endpoint
+    // outside the borrowed scope — the same over-approximation error the
+    // rule-scoping fix corrected in 0.6.0, one level up.
+    //
+    // A lambda is now attributed to the method that PASSED it, which
+    // javasrc2cpg makes recoverable: the argument's code is the lambda's own
+    // full name.
+    val home = chainHomeOf(cpg, call.method)
     val scopes = cpg.call
       .nameExact("securityMatcher", "antMatcher")
-      .filter(scope =>
-        scope.method.fullName == enclosing ||
-          (lambda && owner.contains(scope.method.typeDecl.fullName.headOption.getOrElse("")))
-      )
+      .filter(scope => chainHomeOf(cpg, scope.method) == home)
       .argument
       .argumentIndexGt(0)
       .isLiteral
@@ -1674,6 +1705,19 @@ object WadiExport {
       // one would be a guess. The worker treats it as chain-wide.
       case many => ujson.Str(many.mkString(","))
     }
+  }
+
+  /** The bean method a chain lives in, following a lambda to its caller. */
+  private def chainHomeOf(cpg: Cpg, method: Method): String = {
+    val name = method.fullName
+    if (!method.name.startsWith("<lambda>")) name
+    else
+      cpg.call
+        .filter(_.argument.argumentIndexGt(0).code.exists(_ == name))
+        .method
+        .fullName
+        .headOption
+        .getOrElse(name)
   }
 
   /** How the service authenticates, from `auth-mechanism=` tags (§5.2.9 D4).
