@@ -233,4 +233,35 @@ public class DegenerateController {
     private String other(int n) {
         return "other" + n;
     }
+
+    /** A catch that SWALLOWS — an empty handler body.
+     *
+     * No interior means the container router finds no entry and wires neither
+     * side, so the CATCH projected fully isolated: an unreachable handler,
+     * which on the map reads as "this error path cannot happen". */
+    @GetMapping("/degenerate/empty-catch/{n}")
+    public String emptyCatchBody(@PathVariable int n) {
+        try {
+            marker = 10 / n;
+        } catch (ArithmeticException e) {
+        }
+        return "swallowed";
+    }
+
+    /** A try whose body's TAIL leaves the method.
+     *
+     * javasrc2cpg's try-tail→handler approximation has no normal tail to start
+     * from — even though that very throw is what the handler catches — so the
+     * CATCH had no incoming edge. */
+    @GetMapping("/degenerate/throwing-try/{n}")
+    public String tryBodyEndsInThrow(@PathVariable int n) {
+        try {
+            if (n > 0) {
+                return "positive";
+            }
+            throw new IllegalArgumentException("non-positive");
+        } catch (IllegalArgumentException e) {
+            return "rejected";
+        }
+    }
 }

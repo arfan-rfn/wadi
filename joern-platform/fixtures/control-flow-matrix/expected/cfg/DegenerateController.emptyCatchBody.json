@@ -1,0 +1,56 @@
+{
+  "nodes": [
+    {
+      "key": "statement@244",
+      "kind": "statement",
+      "code": "try",
+      "line": 244,
+      "line_end": 246,
+      "construct_kind": "try"
+    },
+    {
+      "key": "statement@245",
+      "kind": "statement",
+      "code": "this.marker = 10 / n",
+      "line": 245,
+      "line_end": 245
+    },
+    {
+      "key": "statement@246",
+      "kind": "statement",
+      "code": "catch",
+      "line": 246,
+      "line_end": 246,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@248",
+      "kind": "return",
+      "code": "return \"swallowed\";",
+      "line": 248,
+      "line_end": 248
+    }
+  ],
+  "edges": [
+    {
+      "source": "statement@244",
+      "target": "statement@245",
+      "label": "flow"
+    },
+    {
+      "source": "statement@244",
+      "target": "statement@246",
+      "label": "exception"
+    },
+    {
+      "source": "statement@245",
+      "target": "return@248",
+      "label": "flow"
+    },
+    {
+      "source": "statement@246",
+      "target": "return@248",
+      "label": "flow"
+    }
+  ]
+}

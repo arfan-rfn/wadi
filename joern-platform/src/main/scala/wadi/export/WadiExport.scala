@@ -575,6 +575,7 @@ object WadiExport {
     semantics.routeContainers()
     semantics.labelSwitchEdges()
     semantics.labelExpressionMatchEdges()
+    semantics.wireOrphanHandlers()
     semantics.fixJumpEdges()
 
     ujson.Obj(
@@ -782,6 +783,55 @@ object WadiExport {
         labels.remove(edge)
       }
     }
+
+    /** Every handler is reachable from its try, and an empty handler still
+      * continues (§5.2.8, recorded 2026-08-05).
+      *
+      * The normal path leans on javasrc2cpg's try-tail→handler approximation,
+      * which `routeContainers` relabels `exception`. Two ordinary shapes leave
+      * that approximation with nothing to say, and both projected a CATCH with
+      * no incoming edge — an unreachable handler, which on the map reads as
+      * "this error path cannot happen":
+      *
+      *   - an EMPTY catch body (`catch (Exception e) { }`, a swallow) has no
+      *     interior, so the container router finds no entry and wires neither
+      *     side; the CATCH is fully isolated;
+      *   - a try body whose TAIL leaves the method (`throw` / `return` as the
+      *     last statement) has no normal tail for the edge to start from, even
+      *     though that very throw is what the handler catches.
+      *
+      * Rather than teach the approximation two more cases, the gap is closed by
+      * its invariant: a handler that ended up with no incoming edge gets one
+      * from its try, and a handler with no outgoing edge continues where the
+      * try does. Runs AFTER the routers, so it only ever fills a hole — a
+      * handler they wired correctly is left untouched.
+      */
+    def wireOrphanHandlers(): Unit =
+      controlStructures(Set("TRY")).foreach { tryS =>
+        val handlers = tryS.astChildren.l.collect {
+          case cs: ControlStructure
+              if HandlerStructureTypes.contains(cs.controlStructureType) &&
+                statementIds.contains(cs.id) =>
+            cs
+        }
+        handlers.filter(_.controlStructureType == "CATCH").foreach { handler =>
+          if (!edges.exists(_._2 == handler.id)) {
+            val edge = (tryS.id, handler.id)
+            edges += edge
+            labels(edge) = "exception"
+          }
+        }
+        handlers.foreach { handler =>
+          if (!edges.exists(_._1 == handler.id)) {
+            normalCompletionTarget(tryS).foreach { case (target, isBack) =>
+              val edge = (handler.id, target)
+              edges += edge
+              labels.getOrElseUpdate(edge, "flow")
+              if (isBack) backEdges += edge
+            }
+          }
+        }
+      }
 
     /** An empty try body has no tail for javasrc2cpg's try-tail→handler
       * approximation to start from and no interior to enter, so the whole

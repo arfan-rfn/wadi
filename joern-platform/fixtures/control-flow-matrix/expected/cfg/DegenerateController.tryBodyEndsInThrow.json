@@ -1,0 +1,82 @@
+{
+  "nodes": [
+    {
+      "key": "statement@258",
+      "kind": "statement",
+      "code": "try",
+      "line": 258,
+      "line_end": 264,
+      "construct_kind": "try"
+    },
+    {
+      "key": "branch@259",
+      "kind": "branch",
+      "code": "if (n > 0)",
+      "line": 259,
+      "line_end": 260,
+      "construct_kind": "if",
+      "condition_code": "n > 0"
+    },
+    {
+      "key": "return@260",
+      "kind": "return",
+      "code": "return \"positive\";",
+      "line": 260,
+      "line_end": 260
+    },
+    {
+      "key": "statement@262",
+      "kind": "statement",
+      "code": "throw new IllegalArgumentException(\"non-positive\");",
+      "line": 262,
+      "line_end": 262,
+      "construct_kind": "throw",
+      "call": {
+        "callee": "java.lang.IllegalArgumentException.<init>",
+        "resolved": false
+      }
+    },
+    {
+      "key": "statement@263",
+      "kind": "statement",
+      "code": "catch",
+      "line": 263,
+      "line_end": 264,
+      "construct_kind": "catch"
+    },
+    {
+      "key": "return@264",
+      "kind": "return",
+      "code": "return \"rejected\";",
+      "line": 264,
+      "line_end": 264
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@259",
+      "target": "return@260",
+      "label": "true"
+    },
+    {
+      "source": "branch@259",
+      "target": "statement@262",
+      "label": "false"
+    },
+    {
+      "source": "statement@258",
+      "target": "branch@259",
+      "label": "flow"
+    },
+    {
+      "source": "statement@258",
+      "target": "statement@263",
+      "label": "exception"
+    },
+    {
+      "source": "statement@263",
+      "target": "return@264",
+      "label": "flow"
+    }
+  ]
+}
