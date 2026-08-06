@@ -399,10 +399,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                     kept {collision.kept_handler}
                   </p>
                   {(collision.dropped_handlers ?? []).map((handler) => (
-                    <p
-                      key={handler}
-                      className="font-mono text-2xs text-warn"
-                    >
+                    <p key={handler} className="font-mono text-2xs text-warn">
                       dropped {handler}
                     </p>
                   ))}

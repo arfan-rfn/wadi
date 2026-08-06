@@ -35,7 +35,9 @@ describe("density preference", () => {
     // Comfortable is the `:root` baseline, so there is exactly one override to
     // read rather than two competing states.
     applyDensity("compact")
-    expect(document.documentElement.getAttribute("data-density")).toBe("compact")
+    expect(document.documentElement.getAttribute("data-density")).toBe(
+      "compact"
+    )
     applyDensity("comfortable")
     expect(document.documentElement.hasAttribute("data-density")).toBe(false)
   })
@@ -43,7 +45,9 @@ describe("density preference", () => {
   it("the pre-paint script stamps compact and survives blocked storage", () => {
     window.localStorage.setItem("wadi.density", "compact")
     new Function(DENSITY_INIT_SCRIPT)()
-    expect(document.documentElement.getAttribute("data-density")).toBe("compact")
+    expect(document.documentElement.getAttribute("data-density")).toBe(
+      "compact"
+    )
 
     // The script is wrapped in try/catch precisely because localStorage throws
     // outright in some privacy modes; a themed page must still render.

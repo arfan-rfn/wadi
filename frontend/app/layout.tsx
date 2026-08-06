@@ -46,9 +46,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
               first frame is always comfortable and a compact reader watches
               every row snap shorter on load — the same flash next-themes
               solves the same way. */}
-          <script
-            dangerouslySetInnerHTML={{ __html: DENSITY_INIT_SCRIPT }}
-          />
+          <script dangerouslySetInnerHTML={{ __html: DENSITY_INIT_SCRIPT }} />
         </head>
         <body
           className={`min-h-screen bg-background font-sans antialiased ${fontSans.variable} ${fontMono.variable}`}

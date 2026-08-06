@@ -290,9 +290,7 @@ export function EndpointPeek({
                     <p
                       className={cn(
                         "text-2xs",
-                        note.incomplete
-                          ? "text-warn"
-                          : "text-muted-foreground"
+                        note.incomplete ? "text-warn" : "text-muted-foreground"
                       )}
                     >
                       {note.text}

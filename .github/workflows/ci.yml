@@ -104,19 +104,13 @@ jobs:
           cd frontend && npm ci --no-audit --no-fund && npm run generate-types
       - name: Generated types are not stale (§7)
         run: git diff --exit-code frontend/lib/generated/
-      - name: Lint + format
-        working-directory: frontend
-        run: |
-          npm run lint
-          npm run format:check
-      - name: Typecheck + build
-        working-directory: frontend
-        run: |
-          npx tsc --noEmit
-          npm run build
-      - name: Component tests (M6 honesty states)
-        working-directory: frontend
-        run: npm test
+      # Delegated to the Makefile so the local gate and CI are the SAME list.
+      # When they were two lists they drifted twice: both times the frontend
+      # passed typecheck + lint + tests + build locally and failed CI on
+      # Prettier, which nothing local ran. `make verify-frontend` is now the
+      # one command, and it is this step.
+      - name: Lint, format, typecheck, build, tests
+        run: make verify-frontend
 
   e2e:
     name: vertical-slice e2e (real Joern)

@@ -6,13 +6,8 @@
 // These render INLINE inside `AppHeader` rather than owning a bar of their
 // own: two stacked chrome rows cost 7rem before any content and made the
 // reader correlate two lines to know what they were looking at.
-import {
-  ChevronsUpDown,
-  Database,
-  GitCommitHorizontal,
-} from "lucide-react"
-
 import { format } from "date-fns"
+import { ChevronsUpDown, Database, GitCommitHorizontal } from "lucide-react"
 
 import type { Snapshot, System } from "@/lib/wadi/api"
 import { Badge } from "@/components/ui/badge"
@@ -20,9 +15,9 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuGroup,
   DropdownMenuGroupLabel,
+  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -86,7 +81,11 @@ export function ScopeBar(props: ScopeBarProps) {
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button variant="ghost" size="sm" className="gap-2 px-2 font-medium" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2 px-2 font-medium"
+            />
           }
         >
           <Database className="size-3.5 text-muted-foreground" />

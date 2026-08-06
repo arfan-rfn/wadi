@@ -18,9 +18,8 @@ import {
 import { cn } from "@/lib/utils"
 import type { GoverningCondition } from "@/lib/wadi/conditions"
 import { conditionLabel } from "@/lib/wadi/conditions"
-import { unopenableCopy } from "@/lib/wadi/unopenable"
-
 import { NODE_BOX } from "@/lib/wadi/flow-lanes"
+import { unopenableCopy } from "@/lib/wadi/unopenable"
 
 import { NodeShell, useFlowActions } from "../flow-chrome"
 

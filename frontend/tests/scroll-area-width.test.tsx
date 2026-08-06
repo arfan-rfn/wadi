@@ -23,7 +23,9 @@ import { describe, expect, it } from "vitest"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 function viewportOf(container: HTMLElement): HTMLElement {
-  const viewport = container.querySelector<HTMLElement>('[data-id$="-viewport"]')
+  const viewport = container.querySelector<HTMLElement>(
+    '[data-id$="-viewport"]'
+  )
   if (!viewport) throw new Error("no scroll-area viewport rendered")
   return viewport
 }

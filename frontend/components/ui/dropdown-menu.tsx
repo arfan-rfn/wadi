@@ -76,7 +76,12 @@ const DropdownMenuSubTrigger = React.forwardRef<
 >(({ className, inset, children, ...props }, ref) => (
   <MenuPrimitive.SubmenuTrigger
     ref={ref}
-    className={cn(itemClass, "data-[popup-open]:bg-accent", inset && "pl-8", className)}
+    className={cn(
+      itemClass,
+      "data-[popup-open]:bg-accent",
+      inset && "pl-8",
+      className
+    )}
     {...props}
   >
     {children}
@@ -91,7 +96,11 @@ const DropdownMenuSubContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <MenuPrimitive.Portal>
     <MenuPrimitive.Positioner className="z-50" sideOffset={4}>
-      <MenuPrimitive.Popup ref={ref} className={cn(popupClass, className)} {...props} />
+      <MenuPrimitive.Popup
+        ref={ref}
+        className={cn(popupClass, className)}
+        {...props}
+      />
     </MenuPrimitive.Positioner>
   </MenuPrimitive.Portal>
 ))
@@ -113,7 +122,11 @@ const DropdownMenuContent = React.forwardRef<
       sideOffset={sideOffset}
       alignOffset={alignOffset}
     >
-      <MenuPrimitive.Popup ref={ref} className={cn(popupClass, className)} {...props} />
+      <MenuPrimitive.Popup
+        ref={ref}
+        className={cn(popupClass, className)}
+        {...props}
+      />
     </MenuPrimitive.Positioner>
   </MenuPrimitive.Portal>
 ))
@@ -217,7 +230,11 @@ const DropdownMenuLabel = React.forwardRef<
   HTMLDivElement,
   React.ComponentPropsWithoutRef<"div"> & { inset?: boolean }
 >(({ className, inset, ...props }, ref) => (
-  <div ref={ref} className={cn(labelClass, inset && "pl-8", className)} {...props} />
+  <div
+    ref={ref}
+    className={cn(labelClass, inset && "pl-8", className)}
+    {...props}
+  />
 ))
 DropdownMenuLabel.displayName = "DropdownMenuLabel"
 

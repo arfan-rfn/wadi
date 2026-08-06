@@ -65,7 +65,9 @@ function RootResolver() {
     return (
       <EmptyState className="p-8">
         No systems yet — run{" "}
-        <code className="rounded-sm bg-muted px-1 font-mono">wadi analyze .</code>{" "}
+        <code className="rounded-sm bg-muted px-1 font-mono">
+          wadi analyze .
+        </code>{" "}
         to create the first snapshot.
       </EmptyState>
     )
@@ -76,7 +78,9 @@ function RootResolver() {
         {requestedSystem
           ? "This system has no snapshots yet — run "
           : "No snapshots yet in any system — run "}
-        <code className="rounded-sm bg-muted px-1 font-mono">wadi analyze .</code>
+        <code className="rounded-sm bg-muted px-1 font-mono">
+          wadi analyze .
+        </code>
       </EmptyState>
     )
   }

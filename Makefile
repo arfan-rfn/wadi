@@ -37,6 +37,26 @@ schema: ## Export JSON Schemas from wadi-contracts and regenerate frontend TS ty
 		echo "frontend/node_modules missing — run 'npm install' in frontend/ to regenerate TS types"; \
 	fi
 
+verify-frontend: ## Everything CI's frontend job checks, in CI's order
+	# The single source of truth for "is the frontend green". `.github/workflows/ci.yml`
+	# invokes THIS target, so the list cannot drift from what CI enforces.
+	#
+	# It exists because it drifted twice. Running typecheck + lint + tests +
+	# build locally reads like a complete gate and is not: CI also enforces
+	# Prettier and generated-type freshness, and both have broken master —
+	# 0.7.0 shipped a "Prettier, which /ship never ran" fix, and the 0.7.4
+	# release repeated it exactly. Remembering was never the missing piece;
+	# one command was.
+	cd frontend && npm run lint
+	cd frontend && npm run format:check
+	cd frontend && npx tsc --noEmit
+	cd frontend && npm run build
+	cd frontend && npm test
+
+verify-types-fresh: ## Generated TS types match the contracts (§7)
+	$(MAKE) schema
+	git diff --exit-code frontend/lib/generated/
+
 up: ## Start the local stack (docker compose, project name 'wadi')
 	docker compose -p wadi -f infra/docker-compose.yml up -d
 

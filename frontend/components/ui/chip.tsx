@@ -19,8 +19,7 @@ const chipVariants = cva(
       variant: {
         outline: "text-muted-foreground",
         unknown: "border-dashed border-destructive/60 text-destructive",
-        condition:
-          "border-warn/40 bg-warn/5 text-warn",
+        condition: "border-warn/40 bg-warn/5 text-warn",
         mono: "font-mono text-muted-foreground",
       },
     },

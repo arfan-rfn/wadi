@@ -3,7 +3,6 @@
 // The density control (§11 Phase 2.10). Sits beside the theme toggle because
 // it is the same KIND of choice: how this reader wants to look at the app,
 // not what the app is showing them.
-
 import { useEffect, useState } from "react"
 import { Rows2, Rows3 } from "lucide-react"
 
@@ -38,7 +37,9 @@ export function DensityToggle({ className }: { className?: string }) {
 
   const compact = mounted && density === "compact"
   const Icon = compact ? Rows3 : Rows2
-  const label = compact ? "Switch to comfortable rows" : "Switch to compact rows"
+  const label = compact
+    ? "Switch to comfortable rows"
+    : "Switch to compact rows"
 
   return (
     <button

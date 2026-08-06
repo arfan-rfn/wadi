@@ -12,7 +12,6 @@ import { Globe, HelpCircle, Server } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { GoverningCondition } from "@/lib/wadi/conditions"
 import { conditionLabel } from "@/lib/wadi/conditions"
-
 import { NODE_BOX } from "@/lib/wadi/flow-lanes"
 
 import { NodeShell, useFlowActions } from "../flow-chrome"
