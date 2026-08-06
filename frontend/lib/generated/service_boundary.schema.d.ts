@@ -39,22 +39,41 @@ export type MethodSignature = string
  */
 export type AsyncRoots = AsyncRoot[]
 /**
- * Path of the build root relative to the repo root ('.' = root)
+ * §5.2.10 independent-oracle findings: auth constructs the source names that the export did not carry. None = never checked (library, extraction failed, pre-1.17 snapshot); [] = checked and clean — never conflated (P10)
  */
-export type BuildRoot = string
+export type AuthExtractionGaps = AuthExtractionGap[] | null
 /**
- * e.g. 'maven', 'gradle'
+ * §5.2.10 auth-extraction gap codes — the independent oracle's findings.
+ *
+ * ``AuthCoverageSection`` counts what the auth layer *emitted*, so it can
+ * only see enforcement wadi already read; a construct dropped before
+ * emission contributes to none of its counters and leaves the endpoint
+ * looking cleanly authenticated. That is how 365 train-ticket-aitest
+ * endpoints published a confident wrong claim while the tracker read zero.
+ *
+ * These codes come from a second, deliberately dumb reading of the SOURCE
+ * TEXT that shares no code path with the CPG — so a gap here means "the file
+ * says something the graph did not", which no emission-derived counter can
+ * express. Never fatal: a gap is a queryable fact about how far to trust the
+ * auth answer (P10).
+ *
+ * An enum rather than a string registry (§7): pyright catches producer /
+ * registry drift in CI, which a runtime validator could only catch on a
+ * user's repository.
  */
-export type BuildSystem = string
+export type AuthGapCode =
+  | "unemitted-access-site"
+  | "unread-security-config"
+  | "unresolved-scope"
+  | "reactive-chain"
 /**
- * §5.2.8 M2 structural-invariant violations across this service's method CFGs. None = never checked (library, extraction failed, pre-1.8 snapshot); [] = checked and clean — never conflated (P10)
- */
-export type CfgAnomalies = CfgAnomaly[] | null
-export type Code = string
-/**
- * Occurrences across the service's methods
+ * Occurrences across the service's sources
  */
 export type Count = number
+/**
+ * What the oracle saw versus what the export carried
+ */
+export type Detail = string | null
 /**
  * Up to 5 example sites — examples, never the exhaustive list
  *
@@ -68,10 +87,98 @@ export type SampleSites =
   | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
   | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
 /**
- * HTTP client libraries detected by import scan (§5.4.2 census, KNOWN_CLIENT_LIBRARIES vocabulary). Presence facts only — an import is not a call (P10)
+ * Path of the build root relative to the repo root ('.' = root)
  */
-export type ClientLibraries = string[]
+export type BuildRoot = string
+/**
+ * e.g. 'maven', 'gradle'
+ */
+export type BuildSystem = string
+/**
+ * §5.2.8 M2 structural-invariant violations across this service's method CFGs. None = never checked (library, extraction failed, pre-1.8 snapshot); [] = checked and clean — never conflated (P10)
+ */
+export type CfgAnomalies = CfgAnomaly[] | null
+/**
+ * §5.2.8 M2 structural-invariant violation codes.
+ *
+ * Evaluated against the RAW exported CFG of every method on every snapshot —
+ * before the assembler's synthetic entry/exit patching, which would make
+ * reachability invariants vacuously true. Additive changes bump
+ * ``SCHEMA_VERSION`` minor.
+ *
+ * An enum rather than a string registry (§7, recorded 2026-08-05): pyright
+ * catches producer/registry drift in CI, which a runtime validator could
+ * only catch on a user's repository.
+ */
+export type CfgAnomalyCode =
+  | "disconnected-node"
+  | "branch-arity"
+  | "unlabeled-arm"
+  | "loop-no-back-edge"
+  | "dangling-edge"
+  | "exit-unreachable"
+/**
+ * Occurrences across the service's methods
+ */
+export type Count1 = number
+/**
+ * Up to 5 example sites — examples, never the exhaustive list
+ *
+ * @maxItems 5
+ */
+export type SampleSites1 =
+  | []
+  | [SourceAnchor]
+  | [SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+  | [SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor, SourceAnchor]
+/**
+ * Client-library census vocabulary (§5.4.2).
+ *
+ * The worker detects these by deterministic import scan; presence is a fact,
+ * call counts are not claimed (an import is not a call — P10). See
+ * ``MODELLED_CLIENT_LIBRARIES`` for the subset wadi's sink passes model.
+ */
+export type ClientLibrary =
+  | "resttemplate"
+  | "webclient"
+  | "feign"
+  | "restclient"
+  | "http-interface"
+  | "jdk-httpclient"
+  | "okhttp"
+  | "retrofit"
+  | "apache-httpclient"
+  | "unirest"
+/**
+ * HTTP client libraries detected by import scan (§5.4.2 census, ClientLibrary vocabulary). Presence facts only — an import is not a call (P10)
+ */
+export type ClientLibraries = ClientLibrary[]
 export type CreatedAt = string
+/**
+ * Handler signatures whose endpoints were lost to the collision
+ *
+ * @minItems 1
+ */
+export type DroppedHandlers = [string, ...string[]]
+/**
+ * The id both endpoints derived
+ */
+export type EndpointId = string
+export type HttpMethod = string
+/**
+ * Handler signature of the endpoint that was stored
+ */
+export type KeptHandler = string
+/**
+ * The simplified URI they collapsed onto
+ */
+export type Uri = string
+/**
+ * Endpoints of this service that derived the same content-derived id and so could not all be stored (§7). Expected empty; non-empty means endpoints were dropped
+ */
+export type EndpointCollisions = EndpointCollision[]
 /**
  * Set when this service's CPG extraction failed (§5.2.6 per-service isolation): the error, recorded as a queryable fact (P10). The service then has no endpoints/calls — absence with a stated cause, never silence
  */
@@ -142,11 +249,47 @@ export type Ports = number[]
  */
 export type ServerPort = number | null
 /**
+ * Occurrences of this value
+ */
+export type Count2 = number
+/**
+ * Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'
+ */
+export type Registry = string
+/**
+ * Owning service; None on a snapshot-level artifact
+ */
+export type ServiceId = string | null
+/**
+ * The raw unrecognized value, verbatim
+ */
+export type Value = string
+/**
+ * Diagnostic facts whose vocabulary this build does not recognize (§7). Expected empty; non-empty means version drift, never a property of the analyzed code
+ */
+export type QuarantinedFacts = QuarantinedFact[]
+/**
  * Normalized repo source this service lives in
  */
 export type Repo = string
+/**
+ * Origins, or the source text of the decision
+ */
+export type Detail1 = string
+/**
+ * Registry kind, e.g. 'cors' (tags.py)
+ */
+export type Kind1 = string
+/**
+ * Path scope; '{?}' = read but unresolvable
+ */
+export type Scope = string
+/**
+ * CORS/CSRF/rejection-handling policy declared by this service (§5.2.10 T6). Never merged into any endpoint's auth claim — these decide which ORIGIN or request shape may reach the service, not which principal. Empty also for pre-1.20 snapshots: absence of the fact, not proof of none
+ */
+export type RequestPolicies = RequestPolicy[]
 export type SchemaVersion = string
-export type ServiceId = string
+export type ServiceId1 = string
 export type SnapshotId = string
 
 /**
@@ -161,20 +304,24 @@ export interface ServiceBoundary {
    */
   analysis_coverage?: AnalysisCoverage | null
   async_roots?: AsyncRoots
+  auth_extraction_gaps?: AuthExtractionGaps
   build_root: BuildRoot
   build_system: BuildSystem
   cfg_anomalies?: CfgAnomalies
   client_libraries?: ClientLibraries
   created_at?: CreatedAt
+  endpoint_collisions?: EndpointCollisions
   extraction_error?: ExtractionError
   kind?: ServiceKind
   languages: Languages
   library_roots?: LibraryRoots
   name: Name
   network?: NetworkIdentity
+  quarantined_facts?: QuarantinedFacts
   repo: Repo
+  request_policies?: RequestPolicies
   schema_version?: SchemaVersion
-  service_id: ServiceId
+  service_id: ServiceId1
   snapshot_id: SnapshotId
 }
 /**
@@ -219,15 +366,60 @@ export interface SourceAnchor {
   variant?: SourceVariant
 }
 /**
+ * One auth-extraction gap family on a service (§5.2.10, schema 1.17.0).
+ *
+ * The independent oracle's finding: what the SOURCE TEXT says the auth layer
+ * should have read, minus what it emitted. Deliberately separate from
+ * ``EndpointAuth.evidence`` — evidence records enforcement wadi *found*,
+ * while this records enforcement it appears to have *missed*, and folding
+ * the second into the first would make a miss indistinguishable from a
+ * clean service.
+ */
+export interface AuthExtractionGap {
+  code: AuthGapCode
+  count: Count
+  detail?: Detail
+  sample_sites?: SampleSites
+}
+/**
  * One structural-invariant violation family on a service's CFGs
  * (§5.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real
  * repos, and a violated invariant is a queryable fact about how much the
  * graph can be trusted (P10).
  */
 export interface CfgAnomaly {
-  code: Code
-  count: Count
-  sample_sites?: SampleSites
+  code: CfgAnomalyCode
+  count: Count1
+  sample_sites?: SampleSites1
+}
+/**
+ * Two endpoints of one service derived the SAME content-derived id
+ * (§7, recorded 2026-08-05, schema 1.18.0).
+ *
+ * Endpoint ids are ``hash(service, verb, simplified_uri)`` and the store
+ * upserts on ``(snapshot_id, service_id, id)``, so a collision does not
+ * merge — the second row *replaces* the first and the endpoint is gone. That
+ * is how three handlers of a real controller vanished with every honesty
+ * surface reading clean: the loss happens at the storage key, downstream of
+ * everything that counts.
+ *
+ * Recorded as a fact rather than resolved silently, because the alternatives
+ * are both worse. Failing the service would cost a whole map to one duplicate
+ * pair; picking a winner quietly is exactly the behaviour that hid the bug.
+ * A deterministic winner is kept so the snapshot stays reproducible, and the
+ * losers are named here with their handlers so the cause is one click away.
+ *
+ * **Cause-independent by design.** The 2026-08-05 instance came from URI
+ * truncation, but any future defect that makes two URIs equal — a bad
+ * normalizer, an over-eager simplification — lands here too. Expected empty
+ * in healthy operation; non-empty means endpoints were dropped.
+ */
+export interface EndpointCollision {
+  dropped_handlers: DroppedHandlers
+  endpoint_id: EndpointId
+  http_method: HttpMethod
+  kept_handler: KeptHandler
+  uri: Uri
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.
@@ -269,4 +461,49 @@ export interface GatewayRoute {
   route_id?: RouteId
   strip_prefix?: StripPrefix
   target_uri: TargetUri
+}
+/**
+ * A diagnostic fact whose vocabulary this build does not recognize
+ * (§7, recorded 2026-08-05, schema 1.16.0).
+ *
+ * Never fatal and never dropped. Diagnostic facts describe how well analysis
+ * read the code, not the code itself, so an unreadable one must not cost the
+ * map — but silently discarding it would be the exact gap the registries
+ * exist to prevent (P10, turned on wadi's own pipeline: a self-observation we
+ * cannot parse is itself a queryable fact).
+ *
+ * Expected **empty in all healthy operation**, unlike ``cfg_anomalies``,
+ * which is expected non-zero on real code forever. That difference is why it
+ * has its own home rather than sharing one: an always-zero signal folded into
+ * an always-noisy one stops being a signal. Non-empty on the fixtures or
+ * benchmarks fails CI, while a user's run only ever loses the one footnote.
+ */
+export interface QuarantinedFact {
+  count?: Count2
+  registry: Registry
+  /**
+   * One example site, when the rejected fact carried one
+   */
+  sample_anchor?: SourceAnchor | null
+  service_id?: ServiceId
+  value: Value
+}
+/**
+ * Request-level policy that gates reach without deciding principal (§5.2.10 T6).
+ *
+ * CORS, CSRF and rejection handling — the third category a ``SecurityConfig``
+ * declares. A service-level fact by nature: these are configured once per
+ * chain and shape who can reach the service at all.
+ *
+ * Deliberately NOT an input to ``EndpointAuth``. A CORS policy decides which
+ * ORIGIN may call and CSRF which requests need a token; neither decides which
+ * PRINCIPAL may, so merging either into ``authenticated`` would answer a
+ * different question than the one asked. Published so the question becomes
+ * answerable at all — absent facts made present, never facts made wrong.
+ */
+export interface RequestPolicy {
+  anchor: SourceAnchor
+  detail: Detail1
+  kind: Kind1
+  scope: Scope
 }

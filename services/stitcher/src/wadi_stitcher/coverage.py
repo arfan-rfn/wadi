@@ -15,8 +15,11 @@ from wadi_contracts import (
     CoverageReport,
     CoverageTotals,
     Endpoint,
+    EndpointCollision,
     ExternalApiEntry,
     PlaceholderEntry,
+    QuarantinedFact,
+    Reachability,
     RemoteCall,
     ServiceBoundary,
     ServiceCfgAnomalyEntry,
@@ -117,7 +120,46 @@ def build_cfg_anomalies(boundaries: Sequence[ServiceBoundary]) -> CfgAnomalySect
     return CfgAnomalySection(total_by_code=dict(sorted(total_by_code.items())), services=entries)
 
 
-def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
+def build_quarantined_facts(boundaries: Sequence[ServiceBoundary]) -> list[QuarantinedFact]:
+    """§7: roll up diagnostic facts whose vocabulary this build cannot read.
+
+    Expected empty. Non-empty means a producer emitted vocabulary its registry
+    does not carry — version drift between the pack, the contracts, and the
+    stored artifact — never a property of the analyzed code. Identical values
+    from one service fold into one entry so the count means occurrences, not
+    rows. Libraries are included: a library boundary carries a census too, and
+    unreadable vocabulary is a fact about wadi regardless of what emitted it.
+    """
+    folded: dict[tuple[str, str, str | None], QuarantinedFact] = {}
+    for boundary in sorted(boundaries, key=lambda b: (b.name, b.service_id)):
+        for fact in boundary.quarantined_facts:
+            key = (fact.registry, fact.value, fact.service_id)
+            if (existing := folded.get(key)) is None:
+                folded[key] = fact
+            else:
+                folded[key] = existing.model_copy(update={"count": existing.count + fact.count})
+    return [folded[key] for key in sorted(folded, key=lambda k: (k[0], k[1], k[2] or ""))]
+
+
+def build_endpoint_collisions(
+    boundaries: Sequence[ServiceBoundary],
+) -> list[EndpointCollision]:
+    """§7: endpoints that could not all be stored because their ids collided.
+
+    Expected empty. Non-empty means the endpoint inventory — product goal 1 —
+    is missing routes the analysis actually found, which no other counter in
+    this report can express: the loss happens at the storage key, downstream
+    of everything else here.
+    """
+    collisions: list[EndpointCollision] = []
+    for boundary in sorted(boundaries, key=lambda b: (b.name, b.service_id)):
+        collisions.extend(boundary.endpoint_collisions)
+    return collisions
+
+
+def build_auth_coverage(
+    endpoints: Sequence[Endpoint], boundaries: Sequence[ServiceBoundary] = ()
+) -> AuthCoverageSection:
     """Snapshot rollup of what the auth layer could and could not read (§5.2.9).
 
     The standing tracking mechanism for auth blind spots, playing the role
@@ -126,6 +168,14 @@ def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
     is scheduled by measured demand. `withheld` and `no_evidence` are split
     because they call for opposite responses — one is a gap in wadi, the other
     a possible hole in the system.
+
+    *Corrected 2026-08-05 (§5.2.10).* Every counter below except
+    ``extraction_gaps`` is derived from evidence the auth layer EMITTED, which
+    made this section blind to the one failure it was built to catch: a
+    construct dropped before emission raises none of them and leaves its
+    endpoint reading as cleanly authenticated. ``extraction_gaps`` carries the
+    independent oracle's findings from the service boundaries, so a miss is
+    countable rather than invisible.
     """
     unread_by_kind: dict[str, int] = {}
     authenticated = unauthenticated = withheld = no_evidence = 0
@@ -141,6 +191,28 @@ def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
             withheld += 1
         else:
             no_evidence += 1
+    extraction_gaps: dict[str, int] = {}
+    # §5.2.10 T6: counted apart from every claim counter — these gate REACH,
+    # not principal, so they must never move an authenticated/withheld number.
+    request_policies: dict[str, int] = {}
+    for boundary in boundaries:
+        for gap in boundary.auth_extraction_gaps or ():
+            extraction_gaps[gap.code.value] = extraction_gaps.get(gap.code.value, 0) + gap.count
+        for policy in boundary.request_policies:
+            request_policies[policy.kind] = request_policies.get(policy.kind, 0) + 1
+    # §5.2.11 T6: a zero counter is ambiguous — wadi looked and found none, or
+    # the corpus never exercises the idiom and the zero proves nothing. Naming
+    # the second case stops `denied: 0` being read as "the denial path works".
+    exercised = {
+        "roles": any(e.auth.roles for e in endpoints),
+        "authorities": any(e.auth.authorities for e in endpoints),
+        "denied": any(e.auth.denied for e in endpoints),
+        "withheld": withheld > 0,
+        "no-evidence": no_evidence > 0,
+        "unread-enforcement": bool(unread_by_kind),
+        "request-policy": bool(request_policies),
+    }
+    unexercised = sorted(name for name, seen in exercised.items() if not seen)
     return AuthCoverageSection(
         endpoints=len(endpoints),
         authenticated=authenticated,
@@ -148,6 +220,9 @@ def build_auth_coverage(endpoints: Sequence[Endpoint]) -> AuthCoverageSection:
         withheld=withheld,
         no_evidence=no_evidence,
         unread_by_kind=dict(sorted(unread_by_kind.items())),
+        extraction_gaps=dict(sorted(extraction_gaps.items())),
+        request_policies=dict(sorted(request_policies.items())),
+        unexercised_vocabulary=unexercised,
     )
 
 
@@ -163,6 +238,8 @@ def build_coverage_report(
     analysis_coverage: AnalysisCoverageSection | None = None,
     cfg_anomalies: CfgAnomalySection | None = None,
     auth_coverage: AuthCoverageSection | None = None,
+    quarantined_facts: Sequence[QuarantinedFact] = (),
+    endpoint_collisions: Sequence[EndpointCollision] = (),
 ) -> CoverageReport:
     by_kind: dict[TargetKind, list[StitchedEdge]] = {kind: [] for kind in TargetKind}
     by_confidence: dict[str, int] = {}
@@ -211,6 +288,12 @@ def build_coverage_report(
     # Inventory facts (§5.2.5): excluded from matching by design, counted so
     # the exclusion is queryable. `call_sites` stays the stitchable population.
     unreachable_count = sum(1 for call in remote_calls if not call.reachable)
+    # §5.2.11 T2: of the excluded sites, the ones a startup/scheduled root DOES
+    # reach. Counting them together with dead code made real production traffic
+    # read as unwired.
+    async_rooted_count = sum(
+        1 for call in remote_calls if call.reachability is Reachability.ASYNC_ROOT
+    )
     suspected_count = sum(1 for call in remote_calls if call.reachable and call.suspected)
     stitchable_count = sum(1 for call in remote_calls if call.reachable and not call.suspected)
 
@@ -224,6 +307,7 @@ def build_coverage_report(
             placeholder=len(by_kind[TargetKind.PLACEHOLDER]),
             undetermined=len(by_kind[TargetKind.UNDETERMINED]),
             unreachable_call_sites=unreachable_count,
+            async_rooted_call_sites=async_rooted_count,
             suspected_call_sites=suspected_count,
             by_confidence=dict(sorted(by_confidence.items())),
         ),
@@ -236,4 +320,6 @@ def build_coverage_report(
         analysis_coverage=analysis_coverage,
         cfg_anomalies=cfg_anomalies,
         auth_coverage=auth_coverage,
+        quarantined_facts=list(quarantined_facts),
+        endpoint_collisions=list(endpoint_collisions),
     )

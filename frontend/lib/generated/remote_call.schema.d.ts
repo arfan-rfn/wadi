@@ -6,9 +6,13 @@
  */
 
 /**
- * How auth crosses this call, when statically visible: 'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence)
+ * How auth crosses this call, when statically visible: 'authorization-header' | 'feign-interceptor' (§5.1 token-propagation evidence). See `auth_propagation_state` for WHETHER it crosses at all
  */
 export type AuthPropagation = string | null
+/**
+ * Whether the caller's credentials cross this call (§5.2.11 T4). Refines `auth_propagation`: a named mechanism implies 'forwarded'
+ */
+export type TokenPropagation = "forwarded" | "not-forwarded" | "undetermined"
 export type CreatedAt = string
 /**
  * Raw slice evidence behind the recovered URL
@@ -27,7 +31,11 @@ export type Id1 = string
  */
 export type Signature = string
 /**
- * False = the call site exists but no endpoint-reachable path leads to it (dead/unwired code). Excluded from stitching by design; inventoried so the exclusion is queryable (§5.2.5)
+ * Which root reaches this call: endpoint | async-root | unreached (§5.2.11 T2). Refines `reachable`, never contradicts it
+ */
+export type Reachability = "endpoint" | "async-root" | "unreached"
+/**
+ * False = no ENDPOINT-reachable path leads here. Excluded from stitching by design; inventoried so the exclusion is queryable (§5.2.5). See `reachability` for which root reaches it — False alone does not mean dead
  */
 export type Reachable = boolean
 export type SchemaVersion = string
@@ -64,12 +72,14 @@ export type Confidence = "exact" | "high" | "heuristic" | "none"
  */
 export interface RemoteCall {
   auth_propagation?: AuthPropagation
+  auth_propagation_state?: TokenPropagation
   created_at?: CreatedAt
   evidence?: Evidence
   http_verb?: HttpMethod | null
   id: Id
   mechanism: Mechanism
   method: MethodRef
+  reachability?: Reachability
   reachable?: Reachable
   schema_version?: SchemaVersion
   service_id: ServiceId

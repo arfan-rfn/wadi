@@ -7,12 +7,14 @@ from wadi_contracts import (
     AuthEvidenceKind,
     AuthResolution,
     CfgAnomaly,
+    CfgAnomalyCode,
     Confidence,
     Endpoint,
     EndpointAuth,
     HttpMethod,
     MethodRef,
     Provenance,
+    Reachability,
     ServiceKind,
     SourceAnchor,
     StitchedEdge,
@@ -310,8 +312,8 @@ def test_cfg_anomalies_rollup_and_unchecked_services() -> None:
     noisy = make_service(snapshot, "services/noisy").model_copy(
         update={
             "cfg_anomalies": [
-                CfgAnomaly(code="disconnected-node", count=3, sample_sites=[anchor]),
-                CfgAnomaly(code="branch-arity", count=1),
+                CfgAnomaly(code=CfgAnomalyCode.DISCONNECTED_NODE, count=3, sample_sites=[anchor]),
+                CfgAnomaly(code=CfgAnomalyCode.BRANCH_ARITY, count=1),
             ]
         }
     )
@@ -404,3 +406,83 @@ class TestAuthCoverage:
         section = build_auth_coverage([])
         assert section.unread_by_kind == {}
         assert section.endpoints == 0
+
+
+def test_async_rooted_sites_are_split_out_of_the_unreachable_count() -> None:
+    """§5.2.11 T2: startup traffic is excluded from stitching, not dead.
+
+    Rolling both into one number is what made 430 real async roots on
+    train-ticket-aitest read as unwired code.
+    """
+    snapshot = make_snapshot(make_system())
+    caller = make_service(snapshot, "services/petstore")
+    calls = [
+        make_remote_call(snapshot, caller, url="http://a/1", line=1),
+        make_remote_call(
+            snapshot,
+            caller,
+            url="http://a/2",
+            line=2,
+            reachable=False,
+            reachability=Reachability.ASYNC_ROOT,
+        ),
+        make_remote_call(
+            snapshot,
+            caller,
+            url="http://a/3",
+            line=3,
+            reachable=False,
+            reachability=Reachability.UNREACHED,
+        ),
+    ]
+    report = build_coverage_report(
+        snapshot.id,
+        remote_calls=calls,
+        edges=[],
+        unresolved=[],
+        phonebook_conflicts=(),
+        placeholder_names={},
+    )
+    assert report.totals.unreachable_call_sites == 2
+    assert report.totals.async_rooted_call_sites == 1
+    assert report.totals.call_sites == 1
+
+
+def test_a_zero_says_whether_it_was_measured_or_never_exercised() -> None:
+    """§5.2.11 T6 — `denied: 0` is not evidence the denial path works.
+
+    On train-ticket-aitest `authorities`, `denied` and `withheld` all read 0.
+    Each is CORRECT — the corpus uses only hasAnyRole, has no denyAll route,
+    and every idiom in it is readable — but a reader cannot tell that from a
+    zero, and the role/authority split shipped in 0.6.0 is fixture-proven only.
+    """
+    snapshot = make_snapshot(make_system())
+    service = make_service(snapshot, "services/petstore")
+    # One plainly authenticated endpoint carrying a role and nothing else.
+    endpoint = make_endpoint(
+        snapshot,
+        service,
+        uri="/orders",
+        auth=EndpointAuth(
+            authenticated=True,
+            roles=["ADMIN"],
+            evidence=[
+                AuthEvidence(
+                    kind=AuthEvidenceKind.SECURITY_DSL,
+                    detail="/orders -> hasRole('ADMIN')",
+                    effect=AuthEffect.REQUIRE_ROLES,
+                    resolution=AuthResolution.RESOLVED,
+                    anchor=SourceAnchor(file="Sec.java", start_line=1, end_line=1),
+                )
+            ],
+        ),
+    )
+    section = build_auth_coverage([endpoint], [service])
+
+    assert section.authenticated == 1
+    # roles WERE exercised, so their presence is real evidence...
+    assert "roles" not in section.unexercised_vocabulary
+    # ...while these zeros are evidence of nothing, and say so.
+    assert "authorities" in section.unexercised_vocabulary
+    assert "denied" in section.unexercised_vocabulary
+    assert "withheld" in section.unexercised_vocabulary

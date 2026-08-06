@@ -41,10 +41,32 @@ export type Endpoints = number
 export type NoEvidence = number
 export type Unauthenticated = number
 /**
+ * Auth vocabulary this snapshot contains ZERO instances of (§5.2.11 T6). A zero counter is otherwise ambiguous: it may mean wadi looked and the system genuinely has none, or that this corpus never exercises the idiom and the zero is evidence of nothing. Naming the second case stops a reader taking `denied: 0` as proof the denial path works
+ */
+export type UnexercisedVocabulary = string[]
+/**
  * No claim because an in-scope guard could not be read
  */
 export type Withheld = number
-export type Code = string
+/**
+ * §5.2.8 M2 structural-invariant violation codes.
+ *
+ * Evaluated against the RAW exported CFG of every method on every snapshot —
+ * before the assembler's synthetic entry/exit patching, which would make
+ * reachability invariants vacuously true. Additive changes bump
+ * ``SCHEMA_VERSION`` minor.
+ *
+ * An enum rather than a string registry (§7, recorded 2026-08-05): pyright
+ * catches producer/registry drift in CI, which a runtime validator could
+ * only catch on a user's repository.
+ */
+export type CfgAnomalyCode =
+  | "disconnected-node"
+  | "branch-arity"
+  | "unlabeled-arm"
+  | "loop-no-back-edge"
+  | "dangling-edge"
+  | "exit-unreachable"
 /**
  * Occurrences across the service's methods
  */
@@ -92,6 +114,29 @@ export type ServiceId1 = string
  */
 export type Services1 = ServiceCfgAnomalyEntry[]
 export type CreatedAt = string
+/**
+ * Handler signatures whose endpoints were lost to the collision
+ *
+ * @minItems 1
+ */
+export type DroppedHandlers = [string, ...string[]]
+/**
+ * The id both endpoints derived
+ */
+export type EndpointId = string
+export type HttpMethod = string
+/**
+ * Handler signature of the endpoint that was stored
+ */
+export type KeptHandler = string
+/**
+ * The simplified URI they collapsed onto
+ */
+export type Uri = string
+/**
+ * Endpoints that derived the same content-derived id and so could not all be stored (§7, schema 1.18.0), rolled up across services. **Expected empty**: non-empty means the inventory is missing endpoints the analysis actually found — the loss happens at the storage key, downstream of every other counter here
+ */
+export type EndpointCollisions = EndpointCollision[]
 export type CallCount = number
 /**
  * @minItems 1
@@ -125,6 +170,26 @@ export type PlaceholderId = string
  */
 export type ResolvedVia = string
 export type Placeholders = PlaceholderEntry[]
+/**
+ * Occurrences of this value
+ */
+export type Count1 = number
+/**
+ * Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'
+ */
+export type Registry = string
+/**
+ * Owning service; None on a snapshot-level artifact
+ */
+export type ServiceId2 = string | null
+/**
+ * The raw unrecognized value, verbatim
+ */
+export type Value = string
+/**
+ * Diagnostic facts whose vocabulary this build does not recognize (§7, schema 1.16.0), rolled up across services. **Expected empty**: non-empty means version drift between a producer and its registry, never a property of the analyzed code. CI fails on non-empty for the fixtures and benchmarks; a user's run only loses the footnote
+ */
+export type QuarantinedFacts = QuarantinedFact[]
 export type SchemaVersion = string
 export type SnapshotId = string
 /**
@@ -132,6 +197,10 @@ export type SnapshotId = string
  */
 export type StaleHintIds = string[]
 export type Analyzed = number
+/**
+ * Subset of unreachable_call_sites reached from a NON-HTTP root (startup runner, scheduled task, listener). These really execute — they are not stitched because no request is behind them, not because they are dead (§5.2.11 T2)
+ */
+export type AsyncRootedCallSites = number
 /**
  * Distinct remote-call facts considered
  */
@@ -171,7 +240,7 @@ export type Reason = string
  */
 export type ReasonCode = string
 export type RemoteCallId = string
-export type ServiceId2 = string
+export type ServiceId3 = string
 export type Unresolved = UnresolvedCallEntry[]
 
 /**
@@ -196,10 +265,12 @@ export interface CoverageReport {
    */
   cfg_anomalies?: CfgAnomalySection | null
   created_at?: CreatedAt
+  endpoint_collisions?: EndpointCollisions
   external_apis?: ExternalApis
   low_confidence_edge_ids?: LowConfidenceEdgeIds
   phonebook_conflicts?: PhonebookConflicts
   placeholders?: Placeholders
+  quarantined_facts?: QuarantinedFacts
   schema_version?: SchemaVersion
   snapshot_id: SnapshotId
   stale_hint_ids?: StaleHintIds
@@ -245,10 +316,25 @@ export interface ServiceCoverageEntry {
 export interface AuthCoverageSection {
   authenticated?: Authenticated
   endpoints?: Endpoints
+  extraction_gaps?: ExtractionGaps
   no_evidence?: NoEvidence
+  request_policies?: RequestPolicies
   unauthenticated?: Unauthenticated
+  unexercised_vocabulary?: UnexercisedVocabulary
   unread_by_kind?: UnreadByKind
   withheld?: Withheld
+}
+/**
+ * §5.2.10: independent-oracle findings per AuthGapCode. Every other counter here is derived from evidence the auth layer EMITTED, so a construct dropped before emission is invisible to them — this is the one that can see a miss
+ */
+export interface ExtractionGaps {
+  [k: string]: number
+}
+/**
+ * §5.2.10 T6: CORS/CSRF/rejection-handling declarations per kind, across all services. Counted apart from every claim counter above because they gate REACH, not principal — a system with `csrf disabled` everywhere is a fact worth reading, and it changes none of the authenticated/withheld numbers
+ */
+export interface RequestPolicies {
+  [k: string]: number
 }
 /**
  * Enforcement points detected but not readable, counted per AuthEvidenceKind
@@ -286,7 +372,7 @@ export interface ServiceCfgAnomalyEntry {
  * graph can be trusted (P10).
  */
 export interface CfgAnomaly {
-  code: Code
+  code: CfgAnomalyCode
   count: Count
   sample_sites?: SampleSites
 }
@@ -310,6 +396,35 @@ export interface TotalByCode {
   [k: string]: number
 }
 /**
+ * Two endpoints of one service derived the SAME content-derived id
+ * (§7, recorded 2026-08-05, schema 1.18.0).
+ *
+ * Endpoint ids are ``hash(service, verb, simplified_uri)`` and the store
+ * upserts on ``(snapshot_id, service_id, id)``, so a collision does not
+ * merge — the second row *replaces* the first and the endpoint is gone. That
+ * is how three handlers of a real controller vanished with every honesty
+ * surface reading clean: the loss happens at the storage key, downstream of
+ * everything that counts.
+ *
+ * Recorded as a fact rather than resolved silently, because the alternatives
+ * are both worse. Failing the service would cost a whole map to one duplicate
+ * pair; picking a winner quietly is exactly the behaviour that hid the bug.
+ * A deterministic winner is kept so the snapshot stays reproducible, and the
+ * losers are named here with their handlers so the cause is one click away.
+ *
+ * **Cause-independent by design.** The 2026-08-05 instance came from URI
+ * truncation, but any future defect that makes two URIs equal — a bad
+ * normalizer, an over-eager simplification — lands here too. Expected empty
+ * in healthy operation; non-empty means endpoints were dropped.
+ */
+export interface EndpointCollision {
+  dropped_handlers: DroppedHandlers
+  endpoint_id: EndpointId
+  http_method: HttpMethod
+  kept_handler: KeptHandler
+  uri: Uri
+}
+/**
  * A real dependency on an address outside the analyzed system.
  */
 export interface ExternalApiEntry {
@@ -329,10 +444,37 @@ export interface PlaceholderEntry {
   resolved_via: ResolvedVia
 }
 /**
+ * A diagnostic fact whose vocabulary this build does not recognize
+ * (§7, recorded 2026-08-05, schema 1.16.0).
+ *
+ * Never fatal and never dropped. Diagnostic facts describe how well analysis
+ * read the code, not the code itself, so an unreadable one must not cost the
+ * map — but silently discarding it would be the exact gap the registries
+ * exist to prevent (P10, turned on wadi's own pipeline: a self-observation we
+ * cannot parse is itself a queryable fact).
+ *
+ * Expected **empty in all healthy operation**, unlike ``cfg_anomalies``,
+ * which is expected non-zero on real code forever. That difference is why it
+ * has its own home rather than sharing one: an always-zero signal folded into
+ * an always-noisy one stops being a signal. Non-empty on the fixtures or
+ * benchmarks fails CI, while a user's run only ever loses the one footnote.
+ */
+export interface QuarantinedFact {
+  count?: Count1
+  registry: Registry
+  /**
+   * One example site, when the rejected fact carried one
+   */
+  sample_anchor?: SourceAnchor | null
+  service_id?: ServiceId2
+  value: Value
+}
+/**
  * Aggregate counts for a snapshot's stitched graph.
  */
 export interface CoverageTotals {
   analyzed: Analyzed
+  async_rooted_call_sites?: AsyncRootedCallSites
   by_confidence?: ByConfidence
   call_sites: CallSites
   edges: Edges
@@ -371,6 +513,6 @@ export interface UnresolvedCallEntry {
   reason: Reason
   reason_code: ReasonCode
   remote_call_id: RemoteCallId
-  service_id: ServiceId2
+  service_id: ServiceId3
   site: SourceAnchor
 }

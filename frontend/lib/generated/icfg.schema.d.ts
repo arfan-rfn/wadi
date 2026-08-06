@@ -80,6 +80,9 @@ export type CalleeUnboundReason =
   | "third-party"
   | "ambiguous-overload"
   | "unresolved-receiver"
+  | "declared-not-bound"
+  | "not-declared"
+  | "unparseable-callee"
 export type Expression = string
 export type Name = string
 export type OperandOrigin = "payload" | "local" | "field" | "config" | "unknown"

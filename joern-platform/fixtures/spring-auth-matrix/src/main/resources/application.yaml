@@ -15,3 +15,21 @@ app:
           - "/config-driven/admin/**"
         roles:
           - "ADMIN"
+
+  matrix:
+    # Resolves the @Value pattern in Ss6PatternSourceChain. A placeholder that
+    # cannot be resolved must WITHHOLD rather than match nothing, so the
+    # resolvable case needs to exist here to prove the other half.
+    reports-path: "/ss6/patterns/reports"
+
+# The field-injected binding (§5.2.10 T3): 20 of 20 train-ticket-aitest
+# services inject their properties this way, and only the parameter-injected
+# form resolved before.
+security:
+  rules:
+    - patterns:
+        - "/ss6/local/open"
+      method: "GET"
+      permit-all: true
+    - patterns:
+        - "/ss6/local/admin"

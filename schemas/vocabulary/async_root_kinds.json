@@ -1,0 +1,14 @@
+{
+  "name": "async_root_kinds",
+  "schema_version": "1.21.0",
+  "values": [
+    "application-runner",
+    "bean",
+    "event-listener",
+    "framework-callback",
+    "jms-listener",
+    "kafka-listener",
+    "rabbit-listener",
+    "scheduled"
+  ]
+}

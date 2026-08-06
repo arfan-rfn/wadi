@@ -1,0 +1,39 @@
+{
+  "nodes": [
+    {
+      "key": "branch@103",
+      "kind": "branch",
+      "code": "if (n > 0 && new int[] { n }.length > 0)",
+      "line": 103,
+      "line_end": 104,
+      "construct_kind": "if",
+      "condition_code": "n > 0 && new int[] { n }.length > 0"
+    },
+    {
+      "key": "return@104",
+      "kind": "return",
+      "code": "return \"guarded\";",
+      "line": 104,
+      "line_end": 104
+    },
+    {
+      "key": "return@106",
+      "kind": "return",
+      "code": "return \"fell-through\";",
+      "line": 106,
+      "line_end": 106
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@103",
+      "target": "return@104",
+      "label": "true"
+    },
+    {
+      "source": "branch@103",
+      "target": "return@106",
+      "label": "false"
+    }
+  ]
+}

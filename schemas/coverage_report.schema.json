@@ -62,6 +62,14 @@
           "title": "Endpoints",
           "type": "integer"
         },
+        "extraction_gaps": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "\u00a75.2.10: independent-oracle findings per AuthGapCode. Every other counter here is derived from evidence the auth layer EMITTED, so a construct dropped before emission is invisible to them \u2014 this is the one that can see a miss",
+          "title": "Extraction Gaps",
+          "type": "object"
+        },
         "no_evidence": {
           "default": 0,
           "description": "No claim because nothing that could gate was found",
@@ -69,11 +77,27 @@
           "title": "No Evidence",
           "type": "integer"
         },
+        "request_policies": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "\u00a75.2.10 T6: CORS/CSRF/rejection-handling declarations per kind, across all services. Counted apart from every claim counter above because they gate REACH, not principal \u2014 a system with `csrf disabled` everywhere is a fact worth reading, and it changes none of the authenticated/withheld numbers",
+          "title": "Request Policies",
+          "type": "object"
+        },
         "unauthenticated": {
           "default": 0,
           "minimum": 0,
           "title": "Unauthenticated",
           "type": "integer"
+        },
+        "unexercised_vocabulary": {
+          "description": "Auth vocabulary this snapshot contains ZERO instances of (\u00a75.2.11 T6). A zero counter is otherwise ambiguous: it may mean wadi looked and the system genuinely has none, or that this corpus never exercises the idiom and the zero is evidence of nothing. Naming the second case stops a reader taking `denied: 0` as proof the denial path works",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unexercised Vocabulary",
+          "type": "array"
         },
         "unread_by_kind": {
           "additionalProperties": {
@@ -99,8 +123,7 @@
       "description": "One structural-invariant violation family on a service's CFGs\n(\u00a75.2.8 M2, schema 1.8.0). Never an error: the weird code lives in real\nrepos, and a violated invariant is a queryable fact about how much the\ngraph can be trusted (P10).",
       "properties": {
         "code": {
-          "title": "Code",
-          "type": "string"
+          "$ref": "#/$defs/CfgAnomalyCode"
         },
         "count": {
           "description": "Occurrences across the service's methods",
@@ -124,6 +147,19 @@
       ],
       "title": "CfgAnomaly",
       "type": "object"
+    },
+    "CfgAnomalyCode": {
+      "description": "\u00a75.2.8 M2 structural-invariant violation codes.\n\nEvaluated against the RAW exported CFG of every method on every snapshot \u2014\nbefore the assembler's synthetic entry/exit patching, which would make\nreachability invariants vacuously true. Additive changes bump\n``SCHEMA_VERSION`` minor.\n\nAn enum rather than a string registry (\u00a77, recorded 2026-08-05): pyright\ncatches producer/registry drift in CI, which a runtime validator could\nonly catch on a user's repository.",
+      "enum": [
+        "disconnected-node",
+        "branch-arity",
+        "unlabeled-arm",
+        "loop-no-back-edge",
+        "dangling-edge",
+        "exit-unreachable"
+      ],
+      "title": "CfgAnomalyCode",
+      "type": "string"
     },
     "CfgAnomalySection": {
       "additionalProperties": false,
@@ -156,6 +192,13 @@
         "analyzed": {
           "minimum": 0,
           "title": "Analyzed",
+          "type": "integer"
+        },
+        "async_rooted_call_sites": {
+          "default": 0,
+          "description": "Subset of unreachable_call_sites reached from a NON-HTTP root (startup runner, scheduled task, listener). These really execute \u2014 they are not stitched because no request is behind them, not because they are dead (\u00a75.2.11 T2)",
+          "minimum": 0,
+          "title": "Async Rooted Call Sites",
           "type": "integer"
         },
         "by_confidence": {
@@ -216,6 +259,53 @@
         "undetermined"
       ],
       "title": "CoverageTotals",
+      "type": "object"
+    },
+    "EndpointCollision": {
+      "additionalProperties": false,
+      "description": "Two endpoints of one service derived the SAME content-derived id\n(\u00a77, recorded 2026-08-05, schema 1.18.0).\n\nEndpoint ids are ``hash(service, verb, simplified_uri)`` and the store\nupserts on ``(snapshot_id, service_id, id)``, so a collision does not\nmerge \u2014 the second row *replaces* the first and the endpoint is gone. That\nis how three handlers of a real controller vanished with every honesty\nsurface reading clean: the loss happens at the storage key, downstream of\neverything that counts.\n\nRecorded as a fact rather than resolved silently, because the alternatives\nare both worse. Failing the service would cost a whole map to one duplicate\npair; picking a winner quietly is exactly the behaviour that hid the bug.\nA deterministic winner is kept so the snapshot stays reproducible, and the\nlosers are named here with their handlers so the cause is one click away.\n\n**Cause-independent by design.** The 2026-08-05 instance came from URI\ntruncation, but any future defect that makes two URIs equal \u2014 a bad\nnormalizer, an over-eager simplification \u2014 lands here too. Expected empty\nin healthy operation; non-empty means endpoints were dropped.",
+      "properties": {
+        "dropped_handlers": {
+          "description": "Handler signatures whose endpoints were lost to the collision",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Dropped Handlers",
+          "type": "array"
+        },
+        "endpoint_id": {
+          "description": "The id both endpoints derived",
+          "minLength": 1,
+          "title": "Endpoint Id",
+          "type": "string"
+        },
+        "http_method": {
+          "minLength": 1,
+          "title": "Http Method",
+          "type": "string"
+        },
+        "kept_handler": {
+          "description": "Handler signature of the endpoint that was stored",
+          "minLength": 1,
+          "title": "Kept Handler",
+          "type": "string"
+        },
+        "uri": {
+          "description": "The simplified URI they collapsed onto",
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "endpoint_id",
+        "http_method",
+        "uri",
+        "kept_handler",
+        "dropped_handlers"
+      ],
+      "title": "EndpointCollision",
       "type": "object"
     },
     "ExternalApiEntry": {
@@ -293,6 +383,62 @@
         "caller_service_ids"
       ],
       "title": "PlaceholderEntry",
+      "type": "object"
+    },
+    "QuarantinedFact": {
+      "additionalProperties": false,
+      "description": "A diagnostic fact whose vocabulary this build does not recognize\n(\u00a77, recorded 2026-08-05, schema 1.16.0).\n\nNever fatal and never dropped. Diagnostic facts describe how well analysis\nread the code, not the code itself, so an unreadable one must not cost the\nmap \u2014 but silently discarding it would be the exact gap the registries\nexist to prevent (P10, turned on wadi's own pipeline: a self-observation we\ncannot parse is itself a queryable fact).\n\nExpected **empty in all healthy operation**, unlike ``cfg_anomalies``,\nwhich is expected non-zero on real code forever. That difference is why it\nhas its own home rather than sharing one: an always-zero signal folded into\nan always-noisy one stops being a signal. Non-empty on the fixtures or\nbenchmarks fails CI, while a user's run only ever loses the one footnote.",
+      "properties": {
+        "count": {
+          "default": 1,
+          "description": "Occurrences of this value",
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "registry": {
+          "description": "Which vocabulary rejected it, e.g. 'CfgAnomalyCode' or 'async-root'",
+          "minLength": 1,
+          "title": "Registry",
+          "type": "string"
+        },
+        "sample_anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One example site, when the rejected fact carried one"
+        },
+        "service_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning service; None on a snapshot-level artifact",
+          "title": "Service Id"
+        },
+        "value": {
+          "description": "The raw unrecognized value, verbatim",
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "registry",
+        "value"
+      ],
+      "title": "QuarantinedFact",
       "type": "object"
     },
     "ServiceCfgAnomalyEntry": {
@@ -505,7 +651,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.15.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.21.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What the map knows it doesn't know (\u00a75.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
@@ -559,6 +705,14 @@
       "title": "Created At",
       "type": "string"
     },
+    "endpoint_collisions": {
+      "description": "Endpoints that derived the same content-derived id and so could not all be stored (\u00a77, schema 1.18.0), rolled up across services. **Expected empty**: non-empty means the inventory is missing endpoints the analysis actually found \u2014 the loss happens at the storage key, downstream of every other counter here",
+      "items": {
+        "$ref": "#/$defs/EndpointCollision"
+      },
+      "title": "Endpoint Collisions",
+      "type": "array"
+    },
     "external_apis": {
       "items": {
         "$ref": "#/$defs/ExternalApiEntry"
@@ -589,8 +743,16 @@
       "title": "Placeholders",
       "type": "array"
     },
+    "quarantined_facts": {
+      "description": "Diagnostic facts whose vocabulary this build does not recognize (\u00a77, schema 1.16.0), rolled up across services. **Expected empty**: non-empty means version drift between a producer and its registry, never a property of the analyzed code. CI fails on non-empty for the fixtures and benchmarks; a user's run only loses the footnote",
+      "items": {
+        "$ref": "#/$defs/QuarantinedFact"
+      },
+      "title": "Quarantined Facts",
+      "type": "array"
+    },
     "schema_version": {
-      "default": "1.15.0",
+      "default": "1.21.0",
       "title": "Schema Version",
       "type": "string"
     },

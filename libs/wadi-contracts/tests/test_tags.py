@@ -99,6 +99,7 @@ class TestRegistry:
                 "auth-mechanism",
                 "auth-enforcement",
                 "token-propagation",
+                "token-propagation-state",
                 "async-root",
             }
         )

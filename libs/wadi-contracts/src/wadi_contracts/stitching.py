@@ -18,8 +18,14 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
-from wadi_contracts.boundary import CfgAnomaly
-from wadi_contracts.enums import Confidence, HttpMethod, Provenance, TargetKind
+from wadi_contracts.boundary import CfgAnomaly, EndpointCollision, QuarantinedFact
+from wadi_contracts.enums import (
+    Confidence,
+    HttpMethod,
+    Provenance,
+    TargetKind,
+    UnresolvedReasonCode,
+)
 from wadi_contracts.ids import remote_edge_id
 from wadi_contracts.source import SourceAnchor
 from wadi_contracts.version import SCHEMA_VERSION
@@ -210,26 +216,12 @@ class ExternalApiEntry(WadiModel):
     caller_service_ids: list[str] = Field(min_length=1)
 
 
-UNRESOLVED_REASON_CODES: frozenset[str] = frozenset(
-    {
-        "url-undetermined",
-        "url-unparseable",
-        "no-endpoint-match",
-        "lombok-generated-interior",
-        "slice-budget-truncated",
-        "unresolved-receiver-type",
-        "base-undetermined",
-    }
-)
-"""Versioned reason-code vocabulary (§5.4.2) — the queryable-gap registry.
+UNRESOLVED_REASON_CODES: frozenset[str] = frozenset(code.value for code in UnresolvedReasonCode)
+"""Value view of :class:`UnresolvedReasonCode`, derived so the two cannot drift.
 
-Additive changes bump ``SCHEMA_VERSION`` minor. ``host-unresolvable`` was
-removed in 1.2.0: documented since Phase 2 but never emitted — unresolved
-hosts classify as external/placeholder nodes instead (recorded correction).
-1.5.0 adds ``base-undetermined`` (a relative URL whose client base is not
-statically recoverable — the rootUri/baseUrl split, T2) and the
-``unsupported-idiom:<name>`` prefix family (a *named* unmodelled construct;
-the slicer marks the idiom, the matcher lifts it into the code)."""
+The enum is the vocabulary (§7, recorded 2026-08-05); the
+``unsupported-idiom:<name>`` prefix family is dynamic and validated
+separately by :class:`UnresolvedCallEntry`."""
 
 UNSUPPORTED_IDIOM_PREFIX = "unsupported-idiom:"
 """Prefix family of reason codes: dynamic slugs name the unmodelled idiom."""
@@ -283,6 +275,16 @@ class CoverageTotals(WadiModel):
             "Sink call sites outside the endpoint-reachable closure — excluded "
             "from the map by design, inventoried so the exclusion is queryable "
             "(§5.2.5; detail rows live in remote_calls with reachable=false)"
+        ),
+    )
+    async_rooted_call_sites: int = Field(
+        ge=0,
+        default=0,
+        description=(
+            "Subset of unreachable_call_sites reached from a NON-HTTP root "
+            "(startup runner, scheduled task, listener). These really execute "
+            "— they are not stitched because no request is behind them, not "
+            "because they are dead (§5.2.11 T2)"
         ),
     )
     suspected_call_sites: int = Field(
@@ -423,6 +425,36 @@ class AuthCoverageSection(WadiModel):
         default_factory=dict,
         description="Enforcement points detected but not readable, counted per AuthEvidenceKind",
     )
+    extraction_gaps: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "§5.2.10: independent-oracle findings per AuthGapCode. Every other "
+            "counter here is derived from evidence the auth layer EMITTED, so "
+            "a construct dropped before emission is invisible to them — this "
+            "is the one that can see a miss"
+        ),
+    )
+    request_policies: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "§5.2.10 T6: CORS/CSRF/rejection-handling declarations per kind, "
+            "across all services. Counted apart from every claim counter above "
+            "because they gate REACH, not principal — a system with `csrf "
+            "disabled` everywhere is a fact worth reading, and it changes none "
+            "of the authenticated/withheld numbers"
+        ),
+    )
+    unexercised_vocabulary: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Auth vocabulary this snapshot contains ZERO instances of "
+            "(§5.2.11 T6). A zero counter is otherwise ambiguous: it may mean "
+            "wadi looked and the system genuinely has none, or that this "
+            "corpus never exercises the idiom and the zero is evidence of "
+            "nothing. Naming the second case stops a reader taking "
+            "`denied: 0` as proof the denial path works"
+        ),
+    )
 
 
 class CoverageReport(SnapshotEnvelope):
@@ -471,6 +503,26 @@ class CoverageReport(SnapshotEnvelope):
         description=(
             "What the auth layer could and could not read (§5.2.9, schema 1.13.0). "
             "None only on reports written before the enforcement model existed"
+        ),
+    )
+    endpoint_collisions: list[EndpointCollision] = Field(
+        default_factory=list[EndpointCollision],
+        description=(
+            "Endpoints that derived the same content-derived id and so could "
+            "not all be stored (§7, schema 1.18.0), rolled up across services. "
+            "**Expected empty**: non-empty means the inventory is missing "
+            "endpoints the analysis actually found — the loss happens at the "
+            "storage key, downstream of every other counter here"
+        ),
+    )
+    quarantined_facts: list[QuarantinedFact] = Field(
+        default_factory=list[QuarantinedFact],
+        description=(
+            "Diagnostic facts whose vocabulary this build does not recognize "
+            "(§7, schema 1.16.0), rolled up across services. **Expected empty**: "
+            "non-empty means version drift between a producer and its registry, "
+            "never a property of the analyzed code. CI fails on non-empty for "
+            "the fixtures and benchmarks; a user's run only loses the footnote"
         ),
     )
     applied_hint_ids: list[str] = Field(

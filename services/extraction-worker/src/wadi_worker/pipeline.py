@@ -25,6 +25,7 @@ from wadi_contracts import (
     ExtractionJob,
     GatewayRoute,
     NetworkIdentity,
+    RequestPolicy,
     ServiceBoundary,
     ServiceKind,
     Snapshot,
@@ -37,6 +38,7 @@ from wadi_joern_client import JoernClient, ServiceExport
 from wadi_repo import RepoCache
 from wadi_storage import ArtifactRepository, SnapshotRepository, SystemRepository
 from wadi_worker.assembler import Assembler
+from wadi_worker.auth_oracle import scan_auth_extraction
 from wadi_worker.boundary import DiscoveredService, discover_services
 
 logger = logging.getLogger(__name__)
@@ -214,6 +216,30 @@ class ExtractionPipeline:
                         if (method := methods_by_id.get(root.method_id)) is not None
                     ]
                     boundary = boundary.model_copy(update={"async_roots": roots})
+                # §5.2.10 T6 / §5.2.11 T3: CORS, CSRF and rejection handling.
+                # The pack has emitted these since export 2.8.0 and the client
+                # has parsed them just as long — nothing consumed them, so they
+                # were read and discarded. Service-level by nature, and
+                # deliberately never merged into an endpoint's auth claim:
+                # they decide which ORIGIN may call, not which principal.
+                if export.auth_policies:
+                    boundary = boundary.model_copy(
+                        update={
+                            "request_policies": [
+                                RequestPolicy(
+                                    kind=policy.kind,
+                                    scope=policy.scope,
+                                    detail=policy.detail,
+                                    anchor=SourceAnchor(
+                                        file=policy.anchor.file,
+                                        start_line=max(policy.anchor.line, 1),
+                                        end_line=max(policy.anchor.line, 1),
+                                    ),
+                                )
+                                for policy in export.auth_policies
+                            ]
+                        }
+                    )
                 assembled = Assembler(
                     snapshot_id=snapshot.id,
                     service_id=svc_id,
@@ -225,7 +251,26 @@ class ExtractionPipeline:
                 # worker-owned per-service fact like analysis_coverage. [] =
                 # checked and clean; the failed-extraction path above keeps
                 # None (never checked).
-                boundary = boundary.model_copy(update={"cfg_anomalies": assembled.cfg_anomalies})
+                boundary = boundary.model_copy(
+                    update={
+                        "cfg_anomalies": assembled.cfg_anomalies,
+                        # §7: endpoints lost to an id collision are named
+                        # here because the loss itself happens at the
+                        # storage key, past every other counter.
+                        "endpoint_collisions": assembled.endpoint_collisions,
+                    }
+                )
+                # §5.2.10: the independent oracle runs against the STAGED tree
+                # the extractor parsed, so a divergence is a reading failure
+                # rather than a staging one. Its findings are the only auth
+                # counter not derived from what the auth layer emitted.
+                boundary = boundary.model_copy(
+                    update={
+                        "auth_extraction_gaps": await asyncio.to_thread(
+                            scan_auth_extraction, parse_root, export
+                        )
+                    }
+                )
                 await self._artifacts.write_service_boundaries([boundary])
                 await self._artifacts.write_endpoints(assembled.endpoints)
                 for icfg in assembled.icfgs:

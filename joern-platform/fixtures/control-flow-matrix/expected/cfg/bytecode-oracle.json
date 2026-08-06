@@ -1,4 +1,52 @@
 {
+  "ConditionalController.allocInCondition": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": false,
+    "reasons": [
+      "short-circuit"
+    ]
+  },
+  "ConditionalController.allocInConditionNoElse": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": false,
+    "reasons": [
+      "short-circuit"
+    ]
+  },
+  "ConditionalController.allocInOrCondition": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": false,
+    "reasons": [
+      "short-circuit"
+    ]
+  },
   "ConditionalController.elseIfChain": {
     "bytecode": {
       "cond_jumps": 3,
@@ -86,6 +134,34 @@
     "reasons": [
       "ternary"
     ]
+  },
+  "DegenerateController.anonymousOpensTry": {
+    "bytecode": {
+      "cond_jumps": 1,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": true,
+    "reasons": []
+  },
+  "DegenerateController.emptyCatchBody": {
+    "bytecode": {
+      "cond_jumps": 0,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 0,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": true,
+    "reasons": []
   },
   "DegenerateController.emptyElseArm": {
     "bytecode": {
@@ -185,6 +261,34 @@
     "exact": true,
     "reasons": []
   },
+  "DegenerateController.expressionSwitchArms": {
+    "bytecode": {
+      "cond_jumps": 0,
+      "switches": 1,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 0,
+      "switch_nodes": 1,
+      "loop_nodes": 0
+    },
+    "exact": true,
+    "reasons": []
+  },
+  "DegenerateController.high": {
+    "bytecode": {
+      "cond_jumps": 0,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 0,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": true,
+    "reasons": []
+  },
   "DegenerateController.infiniteFor": {
     "bytecode": {
       "cond_jumps": 0,
@@ -216,6 +320,34 @@
     "reasons": [
       "constant-true-condition"
     ]
+  },
+  "DegenerateController.low": {
+    "bytecode": {
+      "cond_jumps": 0,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 0,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": true,
+    "reasons": []
+  },
+  "DegenerateController.other": {
+    "bytecode": {
+      "cond_jumps": 0,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 0,
+      "switch_nodes": 0,
+      "loop_nodes": 0
+    },
+    "exact": true,
+    "reasons": []
   },
   "DegenerateController.trailingIf": {
     "bytecode": {
@@ -254,6 +386,20 @@
     "graph": {
       "if_nodes": 0,
       "switch_nodes": 1,
+      "loop_nodes": 0
+    },
+    "exact": true,
+    "reasons": []
+  },
+  "DegenerateController.tryBodyEndsInThrow": {
+    "bytecode": {
+      "cond_jumps": 1,
+      "switches": 0,
+      "back_jumps": 0
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 0,
       "loop_nodes": 0
     },
     "exact": true,
@@ -584,6 +730,20 @@
     "reasons": [
       "switch-on-string"
     ]
+  },
+  "SwitchController.switchInsideLoop": {
+    "bytecode": {
+      "cond_jumps": 2,
+      "switches": 1,
+      "back_jumps": 1
+    },
+    "graph": {
+      "if_nodes": 1,
+      "switch_nodes": 1,
+      "loop_nodes": 1
+    },
+    "exact": true,
+    "reasons": []
   },
   "SwitchController.yieldForm": {
     "bytecode": {

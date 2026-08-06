@@ -1,0 +1,121 @@
+{
+  "nodes": [
+    {
+      "key": "branch@206",
+      "kind": "branch",
+      "code": "if (n > 0)",
+      "line": 206,
+      "line_end": 218,
+      "construct_kind": "if",
+      "condition_code": "n > 0"
+    },
+    {
+      "key": "statement@207",
+      "kind": "statement",
+      "code": "try",
+      "line": 207,
+      "line_end": 216,
+      "construct_kind": "try"
+    },
+    {
+      "key": "call@208",
+      "kind": "call",
+      "code": "new Runnable() {",
+      "line": 208,
+      "line_end": 208,
+      "call": {
+        "callee": "com.acme.flow.DegenerateController.anonymousOpensTry.Runnable$0.<init>",
+        "resolved": true
+      }
+    },
+    {
+      "key": "statement@208",
+      "kind": "statement",
+      "code": "Runnable r = new Runnable() {",
+      "line": 208,
+      "line_end": 208
+    },
+    {
+      "key": "call@214",
+      "kind": "call",
+      "code": "r.run()",
+      "line": 214,
+      "line_end": 214,
+      "call": {
+        "callee": "com.acme.flow.DegenerateController.anonymousOpensTry.Runnable$0.run",
+        "resolved": true
+      }
+    },
+    {
+      "key": "statement@215",
+      "kind": "statement",
+      "code": "finally",
+      "line": 215,
+      "line_end": 216,
+      "construct_kind": "finally"
+    },
+    {
+      "key": "statement@216",
+      "kind": "statement",
+      "code": "this.marker = 0",
+      "line": 216,
+      "line_end": 216
+    },
+    {
+      "key": "return@218",
+      "kind": "return",
+      "code": "return \"ran\";",
+      "line": 218,
+      "line_end": 218
+    },
+    {
+      "key": "return@220",
+      "kind": "return",
+      "code": "return \"skipped\";",
+      "line": 220,
+      "line_end": 220
+    }
+  ],
+  "edges": [
+    {
+      "source": "branch@206",
+      "target": "return@220",
+      "label": "false"
+    },
+    {
+      "source": "branch@206",
+      "target": "statement@207",
+      "label": "true"
+    },
+    {
+      "source": "call@208",
+      "target": "call@214",
+      "label": "flow"
+    },
+    {
+      "source": "call@214",
+      "target": "statement@215",
+      "label": "flow"
+    },
+    {
+      "source": "statement@207",
+      "target": "statement@208",
+      "label": "flow"
+    },
+    {
+      "source": "statement@208",
+      "target": "call@208",
+      "label": "flow"
+    },
+    {
+      "source": "statement@215",
+      "target": "statement@216",
+      "label": "flow"
+    },
+    {
+      "source": "statement@216",
+      "target": "return@218",
+      "label": "flow"
+    }
+  ]
+}

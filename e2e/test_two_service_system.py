@@ -205,14 +205,14 @@ class TestTwoServiceSystem:
         section = coverage["analysis_coverage"]
         per_service = {e["name"]: e for e in section["services"]}
         assert set(per_service) == {"petstore", "inventory", "sweeper"}
-        assert per_service["petstore"]["production_methods"] == 53
-        assert per_service["petstore"]["reachable_methods"] == 50
+        assert per_service["petstore"]["production_methods"] == 56
+        assert per_service["petstore"]["reachable_methods"] == 53
         assert per_service["inventory"]["production_methods"] == 10
         assert per_service["inventory"]["reachable_methods"] == 10
         assert per_service["sweeper"]["production_methods"] == 2
         assert per_service["sweeper"]["reachable_methods"] == 1
-        assert section["production_methods"] == 65
-        assert section["reachable_methods"] == 61
+        assert section["production_methods"] == 68
+        assert section["reachable_methods"] == 64
         # §5.2.8 M2: the invariant check ran for every analyzed service, and
         # the enriched coarsening leaves the fixture anomaly-free — a checked
         # clean answer, structurally distinct from never-checked (P10).
@@ -223,7 +223,14 @@ class TestTwoServiceSystem:
             "sweeper": True,
         }
         assert anomalies["total_by_code"] == {}
-        assert section["coverage_percent"] == 93.8
+        # §7 (2026-08-05): quarantine is an alarm, not a metric. Non-empty here
+        # means a producer emitted vocabulary its registry does not carry —
+        # version drift between the pack, the contracts, and the stored
+        # artifact — never a property of the fixture. Asserting empty on the
+        # conformance stack is what turns a crash on a user's repository into
+        # a red build, which is the whole point of the mechanism.
+        assert coverage["quarantined_facts"] == []
+        assert section["coverage_percent"] == 94.1
 
         # 4b. Source-on-demand hardening (§11 Phase 2.7 M1): whole-file
         # serving with an honest length, and a tree path is a clean 400.
@@ -455,8 +462,8 @@ class TestTwoServiceSystem:
         assert manifest.artifact_counts == dict(sorted(received.items()))
         # The bundle mirrors the API's own answers.
         assert received["service_boundary"] == 4  # petstore + inventory + sweeper + library
-        assert received["endpoint"] == 20
-        assert received["icfg"] == 20
+        assert received["endpoint"] == 23
+        assert received["icfg"] == 23
         assert received["stitched_edge"] == coverage["totals"]["edges"]
         assert received["coverage_report"] == 1
 

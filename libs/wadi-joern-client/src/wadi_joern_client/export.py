@@ -8,10 +8,11 @@ version and refuse mismatched majors).
 """
 
 from enum import StrEnum
+from typing import cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.7.0"
+EXPORT_SCHEMA_VERSION = "2.11.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -62,7 +63,52 @@ instead of being dropped — the change that stops an unreadable rule from
 falling through to a later ``permitAll``. New top-level ``auth_enforcements``
 section for gating constructs that carry no rule at all (chain bypasses,
 interceptors, servlet filters, aspects, in-handler checks). Readers of 2.6.0
-still parse: both additions default to empty/None."""
+still parse: both additions default to empty/None.
+
+2.8.0 (§5.2.10): a security rule is now a **site record**. It gained
+``call_id`` (the access call's CPG id — rows sharing it are one site with
+several patterns), ``pattern`` became nullable, and ``pattern_confidence``
+(``exact``/``config``/``none``) replaces the ``{?}`` sentinel. The reason is
+structural, not cosmetic: with the sentinel living inside a required field,
+only a code path that had already resolved a matcher could emit it, so a chain
+whose SHAPE was unreadable (the ``AuthorizedUrl`` parked in a local variable,
+which config-driven Spring code must do) erased its site instead of degrading
+it — 365 train-ticket-aitest endpoints published as confidently authenticated
+with zero roles and zero withheld claims. Every detected access site now emits
+a row, asserted by an export-time invariant. Pre-2.8.0 documents still parse:
+the sentinels are normalized into the new fields on load.
+
+2.9.0 (additive, §5.2.7 amended): wire shapes carry ``origin``
+(``declared``/``return-expression``). A handler declaring a RAW wrapper —
+``public HttpEntity query(...)``, which train-ticket-aitest writes 376 times
+against 9 generic ones — leaves no type argument to unwrap, so the shape
+terminated at ``unresolved`` on 274 of 365 endpoints. The payload is instead
+read from the return expression (``ok(expr)``, ``new ResponseEntity<>(expr,
+…)``), and ``origin`` keeps that inference distinguishable from a shape the
+signature actually declared (P7). Recovery never overrides a declared generic
+and yields nothing unless every return agrees. Pre-2.9.0 documents still
+parse: ``origin`` defaults to ``declared``, which is what they were.
+
+2.10.0 (additive, §5.2.11 T4): http-client sinks carry
+``auth_propagation_state`` (``forwarded`` | ``not-forwarded`` |
+``undetermined``). ``auth_propagation`` names the MECHANISM and was null on
+382/382 train-ticket-aitest calls, because the only detector looked for a
+literal ``"Authorization"`` anywhere in the enclosing method — which on that
+corpus appears solely inside ``JWTUtil``, where inbound tokens are READ and no
+outbound sink exists. The forwarding idiom it missed is
+``new HttpEntity(body, headers)`` (5 sites), and the far more common shape is
+``new HttpEntity(null)`` (98 sites): a provable NEGATIVE, which the old
+nullable field could not express apart from "we did not look". Resolution is
+per CALL SITE, because one method routinely builds both. Pre-2.10.0 documents
+still parse as ``undetermined``, which is what a null meant.
+
+2.11.0 (additive, §5.2.7 T9): endpoints carry ``status_codes`` — the HTTP
+statuses the handler's own code NAMES, each with how it was read
+(``builder``/``explicit``/``annotation``), its source text and line.
+Deliberately not "the statuses this endpoint returns": a 500 from an uncaught
+exception, a 403 from the security layer and a 404 from the dispatcher appear
+in no handler source, so a reader must not take this list as proof an endpoint
+cannot fail. Empty on pre-2.11.0 exports."""
 
 
 class ExportModelBase(BaseModel):
@@ -127,8 +173,22 @@ class UnboundReason(StrEnum):
     could not be bound to one, and P10 forbids guessing."""
 
     UNRESOLVED_RECEIVER = "unresolved-receiver"
-    """First-party type in the CPG that declares no such method: a static
-    import attributed to the importing class, or an unbindable receiver."""
+    """The receiver's TYPE is a javasrc2cpg sentinel — unbindable, so nothing
+    downstream can name the callee."""
+
+    DECLARED_NOT_BOUND = "declared-not-bound"
+    """The first-party type declares exactly this method and the call still did
+    not bind. The one actionable bucket (§5.2.11 T5): every other code here
+    describes something analysis cannot see; this describes something it saw
+    and failed to connect."""
+
+    NOT_DECLARED = "not-declared"
+    """A first-party type in the CPG that declares no such method — a static
+    import attributed to the importing class (``ok(…)`` from
+    ``ResponseEntity.ok``). Not a hole: the callee is real and elsewhere."""
+
+    UNPARSEABLE_CALLEE = "unparseable-callee"
+    """The callee name carries no type qualifier to split on."""
 
 
 class ExportCall(ExportModelBase):
@@ -216,6 +276,10 @@ class ExportTypeShape(ExportModelBase):
     """A recovered wire shape (§5.2.7) — mirrors the contract TypeShape."""
 
     kind: str = Field(description="object|scalar|array|map|cycle|truncated|unresolved")
+    origin: str = Field(
+        default="declared",
+        description="declared|return-expression (§5.2.7); absent on pre-2.9.0 exports",
+    )
     type_name: str
     fields: list["ExportFieldShape"] = Field(default_factory=lambda: [])
     element: "ExportTypeShape | None" = None
@@ -227,10 +291,23 @@ class ExportFieldShape(ExportModelBase):
     shape: ExportTypeShape
 
 
+class ExportStatusCode(ExportModelBase):
+    """One HTTP status the handler's own code names (§5.2.7 T9)."""
+
+    code: int = Field(ge=100, le=599)
+    origin: str = Field(description="builder | explicit | annotation | default")
+    detail: str
+    line: int = Field(ge=0)
+
+
 class ExportEndpoint(ExportModelBase):
     method_id: int = Field(description="Handler method's Joern id")
     http_method: str
     uri: str
+    status_codes: list[ExportStatusCode] = Field(
+        default_factory=list["ExportStatusCode"],
+        description="Statuses the handler DECLARES; empty on pre-2.11.0 exports",
+    )
     auth_tags: list[str] = Field(
         default_factory=list[str],
         description="Registered auth= tags on the handler (raw annotation evidence)",
@@ -268,6 +345,13 @@ class ExportSink(ExportModelBase):
     evidence: str | None = Field(
         default=None, description="Human-readable slice trace behind this candidate"
     )
+    auth_propagation_state: str = Field(
+        default="undetermined",
+        description=(
+            "forwarded | not-forwarded | undetermined (§5.2.11 T4). "
+            "'undetermined' on pre-2.10.0 exports, which is what they meant"
+        ),
+    )
     auth_propagation: str | None = Field(
         default=None,
         description="'authorization-header' | 'feign-interceptor' when statically visible",
@@ -304,12 +388,29 @@ parsed config tree and recovers the real rules.
 """
 
 UNRESOLVABLE_PATTERN = "{?}"
-"""A rule that was READ but whose path could not be resolved (§5.2.9).
+"""Legacy spelling of "read but unresolvable" (pre-2.8.0; §5.2.9).
 
-Emitted instead of dropping the rule, because dropping does not degrade to
-"unknown": the endpoint falls through to whatever permissive rule comes next.
-The worker turns this into a withheld claim.
+Superseded by ``pattern=None`` + ``RulePatternConfidence.NONE`` (§5.2.10): a
+sentinel inside a REQUIRED field can only be produced by a code path that
+already succeeded structurally, which is exactly why an unreadable chain
+*shape* erased its site instead of degrading it. Retained so the worker keeps
+reading pre-2.8.0 exports, and normalized away on load.
 """
+
+
+class RulePatternConfidence(StrEnum):
+    """How well a rule's scope could be read (§5.2.10).
+
+    Mirrors ``SinkValueConfidence``, and for the same reason: resolution
+    failure must degrade a FIELD, never erase the site. ``CONFIG`` is not a
+    lesser ``EXACT`` — it says "readable, but not from the Java", and the
+    worker recovers the real patterns by correlating the binding against the
+    parsed config tree.
+    """
+
+    EXACT = "exact"
+    CONFIG = "config"
+    NONE = "none"
 
 
 class ExportSecurityRule(ExportModelBase):
@@ -317,10 +418,34 @@ class ExportSecurityRule(ExportModelBase):
 
     Pattern → endpoint pairing is deliberately NOT done in Scala — wrong
     security facts are worse than absent ones (§12); the worker matches.
+
+    Since 2.8.0 (§5.2.10) this is a **site record**, not merely a rule: every
+    access call the vocabulary detects produces at least one row, keyed by
+    ``call_id``, whether or not any of its facts could be resolved. Rows
+    sharing a ``call_id`` are one site with several patterns
+    (``requestMatchers("/a", "/b")``), the same way sink rows share
+    ``node_id``. The invariant that makes the drop impossible — every detected
+    access site appears here — is asserted at export time, because a pass that
+    cannot drop cannot regress.
     """
 
-    pattern: str = Field(
-        description="Ant-style pattern, e.g. '/admin/**'; '{?}' = read but unresolvable"
+    call_id: int = Field(
+        default=0,
+        description=(
+            "2.8.0: CPG id of the access call — the SITE identity. Rows sharing "
+            "it are one call site with several patterns. 0 in pre-2.8.0 exports"
+        ),
+    )
+    pattern: str | None = Field(
+        default=None,
+        description=(
+            "Ant-style pattern, e.g. '/admin/**'. None = the site was detected "
+            "and its scope could not be read (2.8.0; formerly '{?}')"
+        ),
+    )
+    pattern_confidence: RulePatternConfidence = Field(
+        default=RulePatternConfidence.NONE,
+        description="2.8.0: how the pattern was obtained — exact | config | none",
     )
     http_method: str | None = Field(default=None, description="Verb restriction, when present")
     access: str = Field(description="Raw access expression, e.g. \"hasRole('ADMIN')\"")
@@ -340,15 +465,102 @@ class ExportSecurityRule(ExportModelBase):
     anchor: ExportAnchor
     evidence: str = Field(description="First line of the rule's source text")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_pattern(cls, data: object) -> object:
+        """Pre-2.8.0 exports carry the sentinels inside ``pattern`` (§5.2.10).
+
+        Normalized on load rather than handled at every read site, so exactly
+        one place in the codebase knows the old spelling existed.
+        """
+        if not isinstance(data, dict):
+            return data
+        values = cast(dict[str, object], data)
+        if "pattern_confidence" in values:
+            return values
+        pattern = values.get("pattern")
+        if not isinstance(pattern, str):
+            return values
+        if pattern == UNRESOLVABLE_PATTERN:
+            values["pattern"] = None
+            values["pattern_confidence"] = RulePatternConfidence.NONE
+        elif pattern.startswith(CONFIG_PREFIX):
+            values["pattern_confidence"] = RulePatternConfidence.CONFIG
+        else:
+            values["pattern_confidence"] = RulePatternConfidence.EXACT
+        return values
+
     @property
     def resolvable(self) -> bool:
-        """False when the rule was seen but its scope could not be read.
+        """True only when this rule's scope is known well enough to match on.
 
-        A ``@prefix`` pattern counts as UNresolvable here: until the worker has
-        correlated it against config it is exactly as unreadable as ``{?}``, and
-        treating it otherwise would let it match nothing and fall through.
+        A ``CONFIG`` pattern counts as UNresolvable here: until the worker has
+        correlated it against config it is exactly as unreadable as a missing
+        one, and treating it otherwise would let it match nothing and fall
+        through — the §5.2.9 failure mode.
         """
-        return self.pattern != UNRESOLVABLE_PATTERN and not self.pattern.startswith(CONFIG_PREFIX)
+        return self.pattern_confidence is RulePatternConfidence.EXACT
+
+
+class ExportAuthPolicy(ExportModelBase):
+    """Request-level policy that is not an authorization rule (2.8.0; §5.2.10).
+
+    CORS, CSRF and rejection handling — the third category a ``SecurityConfig``
+    declares, and the one wadi had no vocabulary for. CORS alone is the second
+    most common construct across the 76 security configs measured.
+
+    Deliberately NOT an input to ``EndpointAuth``: a CORS policy decides which
+    ORIGIN may call, not which principal, and folding it into ``authenticated``
+    would answer a different question than the one asked. These are published
+    so the question becomes answerable at all (P10) — absent facts made
+    present, never facts made wrong.
+    """
+
+    kind: str = Field(
+        description="cors | csrf-disabled | csrf-exempt | entry-point | access-denied"
+    )
+    scope: str = Field(description="Path scope; '{?}' = read but unresolvable")
+    detail: str = Field(description="Origins, or the source text of the decision")
+    anchor: ExportAnchor
+
+
+class ExportAuthorityModel(ExportModelBase):
+    """What a grant MEANS and where it is minted (2.8.0; §5.2.10 T7).
+
+    ``role-hierarchy`` | ``authority-defaults`` | ``jwt-claim-converter`` |
+    ``user-details-service``.
+
+    None of these gate a request, so none withholds a claim. Two of them can
+    still falsify a role list wadi already publishes: under
+    ``ROLE_ADMIN > ROLE_USER`` an endpoint reported as requiring ``[USER]`` is
+    also reachable by ADMIN, and a ``GrantedAuthorityDefaults`` prefix rewires
+    the very ``hasRole`` → authority mapping the role/authority split assumes.
+    A role list that under-states who can get in is a confident wrong security
+    fact, so the worker marks it incomplete rather than hiding the cause.
+    """
+
+    kind: str
+    detail: str
+    anchor: ExportAnchor
+
+
+class ExportAuthExtraction(ExportModelBase):
+    """What the auth vocabulary saw versus what it emitted (2.8.0; §5.2.10).
+
+    The in-graph half of the no-drop invariant. ``access_calls_seen`` counts
+    every access-vocabulary name in the CPG with no scope test applied, so it
+    cannot be talked down by the same predicate that decides emission.
+
+    The two counts are NOT expected to be equal — ``access``, ``authenticated``
+    and ``anonymous`` are ordinary words, and a business method named
+    ``access()`` raises the first without belonging in the second. The GAP is
+    the signal, reconciled worker-side against an independent source-text
+    oracle so an unreadable chain shape announces itself as a number instead of
+    publishing a confident wrong claim.
+    """
+
+    access_calls_seen: int = Field(default=0, ge=0)
+    rule_sites_emitted: int = Field(default=0, ge=0)
 
 
 class ExportAuthEnforcement(ExportModelBase):
@@ -465,6 +677,18 @@ class ServiceExport(ExportModelBase):
     config_refs: list[ExportConfigRef] = Field(default_factory=list[ExportConfigRef])
     analysis_coverage: ExportAnalysisCoverage | None = Field(
         default=None, description="None = exporter predates 2.2.0 (unknown, not zero — P10)"
+    )
+    auth_extraction: ExportAuthExtraction | None = Field(
+        default=None,
+        description="2.8.0 (§5.2.10): detected-vs-emitted auth sites; None pre-2.8.0",
+    )
+    auth_policies: list[ExportAuthPolicy] = Field(
+        default_factory=list[ExportAuthPolicy],
+        description="2.8.0 (§5.2.10): CORS / CSRF / rejection handling, service-level",
+    )
+    auth_authorities: list[ExportAuthorityModel] = Field(
+        default_factory=list[ExportAuthorityModel],
+        description="2.8.0 (§5.2.10 T7): what a grant means and where it is minted",
     )
 
     def compatible_with_reader(self) -> bool:

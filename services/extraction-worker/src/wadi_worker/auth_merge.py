@@ -39,20 +39,28 @@ from wadi_joern_client.export import (
     UNRESOLVABLE_PATTERN,
     ExportAuthEnforcement,
     ExportAuthMechanism,
+    ExportAuthorityModel,
     ExportMethodSecurity,
     ExportSecurityRule,
+    RulePatternConfidence,
 )
 
-_ROLE_PATTERNS = (
-    re.compile(r"hasRole\(\s*['\"]([^'\"]+)['\"]\s*\)"),
-    re.compile(r"hasAuthority\(\s*['\"](?:ROLE_)?([^'\"]+)['\"]\s*\)"),
-)
+# Role-scoped grants. Spring PREPENDS `ROLE_` to a hasRole argument, so the
+# role's name is the bare part and stripping a redundant prefix is defensive.
+# `@Secured`/`@RolesAllowed` name roles by the same convention.
+_ROLE_PATTERNS = (re.compile(r"hasRole\(\s*['\"]([^'\"]+)['\"]\s*\)"),)
 _MULTI_ROLE_PATTERNS = (
     re.compile(r"hasAnyRole\(([^)]*)\)"),
-    re.compile(r"hasAnyAuthority\(([^)]*)\)"),
     re.compile(r"@RolesAllowed\(([^)]*)\)"),
     re.compile(r"@Secured\(([^)]*)\)"),
 )
+# Authority-scoped grants, kept VERBATIM (§5.2.10). `hasAuthority("ROLE_ADMIN")`
+# tests for the authority literally spelled `ROLE_ADMIN`; reporting it as
+# `ADMIN` names a different grant, one that would NOT pass the check. The
+# predecessor stripped the prefix from both families, which quietly undid half
+# of the role/authority split it had just shipped.
+_AUTHORITY_PATTERNS = (re.compile(r"hasAuthority\(\s*['\"]([^'\"]+)['\"]\s*\)"),)
+_MULTI_AUTHORITY_PATTERNS = (re.compile(r"hasAnyAuthority\(([^)]*)\)"),)
 _QUOTED = re.compile(r"['\"]([^'\"]+)['\"]")
 _ARGUMENTS = re.compile(r"\(([^)]*)\)")
 
@@ -79,14 +87,18 @@ def merge_endpoint_auth(
     auth_mechanisms: list[ExportAuthMechanism] | None = None,
     method_security: ExportMethodSecurity | None = None,
     config_structured: dict[str, list[dict[str, object]]] | None = None,
+    authority_models: list[ExportAuthorityModel] | None = None,
 ) -> EndpointAuth:
     """Collect every enforcement in scope, then derive the claim from it."""
     evidence: list[AuthEvidence] = []
     evidence.extend(_annotation_evidence(auth_tags, handler_anchor, method_security))
     evidence.extend(_bypass_evidence(auth_enforcements or [], full_uri))
     evidence.extend(_enforcement_evidence(auth_enforcements or [], full_uri))
-    evidence.extend(_rule_evidence(security_rules, full_uri, http_method, config_structured or {}))
+    evidence.extend(
+        _rule_evidence(security_rules, full_uri, http_method, config_structured or {}, config_env)
+    )
     evidence.extend(_config_evidence(config_env))
+    evidence.extend(_authority_model_evidence(authority_models or []))
 
     if not evidence:
         return EndpointAuth()  # honest unknown (P10)
@@ -142,25 +154,57 @@ def _opacity_could_change_the_answer(
     role list is uncertain. Enforcement is a conjunction — an unknown gate can
     add a requirement, never remove one.
 
-    So opacity is decisive in exactly two shapes:
+    So opacity is decisive in exactly three shapes:
 
     * nothing readable requires auth yet, so an unread guard is the difference
       between "open" and "protected" — this is the train-ticket case, where a
-      dropped rule let a route publish as evidenced-open; and
+      dropped rule let a route publish as evidenced-open;
     * the unread guard is a chain BYPASS, the one construct that *removes*
-      enforcement and so could flip a protected answer to open.
+      enforcement and so could flip a protected answer to open; and
+    * the unread guard PERMITS — see below.
+
+    *Corrected 2026-08-05 (§5.2.10).* The conjunction premise is true for
+    LAYERED enforcement, which is what it was written for: a filter chain and
+    method security both run, so an unread annotation can only add to a chain
+    rule. It is false for ORDERED ALTERNATIVES inside one chain.
+    ``authorizeHttpRequests`` is first-match-wins, so a rule matching earlier
+    means the later ones never execute — they are mutually exclusive, not
+    conjunctive. An unread-scope ``permitAll()`` ahead of a readable
+    ``anyRequest().authenticated()`` therefore leaves the endpoint genuinely
+    uncertain between open and protected, and the old test discounted it and
+    published a confident ``True``.
+
+    That is the §5.2.9 defect mirrored: there, an unreadable rule was dropped
+    and the endpoint fell through to a later ``permitAll()``, claiming open
+    when protected. Here an unreadable rule is discounted and the endpoint
+    falls through to a later ``authenticated()``, claiming protected when
+    open. Same root shape — an unread rule not permitted to withhold — in the
+    other direction. A permissive effect and a chain bypass remove enforcement
+    by different mechanisms; only the mechanism differed, so only the bypass
+    was caught.
     """
     opaque = [item for item in gating if item.resolution is AuthResolution.OPAQUE]
     if not opaque:
         return False
-    if any(item.kind is AuthEvidenceKind.CHAIN_BYPASS for item in opaque):
+    removes_enforcement = any(
+        item.kind is AuthEvidenceKind.CHAIN_BYPASS or item.effect is AuthEffect.PERMIT_ALL
+        for item in opaque
+    )
+    if removes_enforcement:
         return True
     return not (requiring and not bypassed)
 
 
 def _gates(item: AuthEvidence) -> bool:
-    """Config keys describe the service; they do not gate a request."""
-    return item.kind is not AuthEvidenceKind.CONFIG
+    """Which evidence actually decides whether a request gets through.
+
+    Config keys describe the service. An authority model says what a grant
+    MEANS — treating either as a gate would be worse than ignoring it: with a
+    non-permissive effect they would land in ``requiring`` and make every
+    service that merely declares a ``UserDetailsService`` claim that all its
+    endpoints demand authentication.
+    """
+    return item.kind not in (AuthEvidenceKind.CONFIG, AuthEvidenceKind.AUTHORITY_MODEL)
 
 
 # --------------------------------------------------------------------------
@@ -294,6 +338,29 @@ def _enforcement_evidence(
 _VERBS = frozenset(method.value for method in HttpMethod)
 
 
+def _config_entries(
+    rule: ExportSecurityRule, config_structured: dict[str, list[dict[str, object]]]
+) -> tuple[str, list[dict[str, object]]] | None:
+    """The config node a ``@prefix`` binding correlates to, and its key.
+
+    The KEY is half the answer: a recovered rule's pattern and roles appear
+    nowhere in the Java, so naming ``security.authorization-rules`` is what
+    lets a reader go read the policy for themselves instead of taking the
+    analysis on faith.
+    """
+    prefix = (rule.pattern or "").removeprefix(CONFIG_PREFIX)
+    if not prefix:
+        return None
+    return next(
+        (
+            (key, value)
+            for key, value in config_structured.items()
+            if key == prefix or key.startswith(f"{prefix}.")
+        ),
+        None,
+    )
+
+
 def _expand_config_rules(
     rule: ExportSecurityRule, config_structured: dict[str, list[dict[str, object]]]
 ) -> list[ExportSecurityRule] | None:
@@ -308,24 +375,46 @@ def _expand_config_rules(
     restriction, a truthy ``permit*`` flag is permitAll — so the next project
     that spells its keys differently still resolves. Returns None when nothing
     correlates, which leaves the enforcement opaque and withholds the claim.
+
+    *Three corrections from train-ticket-aitest (§5.2.10 T4).* Shape-reading is
+    only as good as the shapes it knows, and this one knew yas's:
+
+    * **A scalar ``method:`` was dropped.** Verbs were read from LISTS only, so
+      ``method: "GET"`` vanished and a GET-only ``permitAll`` leaked onto every
+      verb. Measured: ``POST /adminbasic/configs`` would have published
+      ``authenticated=false`` against a ROLE_ADMIN ground truth — the original
+      §5.2.9 defect, re-entered through the fix for it.
+    * **Permissive sentinels live inside the authority LIST**, not only in a
+      boolean key: ``authorities: ["permitAll"]``. Read as roles they became a
+      demand for a role nobody holds. The current answer is right only by the
+      accident of ``permitAll`` being a substring of the fabricated
+      ``hasAnyRole('permitAll')``.
+    * **Whether the values are roles or authorities is the JAVA's decision.**
+      The loop that consumed them called ``hasAnyRole`` or ``hasAnyAuthority``;
+      guessing from the YAML key name would get ``authorities: [ROLE_ADMIN]``
+      exactly backwards. The original rule's access text is the evidence.
+
+    An entry whose access cannot be determined at all yields an unresolvable
+    rule rather than a fabricated one, so it withholds instead of guessing.
     """
-    prefix = rule.pattern.removeprefix("@")
-    entries = next(
-        (
-            value
-            for key, value in config_structured.items()
-            if key == prefix or key.startswith(f"{prefix}.")
-        ),
-        None,
-    )
-    if not entries:
+    correlated = _config_entries(rule, config_structured)
+    if correlated is None:
         return None
+    _, entries = correlated
+
+    # Which grant vocabulary the Java asked for, read from the loop that
+    # consumed these values rather than guessed from the YAML key name.
+    grant = (
+        "hasAnyAuthority"
+        if ("hasAnyAuthority" in rule.access or "hasAuthority" in rule.access)
+        else "hasAnyRole"
+    )
 
     expanded: list[ExportSecurityRule] = []
     for entry in entries:
         patterns: list[str] = []
         verbs: list[str] = []
-        roles: list[str] = []
+        grants: list[str] = []
         permit = False
         for key, value in entry.items():
             if isinstance(value, bool):
@@ -333,25 +422,115 @@ def _expand_config_rules(
             elif isinstance(value, list):
                 items: list[object] = value  # pyright: ignore[reportUnknownVariableType]
                 strings = [str(item) for item in items]
-                if all(s.startswith("/") for s in strings):
+                if strings and all(s.startswith("/") for s in strings):
                     patterns.extend(strings)
-                elif all(s.upper() in _VERBS for s in strings):
+                elif strings and all(s.upper() in _VERBS for s in strings):
                     verbs.extend(s.upper() for s in strings)
                 else:
-                    roles.extend(strings)
-            elif isinstance(value, str) and value.startswith("/"):
-                patterns.append(value)
+                    grants.extend(strings)
+            elif isinstance(value, str):
+                if value.startswith("/"):
+                    patterns.append(value)
+                elif value.upper() in _VERBS:
+                    # `method: "GET"`. Read from lists only, this restriction
+                    # vanished and widened the rule to every verb.
+                    verbs.append(value.upper())
         if not patterns:
             continue
-        access = "permitAll()" if permit else f"hasAnyRole({', '.join(repr(r) for r in roles)})"
+        access = _config_access(grants, grant, permit=permit)
         for pattern in patterns:
             for verb in verbs or [None]:
                 expanded.append(
                     rule.model_copy(
-                        update={"pattern": pattern, "http_method": verb, "access": access}
+                        update={
+                            "pattern": pattern,
+                            # Recovered from config, so the scope IS now known —
+                            # without this the rule stays unresolvable and every
+                            # config-defined policy withholds forever (§5.2.10).
+                            "pattern_confidence": RulePatternConfidence.EXACT,
+                            "http_method": verb,
+                            "access": access,
+                        }
+                        if access is not None
+                        # Scope known, EFFECT unreadable. The pattern is kept —
+                        # it was read, and dropping it would tell the reader we
+                        # could not find the rule rather than could not
+                        # interpret it — while the confidence still withholds.
+                        else {
+                            "pattern": pattern,
+                            "pattern_confidence": RulePatternConfidence.NONE,
+                            "http_method": verb,
+                        }
                     )
                 )
     return expanded or None
+
+
+#: Values that stand for a whole access decision rather than naming a grant.
+#: Spelled loosely because every project invents its own casing, and matched
+#: against a normalized form so `PERMIT_ALL`, `permit-all` and `permitAll` are
+#: one thing.
+_PERMIT_SENTINELS = frozenset({"permitall", "permit", "public", "anonymous", "isanonymous"})
+_DENY_SENTINELS = frozenset({"denyall", "deny", "denied", "none"})
+_AUTHENTICATED_SENTINELS = frozenset(
+    {"authenticated", "isauthenticated", "fullyauthenticated", "isfullyauthenticated"}
+)
+
+
+def _config_access(grants: list[str], grant: str, *, permit: bool) -> str | None:
+    """A config entry's grant list → the access expression it stands for.
+
+    None means the entry named no readable decision, which withholds. Order
+    matters and follows how the Java actually branches: a permissive sentinel
+    anywhere short-circuits, exactly as
+    ``if (authorities.contains("permitAll"))`` does.
+    """
+    normalized = {value.strip().replace("_", "").replace("-", "").lower() for value in grants}
+    if permit or normalized & _PERMIT_SENTINELS:
+        return "permitAll()"
+    if normalized & _DENY_SENTINELS:
+        return "denyAll()"
+    named = [
+        value
+        for value in grants
+        if value.strip().replace("_", "").replace("-", "").lower()
+        not in _PERMIT_SENTINELS | _DENY_SENTINELS | _AUTHENTICATED_SENTINELS
+    ]
+    if named:
+        return f"{grant}({', '.join(repr(value) for value in named)})"
+    if normalized & _AUTHENTICATED_SENTINELS:
+        return "authenticated()"
+    return None
+
+
+#: Spring property placeholder, with its optional `:default`.
+_PLACEHOLDER = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
+
+
+def _resolve_placeholders(pattern: str, config_env: dict[str, str]) -> str | None:
+    """``/api/${admin.path}/**`` → the real path, or None if a key is unknown.
+
+    Returning None (rather than the raw text) is the whole point. A pattern
+    still holding ``${…}`` matches no endpoint literally, so leaving it
+    "resolved" would make the rule govern nothing and let the endpoint fall
+    through to whatever permissive rule comes next — the §5.2.9 failure mode
+    reached by a new road. An unresolved placeholder is an unread scope, and
+    unread scopes withhold.
+    """
+    missing = False
+
+    def _substitute(match: re.Match[str]) -> str:
+        nonlocal missing
+        # group(2) is absent when the placeholder declares no `:default`.
+        default: str | None = match.group(2)
+        value = config_env.get(match.group(1), default)
+        if value is None:
+            missing = True
+            return match.group(0)
+        return value
+
+    resolved = _PLACEHOLDER.sub(_substitute, pattern)
+    return None if missing else resolved
 
 
 def _rule_evidence(
@@ -359,6 +538,7 @@ def _rule_evidence(
     full_uri: str,
     http_method: HttpMethod,
     config_structured: dict[str, list[dict[str, object]]],
+    config_env: dict[str, str],
 ) -> list[AuthEvidence]:
     """The governing filter-chain rule, resolved per chain (§5.2.9).
 
@@ -366,15 +546,38 @@ def _rule_evidence(
     the endpoint and nothing says which, that ambiguity is itself opaque —
     picking one would be a guess about which policy runs.
     """
+    # A config-bound loop emits one site per BRANCH of its if/else — denyAll,
+    # permitAll, authenticated, hasAnyRole — and every one of them binds the
+    # same prefix. Expanding each would replay the whole policy once per
+    # branch; expanding once, at the first site, reproduces what the loop
+    # actually does: walk the config entries in order.
     expanded: list[ExportSecurityRule] = []
+    config_sites = [
+        rule for rule in security_rules if rule.pattern_confidence is RulePatternConfidence.CONFIG
+    ]
+    recovered_from: dict[int, str] = {}
+    seen_bindings: set[tuple[str | None, str | None]] = set()
     for rule in security_rules:
-        if rule.pattern.startswith(CONFIG_PREFIX):
-            recovered = _expand_config_rules(rule, config_structured)
+        if rule.pattern_confidence is not RulePatternConfidence.CONFIG:
+            expanded.append(rule)
+            continue
+        binding = (rule.chain_id, rule.pattern)
+        if binding in seen_bindings:
+            continue
+        seen_bindings.add(binding)
+        recovered = _expand_config_rules(rule, config_structured)
+        if recovered is None:
             # No correlation: the rule stays as-is and reads as unresolvable,
             # which withholds rather than falling through.
-            expanded.extend(recovered if recovered is not None else [rule])
-        else:
             expanded.append(rule)
+            continue
+        correlated = _config_entries(rule, config_structured)
+        source = correlated[0] if correlated else (rule.pattern or "")
+        for entry in recovered:
+            anchored = _anchored_at_applying_branch(entry, rule, config_sites)
+            recovered_from[id(anchored)] = source
+            expanded.append(anchored)
+    expanded = [_with_resolved_placeholders(rule, config_env) for rule in expanded]
     chains = _chains_governing(expanded, full_uri)
     if not chains:
         return []
@@ -386,11 +589,22 @@ def _rule_evidence(
             effect, roles, authorities, resolution = _read_access(matched.access)
             if unresolvable or ambiguous:
                 resolution = AuthResolution.OPAQUE
-            detail = (
-                "a security rule's path could not be read"
-                if unresolvable
-                else f"{matched.pattern} -> {matched.access}"
-            )
+            # Which HALF was unreadable is what the reader needs: a rule whose
+            # scope is unknown might not govern this endpoint at all, while one
+            # whose scope is known and whose effect is not definitely does.
+            if not unresolvable:
+                detail = f"{matched.pattern} -> {matched.access}"
+                # Say where the rule was WRITTEN. Recovered from config, its
+                # pattern and roles appear nowhere in the Java, so a reader
+                # following the anchor finds a loop over values it cannot see
+                # — and would reasonably conclude the roles were invented.
+                source = recovered_from.get(id(matched))
+                if source is not None:
+                    detail += f"  ·  declared in {source}"
+            elif matched.pattern is None:
+                detail = "a security rule's path could not be read"
+            else:
+                detail = f"{matched.pattern} -> effect could not be read"
             evidence.append(
                 AuthEvidence(
                     kind=AuthEvidenceKind.SECURITY_DSL,
@@ -414,6 +628,64 @@ def _rule_evidence(
     return evidence
 
 
+#: The Java call each synthesized access corresponds to, so a recovered rule
+#: can be anchored at the branch that actually runs for it.
+_BRANCH_FOR_ACCESS = (
+    ("permitAll", "permitAll"),
+    ("denyAll", "denyAll"),
+    ("hasAnyAuthority", "hasAnyAuthority"),
+    ("hasAuthority", "hasAuthority"),
+    ("hasAnyRole", "hasAnyRole"),
+    ("hasRole", "hasRole"),
+    ("authenticated", "authenticated"),
+)
+
+
+def _anchored_at_applying_branch(
+    recovered: ExportSecurityRule,
+    binding: ExportSecurityRule,
+    sites: list[ExportSecurityRule],
+) -> ExportSecurityRule:
+    """Point a config-recovered rule at the branch that applies IT.
+
+    The loop's if/else emits one site per branch, and the binding that got
+    expanded is simply the first of them. Keeping its anchor means a rule
+    reading ``hasAnyRole('ROLE_ADMIN')`` can point at the line
+    ``authorizedUrl.denyAll();`` — a branch this rule never takes, whose text
+    contradicts the fact above it. The value is right and the citation is not,
+    which is the worse of the two failures: a reader who checks is told the
+    analysis is wrong.
+
+    Matched on the access VERB rather than by position, because the branch
+    order is the codebase's choice, not a convention.
+    """
+    access = recovered.access
+    verb = next((call for marker, call in _BRANCH_FOR_ACCESS if marker in access), None)
+    if verb is None:
+        return recovered
+    branch = next(
+        (site for site in sites if site.chain_id == binding.chain_id and verb in site.access),
+        None,
+    )
+    if branch is None:
+        return recovered
+    return recovered.model_copy(update={"anchor": branch.anchor, "call_id": branch.call_id})
+
+
+def _with_resolved_placeholders(
+    rule: ExportSecurityRule, config_env: dict[str, str]
+) -> ExportSecurityRule:
+    """A ``${…}`` pattern resolved against config, or downgraded to unread."""
+    if rule.pattern is None or "${" not in rule.pattern:
+        return rule
+    resolved = _resolve_placeholders(rule.pattern, config_env)
+    if resolved is None:
+        return rule.model_copy(
+            update={"pattern": None, "pattern_confidence": RulePatternConfidence.NONE}
+        )
+    return rule.model_copy(update={"pattern": resolved})
+
+
 def _chains_governing(
     security_rules: list[ExportSecurityRule], full_uri: str
 ) -> list[list[ExportSecurityRule]]:
@@ -427,6 +699,46 @@ def _chains_governing(
         if scope is None or any(_ant_match(part, full_uri) for part in scope.split(",")):
             in_scope.append(rules)
     return in_scope
+
+
+#: Authority-model kinds that make a role list INCOMPLETE rather than merely
+#: explaining it. A hierarchy adds reachers the list does not name; a custom
+#: authority prefix rewires the hasRole→authority mapping the split assumes.
+_ROLE_LIST_ALTERING = frozenset({"role-hierarchy", "authority-defaults"})
+
+#: The prefix Spring uses when nobody overrides it. A `GrantedAuthorityDefaults`
+#: that restates it changes nothing and must not raise a flag.
+_DEFAULT_ROLE_PREFIX = "ROLE_"
+
+
+def _authority_model_evidence(models: list[ExportAuthorityModel]) -> list[AuthEvidence]:
+    """§5.2.10 T7: what a grant means, and whether the role list is complete.
+
+    These constructs gate nothing, so they never withhold — withholding on
+    them would be the blunt instrument §5.2.9 already rejected. They are
+    recorded as PARTIAL evidence, which is what marks the role list as
+    under-stating who can reach the endpoint without discarding the claim that
+    authentication is required.
+    """
+    evidence: list[AuthEvidence] = []
+    for model in models:
+        alters = model.kind in _ROLE_LIST_ALTERING
+        if model.kind == "authority-defaults" and _DEFAULT_ROLE_PREFIX in model.detail:
+            alters = False  # a restatement of the default rewires nothing
+        evidence.append(
+            AuthEvidence(
+                kind=AuthEvidenceKind.AUTHORITY_MODEL,
+                detail=f"{model.kind}: {model.detail}",
+                anchor=SourceAnchor(
+                    file=model.anchor.file,
+                    start_line=max(model.anchor.line, 1),
+                    end_line=max(model.anchor.line, 1),
+                ),
+                effect=AuthEffect.UNKNOWN,
+                resolution=AuthResolution.PARTIAL if alters else AuthResolution.RESOLVED,
+            )
+        )
+    return evidence
 
 
 def _config_evidence(config_env: dict[str, str]) -> list[AuthEvidence]:
@@ -491,19 +803,19 @@ def _read_access(
         return AuthEffect.PERMIT_ALL, [], [], AuthResolution.RESOLVED
     if "denyAll" in expression or "@DenyAll" in expression:
         return AuthEffect.DENY_ALL, [], [], AuthResolution.RESOLVED
-    named = _extract_roles(expression)
+    # Roles and authorities are different things in Spring — `hasRole("X")`
+    # matches the authority `ROLE_X`, `hasAuthority("X")` matches `X` — so they
+    # are extracted by their OWN patterns and land in separate lists. Only the
+    # role family has its `ROLE_` prefix normalized away; an authority is
+    # reported exactly as written, because `hasAuthority("ROLE_ADMIN")` asks
+    # for a grant that `ADMIN` would not satisfy.
+    roles = _extract_roles(expression)
+    authorities = _extract_authorities(expression)
     partial = _has_unresolved_arguments(expression)
-    if named:
-        # Roles and authorities are different things in Spring — `hasRole("X")`
-        # matches the authority `ROLE_X`, `hasAuthority("X")` matches `X` — so
-        # the values land in separate lists rather than being pooled under
-        # "roles" and quietly losing which kind of grant is required.
-        authority_scoped = "hasAuthority" in expression or "hasAnyAuthority" in expression
-        effect = AuthEffect.REQUIRE_AUTHORITIES if authority_scoped else AuthEffect.REQUIRE_ROLES
+    if roles or authorities:
+        effect = AuthEffect.REQUIRE_ROLES if roles else AuthEffect.REQUIRE_AUTHORITIES
         resolution = AuthResolution.PARTIAL if partial else AuthResolution.RESOLVED
-        if authority_scoped:
-            return effect, [], named, resolution
-        return effect, named, [], resolution
+        return effect, roles, authorities, resolution
     if _requires_identity(expression):
         return AuthEffect.REQUIRE_AUTHENTICATED, [], [], AuthResolution.RESOLVED
     # A gate whose condition we cannot read: it still gates, and it is not
@@ -529,14 +841,33 @@ def _has_unresolved_arguments(expression: str) -> bool:
 
 
 def _extract_roles(expression: str) -> list[str]:
-    """Best-effort role extraction; unparseable expressions stay evidence-only."""
-    roles: list[str] = []
-    for pattern in _ROLE_PATTERNS:
-        roles.extend(pattern.findall(expression))
-    for pattern in _MULTI_ROLE_PATTERNS:
+    """Role names, `ROLE_` normalized away; unparseable stays evidence-only."""
+    named = _extract_grants(expression, _ROLE_PATTERNS, _MULTI_ROLE_PATTERNS)
+    return sorted(dict.fromkeys(role.removeprefix("ROLE_") for role in named))
+
+
+def _extract_authorities(expression: str) -> list[str]:
+    """Authority names, VERBATIM — see the pattern definitions for why."""
+    return sorted(
+        dict.fromkeys(
+            _extract_grants(expression, *(_AUTHORITY_PATTERNS,))
+            + _extract_grants(expression, (), _MULTI_AUTHORITY_PATTERNS)
+        )
+    )
+
+
+def _extract_grants(
+    expression: str,
+    single: tuple[re.Pattern[str], ...],
+    multi: tuple[re.Pattern[str], ...] = (),
+) -> list[str]:
+    grants: list[str] = []
+    for pattern in single:
+        grants.extend(pattern.findall(expression))
+    for pattern in multi:
         for group in pattern.findall(expression):
-            roles.extend(quoted.removeprefix("ROLE_") for quoted in _QUOTED.findall(group))
-    return sorted(dict.fromkeys(role.removeprefix("ROLE_") for role in roles))
+            grants.extend(_QUOTED.findall(group))
+    return grants
 
 
 def _matching_rules(
@@ -561,7 +892,7 @@ def _matching_rules(
     for rule in rules:
         if rule.http_method is not None and rule.http_method.upper() != http_method.value:
             continue
-        if not rule.resolvable:
+        if not rule.resolvable or rule.pattern is None:
             matched.append(rule)
             continue  # the fork: keep walking for the alternative branch
         if _governs(rule.pattern, full_uri):

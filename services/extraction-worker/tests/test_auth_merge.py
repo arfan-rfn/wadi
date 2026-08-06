@@ -4,7 +4,9 @@ from typing import ClassVar
 
 from wadi_contracts import (
     AuthEffect,
+    AuthEvidence,
     AuthEvidenceKind,
+    AuthResolution,
     EndpointAuth,
     HttpMethod,
     SourceAnchor,
@@ -14,8 +16,10 @@ from wadi_joern_client.export import (
     ExportAnchor,
     ExportAuthEnforcement,
     ExportAuthMechanism,
+    ExportAuthorityModel,
     ExportMethodSecurity,
     ExportSecurityRule,
+    RulePatternConfidence,
 )
 from wadi_worker.auth_merge import (
     _ant_match,  # pyright: ignore[reportPrivateUsage] — the matching core deserves direct tests
@@ -647,3 +651,398 @@ class TestRuleScoping:
             config_env={},
         )
         assert auth.denied is True
+
+
+class TestPropertyPlaceholderScopes:
+    """§5.2.10: a `${…}` pattern is a scope, not a string.
+
+    The exporter now passes placeholders through instead of reporting `{?}`,
+    which is more informative — and would be actively dangerous if the worker
+    compared them literally. A pattern still holding `${…}` matches no
+    endpoint, so the rule would govern nothing and the endpoint would fall
+    through to whatever comes next. These pin the two halves apart.
+    """
+
+    def test_a_resolvable_placeholder_governs_the_endpoint_it_names(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("${app.admin-path}/**", 'hasRole("ADMIN")'),
+                _rule("/**", "permitAll()", line=22),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={"app.admin-path": "/api/admin"},
+        )
+        assert auth.authenticated is True
+        assert auth.roles == ["ADMIN"]
+
+    def test_a_placeholder_default_is_used_when_config_is_silent(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("${app.admin-path:/api/admin}/**", 'hasRole("ADMIN")'),
+                _rule("/**", "permitAll()", line=22),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is True
+        assert auth.roles == ["ADMIN"]
+
+    def test_an_unresolvable_placeholder_withholds_instead_of_falling_through(self) -> None:
+        # The regression that matters. Left as a literal `${…}` this rule
+        # matches nothing, the endpoint reaches `permitAll()`, and wadi
+        # publishes "no authentication, evidenced" for a route that may well
+        # require ADMIN — the exact §5.2.9 wrong answer by a new road.
+        auth = merge_endpoint_auth(
+            full_uri="/api/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("${app.admin-path}/**", 'hasRole("ADMIN")'),
+                _rule("/**", "permitAll()", line=22),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is None, "an unread scope must withhold, never fall through"
+        assert auth.unread_enforcement, "and it must say which construct it could not read"
+
+
+class TestConfigDefinedRuleShapes:
+    """§5.2.10 T4: the config reader knew yas's shape, not the shape space.
+
+    Every case here is a real train-ticket-aitest construct. The verb one is a
+    measured wrong answer, not a hypothetical: without it a GET-only permitAll
+    widened to every verb and `POST /adminbasic/configs` published as
+    evidenced-open against a ROLE_ADMIN ground truth.
+    """
+
+    PREFIX = "@security"
+
+    def _bound(self, access: str = "hasAnyRole(roles)") -> ExportSecurityRule:
+        return ExportSecurityRule(
+            call_id=1,
+            pattern=self.PREFIX,
+            pattern_confidence=RulePatternConfidence.CONFIG,
+            access=access,
+            kind="filter-chain",
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=21),
+            evidence="authorizedUrl.hasAnyRole(roles)",
+        )
+
+    #: The real ts-admin-service policy, verbatim in shape.
+    AITEST_RULES: ClassVar[dict[str, list[dict[str, object]]]] = {
+        "security.authorization-rules": [
+            {
+                "paths": ["/api/v1/adminbasicservice/adminbasic/configs"],
+                "method": "GET",
+                "authorities": ["permitAll"],
+            },
+            {"paths": ["/api/v1/adminbasicservice/**"], "authorities": ["ROLE_ADMIN"]},
+        ]
+    }
+
+    def _auth(self, uri: str, verb: HttpMethod, **kwargs: object) -> EndpointAuth:
+        return merge_endpoint_auth(
+            full_uri=uri,
+            http_method=verb,
+            auth_tags=[],
+            security_rules=[self._bound(), _rule("/**", "authenticated()", line=99)],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured=self.AITEST_RULES,
+            **kwargs,  # pyright: ignore[reportArgumentType]
+        )
+
+    def test_a_scalar_method_key_keeps_the_rule_verb_scoped(self) -> None:
+        # The measured regression: `method: "GET"` was read from lists only.
+        opened = self._auth("/api/v1/adminbasicservice/adminbasic/configs", HttpMethod.GET)
+        assert opened.authenticated is False, "GET is permitAll by rule 1"
+
+        guarded = self._auth("/api/v1/adminbasicservice/adminbasic/configs", HttpMethod.POST)
+        assert guarded.authenticated is True, "POST must fall to the ROLE_ADMIN rule"
+        assert guarded.roles == ["ADMIN"]
+
+    def test_a_permissive_sentinel_in_the_authority_list_opens_the_route(self) -> None:
+        # Not as a demand for a role literally named "permitAll".
+        auth = self._auth("/api/v1/adminbasicservice/adminbasic/configs", HttpMethod.GET)
+        assert auth.roles == []
+        assert auth.authenticated is False
+
+    def test_role_vs_authority_follows_the_java_not_the_yaml_key(self) -> None:
+        # The key is spelled "authorities", but the loop called hasAnyRole, so
+        # ROLE_ADMIN is a role. A reader that trusted the key name would emit
+        # an authority and the chip would name a grant the rule never asks for.
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/adminbasicservice/x",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound()],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured=self.AITEST_RULES,
+        )
+        assert auth.roles == ["ADMIN"]
+        assert auth.authorities == []
+
+        as_authority = merge_endpoint_auth(
+            full_uri="/api/v1/adminbasicservice/x",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound(access="hasAnyAuthority(auths)")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured=self.AITEST_RULES,
+        )
+        assert as_authority.authorities == ["ROLE_ADMIN"]
+        assert as_authority.roles == []
+
+    def test_an_undeterminable_entry_withholds_instead_of_inventing_a_grant(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/thing",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound(), _rule("/**", "permitAll()", line=99)],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured={"security.rules": [{"paths": ["/api/v1/**"], "note": "tbd"}]},
+        )
+        assert auth.authenticated is None
+
+    def test_a_deny_sentinel_is_a_denial_not_a_role(self) -> None:
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/legacy",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[self._bound()],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_structured={
+                "security.rules": [{"paths": ["/api/v1/legacy"], "authorities": ["denyAll"]}]
+            },
+        )
+        assert auth.denied is True
+
+
+class TestAuthorityModel:
+    """§5.2.10 T7: what a grant means is not whether a request gets through."""
+
+    def _model(self, kind: str, detail: str) -> ExportAuthorityModel:
+        return ExportAuthorityModel(
+            kind=kind,
+            detail=detail,
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=30),
+        )
+
+    def _auth(self, *models: ExportAuthorityModel, **kwargs: object) -> EndpointAuth:
+        return merge_endpoint_auth(
+            full_uri="/admin/reports",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            handler_anchor=ANCHOR,
+            config_env={},
+            authority_models=list(models),
+            **kwargs,  # pyright: ignore[reportArgumentType]
+        )
+
+    def test_an_authority_model_never_gates_on_its_own(self) -> None:
+        # The trap. With effect UNKNOWN these land in `requiring` unless
+        # excluded, and every service that merely declares a UserDetailsService
+        # would claim all its endpoints demand authentication — a wrong fact
+        # invented by the machinery meant to prevent wrong facts.
+        auth = self._auth(
+            self._model("user-details-service", "userDetailsService"), security_rules=[]
+        )
+        assert auth.authenticated is None
+        assert auth.roles == []
+
+    def test_a_role_hierarchy_marks_the_role_list_incomplete(self) -> None:
+        # ROLE_ADMIN > ROLE_USER means ADMIN reaches a [USER] endpoint too, so
+        # the published list under-states who can get in.
+        auth = self._auth(
+            self._model("role-hierarchy", "RoleHierarchyImpl"),
+            security_rules=[_rule("/admin/**", 'hasRole("USER")')],
+        )
+        assert auth.authenticated is True, "the hierarchy must not cost the claim"
+        assert auth.roles == ["USER"]
+        partial = [
+            item
+            for item in auth.evidence
+            if item.kind is AuthEvidenceKind.AUTHORITY_MODEL
+            and item.resolution is AuthResolution.PARTIAL
+        ]
+        assert partial, "the incompleteness must be visible on the endpoint"
+
+    def test_a_default_authority_prefix_changes_nothing_and_says_so(self) -> None:
+        # A GrantedAuthorityDefaults that restates ROLE_ rewires nothing;
+        # flagging it would be crying wolf on a no-op bean.
+        auth = self._auth(
+            self._model("authority-defaults", 'GrantedAuthorityDefaults("ROLE_")'),
+            security_rules=[_rule("/admin/**", 'hasRole("ADMIN")')],
+        )
+        model = next(i for i in auth.evidence if i.kind is AuthEvidenceKind.AUTHORITY_MODEL)
+        assert model.resolution is AuthResolution.RESOLVED
+
+    def test_a_custom_authority_prefix_is_flagged(self) -> None:
+        auth = self._auth(
+            self._model("authority-defaults", 'GrantedAuthorityDefaults("")'),
+            security_rules=[_rule("/admin/**", 'hasRole("ADMIN")')],
+        )
+        model = next(i for i in auth.evidence if i.kind is AuthEvidenceKind.AUTHORITY_MODEL)
+        assert model.resolution is AuthResolution.PARTIAL
+
+
+class TestOrderedAlternativesAreNotConjunctive:
+    """§5.2.10: the §5.2.9 defect, mirrored.
+
+    "Enforcement is a conjunction — an unknown gate can add a requirement,
+    never remove one" is true for LAYERED enforcement (a chain rule and method
+    security both run). It is false for ORDERED ALTERNATIVES inside one chain:
+    authorizeHttpRequests is first-match-wins, so an earlier match means the
+    later rules never execute.
+
+    An unread-scope permitAll() ahead of a readable anyRequest().authenticated()
+    therefore leaves the endpoint genuinely uncertain, and discounting it
+    published a confident `True` — the same root shape as the original defect
+    (an unread rule not permitted to withhold), pointing the other way.
+    """
+
+    def _opaque(self, access: str, line: int) -> ExportSecurityRule:
+        return ExportSecurityRule(
+            call_id=line,
+            pattern=None,
+            pattern_confidence=RulePatternConfidence.NONE,
+            access=access,
+            kind="filter-chain",
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=line),
+            evidence=access,
+        )
+
+    def _claim(self, *rules: ExportSecurityRule) -> EndpointAuth:
+        return merge_endpoint_auth(
+            full_uri="/contest/public/list",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=list(rules),
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+
+    def test_an_unread_permit_all_withholds_a_protected_answer(self) -> None:
+        auth = self._claim(
+            self._opaque("permitAll()", 10),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert auth.authenticated is None, (
+            "a permitAll whose scope is unknown can remove enforcement exactly "
+            "as a chain bypass can; claiming protected here is a false positive"
+        )
+        assert auth.unread_enforcement
+
+    def test_an_unread_restrictive_rule_still_leaves_the_claim_standing(self) -> None:
+        # The control that keeps the fix from becoming a wall of unknowns: an
+        # unread hasRole can only ADD restriction, so protected either way.
+        auth = self._claim(
+            self._opaque('hasRole("AUDITOR")', 10),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert auth.authenticated is True
+
+    def test_an_unread_restrictive_rule_before_permit_all_still_withholds(self) -> None:
+        auth = self._claim(
+            self._opaque('hasRole("AUDITOR")', 10),
+            _rule("/**", "permitAll()", line=20),
+        )
+        assert auth.authenticated is None
+
+    def test_fully_readable_chains_are_unaffected(self) -> None:
+        opened = self._claim(
+            _rule("/contest/public/**", "permitAll()"),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert opened.authenticated is False
+        guarded = self._claim(
+            _rule("/admin/**", 'hasRole("ADMIN")'),
+            _rule("/**", "authenticated()", line=20),
+        )
+        assert guarded.authenticated is True
+
+
+class TestConfigRecoveredProvenance:
+    """A recovered rule must cite the branch that applies it, and the config
+    it was declared in (§5.2.10).
+
+    Neither pattern nor roles appear anywhere in the Java, so a reader who
+    follows the anchor lands on a loop over values they cannot see. If the
+    anchor also points at the wrong branch — a rule reading
+    `hasAnyRole('ROLE_ADMIN')` citing a line that says `denyAll()` — the reader
+    who checks is told the analysis is wrong. The value being right does not
+    save it; a false citation is its own defect.
+    """
+
+    RULES: ClassVar[dict[str, list[dict[str, object]]]] = {
+        "security.authorization-rules": [
+            {"paths": ["/admin/open"], "method": "GET", "authorities": ["permitAll"]},
+            {"paths": ["/admin/**"], "authorities": ["ROLE_ADMIN"]},
+        ]
+    }
+
+    def _site(self, line: int, access: str) -> ExportSecurityRule:
+        return ExportSecurityRule(
+            call_id=line,
+            pattern="@security",
+            pattern_confidence=RulePatternConfidence.CONFIG,
+            access=access,
+            kind="filter-chain",
+            chain_id="chain",
+            anchor=ExportAnchor(file="src/SecurityConfig.java", line=line),
+            evidence=access,
+        )
+
+    def _chain(self) -> list[ExportSecurityRule]:
+        # One site per branch of the loop's if/else, exactly as the pass emits.
+        return [
+            self._site(87, "denyAll()"),
+            self._site(89, "permitAll()"),
+            self._site(91, "authenticated()"),
+            self._site(97, "hasAnyRole(roles)"),
+        ]
+
+    def _evidence(self, uri: str, verb: HttpMethod) -> list[AuthEvidence]:
+        from wadi_worker.auth_merge import (
+            _rule_evidence,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        return _rule_evidence(self._chain(), uri, verb, self.RULES, {})
+
+    def test_a_role_rule_cites_the_role_branch(self) -> None:
+        item = self._evidence("/admin/thing", HttpMethod.POST)[0]
+        assert item.roles == ["ADMIN"]
+        # NOT line 87 (denyAll) — a branch this rule never takes.
+        assert item.anchor is not None
+        assert item.anchor.start_line == 97
+
+    def test_a_permit_rule_cites_the_permit_branch(self) -> None:
+        item = self._evidence("/admin/open", HttpMethod.GET)[0]
+        assert item.effect is AuthEffect.PERMIT_ALL
+        assert item.anchor is not None
+        assert item.anchor.start_line == 89
+
+    def test_the_config_key_is_named_so_the_policy_can_be_read(self) -> None:
+        item = self._evidence("/admin/thing", HttpMethod.POST)[0]
+        assert "security.authorization-rules" in item.detail
+
+    def test_one_binding_expands_once_not_once_per_branch(self) -> None:
+        # Four sites bind the same prefix. Expanding each would replay the
+        # whole policy four times and make the chain read as 4x its length.
+        from wadi_worker.auth_merge import (
+            _rule_evidence,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        evidence = _rule_evidence(self._chain(), "/admin/thing", HttpMethod.POST, self.RULES, {})
+        assert len(evidence) == 1

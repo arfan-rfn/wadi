@@ -24,6 +24,10 @@ import { unopenableCopy } from "@/lib/wadi/unopenable"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MethodBadge } from "@/components/explorer/method-badge"
+import {
+  authorityModelNote,
+  gatesRequests,
+} from "@/components/shared/auth-chip"
 import { CollapsibleSection } from "@/components/shared/collapsible-section"
 import { EmptyState } from "@/components/shared/empty-state"
 
@@ -91,8 +95,14 @@ export function EndpointPeek({
     )
 
   const params = endpoint.params ?? []
-  const evidence = (endpoint.auth?.evidence ?? []).filter(
-    (item) => item.kind !== "config"
+  const allEvidence = endpoint.auth?.evidence ?? []
+  // Split by whether the record GATES. An authority-model says what a grant
+  // means, not who gets through, so listing it here would claim a
+  // UserDetailsService guards the endpoint — and would hide the "nothing gates
+  // this" state on a route that really has no guard (§5.2.10 T7).
+  const evidence = allEvidence.filter((item) => gatesRequests(item.kind))
+  const authorityModel = allEvidence.filter(
+    (item) => item.kind === "authority-model"
   )
   const mechanisms = endpoint.auth?.mechanisms ?? []
   const unopenable = detail.data?.unopenable_calls ?? []
@@ -161,6 +171,24 @@ export function EndpointPeek({
                     >
                       {edge.confidence}
                     </span>
+                    {/* Whether the caller's credentials cross THIS call. The
+                        negative is only shown where it is provable, so absence
+                        of a chip is not a claim either way (§5.2.11 T4). */}
+                    {edge.auth_propagation_state &&
+                      edge.auth_propagation_state !== "undetermined" && (
+                        <span
+                          className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+                          title={
+                            edge.auth_propagation_state === "forwarded"
+                              ? `The caller's credentials are passed on${edge.auth_propagation ? ` (${edge.auth_propagation})` : ""}`
+                              : "This call builds its request with no headers at all — the caller's token does not travel with it"
+                          }
+                        >
+                          {edge.auth_propagation_state === "forwarded"
+                            ? "token fwd"
+                            : "no token"}
+                        </span>
+                      )}
                   </div>
                   {edge.target_simplified_uri ? (
                     <p className="mt-1 flex items-center gap-1.5 pl-[3.25rem] font-mono text-[10px] text-muted-foreground">
@@ -244,7 +272,7 @@ export function EndpointPeek({
                     </p>
                   ) : null}
                   {item.anchor ? (
-                    <p className="font-mono text-[10px] text-muted-foreground/75">
+                    <p className="font-mono text-[10px] break-all text-muted-foreground/75">
                       ↳ {item.anchor.file}:{item.anchor.start_line}
                     </p>
                   ) : null}
@@ -252,6 +280,35 @@ export function EndpointPeek({
               ))}
             </ul>
           )}
+          {authorityModel.length > 0 ? (
+            <div className="mt-2.5 space-y-1 border-t pt-2.5">
+              {authorityModel.map((item, index) => {
+                const note = authorityModelNote(item.resolution)
+                return (
+                  <div key={`authority-${index}`} className="space-y-0.5">
+                    <p
+                      className={cn(
+                        "text-2xs",
+                        note.incomplete
+                          ? "text-amber-700 dark:text-amber-400"
+                          : "text-muted-foreground/70"
+                      )}
+                    >
+                      {note.text}
+                    </p>
+                    <p className="font-mono text-[11px] break-all text-muted-foreground">
+                      {item.detail}
+                    </p>
+                    {item.anchor ? (
+                      <p className="font-mono text-[10px] break-all text-muted-foreground/75">
+                        ↳ {item.anchor.file}:{item.anchor.start_line}
+                      </p>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
           {mechanisms.length > 0 ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
               <span className="text-2xs text-muted-foreground/70">
@@ -310,6 +367,33 @@ export function EndpointPeek({
         </CollapsibleSection>
 
         <CollapsibleSection title="Response">
+          {(endpoint.declared_statuses ?? []).length > 0 && (
+            <div className="mb-2.5">
+              <div className="flex flex-wrap gap-1">
+                {(endpoint.declared_statuses ?? []).map((status) => (
+                  <span
+                    key={`${status.code}:${status.origin}`}
+                    className={cn(
+                      "rounded-full border px-1.5 py-0.5 font-mono text-[10px]",
+                      status.code < 300
+                        ? "text-muted-foreground"
+                        : "border-amber-500/40 text-amber-600 dark:text-amber-400"
+                    )}
+                    title={`${status.detail} — read from the ${status.origin}`}
+                  >
+                    {status.code}
+                  </span>
+                ))}
+              </div>
+              {/* The list is what the handler NAMES. A 500 from an uncaught
+                  exception, a 403 from the security layer and a 404 from the
+                  dispatcher are in no handler source, so silence here is not
+                  a claim that this endpoint cannot fail (P10). */}
+              <p className="mt-1 text-[10px] text-muted-foreground/80">
+                Named in the handler — errors raised elsewhere are not listed.
+              </p>
+            </div>
+          )}
           {endpoint.response_schema ? (
             <SchemaTree shape={endpoint.response_schema} />
           ) : (

@@ -22,7 +22,9 @@ from wadi_contracts import (
     DataModel,
     DataModelField,
     Endpoint,
+    EndpointCollision,
     EndpointParam,
+    EndpointStatus,
     FieldShape,
     HttpMethod,
     Icfg,
@@ -36,10 +38,14 @@ from wadi_contracts import (
     MqDirection,
     MqInteraction,
     ParamLocation,
+    Reachability,
     RemoteCall,
     ShapeKind,
+    ShapeOrigin,
     SinkKind,
     SourceAnchor,
+    StatusOrigin,
+    TokenPropagation,
     TypeShape,
     method_id,
     mq_interaction_id,
@@ -81,6 +87,9 @@ _UNBOUND_REASON = {
     ExportUnboundReason.THIRD_PARTY: CalleeUnboundReason.THIRD_PARTY,
     ExportUnboundReason.AMBIGUOUS_OVERLOAD: CalleeUnboundReason.AMBIGUOUS_OVERLOAD,
     ExportUnboundReason.UNRESOLVED_RECEIVER: CalleeUnboundReason.UNRESOLVED_RECEIVER,
+    ExportUnboundReason.DECLARED_NOT_BOUND: CalleeUnboundReason.DECLARED_NOT_BOUND,
+    ExportUnboundReason.NOT_DECLARED: CalleeUnboundReason.NOT_DECLARED,
+    ExportUnboundReason.UNPARSEABLE_CALLEE: CalleeUnboundReason.UNPARSEABLE_CALLEE,
     None: None,
 }
 
@@ -110,10 +119,63 @@ class AssembledArtifacts:
     mq_interactions: list[MqInteraction] = field(default_factory=list[MqInteraction])
     data_models: list[DataModel] = field(default_factory=list[DataModel])
     cfg_anomalies: list[CfgAnomaly] = field(default_factory=list[CfgAnomaly])
+    endpoint_collisions: list[EndpointCollision] = field(default_factory=list[EndpointCollision])
 
 
 class ExportIncompatibleError(RuntimeError):
     """The export's schema major version doesn't match this reader."""
+
+
+def resolve_id_collisions(artifacts: AssembledArtifacts) -> None:
+    """Endpoints sharing a content-derived id cannot all be stored (§7).
+
+    The store upserts on ``(snapshot_id, service_id, id)``, so a duplicate
+    id does not merge — the later write REPLACES the earlier one and the
+    endpoint is gone. Left alone that is silent: the loss happens at the
+    storage key, downstream of the coverage report and every other counter,
+    which is exactly how three handlers of a real controller disappeared
+    while every honesty surface read clean.
+
+    So the collision is resolved HERE, where it is still visible: a
+    deterministic winner is kept (lowest handler signature, so the snapshot
+    stays reproducible), the losers and their ICFGs are dropped together —
+    an ICFG whose endpoint was not stored would be an orphan — and the whole
+    event is recorded as a queryable fact (P10).
+    """
+    by_id: dict[str, list[Endpoint]] = {}
+    for endpoint in artifacts.endpoints:
+        by_id.setdefault(endpoint.id, []).append(endpoint)
+
+    dropped_ids: set[int] = set()
+    for endpoint_id, group in sorted(by_id.items()):
+        if len(group) == 1:
+            continue
+        ordered = sorted(group, key=lambda e: e.handler.signature)
+        kept, losers = ordered[0], ordered[1:]
+        artifacts.endpoint_collisions.append(
+            EndpointCollision(
+                endpoint_id=endpoint_id,
+                http_method=kept.http_method.value,
+                uri=kept.simplified_uri,
+                kept_handler=kept.handler.signature,
+                dropped_handlers=[e.handler.signature for e in losers],
+            )
+        )
+        dropped_ids.update(id(e) for e in losers)
+        logger.warning(
+            "endpoint id collision on %s %s (%s): kept %s, dropped %s",
+            kept.http_method.value,
+            kept.simplified_uri,
+            endpoint_id,
+            kept.handler.signature,
+            ", ".join(e.handler.signature for e in losers),
+        )
+
+    if not dropped_ids:
+        return
+    artifacts.endpoints = [e for e in artifacts.endpoints if id(e) not in dropped_ids]
+    kept_endpoint_ids = {e.id for e in artifacts.endpoints}
+    artifacts.icfgs = [i for i in artifacts.icfgs if i.endpoint_id in kept_endpoint_ids]
 
 
 class Assembler:
@@ -186,6 +248,17 @@ class Assembler:
                     for param in export_endpoint.params
                 ],
                 response_type=handler.return_type,
+                declared_statuses=[
+                    EndpointStatus(
+                        code=status.code,
+                        origin=StatusOrigin(status.origin),
+                        detail=status.detail,
+                        anchor=self._anchor(
+                            handler.filename, max(status.line, 1), max(status.line, 1)
+                        ),
+                    )
+                    for status in export_endpoint.status_codes
+                ],
                 request_schema=_shape(export_endpoint.request_schema),
                 response_schema=_shape(export_endpoint.response_schema),
                 auth=merge_endpoint_auth(
@@ -199,12 +272,14 @@ class Assembler:
                     auth_mechanisms=export.auth_mechanisms,
                     method_security=export.method_security,
                     config_structured=self._config_structured,
+                    authority_models=export.auth_authorities,
                 ),
             )
             artifacts.endpoints.append(endpoint)
             artifacts.icfgs.append(
                 self._assemble_icfg(endpoint, handler, methods, cfgs, sinks_by_node)
             )
+        resolve_id_collisions(artifacts)
         return artifacts
 
     # --- ICFG construction -----------------------------------------------------
@@ -485,6 +560,9 @@ class Assembler:
             calls.append(call)
         # Sinks outside the endpoint closure (§5.2.5): excluded from the map by
         # design, inventoried so the exclusion is a queryable fact (P10).
+        # §5.2.11 T2: "outside the endpoint closure" is two different facts —
+        # startup/scheduled code that really runs, and code nothing reaches.
+        async_rooted = self._async_root_closure(export, methods)
         for unreachable in export.unreachable_sinks:
             kind = self._sink_kind(unreachable.kind)
             if kind not in self._HTTP_SINK_KINDS:
@@ -499,6 +577,11 @@ class Assembler:
                 ),
                 suspected=kind is SinkKind.HTTP_CLIENT_SUSPECTED,
                 reachable=False,
+                reachability=(
+                    Reachability.ASYNC_ROOT
+                    if unreachable.method_full_name in async_rooted
+                    else Reachability.UNREACHED
+                ),
             )
             if call.id in seen:
                 continue
@@ -515,6 +598,7 @@ class Assembler:
         method_ref: MethodRef,
         suspected: bool,
         reachable: bool,
+        reachability: Reachability = Reachability.ENDPOINT,
     ) -> RemoteCall:
         return RemoteCall(
             snapshot_id=self._snapshot_id,
@@ -530,9 +614,34 @@ class Assembler:
             else Confidence.NONE,
             evidence=sink.evidence,
             auth_propagation=sink.auth_propagation,
+            auth_propagation_state=TokenPropagation(sink.auth_propagation_state),
             suspected=suspected,
             reachable=reachable,
+            reachability=reachability,
         )
+
+    def _async_root_closure(
+        self, export: ServiceExport, methods: dict[int, ExportMethod]
+    ) -> set[str]:
+        """Method full names reachable from a non-HTTP root (§5.2.11 T2).
+
+        The Scala closure is already rooted at endpoints + async roots, so
+        every method involved is in the export — what was missing is the
+        walk that says WHICH root got there. Returns full names because an
+        unreachable sink carries its enclosing method by name, not by id (its
+        method is inventoried inline rather than exported).
+        """
+        cfgs = {cfg.method_id: cfg for cfg in export.cfgs}
+        reached: set[str] = set()
+        for root in export.async_roots:
+            for reached_id in self._reachable_closure(root.method_id, methods, cfgs):
+                # The BFS seeds with the root id unconditionally, so a root the
+                # export did not carry would KeyError here rather than simply
+                # contributing nothing.
+                reached_method = methods.get(reached_id)
+                if reached_method is not None:
+                    reached.add(reached_method.full_name)
+        return reached
 
     def _build_mq_interactions(
         self, export: ServiceExport, methods: dict[int, ExportMethod]
@@ -661,6 +770,7 @@ def _shape(exported: "ExportTypeShape | None") -> TypeShape | None:
         return None
     return TypeShape(
         kind=ShapeKind(exported.kind),
+        origin=ShapeOrigin(exported.origin),
         type_name=exported.type_name,
         fields=[
             FieldShape(name=f.name, java_name=f.java_name, shape=_shape_required(f.shape))

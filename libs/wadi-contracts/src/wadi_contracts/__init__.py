@@ -2,17 +2,27 @@
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
 from wadi_contracts.boundary import (
+    AUTH_GAP_CODES,
     CFG_ANOMALY_CODES,
     KNOWN_CLIENT_LIBRARIES,
     MODELLED_CLIENT_LIBRARIES,
     AnalysisCoverage,
     AsyncRoot,
+    AuthExtractionGap,
     CfgAnomaly,
+    EndpointCollision,
     GatewayRoute,
     NetworkIdentity,
+    QuarantinedFact,
+    RequestPolicy,
     ServiceBoundary,
 )
-from wadi_contracts.comms import MqInteraction, RemoteCall
+from wadi_contracts.comms import (
+    MqInteraction,
+    Reachability,
+    RemoteCall,
+    TokenPropagation,
+)
 from wadi_contracts.datamodel import DataModel, DataModelField, DataModelRelation
 from wadi_contracts.endpoint import (
     AuthEffect,
@@ -24,13 +34,19 @@ from wadi_contracts.endpoint import (
     Endpoint,
     EndpointAuth,
     EndpointParam,
+    EndpointStatus,
     FieldShape,
     ParamLocation,
     ShapeKind,
+    ShapeOrigin,
+    StatusOrigin,
     TypeShape,
 )
 from wadi_contracts.enums import (
+    AuthGapCode,
     CalleeUnboundReason,
+    CfgAnomalyCode,
+    ClientLibrary,
     Confidence,
     HttpMethod,
     IcfgEdgeKind,
@@ -45,6 +61,7 @@ from wadi_contracts.enums import (
     SourceVariant,
     TargetKind,
     TriggerKind,
+    UnresolvedReasonCode,
 )
 from wadi_contracts.export import ExportManifest
 from wadi_contracts.icfg import (
@@ -89,6 +106,7 @@ from wadi_contracts.stitching import (
 )
 from wadi_contracts.system import RepoSource, Snapshot, System
 from wadi_contracts.tags import (
+    REQUEST_POLICY_KINDS,
     TAG_REGISTRY_VERSION,
     Tag,
     TagValidationError,
@@ -116,10 +134,12 @@ from wadi_contracts.views import (
 )
 
 __all__ = [
+    "AUTH_GAP_CODES",
     "CFG_ANOMALY_CODES",
     "CONTRACT_MODELS",
     "KNOWN_CLIENT_LIBRARIES",
     "MODELLED_CLIENT_LIBRARIES",
+    "REQUEST_POLICY_KINDS",
     "SCHEMA_VERSION",
     "TAG_REGISTRY_VERSION",
     "AnalysisCoverage",
@@ -131,6 +151,8 @@ __all__ = [
     "AuthEndpointRow",
     "AuthEvidence",
     "AuthEvidenceKind",
+    "AuthExtractionGap",
+    "AuthGapCode",
     "AuthMechanism",
     "AuthMechanismKind",
     "AuthResolution",
@@ -138,7 +160,9 @@ __all__ = [
     "BranchCondition",
     "CalleeUnboundReason",
     "CfgAnomaly",
+    "CfgAnomalyCode",
     "CfgAnomalySection",
+    "ClientLibrary",
     "Confidence",
     "CoverageReport",
     "CoverageTotals",
@@ -147,10 +171,12 @@ __all__ = [
     "DataModelRelation",
     "Endpoint",
     "EndpointAuth",
+    "EndpointCollision",
     "EndpointDependenciesView",
     "EndpointDependency",
     "EndpointDetailView",
     "EndpointParam",
+    "EndpointStatus",
     "EndpointTouchedFile",
     "ExportManifest",
     "ExternalApiEntry",
@@ -177,16 +203,20 @@ __all__ = [
     "ParamLocation",
     "PlaceholderEntry",
     "Provenance",
+    "QuarantinedFact",
+    "Reachability",
     "RemoteCall",
     "RemoteEdgeItem",
     "RemoteEdgesView",
     "RepoSource",
+    "RequestPolicy",
     "ServiceBoundary",
     "ServiceCfgAnomalyEntry",
     "ServiceCoverageEntry",
     "ServiceKind",
     "ServiceSummary",
     "ShapeKind",
+    "ShapeOrigin",
     "SinkKind",
     "Snapshot",
     "SnapshotEnvelope",
@@ -194,6 +224,7 @@ __all__ = [
     "SourceAnchor",
     "SourceVariant",
     "SourceView",
+    "StatusOrigin",
     "StitchedEdge",
     "System",
     "SystemAuthView",
@@ -202,11 +233,13 @@ __all__ = [
     "Tag",
     "TagValidationError",
     "TargetKind",
+    "TokenPropagation",
     "TriggerKind",
     "TypeShape",
     "UnmodelledMechanismEntry",
     "UnopenableCallCount",
     "UnresolvedCallEntry",
+    "UnresolvedReasonCode",
     "UtcDatetime",
     "WadiModel",
     "data_model_id",

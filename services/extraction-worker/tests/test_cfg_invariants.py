@@ -308,3 +308,41 @@ class TestAggregateAnomalies:
 
     def test_empty_findings_fold_to_empty(self) -> None:
         assert aggregate_anomalies([]) == []
+
+
+class TestEntrySelection:
+    """§5.2.8: the entry is an in-degree-0 node, not the lowest-positioned one.
+
+    `if (x == null) x = false;` on ONE line is ordinary Java. Both statements
+    then share a line, the (line, id) tiebreak falls to node id — arbitrary
+    with respect to source order — and javasrc2cpg gives the assignment a lower
+    id than its enclosing branch. The assignment was crowned entry and the
+    BRANCH reported disconnected, on a graph structurally identical to the
+    two-line spelling, which passed. Six findings on one benchmark were this.
+    """
+
+    def test_branch_and_body_on_one_line_is_clean(self) -> None:
+        # Ids deliberately ordered so the body sorts BEFORE its own branch,
+        # reproducing what the frontend emits for the one-line spelling.
+        body = _node(1, line=29)
+        branch = _node(2, CfgNodeKind.BRANCH, construct_kind="if", line=29)
+        tail = _node(3, CfgNodeKind.RETURN, line=30)
+        cfg = _cfg(
+            [body, branch, tail],
+            [
+                _edge(2, 1, ExportCfgEdgeLabel.TRUE),
+                _edge(2, 3, ExportCfgEdgeLabel.FALSE),
+                _edge(1, 3),
+            ],
+        )
+        assert check_cfg(cfg, _method()) == []
+
+    def test_a_genuine_second_entry_is_still_caught(self) -> None:
+        # Two in-degree-0 nodes: one is the entry, the other is a real
+        # disconnection and must stay reported.
+        cfg = _cfg(
+            [_node(1, line=10), _node(2, line=11), _node(3, CfgNodeKind.RETURN, line=12)],
+            [_edge(1, 3)],
+        )
+        codes = [code for code, _ in check_cfg(cfg, _method())]
+        assert codes == ["disconnected-node"]

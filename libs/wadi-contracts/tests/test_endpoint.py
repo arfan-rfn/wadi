@@ -33,6 +33,55 @@ class TestEndpointCreate:
         assert ep.id == endpoint_id(svc_id, "GET", "/orders/{orderId}")
         assert ep.trigger is TriggerKind.HTTP
 
+    def test_root_anchors_a_slashless_route(self, svc_id: str, handler_ref: MethodRef) -> None:
+        """Spring routes `api/v1/x` exactly as `/api/v1/x` (§5.2.11)."""
+        ep = Endpoint.create(
+            snapshot_id="snap_" + "0" * 16,
+            service_id=svc_id,
+            http_method=HttpMethod.GET,
+            full_uri="api/v1/configservice/configs",
+            handler=handler_ref,
+        )
+        assert ep.full_uri == "/api/v1/configservice/configs"
+        # The two spellings were always ONE endpoint: the id hashes
+        # simplify_uri, which has always anchored the root. Normalizing the
+        # published fact therefore costs no identity churn.
+        assert ep.id == endpoint_id(svc_id, "GET", "/api/v1/configservice/configs")
+
+    def test_slashless_route_loads_from_an_older_snapshot(
+        self, svc_id: str, handler_ref: MethodRef
+    ) -> None:
+        """Coerced, not rejected — stored snapshots predate the rule."""
+        stored = Endpoint.create(
+            snapshot_id="snap_" + "0" * 16,
+            service_id=svc_id,
+            http_method=HttpMethod.GET,
+            full_uri="/api/v1/configservice/configs",
+            handler=handler_ref,
+        ).model_dump()
+        stored["full_uri"] = "api/v1/configservice/configs"  # as written pre-1.19.0
+        reloaded = Endpoint.model_validate(stored)
+        assert reloaded.full_uri == "/api/v1/configservice/configs"
+        assert reloaded.id == stored["id"]
+
+    @pytest.mark.parametrize("uri", ["{?}/pets/list", "${gateway.base}/pets"])
+    def test_leaves_an_unknown_head_alone(
+        self, uri: str, svc_id: str, handler_ref: MethodRef
+    ) -> None:
+        """A hole or a config template has an unknown head.
+
+        Asserting a leading slash in front of one would invent information the
+        analysis does not have (P10) — the expansion may well supply its own.
+        """
+        ep = Endpoint.create(
+            snapshot_id="snap_" + "0" * 16,
+            service_id=svc_id,
+            http_method=HttpMethod.GET,
+            full_uri=uri,
+            handler=handler_ref,
+        )
+        assert ep.full_uri == uri
+
     def test_same_logical_endpoint_same_id(self, svc_id: str, handler_ref: MethodRef) -> None:
         a = Endpoint.create(
             snapshot_id="snap_a",

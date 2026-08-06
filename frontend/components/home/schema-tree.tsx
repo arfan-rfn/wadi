@@ -29,6 +29,10 @@ const TERMINAL_NOTE: Record<string, string> = {
   unresolved: "type is not in the analyzed code — named, never fabricated",
   cycle: "self-referencing type, not expanded again",
   truncated: "depth limit reached",
+  // Deliberately NOT phrased as a limit. `unresolved` says analysis could not
+  // determine the type; this says the code determined it sends nothing, and a
+  // reader acts differently on the two.
+  "always-null": "always null — this endpoint sends no payload here",
 }
 
 function Row({

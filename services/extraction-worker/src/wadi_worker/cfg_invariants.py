@@ -17,6 +17,7 @@ export cannot express and the assembler completes against its exit node.
 from collections import defaultdict
 
 from wadi_contracts.boundary import CfgAnomaly
+from wadi_contracts.enums import CfgAnomalyCode
 from wadi_contracts.source import SourceAnchor
 from wadi_joern_client.export import (
     CfgNodeKind,
@@ -110,15 +111,15 @@ def _anchor(method: ExportMethod, node: ExportCfgNode | None = None) -> SourceAn
     return SourceAnchor(file=method.filename, start_line=max(line, 1), end_line=max(end, line, 1))
 
 
-def check_cfg(cfg: ExportCfg, method: ExportMethod) -> list[tuple[str, SourceAnchor]]:
+def check_cfg(cfg: ExportCfg, method: ExportMethod) -> list[tuple[CfgAnomalyCode, SourceAnchor]]:
     """Structural-invariant findings for one method's raw coarsened CFG."""
-    findings: list[tuple[str, SourceAnchor]] = []
+    findings: list[tuple[CfgAnomalyCode, SourceAnchor]] = []
     nodes = {node.id: node for node in cfg.nodes}
 
     intra = [edge for edge in cfg.edges if edge.source in nodes and edge.target in nodes]
     for edge in cfg.edges:
         if edge.source not in nodes or edge.target not in nodes:
-            findings.append(("dangling-edge", _anchor(method)))
+            findings.append((CfgAnomalyCode.DANGLING_EDGE, _anchor(method)))
 
     incoming: dict[int, list[ExportCfgEdgeLabel]] = defaultdict(list)
     outgoing: dict[int, list[ExportCfgEdgeLabel]] = defaultdict(list)
@@ -130,10 +131,24 @@ def check_cfg(cfg: ExportCfg, method: ExportMethod) -> list[tuple[str, SourceAnc
         # The method's entry statement legitimately has no incoming edge;
         # every other in-degree-0 node is a disconnection the downstream
         # patching would disguise as an extra entry point.
-        entry = min(cfg.nodes, key=lambda n: (n.line, n.id))
+        #
+        # The entry is chosen from the in-degree-0 nodes, NOT from all nodes by
+        # position (measured 2026-08-05). Ranking every node by (line, id) picks
+        # a node that already HAS an incoming edge whenever two statements share
+        # a line, and the tiebreak is node id — arbitrary with respect to source
+        # order. `if (x == null) x = false;` on one line is ordinary Java, and
+        # javasrc2cpg gave the assignment a lower id than its enclosing branch:
+        # the assignment was crowned entry and the BRANCH was reported
+        # disconnected, on a graph structurally identical to the same code
+        # written across two lines, which passed. Six of one benchmark's
+        # findings were this false positive. Falling back to all nodes keeps a
+        # pure cycle (no in-degree-0 node at all) reporting as before — that
+        # shape is caught by `exit-unreachable`.
+        sources = [node for node in cfg.nodes if node.id not in incoming]
+        entry = min(sources or cfg.nodes, key=lambda n: (n.line, n.id))
         for node in cfg.nodes:
             if node.id != entry.id and node.id not in incoming:
-                findings.append(("disconnected-node", _anchor(method, node)))
+                findings.append((CfgAnomalyCode.DISCONNECTED_NODE, _anchor(method, node)))
 
     for node in cfg.nodes:
         labels = set(outgoing.get(node.id, []))
@@ -145,16 +160,16 @@ def check_cfg(cfg: ExportCfg, method: ExportMethod) -> list[tuple[str, SourceAnc
             # one whose arm edge went out unlabeled: `flow` out of a branch
             # means the coarsening could not say which way control went.
             if not labels:
-                findings.append(("branch-arity", _anchor(method, node)))
+                findings.append((CfgAnomalyCode.BRANCH_ARITY, _anchor(method, node)))
             elif node.construct_kind in _SWITCH_CONSTRUCTS:
                 if not labels & {ExportCfgEdgeLabel.CASE, ExportCfgEdgeLabel.DEFAULT}:
-                    findings.append(("branch-arity", _anchor(method, node)))
+                    findings.append((CfgAnomalyCode.BRANCH_ARITY, _anchor(method, node)))
             elif ExportCfgEdgeLabel.FLOW in labels and len(outgoing[node.id]) > 1:
                 # A construct whose ONLY successor is unlabeled is the recorded
                 # convergent case (`if (c) { }` — both arms reach the same
                 # statement, and one edge cannot carry two labels). More than
                 # one successor with an unlabeled arm among them is not.
-                findings.append(("unlabeled-arm", _anchor(method, node)))
+                findings.append((CfgAnomalyCode.UNLABELED_ARM, _anchor(method, node)))
         if node.kind is CfgNodeKind.LOOP:
             body_edges = [
                 e for e in intra if e.source == node.id and e.label is ExportCfgEdgeLabel.TRUE
@@ -164,7 +179,7 @@ def check_cfg(cfg: ExportCfg, method: ExportMethod) -> list[tuple[str, SourceAnc
                     e.back and (e.source == node.id or e.target == node.id) for e in intra
                 )
                 if not closes_cycle:
-                    findings.append(("loop-no-back-edge", _anchor(method, node)))
+                    findings.append((CfgAnomalyCode.LOOP_NO_BACK_EDGE, _anchor(method, node)))
             # Empty-body loops carry no back edge by recorded design (§5.2.8).
 
     if nodes:
@@ -176,17 +191,17 @@ def check_cfg(cfg: ExportCfg, method: ExportMethod) -> list[tuple[str, SourceAnc
             for node in cfg.nodes
         )
         if not has_return and not has_terminal:
-            findings.append(("exit-unreachable", _anchor(method)))
+            findings.append((CfgAnomalyCode.EXIT_UNREACHABLE, _anchor(method)))
 
     return findings
 
 
 def aggregate_anomalies(
-    findings: list[tuple[str, SourceAnchor]],
+    findings: list[tuple[CfgAnomalyCode, SourceAnchor]],
 ) -> list[CfgAnomaly]:
     """Fold per-method findings into the boundary's per-code fact list."""
-    counts: dict[str, int] = defaultdict(int)
-    samples: dict[str, list[SourceAnchor]] = defaultdict(list)
+    counts: dict[CfgAnomalyCode, int] = defaultdict(int)
+    samples: dict[CfgAnomalyCode, list[SourceAnchor]] = defaultdict(list)
     for code, anchor in findings:
         counts[code] += 1
         if len(samples[code]) < _MAX_SAMPLE_SITES:

@@ -37,6 +37,8 @@ object SpringPacks {
     new SpringSecurityPack.SpringSecurityBypassPass(cpg).createAndApply()
     new SpringSecurityPack.SpringAuthMechanismPass(cpg).createAndApply()
     new SpringSecurityPack.SpringAuthEnforcementPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringRequestPolicyPass(cpg).createAndApply()
+    new SpringSecurityPack.SpringAuthorityModelPass(cpg).createAndApply()
     new SpringSecurityPack.SpringTokenPropagationPass(cpg).createAndApply()
   }
 
@@ -59,9 +61,21 @@ object SpringPacks {
     *     array entry (the yas multi-path idiom; first-string-only lost the rest)
     *   - `@RequestMapping(Constants.ApiConstant.COUNTRIES_URL)` — a static
     *     final constant reference, resolved from the in-CPG initializer (the
-    *     yas prefix idiom; unresolvable constants fall back to no prefix —
-    *     honest truncation, and CIMET's raw-text alternative emits garbage
-    *     paths, which is worse)
+    *     yas prefix idiom)
+    *   - `@RequestMapping(PREFIX + "/api")` — a concatenation, resolved
+    *     operand by operand (§5.4.2, 2026-08-05)
+    *
+    * A constant that does NOT resolve falls back to the literal tail. That
+    * fallback was once recorded as "honest truncation, better than CIMET's
+    * raw constant text" — and a production system falsified it: two
+    * controllers whose prefixes both truncated to `/search` produced identical
+    * URIs, and since endpoint ids are content-derived from the URI, the store
+    * upsert REPLACED one with the other and three endpoints vanished. A
+    * truncated path is not merely less precise; under content-derived identity
+    * it is destructive, while unresolved constant text is at least unique.
+    * Endpoint-id collisions are now recorded (§7) so the loss cannot recur
+    * silently, and the remaining work is to hole the path rather than truncate
+    * it.
     */
   private[wadi] def pathsFromAnnotationCode(cpg: Cpg, code: String): List[String] = {
     // Greedy across nested `{id}` template braces: the array block is the
@@ -72,9 +86,41 @@ object SpringPacks {
     }
     if (arrayPaths.nonEmpty) arrayPaths
     else
-      pathFromAnnotationCode(code)
+      // Concatenation is tried BEFORE the first-quoted-string reader, and the
+      // order is the whole fix: `@RequestMapping(PREFIX + "/api")` contains a
+      // quoted literal, so first-quoted-string answered `/api` and every URI
+      // in the service silently lost the prefix that told two controllers
+      // apart. A truncated path is worse than an unresolved one — it collides
+      // with real routes elsewhere in the system.
+      concatenatedPathFromCode(cpg, code)
+        // A concatenation whose operands do not ALL resolve is holed, never
+        // truncated. Falling through to the first quoted string here is what
+        // collapsed `/person/search` and `/team/search` onto `/search`, and
+        // since ids derive from the path, one endpoint replaced the other.
+        // `{?}/search` is imprecise; `/search` was destructive.
+        .orElse(holedConcatPathFromCode(cpg, code))
+        .orElse(pathFromAnnotationCode(code))
         .map(List(_))
         .getOrElse(constantPathFromCode(cpg, code).toList)
+  }
+
+  /** `@RequestMapping(PREFIX + "/api")` → the joined path, when every operand
+    * resolves. Returns None for annotations with no top-level `+`, leaving the
+    * existing readers untouched.
+    */
+  private def holedConcatPathFromCode(cpg: Cpg, code: String): Option[String] =
+    holedStringExpression(cpg, annotationArgument(code), owner = None)
+
+  private def annotationArgument(code: String): String = {
+    val inner =
+      code.dropWhile(_ != '(').stripPrefix("(").reverse.dropWhile(_ != ')').drop(1).reverse
+    inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
+  }
+
+  private def concatenatedPathFromCode(cpg: Cpg, code: String): Option[String] = {
+    val inner     = code.dropWhile(_ != '(').stripPrefix("(").reverse.dropWhile(_ != ')').drop(1).reverse
+    val reference = inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
+    stringExpression(cpg, reference, owner = None)
   }
 
   /** Resolve `Klass.FIELD` (possibly nested, `Constants.ApiConstant.X`) to its
@@ -84,7 +130,11 @@ object SpringPacks {
   private def constantPathFromCode(cpg: Cpg, code: String): Option[String] = {
     val inner = code.dropWhile(_ != '(').stripPrefix("(").takeWhile(_ != ')')
     val reference = inner.replaceAll("^\\s*(?:value|path)\\s*=\\s*", "").trim
+    // `@RequestMapping(PREFIX + "/x")` — without the concatenation reader the
+    // path truncates to its tail, and every URI in the service silently loses
+    // the segment that told two controllers apart.
     constantString(cpg, reference, owner = None)
+      .orElse(stringExpression(cpg, reference, owner = None))
   }
 
   /** Resolve a source-text reference to the string literal it names.
@@ -106,6 +156,20 @@ object SpringPacks {
       cpg: Cpg,
       reference: String,
       owner: Option[TypeDecl]
+  ): Option[String] = constantString(cpg, reference, owner, depth = 0)
+
+  /** `depth` bounds the recursion when a constant's initializer is ITSELF an
+    * expression (`static final String B = A + "/x"`). Java allows that chain to
+    * any length and the JLS keeps every link a compile-time constant, so the
+    * only real risks are a cycle (illegal in Java, but a malformed graph can
+    * still present one) and pathological depth. Four links is far past any
+    * observed idiom and costs nothing to allow.
+    */
+  private def constantString(
+      cpg: Cpg,
+      reference: String,
+      owner: Option[TypeDecl],
+      depth: Int
   ): Option[String] = {
     val normalized = reference.trim.stripPrefix("this.").trim
     val segments   = normalized.split('.').toList.filter(_.nonEmpty)
@@ -113,13 +177,19 @@ object SpringPacks {
     val fieldName  = segments.last
     val qualifier  = Option.when(segments.sizeIs >= 2)(segments(segments.length - 2))
 
-    val named = cpg.assignment.filter(a =>
-      a.target.ast.exists {
-        case fi: FieldIdentifier => fi.canonicalName == fieldName
-        case id: Identifier      => id.name == fieldName
-        case _                   => false
-      }
-    )
+    // Materialised: these are LAZY traversals, and the owner fallback below
+    // has to ask whether a candidate set is empty before choosing it. Asking
+    // an iterator that question consumes it, so a lazy `named` would answer
+    // the question and then hand back nothing — the fix would silently no-op.
+    val named = cpg.assignment
+      .filter(a =>
+        a.target.ast.exists {
+          case fi: FieldIdentifier => fi.canonicalName == fieldName
+          case id: Identifier      => id.name == fieldName
+          case _                   => false
+        }
+      )
+      .l
     val scoped = qualifier match {
       // Nested constant holders (yas `Constants.ApiConstant`): the lowered
       // assignment may sit in the inner OR outer class's initializer, and the
@@ -130,21 +200,143 @@ object SpringPacks {
             td.name == className || td.fullName.split("[.$]").contains(className)
           ) || a.target.code.contains(s"$className.")
         )
-      // A bare name belongs to the type that declared it (§5.2.5).
+      // A bare name belongs to the type that declared it (§5.2.5) — UNLESS the
+      // owner did not declare it, in which case the name came from elsewhere
+      // and owner scoping would answer "unresolvable" for a constant sitting
+      // in plain sight.
+      //
+      // Measured 2026-08-05: `SecurityConfig` references `REST_PERSON_PREFIX`
+      // through `import static ...RestConstants.*`. The same constant in the
+      // same CPG resolved for endpoint paths (which pass owner = None) and
+      // failed for matcher patterns (which pass the owner), leaving 9 rules
+      // without scope and withholding the auth claim on 729 endpoints. The
+      // scoping is still right when the owner DOES declare the name — that is
+      // what keeps two classes declaring `order` apart — so it keeps
+      // precedence and only yields when it has nothing to say.
       case None =>
         owner match {
-          case Some(td) => named.filter(_.method.typeDecl.exists(_.fullName == td.fullName))
-          case None     => named
+          case Some(td) =>
+            val declaredHere =
+              named.filter(_.method.typeDecl.exists(_.fullName == td.fullName))
+            if (declaredHere.nonEmpty) declaredHere else named
+          case None => named
         }
     }
     val literals = scoped
       .flatMap(_.source match {
         case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
-        case _                => None
+        // `static final String B = A + "/x"` — the initializer is a constant
+        // EXPRESSION, not a literal. Reading only literals answered
+        // "unresolvable" for a value the graph fully determines.
+        case other if depth < MaxConstantDepth =>
+          stringExpression(cpg, other.code, owner, depth + 1)
+        case _ => None
       })
-      .l
       .distinct
     Option.when(literals.sizeIs == 1)(literals.head)
+  }
+
+  /** A source-text string EXPRESSION → its value, concatenation included.
+    *
+    * `PREFIX + "/public/x"` is the prevailing way a codebase
+    * writes a route once and reuses it, and it defeated every reader here:
+    * `constantString` resolves a bare reference and a literal is a literal,
+    * but neither handles the `+` between them. The cost is paid twice, which
+    * is why this lives in the shared resolver rather than in either caller —
+    * the endpoint pass loses its URI prefix (paths truncate to the tail) and
+    * the security pass loses its pattern (the rule reads as unscoped, which
+    * §5.2.10 then has to withhold on).
+    *
+    * All-or-nothing by design: a concatenation with one unresolvable operand
+    * yields None rather than a partial path, because half a pattern silently
+    * matches the wrong endpoints (P10 — an honest hole beats a plausible
+    * string).
+    */
+  private[wadi] val MaxConstantDepth = 4
+
+  /** The marker a path carries where an operand could not be resolved (§5.4.2).
+    *
+    * Deliberately NOT an empty string. Dropping the operand shortens the path
+    * onto whatever other routes share the tail, and endpoint ids are derived
+    * from the path — a production system lost three endpoints to exactly that
+    * collapse. A hole keeps the path unique, so an unresolved prefix costs
+    * precision and never a row.
+    */
+  private[wadi] val PathHole = "{?}"
+
+  private[wadi] def stringExpression(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl]
+  ): Option[String] = stringExpression(cpg, text, owner, depth = 0)
+
+  private def stringExpression(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl],
+      depth: Int
+  ): Option[String] = {
+    val resolved = concatOperands(cpg, text, owner, depth)
+    if (resolved.isEmpty) return None
+    Option.when(resolved.forall(_.isDefined))(resolved.flatten.mkString)
+  }
+
+  /** The same evaluation, but rendering unresolved operands as holes.
+    *
+    * Only meaningful for an expression that IS a concatenation — a bare
+    * unresolvable reference has nothing to anchor a hole against, and the
+    * existing readers already answer honestly there.
+    */
+  private[wadi] def holedStringExpression(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl]
+  ): Option[String] = {
+    val resolved = concatOperands(cpg, text, owner, depth = 0)
+    if (resolved.isEmpty || resolved.forall(_.isDefined)) return None
+    Some(resolved.map(_.getOrElse(PathHole)).mkString)
+  }
+
+  private def concatOperands(
+      cpg: Cpg,
+      text: String,
+      owner: Option[TypeDecl],
+      depth: Int
+  ): List[Option[String]] = {
+    val operands = splitTopLevelConcat(text)
+    if (operands.isEmpty) return Nil
+    operands.map { operand =>
+      val trimmed = operand.trim
+      if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\""))
+        Some(trimmed.substring(1, trimmed.length - 1))
+      else constantString(cpg, trimmed, owner, depth)
+    }
+  }
+
+  /** Split on `+` that sits OUTSIDE string literals. A `+` inside a quoted
+    * segment is part of the path (`"/a+b"`), not an operator.
+    */
+  private def splitTopLevelConcat(text: String): List[String] = {
+    val parts    = scala.collection.mutable.ListBuffer.empty[String]
+    val current  = new StringBuilder
+    var inString = false
+    var escaped  = false
+    text.foreach { char =>
+      if (escaped) { current.append(char); escaped = false }
+      else
+        char match {
+          case '\\' if inString      => current.append(char); escaped = true
+          case '"'                   => inString = !inString; current.append(char)
+          case '+' if !inString      => parts += current.toString; current.clear()
+          case other                 => current.append(other)
+        }
+    }
+    parts += current.toString
+    val cleaned = parts.toList.map(_.trim).filter(_.nonEmpty)
+    // Nothing to do for a single operand — the caller's own resolvers already
+    // handle a bare literal or reference, and returning it here would make
+    // this function a second, competing path to the same answer.
+    if (cleaned.sizeIs <= 1) Nil else cleaned
   }
 
   /** Every in-repo supertype of `typeDecl`, transitively (classes AND
@@ -170,6 +362,14 @@ object SpringPacks {
     walk(typeDecl).distinctBy(_.id)
   }
 
+  /** Join a class-level prefix to a method-level path.
+    *
+    * Deliberately NOT root-anchoring: this helper also builds OUTBOUND client
+    * URLs (Feign, `@HttpExchange`), where the left side is an absolute URL or a
+    * `${key}` template and a prepended slash would corrupt it. Root-anchoring
+    * is a property of a SERVED route, so it is applied at that site
+    * (`rootAnchored`) rather than here.
+    */
   private[wadi] def joinPaths(prefix: String, path: String): String = {
     val left = prefix.stripSuffix("/")
     val joined =
@@ -178,6 +378,24 @@ object SpringPacks {
       else s"$left/$path"
     if (joined.isEmpty) "/" else joined
   }
+
+  /** A served route is published from the root (§5.2.11).
+    *
+    * Spring routes `@RequestMapping("api/v1/x")` exactly as `/api/v1/x`, so a
+    * controller that omits the slash declares the same route — but publishing
+    * it verbatim left `full_uri` unmatchable against a caller's URL on those
+    * endpoints (14 of 365 on `train-ticket-aitest`, from 2 controllers).
+    * Identity is unaffected: `endpoint_id` hashes `simplify_uri`, which already
+    * anchors the root, so both spellings have always hashed alike.
+    *
+    * A URI whose head is an unresolved hole or a config template is left ALONE:
+    * we do not know what it expands to, and asserting a leading slash in front
+    * of it would invent information analysis does not have (P10).
+    */
+  private[wadi] def rootAnchored(uri: String): String =
+    if (uri.isEmpty || uri.startsWith("/")) uri
+    else if (uri.startsWith("{") || uri.startsWith("$") || uri.contains("://")) uri
+    else s"/$uri"
 }
 
 /** Tags controller methods: `endpoint=GET /pets/{id}` (class-level prefix respected).
@@ -220,7 +438,7 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
                 case declared => declared
               }
               paths.foreach { path =>
-                val uri = joinPaths(classPrefix, path)
+                val uri = rootAnchored(joinPaths(classPrefix, path))
                 Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
               }
             }
@@ -231,7 +449,8 @@ class SpringEndpointPass(cpg: Cpg) extends CpgPass(cpg) {
                   case declared => declared
                 }
                 paths.foreach { path =>
-                  Iterator(method).newTagNodePair("endpoint", s"$httpMethod ${joinPaths(classPrefix, path)}").store()(using builder)
+                  val uri = rootAnchored(joinPaths(classPrefix, path))
+                  Iterator(method).newTagNodePair("endpoint", s"$httpMethod $uri").store()(using builder)
                 }
               }
             }
@@ -491,16 +710,46 @@ class SpringDataSinkPass(cpg: Cpg) extends CpgPass(cpg) {
   * listener kinds stay with the Phase 3 MQ packs — this tag only roots
   * reachability.
   */
+/** The `async-root` tag vocabulary this pack may emit (§7, recorded
+  * 2026-08-05). Enumerated in ONE place so the pack has a set to conform with:
+  * the vocabulary is owned by `wadi-contracts` (`ASYNC_ROOT_KINDS`) and
+  * published to `schemas/vocabulary/async_root_kinds.json`, which
+  * `AsyncRootVocabularyTest` diffs against `All` in both directions. Nothing
+  * else spans the Scala/Python boundary — a kind added here and not there is
+  * exactly the drift that took a snapshot down on 2026-08-05.
+  */
+object AsyncRootKind {
+  val Scheduled         = "scheduled"
+  val EventListener     = "event-listener"
+  val KafkaListener     = "kafka-listener"
+  val RabbitListener    = "rabbit-listener"
+  val JmsListener       = "jms-listener"
+  val ApplicationRunner = "application-runner"
+  val Bean              = "bean"
+  val FrameworkCallback = "framework-callback"
+
+  val All: Set[String] = Set(
+    Scheduled,
+    EventListener,
+    KafkaListener,
+    RabbitListener,
+    JmsListener,
+    ApplicationRunner,
+    Bean,
+    FrameworkCallback
+  )
+}
+
 class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
 
   private val AnnotationKinds: Map[String, String] = Map(
-    "Scheduled"                  -> "scheduled",
-    "Schedules"                  -> "scheduled",
-    "EventListener"              -> "event-listener",
-    "TransactionalEventListener" -> "event-listener",
-    "KafkaListener"              -> "kafka-listener",
-    "RabbitListener"             -> "rabbit-listener",
-    "JmsListener"                -> "jms-listener"
+    "Scheduled"                  -> AsyncRootKind.Scheduled,
+    "Schedules"                  -> AsyncRootKind.Scheduled,
+    "EventListener"              -> AsyncRootKind.EventListener,
+    "TransactionalEventListener" -> AsyncRootKind.EventListener,
+    "KafkaListener"              -> AsyncRootKind.KafkaListener,
+    "RabbitListener"             -> AsyncRootKind.RabbitListener,
+    "JmsListener"                -> AsyncRootKind.JmsListener
   )
 
   /** Both spellings: fully-qualified when javasrc2cpg resolves the import,
@@ -527,7 +776,7 @@ class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
         }
         // @Bean factory methods run at context startup (§5.4.2 T4).
         if (annotation.name == "Bean") {
-          Iterator(method).newTagNodePair("async-root", "bean").store()(using builder)
+          Iterator(method).newTagNodePair("async-root", AsyncRootKind.Bean).store()(using builder)
         }
       }
     }
@@ -539,7 +788,7 @@ class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
       .filterNot(_.isExternal)
       .l
       .foreach { method =>
-        Iterator(method).newTagNodePair("async-root", "application-runner").store()(using builder)
+        Iterator(method).newTagNodePair("async-root", AsyncRootKind.ApplicationRunner).store()(using builder)
       }
     // A stereotype component implementing an EXTERNAL supertype is a framework
     // callback: the container constructs it and invokes its overrides through
@@ -569,7 +818,7 @@ class SpringAsyncRootPass(cpg: Cpg) extends CpgPass(cpg) {
       .filterNot(_.modifier.modifierType.l.contains("PRIVATE"))
       .l
       .foreach { method =>
-        Iterator(method).newTagNodePair("async-root", "framework-callback").store()(using builder)
+        Iterator(method).newTagNodePair("async-root", AsyncRootKind.FrameworkCallback).store()(using builder)
       }
   }
 }

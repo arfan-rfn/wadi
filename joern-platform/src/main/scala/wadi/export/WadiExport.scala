@@ -7,6 +7,7 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
   CfgNode,
   ControlStructure,
   JumpTarget,
+  Literal,
   Method,
   TypeDecl
 }
@@ -15,6 +16,7 @@ import io.shiftleft.semanticcpg.language.*
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import scala.collection.mutable
 
+import wadi.packs.{SpringPacks, SpringSecurityPack}
 import wadi.slicing.UrlSlicer
 
 /** Bulk subgraph export (§5.1): the endpoint-reachable closure as JSON.
@@ -76,7 +78,7 @@ object WadiExport {
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
     */
-  val ExportSchemaVersion = "2.7.0"
+  val ExportSchemaVersion = "2.11.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -119,12 +121,16 @@ object WadiExport {
                 "http_method" -> httpMethod,
                 "uri"         -> uri,
                 "auth_tags"   -> method.tag.nameExact("auth").value.l.map(v => s"auth=$v"),
-                "params"      -> endpointParamObjs(method)
+                "params"      -> endpointParamObjs(method),
+                // §5.2.7 T9: what the handler's own code names. NOT the
+                // complete set of statuses the endpoint can answer with.
+                "status_codes" -> StatusCodes.declaredBy(cpg, method)
               )
-              // §5.2.7: field-level wire shapes, honest terminals.
+              // §5.2.7: field-level wire shapes, honest terminals. The response
+              // shape falls back to the return expression when the signature
+              // declares a raw wrapper (§5.2.7 amendment) and marks which it read.
               TypeShapes
-                .returnTypeTextOf(method)
-                .flatMap(TypeShapes.shapeOf(cpg, _))
+                .responseShapeOf(cpg, method)
                 .foreach(shape => obj("response_schema") = shape)
               requestBodyTypeText(method)
                 .flatMap(TypeShapes.shapeOf(cpg, _))
@@ -155,6 +161,8 @@ object WadiExport {
       }
     }
 
+    val securityRules = securityRuleObjs(cpg)
+
     val document = ujson.Obj(
       "export_schema_version" -> ExportSchemaVersion,
       "language"              -> "java",
@@ -165,12 +173,15 @@ object WadiExport {
       "sinks"                 -> sinkRows.toList,
       "unreachable_sinks"     -> unreachableObjs,
       "data_models"           -> modelObjs,
-      "security_rules"        -> securityRuleObjs(cpg),
+      "security_rules"        -> securityRules,
       "auth_enforcements"     -> authEnforcementObjs(cpg),
       "method_security"       -> methodSecurityObj(cpg),
       "auth_mechanisms"       -> authMechanismObjs(cpg),
       "config_refs"           -> configRefObjs(cpg),
-      "analysis_coverage"     -> coverageObj
+      "analysis_coverage"     -> coverageObj,
+      "auth_extraction"       -> authExtractionObj(cpg, securityRules),
+      "auth_policies"         -> authPolicyObjs(cpg),
+      "auth_authorities"      -> authAuthorityObjs(cpg)
     )
 
     val target: Path = Paths.get(outDir)
@@ -387,6 +398,8 @@ object WadiExport {
 
   private val HandlerStructureTypes = Set("CATCH", "FINALLY")
   private val LoopStructureTypes    = Set("FOR", "WHILE", "DO")
+  /** Constructs a bare `break` can bind to besides a loop (JLS §14.15). */
+  private val SwitchStructureTypes  = Set("SWITCH", "MATCH")
 
   private def isLeafStatement(node: AstNode): Boolean = node match {
     case cs: ControlStructure => !ContainerStructureTypes.contains(cs.controlStructureType)
@@ -407,7 +420,8 @@ object WadiExport {
     })
 
   /** Statement nodes of a method: AST children of blocks, in line order,
-    * excluding lowering artifacts nested inside leaf statements.
+    * excluding lowering artifacts nested inside leaf statements or inside a
+    * control structure's condition.
     */
   private def statementsOf(method: Method): List[AstNode] = {
     val candidates = method.ast
@@ -417,11 +431,51 @@ object WadiExport {
         case call: Call => call.name == "<operator>.fieldAccess" // bare field reads aren't statements
         case _          => false
       }
+      .filterNot(isConditionInterior)
       .l
     val candidateIds = candidates.map(_.id).toSet
     candidates
       .filterNot(node => hasLeafStatementAncestor(node, candidateIds, candidates))
       .sortBy(n => (lineOf(n.lineNumber), n.id))
+  }
+
+  /** Is this candidate part of a control structure's CONDITION rather than of
+    * its body (§5.2.8, recorded 2026-08-05)?
+    *
+    * A condition is an expression, so nothing inside one is a statement — but
+    * javasrc2cpg lowers an allocation into a BLOCK holding `$obj = new X()`,
+    * and that block's children sit in "statement position" by the only test
+    * `isStatementPosition` can make locally (their AST parent is a BLOCK).
+    * Admitting them put a node in NEITHER arm on the branch's successor list,
+    * which `labelIfEdges` labels by arm-interior membership: with an `else`
+    * the edge stayed `flow` and surfaced as an `unlabeled-arm` anomaly; with
+    * no `else` the empty-arm heuristic stamped it `false`, so the graph grew a
+    * second `false` successor that does not exist and the invariants reported
+    * clean. Silently wrong is the worse half, and it is the common one —
+    * `if (x != null && x.f(new Y()))` is an idiomatic guard clause.
+    *
+    * Excluding them collapses the lowering into the enclosing control
+    * structure, whose own self-edge is dropped as a recorded
+    * non-representable — the condition's cost stops being drawn as control
+    * flow, which is what the source says.
+    *
+    * MATCH shields its interior for the same reason it does in
+    * `hasLeafStatementAncestor`: an expression-position switch used inside a
+    * condition still holds real yield-arm statements.
+    */
+  private def isConditionInterior(node: AstNode): Boolean = {
+    var current: AstNode = node
+    var steps            = 0
+    while (current != null && !current.isInstanceOf[Method] && steps < 10_000) {
+      current.astParent match {
+        case cs: ControlStructure if cs.controlStructureType == "MATCH" => return false
+        case cs: ControlStructure if cs.condition.id.l.contains(current.id) => return true
+        case _                                                             => ()
+      }
+      current = current.astParent
+      steps += 1
+    }
+    false
   }
 
   private def hasLeafStatementAncestor(
@@ -526,6 +580,8 @@ object WadiExport {
     semantics.labelLoopEdges()
     semantics.routeContainers()
     semantics.labelSwitchEdges()
+    semantics.labelExpressionMatchEdges()
+    semantics.wireOrphanHandlers()
     semantics.fixJumpEdges()
 
     ujson.Obj(
@@ -677,10 +733,26 @@ object WadiExport {
         // its own CATCH and present the handler as normal flow (§5.2.8 T3).
         val entryScope =
           if (container.controlStructureType == "TRY") bodyInteriorOf(container) else interior
-        val entry = entryScope.minByOption { id =>
-          val s = statementById(id)
-          (lineOf(s.lineNumber), id)
+        // Prefer the body statement control actually ARRIVES at from outside.
+        // Ranking the whole body by (line, id) breaks when two statements share
+        // a line, because the tiebreak is node id — arbitrary with respect to
+        // source order. `Runnable r = new Runnable() { ... };` opening a try
+        // puts the allocation call and the declaration on one line, javasrc2cpg
+        // numbered the call lower, and the container was wired to the call
+        // while the enclosing `if` arm still pointed at the declaration: the
+        // reroute matched nothing and the TRY was left with no incoming edge,
+        // reported as `disconnected-node`. (Third instance of this shape in one
+        // pass — the CFG invariant's own entry pick had it too.) Falling back
+        // to positional order keeps a container that opens its method working,
+        // where nothing outside points in.
+        val arrivesFromOutside = entryScope.filter { id =>
+          edges.exists(e => e._2 == id && e._1 != container.id && !interior.contains(e._1))
         }
+        val entry = (if (arrivesFromOutside.nonEmpty) arrivesFromOutside else entryScope)
+          .minByOption { id =>
+            val s = statementById(id)
+            (lineOf(s.lineNumber), id)
+          }
         entry.foreach { entryId =>
           rerouteThroughContainer(container, interior, entryId)
           // Always connect container→entry — a try that opens the method has
@@ -717,6 +789,55 @@ object WadiExport {
         labels.remove(edge)
       }
     }
+
+    /** Every handler is reachable from its try, and an empty handler still
+      * continues (§5.2.8, recorded 2026-08-05).
+      *
+      * The normal path leans on javasrc2cpg's try-tail→handler approximation,
+      * which `routeContainers` relabels `exception`. Two ordinary shapes leave
+      * that approximation with nothing to say, and both projected a CATCH with
+      * no incoming edge — an unreachable handler, which on the map reads as
+      * "this error path cannot happen":
+      *
+      *   - an EMPTY catch body (`catch (Exception e) { }`, a swallow) has no
+      *     interior, so the container router finds no entry and wires neither
+      *     side; the CATCH is fully isolated;
+      *   - a try body whose TAIL leaves the method (`throw` / `return` as the
+      *     last statement) has no normal tail for the edge to start from, even
+      *     though that very throw is what the handler catches.
+      *
+      * Rather than teach the approximation two more cases, the gap is closed by
+      * its invariant: a handler that ended up with no incoming edge gets one
+      * from its try, and a handler with no outgoing edge continues where the
+      * try does. Runs AFTER the routers, so it only ever fills a hole — a
+      * handler they wired correctly is left untouched.
+      */
+    def wireOrphanHandlers(): Unit =
+      controlStructures(Set("TRY")).foreach { tryS =>
+        val handlers = tryS.astChildren.l.collect {
+          case cs: ControlStructure
+              if HandlerStructureTypes.contains(cs.controlStructureType) &&
+                statementIds.contains(cs.id) =>
+            cs
+        }
+        handlers.filter(_.controlStructureType == "CATCH").foreach { handler =>
+          if (!edges.exists(_._2 == handler.id)) {
+            val edge = (tryS.id, handler.id)
+            edges += edge
+            labels(edge) = "exception"
+          }
+        }
+        handlers.foreach { handler =>
+          if (!edges.exists(_._1 == handler.id)) {
+            normalCompletionTarget(tryS).foreach { case (target, isBack) =>
+              val edge = (handler.id, target)
+              edges += edge
+              labels.getOrElseUpdate(edge, "flow")
+              if (isBack) backEdges += edge
+            }
+          }
+        }
+      }
 
     /** An empty try body has no tail for javasrc2cpg's try-tail→handler
       * approximation to start from and no interior to enter, so the whole
@@ -874,15 +995,38 @@ object WadiExport {
       val jumps = controlStructures(Set("BREAK", "CONTINUE"))
       jumps.foreach { jump =>
         val isBreak = jump.controlStructureType == "BREAK"
-        val enclosingLoops = enclosingChain(jump).collect {
+        val chain = enclosingChain(jump)
+        val enclosingLoops = chain.collect {
           case cs: ControlStructure
               if LoopStructureTypes.contains(cs.controlStructureType) &&
                 statementIds.contains(cs.id) =>
             cs
         }
+        // `break` binds to the nearest enclosing BREAKABLE construct, and a
+        // switch is one (JLS §14.15). Collecting only loops meant a break
+        // inside a switch inside a loop matched the LOOP — its raw target, the
+        // switch join, lies within the loop's interior — and was redirected to
+        // the loop's exit. The map then claimed those arms leave the loop
+        // entirely, and the statement after the switch was left with no
+        // incoming edge at all (measured: every `disconnected-node` still
+        // standing on the benchmark). `continue` is unaffected: a switch does
+        // not capture it, so its nearest binder is still the loop.
+        val nearestBreakable = chain.collectFirst {
+          case cs: ControlStructure
+              if (LoopStructureTypes.contains(cs.controlStructureType) ||
+                SwitchStructureTypes.contains(cs.controlStructureType)) &&
+                statementIds.contains(cs.id) =>
+            cs
+        }
+        val breakBindsToSwitch =
+          isBreak && nearestBreakable.exists(cs => SwitchStructureTypes.contains(cs.controlStructureType))
         edges.toList.filter(_._1 == jump.id).foreach { edge =>
           val target = edge._2
           enclosingLoops.find(l => l.id == target || interiorOf(l).contains(target)) match {
+            case Some(_) if breakBindsToSwitch =>
+              // The break leaves the SWITCH, not the loop; its raw target — the
+              // statement after the switch — is already right.
+              ()
             case Some(loop) if isBreak =>
               edges -= edge
               labels.remove(edge)
@@ -913,6 +1057,78 @@ object WadiExport {
       * a fabricated cycle) into an explicit body→next-arm `fallthrough` edge;
       * drop the phantom selector→join edge when a `default` arm exists.
       */
+    /** An arrow switch in EXPRESSION position wires its arms (§5.2.8, 2026-08-05).
+      *
+      * `Set<Long> x = switch (role) { case "a" -> ...; }` puts the MATCH inside
+      * an expression, so the control structure is not itself a statement — its
+      * CARRIER is (`x = switch(role) {`, already marked `switch-arrow`).
+      * `labelSwitchEdges` filters edges by the control structure's own id and
+      * therefore found none, leaving every arm with no incoming edge: reported
+      * as `disconnected-node`, and read as unreachable code on the map.
+      *
+      * What javasrc2cpg emits is arm→carrier — the arm's VALUE flowing into the
+      * assignment — with no carrier→arm to match. Statement position gets the
+      * shape right, so the fix is to give expression position the same one:
+      * carrier→arm labeled `case`/`default`, and each arm continuing to
+      * whatever follows the carrier instead of pointing back at it. Fallthrough
+      * is deliberately not synthesised — arrow arms do not fall through.
+      */
+    def labelExpressionMatchEdges(): Unit =
+      // Driven from the STATEMENTS, not from `controlStructures`: that helper
+      // collects control structures that ARE statements, and the whole point
+      // of an expression-position MATCH is that it is not one. Filtering its
+      // result for non-statements searched an already-empty list.
+      statements.foreach { statement =>
+        statement.ast
+          .collectAll[ControlStructure]
+          .find(m =>
+            m.controlStructureType == "MATCH" && enclosing.get(m.id).contains(statement.id)
+          )
+          .foreach { matchS =>
+            val carrier = statement.id
+            val groups   = caseGroupsOf(matchS)
+            val interior = interiorOf(matchS)
+            // NOT `firstStatementId`: it walks outward to the nearest enclosing
+            // STATEMENT, and an arrow arm's nearest enclosing statement is the
+            // carrier itself — which produced a `case` self-edge on the carrier
+            // and left the arm as unreachable as before. The arm's own entry is
+            // the lowest-positioned statement the arm and the match interior
+            // share, with the carrier excluded by construction.
+            val armEntry = groups.flatMap { group =>
+              group.statementIds
+                .intersect(interior)
+                .filter(_ != carrier)
+                .toList
+                .sortBy(id => (lineOf(statementById(id).lineNumber), id))
+                .headOption
+                .map(group -> _)
+            }
+            val armIds = armEntry.map(_._2).toSet
+            // Read BEFORE adding arm edges: what the carrier already reaches
+            // that is not an arm is where control resumes after the switch.
+            val continuations =
+              edges.filter(e => e._1 == carrier && !armIds.contains(e._2)).map(_._2).toSet
+
+            armEntry.foreach { case (group, entry) =>
+              val edge = (carrier, entry)
+              edges += edge
+              if (group.isDefault) labels(edge) = "default"
+              else {
+                labels(edge) = "case"
+                caseValues(edge) = group.values
+              }
+            }
+
+            edges.toList.filter(e => e._2 == carrier && interior.contains(e._1)).foreach { edge =>
+              edges -= edge
+              labels.remove(edge)
+              continuations.foreach { target =>
+                if (target != edge._1) edges += ((edge._1, target))
+              }
+            }
+          }
+      }
+
     def labelSwitchEdges(): Unit =
       controlStructures(Set("SWITCH", "MATCH")).foreach { switch =>
         val interior = interiorOf(switch)
@@ -1117,10 +1333,24 @@ object WadiExport {
       * receiver type could not be bound to one overload — never guessed. */
     val AmbiguousOverload = "ambiguous-overload"
 
-    /** First-party type in the CPG that declares no such method: a
-      * static-import attributed to the importing class, or a receiver type
-      * javasrc2cpg could not bind. */
+    /** The receiver's TYPE is a javasrc2cpg sentinel — it could not be bound at
+      * all, so nothing downstream can name the callee. */
     val UnresolvedReceiver = "unresolved-receiver"
+
+    /** The first-party type declares exactly this method, and the call still
+      * did not bind. The ACTIONABLE bucket (§5.2.11 T5): every other code here
+      * describes something analysis cannot see, this one describes something
+      * it saw and failed to connect. */
+    val DeclaredNotBound = "declared-not-bound"
+
+    /** A first-party type in the CPG that declares no such method — a static
+      * import attributed to the importing class (`ok(…)` from
+      * `ResponseEntity.ok` is the common one). Not a hole in the map: the
+      * callee is real and elsewhere. */
+    val NotDeclared = "not-declared"
+
+    /** The callee name carries no type qualifier to split on. */
+    val UnparseableCallee = "unparseable-callee"
   }
 
   /** Lombok annotations, grouped by what each ACTUALLY generates.
@@ -1264,7 +1494,7 @@ object WadiExport {
     * type qualifier is an unbound receiver, so say that.
     */
   private def unboundReasonOf(cpg: Cpg, call: Call): String =
-    splitCalleeName(call.methodFullName).fold(UnboundReason.UnresolvedReceiver) {
+    splitCalleeName(call.methodFullName).fold(UnboundReason.UnparseableCallee) {
       case (typeName, methodName) =>
         // The answer is a property of the (type, method) pair, not of the call
         // site, and the same pair recurs hundreds of times per service: the
@@ -1302,13 +1532,26 @@ object WadiExport {
         case None => UnboundReason.ThirdParty
         case Some(td) =>
           val declared = td.method.nameExact(methodName).l
-          if (declared.sizeIs > 1) UnboundReason.AmbiguousOverload
-          else if (declared.nonEmpty) UnboundReason.UnresolvedReceiver
+          // A declaration matched by NAME is not evidence that source exists
+          // for the overload being called. `Response` is `@Data
+          // @AllArgsConstructor`: javasrc2cpg materializes one bodiless
+          // `<init>:void()` stub, every call site is the 3-arg generated
+          // constructor, and matching on the name alone let the stub stand in
+          // for it — pre-empting the Lombok branch below and reporting 585
+          // sites as a binding failure when nothing was ever there to bind to.
+          // `declared-not-bound` means "source exists and we failed to reach
+          // it", so it requires a BODY.
+          val implemented = declared.filter(_.body.astChildren.nonEmpty)
+          if (implemented.sizeIs > 1) UnboundReason.AmbiguousOverload
+          else if (implemented.sizeIs == 1) UnboundReason.DeclaredNotBound
           else if (isLombokGenerated(td, methodName)) UnboundReason.LombokGenerated
           else if (isEnumTypeDecl(td) && (methodName == "values" || methodName == "valueOf"))
             UnboundReason.CompilerGenerated
           else if (inheritsMethodFromExternal(td, methodName)) UnboundReason.InheritedExternal
-          else UnboundReason.UnresolvedReceiver
+          // Declared, bodiless, and none of the generators explain it: an
+          // interface or abstract method whose implementation was not found.
+          else if (declared.nonEmpty) UnboundReason.DeclaredNotBound
+          else UnboundReason.NotDeclared
       }
 
   private def constructOf(cs: ControlStructure): String = cs.controlStructureType match {
@@ -1465,6 +1708,10 @@ object WadiExport {
         }
     }
     val authPropagation = call.tag.nameExact("token-propagation").value.headOption
+    // §5.2.11 T4: the mechanism answers HOW auth crosses; the state answers
+    // WHETHER, including the case where we can prove it does not.
+    val propagationState =
+      call.tag.nameExact("token-propagation-state").value.headOption.getOrElse("undetermined")
     candidates.map { case (value, confidence, evidence) =>
       ujson.Obj(
         "node_id"          -> num(statementId),
@@ -1476,7 +1723,8 @@ object WadiExport {
         "http_verb"        -> verb.map(ujson.Str(_)).getOrElse(ujson.Null),
         "mechanism"        -> mechanism.map(ujson.Str(_)).getOrElse(ujson.Null),
         "evidence"         -> evidence.map(ujson.Str(_)).getOrElse(ujson.Null),
-        "auth_propagation" -> authPropagation.map(ujson.Str(_)).getOrElse(ujson.Null)
+        "auth_propagation"       -> authPropagation.map(ujson.Str(_)).getOrElse(ujson.Null),
+        "auth_propagation_state" -> propagationState
       )
     }
   }
@@ -1530,8 +1778,22 @@ object WadiExport {
           // contains the separator, and an unlimited split would throw.
           val Array(verb, pattern, access) = encoded.split('|').take(2) :+
             encoded.split('|').drop(2).mkString("|")
+          // 2.8.0 (§5.2.10): the scope is a nullable field with a confidence,
+          // not a sentinel smuggled into a required string. A sentinel can only
+          // be written by a code path that already resolved a matcher, which is
+          // precisely why an unreadable chain SHAPE erased its site instead of
+          // degrading it.
+          val (patternValue, confidence) =
+            if (pattern == SpringSecurityPack.Unresolvable) (ujson.Null, "none")
+            else if (pattern.startsWith(SpringSecurityPack.ConfigPrefix))
+              (ujson.Str(pattern), "config")
+            else (ujson.Str(pattern), "exact")
           ujson.Obj(
-            "pattern"     -> pattern,
+            // The SITE identity: rows sharing it are one access call with
+            // several patterns, exactly as sink rows share `node_id`.
+            "call_id"            -> num(call.id),
+            "pattern"            -> patternValue,
+            "pattern_confidence" -> confidence,
             "http_method" -> (if (verb == "*") ujson.Null else ujson.Str(verb)),
             "access"      -> access,
             "kind"        -> "filter-chain",
@@ -1549,6 +1811,84 @@ object WadiExport {
         }
       }
 
+  /** What the auth vocabulary SAW versus what it turned into rules (§5.2.10).
+    *
+    * The in-graph half of the no-drop invariant. `access_calls_seen` counts
+    * every call bearing an access-vocabulary name anywhere in the CPG — no
+    * scope test, no filtering — so it cannot be talked down by the same
+    * predicate that decides emission. `rule_sites_emitted` counts the distinct
+    * sites that produced rules.
+    *
+    * The two are NOT expected to be equal: `access`, `authenticated` and
+    * `anonymous` are ordinary words, and a business method named `access()`
+    * legitimately raises the first number without belonging in the second. The
+    * gap is the point — the worker reconciles it against an independent
+    * source-text oracle, and a gap that grows without a matching business
+    * explanation is how the next unreadable chain shape announces itself
+    * instead of publishing a confident wrong claim.
+    */
+  private def authExtractionObj(cpg: Cpg, securityRules: List[ujson.Obj]): ujson.Obj = {
+    val emittedSites = securityRules.map(_("call_id").num).distinct.size
+    ujson.Obj(
+      "access_calls_seen" -> cpg.call
+        .nameExact(SpringSecurityPack.AccessCallNames.toSeq*)
+        .size,
+      "rule_sites_emitted" -> emittedSites
+    )
+  }
+
+  /** Request-level policy from `auth-policy=` tags (§5.2.10 T6).
+    *
+    * CORS, CSRF and rejection handling: service-level facts that shape who can
+    * reach an endpoint without deciding which principal may. Published so the
+    * question is answerable, never merged into the endpoint's auth claim.
+    */
+  private def authPolicyObjs(cpg: Cpg): List[ujson.Obj] =
+    cpg.call
+      .where(_.tag.nameExact("auth-policy"))
+      .l
+      .sortBy(call => (lineOf(call.lineNumber), call.id))
+      .flatMap { call =>
+        call.tag.nameExact("auth-policy").value.l.sorted.map { encoded =>
+          val Array(kind, scope, detail) = encoded.split('|').take(2) :+
+            encoded.split('|').drop(2).mkString("|")
+          ujson.Obj(
+            "kind"   -> kind,
+            "scope"  -> scope,
+            "detail" -> detail,
+            "anchor" -> ujson.Obj(
+              "file" -> call.file.name.headOption.getOrElse("<unknown>"),
+              "line" -> lineOf(call.lineNumber)
+            )
+          )
+        }
+      }
+
+  /** Authority-model facts from `auth-authority=` tags (§5.2.10 T7).
+    *
+    * What a grant MEANS and where it is minted. Never an input to the claim —
+    * these gate nothing — but a `RoleHierarchy` makes every role list on the
+    * service incomplete, which the worker marks rather than hides.
+    */
+  private def authAuthorityObjs(cpg: Cpg): List[ujson.Obj] =
+    (cpg.call.where(_.tag.nameExact("auth-authority")).l ++
+      cpg.method.where(_.tag.nameExact("auth-authority")).l)
+      .sortBy(node => (lineOf(node.lineNumber), node.id))
+      .flatMap { node =>
+        node.tag.nameExact("auth-authority").value.l.sorted.map { encoded =>
+          val Array(kind, detail) =
+            encoded.split('|').take(1) :+ encoded.split('|').drop(1).mkString("|")
+          ujson.Obj(
+            "kind"   -> kind,
+            "detail" -> detail,
+            "anchor" -> ujson.Obj(
+              "file" -> node.file.name.headOption.getOrElse("<unknown>"),
+              "line" -> lineOf(node.lineNumber)
+            )
+          )
+        }
+      }
+
   /** The chain a rule belongs to: its enclosing `SecurityFilterChain` bean or
     * `configure(HttpSecurity)` override, identified by method full name.
     */
@@ -1558,28 +1898,43 @@ object WadiExport {
     * chain declares one — rules inside it only apply to requests it matches.
     */
   private def chainPatternOf(cpg: Cpg, call: Call): ujson.Value = {
-    val enclosing = call.method.fullName
     // The modern DSL puts rules inside `authorizeHttpRequests(auth -> …)`, and
-    // javasrc2cpg lowers that lambda into its OWN method whose name keeps only
-    // the declaring type — so the chain's `securityMatcher`, which sits in the
-    // enclosing bean method, is not in the same method at all. Fall back to the
-    // declaring type for lambdas; several scopes on one type join rather than
-    // one being picked, since guessing which chain a scope belongs to would be
-    // exactly the fabrication this file avoids elsewhere.
-    val owner  = call.method.typeDecl.fullName.headOption
-    val lambda = call.method.name.startsWith("<lambda>")
+    // javasrc2cpg lowers that lambda into its OWN method — so the chain's
+    // `securityMatcher`, which sits in the enclosing bean method, is not in the
+    // same method at all.
+    //
+    // The predecessor fell back to the declaring TYPE, which pools every scope
+    // on that type (§5.2.10). Reproduced: three chains in one class gave an
+    // UNSCOPED chain its siblings' `"/fluent/**,/literal/**"`. That is a
+    // restriction invented where none exists, and it withdraws every endpoint
+    // outside the borrowed scope — the same over-approximation error the
+    // rule-scoping fix corrected in 0.6.0, one level up.
+    //
+    // A lambda is now attributed to the method that PASSED it, which
+    // javasrc2cpg makes recoverable: the argument's code is the lambda's own
+    // full name.
+    val home = chainHomeOf(cpg, call.method)
+    // Non-literal scopes resolve through the shared reader too. Reading only
+    // literals made `securityMatcher(PREFIX + "/api/**")` look like NO scope,
+    // which does not degrade to "unknown": an unscoped chain governs every
+    // request, so it joins the candidates for endpoints it has nothing to do
+    // with and makes them ambiguous between chains.
     val scopes = cpg.call
       .nameExact("securityMatcher", "antMatcher")
-      .filter(scope =>
-        scope.method.fullName == enclosing ||
-          (lambda && owner.contains(scope.method.typeDecl.fullName.headOption.getOrElse("")))
-      )
+      .filter(scope => chainHomeOf(cpg, scope.method) == home)
       .argument
       .argumentIndexGt(0)
-      .isLiteral
-      .code
       .l
-      .map(_.stripPrefix("\"").stripSuffix("\""))
+      .flatMap { argument =>
+        val owner = argument.method.typeDecl.headOption
+        argument match {
+          case literal: Literal => Some(literal.code.stripPrefix("\"").stripSuffix("\""))
+          case _ =>
+            SpringPacks
+              .constantString(cpg, argument.code, owner)
+              .orElse(SpringPacks.stringExpression(cpg, argument.code, owner))
+        }
+      }
       .filter(_.startsWith("/"))
       .distinct
     scopes match {
@@ -1589,6 +1944,19 @@ object WadiExport {
       // one would be a guess. The worker treats it as chain-wide.
       case many => ujson.Str(many.mkString(","))
     }
+  }
+
+  /** The bean method a chain lives in, following a lambda to its caller. */
+  private def chainHomeOf(cpg: Cpg, method: Method): String = {
+    val name = method.fullName
+    if (!method.name.startsWith("<lambda>")) name
+    else
+      cpg.call
+        .filter(_.argument.argumentIndexGt(0).code.exists(_ == name))
+        .method
+        .fullName
+        .headOption
+        .getOrElse(name)
   }
 
   /** How the service authenticates, from `auth-mechanism=` tags (§5.2.9 D4).

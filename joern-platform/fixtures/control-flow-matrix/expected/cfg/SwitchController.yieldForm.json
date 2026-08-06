@@ -35,13 +35,13 @@
   "edges": [
     {
       "source": "call@85",
-      "target": "statement@82",
+      "target": "return@89",
       "label": "flow"
     },
     {
       "source": "statement@82",
       "target": "call@85",
-      "label": "flow"
+      "label": "default"
     },
     {
       "source": "statement@82",

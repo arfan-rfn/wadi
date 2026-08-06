@@ -196,3 +196,81 @@ describe("wire-shape honesty", () => {
     ).toBeInTheDocument()
   })
 })
+
+describe("authority model is not a guard (§5.2.10 T7)", () => {
+  it("does not suppress the no-guard state on an endpoint nothing gates", () => {
+    // The subtle half. A UserDetailsService says where grants come FROM; it
+    // gates nothing. Counting it as evidence would silently retract "nothing
+    // gates this endpoint" — the one sentence a reader acts on.
+    const { container } = renderPeek(
+      makeEndpoint({
+        auth: {
+          authenticated: null,
+          evidence: [
+            {
+              kind: "authority-model",
+              detail: "user-details-service: userDetailsService",
+              resolution: "resolved",
+            },
+          ],
+        },
+      })
+    )
+    const view = within(container)
+    expect(
+      view.getByText(/Nothing that gates this endpoint was found/i)
+    ).toBeInTheDocument()
+  })
+
+  it("marks the role list incomplete when a hierarchy widens it", () => {
+    // ROLE_ADMIN > ROLE_USER means an endpoint published as requiring USER is
+    // reachable by ADMIN too, so the list under-states who can get in.
+    const { container } = renderPeek(
+      makeEndpoint({
+        auth: {
+          authenticated: true,
+          roles: ["USER"],
+          evidence: [
+            { kind: "security-dsl", detail: '/admin/** -> hasRole("USER")' },
+            {
+              kind: "authority-model",
+              detail: "role-hierarchy: RoleHierarchyImpl",
+              resolution: "partial",
+            },
+          ],
+        },
+      })
+    )
+    const view = within(container)
+    expect(view.getByText(/roles above may be incomplete/i)).toBeInTheDocument()
+    expect(
+      view.getByText(/role-hierarchy: RoleHierarchyImpl/)
+    ).toBeInTheDocument()
+    // ...and it must not read as a guard: the gating list keeps only the rule.
+    expect(
+      view.queryByText(/could not be read — no claim is made either way/i)
+    ).toBeNull()
+  })
+
+  it("shows provenance without claiming the list is wrong", () => {
+    const { container } = renderPeek(
+      makeEndpoint({
+        auth: {
+          authenticated: true,
+          roles: ["ADMIN"],
+          evidence: [
+            { kind: "security-dsl", detail: '/x -> hasRole("ADMIN")' },
+            {
+              kind: "authority-model",
+              detail: "jwt-claim-converter: jwtAuthenticationConverter()",
+              resolution: "resolved",
+            },
+          ],
+        },
+      })
+    )
+    const view = within(container)
+    expect(view.getByText(/where the grants come from/i)).toBeInTheDocument()
+    expect(view.queryByText(/may be incomplete/i)).toBeNull()
+  })
+})

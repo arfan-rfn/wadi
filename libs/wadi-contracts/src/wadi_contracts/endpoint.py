@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.enums import HttpMethod, TriggerKind
@@ -37,6 +37,14 @@ class ShapeKind(StrEnum):
     TRUNCATED = "truncated"
     UNRESOLVED = "unresolved"
 
+    ALWAYS_NULL = "always-null"
+    """Every construction of the enclosing type sets this field to `null`, so
+    the wire value is always null. Distinct from `unresolved`, which says the
+    type could not be determined: this says there is no value to determine.
+    TrainTicket writes whole services this way, and reporting them as
+    unresolved claimed an analysis failure about code that states plainly it
+    sends no payload."""
+
 
 class FieldShape(WadiModel):
     """One serialized field: the WIRE name (Jackson renames applied)."""
@@ -48,11 +56,59 @@ class FieldShape(WadiModel):
     shape: "TypeShape"
 
 
+class ShapeOrigin(StrEnum):
+    """Which evidence the shape was read from (§5.2.7, amended 2026-08-05).
+
+    ``declared`` is the signature — the strongest evidence, and the only one
+    used until a raw wrapper (`public HttpEntity query(...)`) leaves nothing to
+    unwrap. ``return_expression`` means the payload came from what the handler
+    returns, which is still symbolic truth but rests on a weaker premise: one
+    return path standing for the whole contract. P7 keeps the two legible
+    rather than blending them.
+    """
+
+    DECLARED = "declared"
+    RETURN_EXPRESSION = "return-expression"
+
+
+class StatusOrigin(StrEnum):
+    """How a declared status was read (§5.2.7 T9)."""
+
+    BUILDER = "builder"
+    """The `ResponseEntity` builder's own name fixes it: `noContent()` is 204."""
+
+    EXPLICIT = "explicit"
+    """A constant the handler names: `new ResponseEntity<>(body, CREATED)`."""
+
+    ANNOTATION = "annotation"
+    """`@ResponseStatus` on the handler, which REPLACES what the body implies."""
+
+    DEFAULT = "default"
+    """Nothing was named and the return type is not a `ResponseEntity`, so the
+    framework decides: Spring serializes the value with 200. Kept distinct from
+    `builder` because the code did not say it — and claimed only where the
+    status is NOT under program control, since guessing 200 for a handler that
+    controls its own status would dress a guess as a framework rule."""
+
+
+class EndpointStatus(WadiModel):
+    """One HTTP status a handler's own code names (§5.2.7 T9)."""
+
+    code: int = Field(ge=100, le=599)
+    origin: StatusOrigin
+    detail: str = Field(description="The source text that named it")
+    anchor: SourceAnchor
+
+
 class TypeShape(WadiModel):
     """A recovered request/response shape (§5.2.7): the wire contract, walked
     from in-CPG type structure with honest terminals."""
 
     kind: ShapeKind
+    origin: ShapeOrigin = Field(
+        default=ShapeOrigin.DECLARED,
+        description="Evidence the shape was read from; nested shapes are always declared",
+    )
     type_name: str = Field(min_length=1, description="Declared type, e.g. 'com.acme.Pet'")
     fields: list[FieldShape] = Field(
         default_factory=list[FieldShape], description="kind=object only; @JsonIgnore omitted"
@@ -80,6 +136,19 @@ class AuthEvidenceKind(StrEnum):
     ASPECT = "aspect"
     IN_HANDLER = "in-handler"
     GATEWAY = "gateway"
+
+    AUTHORITY_MODEL = "authority-model"
+    """A construct that changes what a GRANT MEANS rather than gating a request
+    (§5.2.10 T7): a ``RoleHierarchy``, a ``GrantedAuthorityDefaults`` prefix, a
+    JWT claim→authority converter, a ``UserDetailsService``.
+
+    It never gates on its own, so it never withholds a claim. What it does is
+    make a reported role list *incomplete*: under ``ROLE_ADMIN > ROLE_USER`` an
+    endpoint published as requiring ``[USER]`` is also reachable by ADMIN, and
+    a role list that quietly under-states who can get in is exactly the kind of
+    confident-but-wrong security fact §12 rates worse than an absent one.
+    Carried as PARTIAL evidence so the incompleteness is visible on the
+    endpoint that has it."""
 
 
 class AuthEffect(StrEnum):
@@ -321,6 +390,17 @@ class Endpoint(ArtifactEnvelope):
     simplified_uri: str = Field(min_length=1, description="Identity form, e.g. /orders/{?}")
     params: list[EndpointParam] = Field(default_factory=list[EndpointParam])
     response_type: str | None = None
+    declared_statuses: list[EndpointStatus] = Field(
+        default_factory=list[EndpointStatus],
+        description=(
+            "HTTP statuses the handler's own code NAMES (§5.2.7 T9). Named "
+            "`declared_` because it is not the set this endpoint can answer "
+            "with: a 500 from an uncaught exception, a 403 from the security "
+            "layer and a 404 from the dispatcher appear in no handler source. "
+            "An empty list means nothing was named, never that the endpoint "
+            "cannot fail (P10)"
+        ),
+    )
     request_schema: TypeShape | None = Field(
         default=None,
         description="Field-level @RequestBody shape (§5.2.7); None = no body or pre-1.6",
@@ -332,6 +412,33 @@ class Endpoint(ArtifactEnvelope):
     auth: EndpointAuth = Field(default_factory=EndpointAuth)
     handler: MethodRef
     trigger: TriggerKind = TriggerKind.HTTP
+
+    @field_validator("full_uri", mode="before")
+    @classmethod
+    def _root_anchor(cls, value: object) -> object:
+        """A route is the same route with or without its leading slash.
+
+        Spring accepts ``@RequestMapping("api/v1/x")`` and routes it exactly as
+        ``/api/v1/x``, so the two spellings are one endpoint — ``endpoint_id``
+        has always agreed, hashing ``simplify_uri`` which anchors the root. Only
+        the published ``full_uri`` disagreed, and a consumer matching it
+        literally against a caller's URL missed those routes (§5.2.11).
+
+        Normalizing here rather than rejecting is deliberate: snapshots written
+        before this rule hold the verbatim form, and they must stay readable.
+        The coercion is idempotent and leaves ``simplified_uri`` and the id
+        untouched, so old and new snapshots still join on identity.
+
+        A URI whose head is an unresolved hole or a config template is left
+        alone — we do not know what it expands to, and asserting a leading
+        slash in front of it would invent information analysis does not have
+        (P10). Mirrors ``SpringPacks.rootAnchored`` on the Scala side.
+        """
+        if not isinstance(value, str) or not value or value.startswith("/"):
+            return value
+        if value.startswith(("{", "$")) or "://" in value:
+            return value
+        return "/" + value
 
     @model_validator(mode="after")
     def _enforce_identity(self) -> Self:
@@ -360,6 +467,7 @@ class Endpoint(ArtifactEnvelope):
         handler: MethodRef,
         params: list[EndpointParam] | None = None,
         response_type: str | None = None,
+        declared_statuses: list[EndpointStatus] | None = None,
         request_schema: TypeShape | None = None,
         response_schema: TypeShape | None = None,
         auth: EndpointAuth | None = None,
@@ -375,6 +483,7 @@ class Endpoint(ArtifactEnvelope):
             simplified_uri=simplify_uri(full_uri),
             params=params or [],
             response_type=response_type,
+            declared_statuses=declared_statuses or [],
             request_schema=request_schema,
             response_schema=response_schema,
             auth=auth or EndpointAuth(),

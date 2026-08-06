@@ -77,6 +77,7 @@ export type AuthEvidenceKind =
   | "aspect"
   | "in-handler"
   | "gateway"
+  | "authority-model"
 /**
  * Path pattern this is scoped to; '{?}' means read but unresolvable
  */
@@ -130,6 +131,19 @@ export type AuthMechanismKind =
 export type Mechanisms = AuthMechanism[]
 export type Roles1 = string[]
 export type CreatedAt = string
+export type Code = number
+/**
+ * The source text that named it
+ */
+export type Detail2 = string
+/**
+ * How a declared status was read (§5.2.7 T9).
+ */
+export type StatusOrigin = "builder" | "explicit" | "annotation" | "default"
+/**
+ * HTTP statuses the handler's own code NAMES (§5.2.7 T9). Named `declared_` because it is not the set this endpoint can answer with: a 500 from an uncaught exception, a 403 from the security layer and a 404 from the dispatcher appear in no handler source. An empty list means nothing was named, never that the endpoint cannot fail (P10)
+ */
+export type DeclaredStatuses = EndpointStatus[]
 /**
  * Route as written, e.g. /orders/{orderId}
  */
@@ -162,7 +176,18 @@ export type Fields = FieldShape[]
  * ``truncated`` are honest terminals — never fabricated fields (P10).
  */
 export type ShapeKind =
-  "object" | "scalar" | "array" | "map" | "cycle" | "truncated" | "unresolved"
+  | "object"
+  | "scalar"
+  | "array"
+  | "map"
+  | "cycle"
+  | "truncated"
+  | "unresolved"
+  | "always-null"
+/**
+ * Evidence the shape was read from; nested shapes are always declared
+ */
+export type ShapeOrigin = "declared" | "return-expression"
 /**
  * Declared type, e.g. 'com.acme.Pet'
  */
@@ -185,9 +210,13 @@ export type IcfgAvailable = boolean
  */
 export type IcfgSchemaVersion = string | null
 /**
- * 1.13.0: how auth crosses this call when statically visible — 'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall artifact, which has always recorded it. None is NOT 'does not forward': detection currently misses the inbound-HttpHeaders pass-through idiom (§5.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present.
+ * How auth crosses this call when statically visible — 'authorization-header' | 'feign-interceptor'. See `auth_propagation_state` for WHETHER it crosses: None here no longer has to be read as 'we did not look', because the state says which (§5.2.11 T4 fixed the pass-through idiom this used to miss).
  */
 export type AuthPropagation = string | null
+/**
+ * Whether the caller's credentials cross this call (§5.2.11 T4): forwarded | not-forwarded | undetermined. The negative is claimed only where provable, never inferred from silence
+ */
+export type TokenPropagation = "forwarded" | "not-forwarded" | "undetermined"
 export type CallerServiceId = string
 export type CallerServiceName = string | null
 /**
@@ -263,6 +292,9 @@ export type CalleeUnboundReason =
   | "third-party"
   | "ambiguous-overload"
   | "unresolved-receiver"
+  | "declared-not-bound"
+  | "not-declared"
+  | "unparseable-callee"
 /**
  * 1.12.0 (§5.4.2 T5): how many call sites in this endpoint's flow have no interior to open, by reason. This is the endpoint-level honesty surface — `analysis_coverage` sizes reachability system-wide and the coverage report's unresolved counts cover only cross-service edges, so intra-service unopenable calls were counted NOWHERE per endpoint. Derived from the ICFG, so read it with `icfg_available`: empty with a graph present means every call opens; empty WITHOUT one means not known. `icfg_schema_version` distinguishes a pre-1.12.0 graph, which carried no reasons to count.
  */
@@ -306,6 +338,7 @@ export interface EndpointDetailView {
 export interface Endpoint {
   auth?: EndpointAuth
   created_at?: CreatedAt
+  declared_statuses?: DeclaredStatuses
   full_uri: FullUri
   handler: MethodRef
   http_method: HttpMethod
@@ -410,6 +443,15 @@ export interface AuthMechanism {
   kind: AuthMechanismKind
 }
 /**
+ * One HTTP status a handler's own code names (§5.2.7 T9).
+ */
+export interface EndpointStatus {
+  anchor: SourceAnchor
+  code: Code
+  detail: Detail2
+  origin: StatusOrigin
+}
+/**
  * Reference to a method: stable content-derived id + human-readable signature.
  */
 export interface MethodRef {
@@ -433,6 +475,7 @@ export interface TypeShape {
   element?: TypeShape | null
   fields?: Fields
   kind: ShapeKind
+  origin?: ShapeOrigin
   type_name: TypeName1
 }
 /**
@@ -448,6 +491,7 @@ export interface FieldShape {
  */
 export interface RemoteEdgeItem {
   auth_propagation?: AuthPropagation
+  auth_propagation_state?: TokenPropagation
   caller_service_id: CallerServiceId
   caller_service_name?: CallerServiceName
   confidence: Confidence

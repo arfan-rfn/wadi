@@ -5,6 +5,7 @@ import uuid
 from wadi_contracts import (
     Confidence,
     Endpoint,
+    EndpointAuth,
     HttpMethod,
     Icfg,
     IcfgEdge,
@@ -14,6 +15,7 @@ from wadi_contracts import (
     MethodInfo,
     MethodRef,
     Provenance,
+    Reachability,
     RemoteCall,
     RepoSource,
     ServiceBoundary,
@@ -64,7 +66,11 @@ def make_method(svc_id: str, signature: str) -> MethodRef:
 
 
 def make_endpoint(
-    snapshot: Snapshot, boundary: ServiceBoundary, uri: str = "/orders/{id}"
+    snapshot: Snapshot,
+    boundary: ServiceBoundary,
+    uri: str = "/orders/{id}",
+    *,
+    auth: EndpointAuth | None = None,
 ) -> Endpoint:
     handler = make_method(
         boundary.service_id, f"com.acme.OrderController.handler_{uri}(java.lang.String)"
@@ -75,6 +81,7 @@ def make_endpoint(
         http_method=HttpMethod.GET,
         full_uri=uri,
         handler=handler,
+        auth=auth,
     )
 
 
@@ -145,6 +152,7 @@ def make_remote_call(
     mechanism: str = "resttemplate",
     http_verb: HttpMethod | None = HttpMethod.GET,
     reachable: bool = True,
+    reachability: Reachability | None = None,
     suspected: bool = False,
 ) -> RemoteCall:
     return RemoteCall(
@@ -158,6 +166,8 @@ def make_remote_call(
         url=url,
         url_confidence=confidence if url is not None else Confidence.NONE,
         reachable=reachable,
+        reachability=reachability
+        or (Reachability.ENDPOINT if reachable else Reachability.UNREACHED),
         suspected=suspected,
     )
 

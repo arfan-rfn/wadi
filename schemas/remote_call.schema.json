@@ -49,6 +49,16 @@
       "title": "MethodRef",
       "type": "object"
     },
+    "Reachability": {
+      "description": "WHICH root reaches this call site (\u00a75.2.11 T2).\n\n``reachable`` answers \"is it on the map\"; this answers \"why\". The\ndistinction is load-bearing because the two false-ish cases are not the\nsame fact: a call reached only from a ``CommandLineRunner`` or\n``@Scheduled`` method genuinely runs in production \u2014 it seeds data, it hits\nother services \u2014 while a call in a vendored class no root reaches is dead.\nPublishing both as ``reachable=False`` made the first invisible and the\nsecond look identical to it.",
+      "enum": [
+        "endpoint",
+        "async-root",
+        "unreached"
+      ],
+      "title": "Reachability",
+      "type": "string"
+    },
     "SourceAnchor": {
       "additionalProperties": false,
       "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
@@ -90,9 +100,19 @@
       ],
       "title": "SourceVariant",
       "type": "string"
+    },
+    "TokenPropagation": {
+      "description": "WHETHER the caller's credentials cross this call (\u00a75.2.11 T4).\n\n``auth_propagation`` names the mechanism when there is one; this says\nwhether there is one at all, and \u2014 the part a nullable string could not\nexpress \u2014 distinguishes \"we proved it does not\" from \"we could not tell\".\nThe difference decides whether a downstream 401 is a finding or a shrug.",
+      "enum": [
+        "forwarded",
+        "not-forwarded",
+        "undetermined"
+      ],
+      "title": "TokenPropagation",
+      "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.15.0/remote_call.schema.json",
+  "$id": "https://trywadi.com/schemas/1.21.0/remote_call.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One candidate outbound HTTP call from one call site.",
@@ -107,8 +127,13 @@
         }
       ],
       "default": null,
-      "description": "How auth crosses this call, when statically visible: 'authorization-header' | 'feign-interceptor' (\u00a75.1 token-propagation evidence)",
+      "description": "How auth crosses this call, when statically visible: 'authorization-header' | 'feign-interceptor' (\u00a75.1 token-propagation evidence). See `auth_propagation_state` for WHETHER it crosses at all",
       "title": "Auth Propagation"
+    },
+    "auth_propagation_state": {
+      "$ref": "#/$defs/TokenPropagation",
+      "default": "undetermined",
+      "description": "Whether the caller's credentials cross this call (\u00a75.2.11 T4). Refines `auth_propagation`: a named mechanism implies 'forwarded'"
     },
     "created_at": {
       "format": "date-time",
@@ -154,14 +179,19 @@
       "$ref": "#/$defs/MethodRef",
       "description": "Method containing the call site"
     },
+    "reachability": {
+      "$ref": "#/$defs/Reachability",
+      "default": "endpoint",
+      "description": "Which root reaches this call: endpoint | async-root | unreached (\u00a75.2.11 T2). Refines `reachable`, never contradicts it"
+    },
     "reachable": {
       "default": true,
-      "description": "False = the call site exists but no endpoint-reachable path leads to it (dead/unwired code). Excluded from stitching by design; inventoried so the exclusion is queryable (\u00a75.2.5)",
+      "description": "False = no ENDPOINT-reachable path leads here. Excluded from stitching by design; inventoried so the exclusion is queryable (\u00a75.2.5). See `reachability` for which root reaches it \u2014 False alone does not mean dead",
       "title": "Reachable",
       "type": "boolean"
     },
     "schema_version": {
-      "default": "1.15.0",
+      "default": "1.21.0",
       "title": "Schema Version",
       "type": "string"
     },

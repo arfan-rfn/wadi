@@ -44,7 +44,22 @@ const COPY: Record<CalleeUnboundReason, UnopenableCopy> = {
   "unresolved-receiver": {
     badge: "unresolved",
     detail:
-      "The receiver's type could not be bound — commonly a static import attributed to the importing class. The call is real; its target could not be determined.",
+      "The receiver's type could not be resolved by the Java frontend, so the callee cannot be named at all. The call is real; its target could not be determined.",
+  },
+  "declared-not-bound": {
+    badge: "unbound",
+    detail:
+      "This type declares the method, with a body, and the call still could not be connected to it. Unlike every other reason here, that is a gap in the analysis rather than a fact about your code.",
+  },
+  "not-declared": {
+    badge: "elsewhere",
+    detail:
+      "The named type declares no such method — typically a static import credited to the importing class (ok() from ResponseEntity.ok). The callee is real and defined elsewhere, so this is not a hole in the map.",
+  },
+  "unparseable-callee": {
+    badge: "unnamed",
+    detail:
+      "The callee's name carries no type qualifier, so there is nothing to look the method up by.",
   },
 }
 

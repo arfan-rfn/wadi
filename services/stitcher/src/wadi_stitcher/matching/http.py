@@ -30,6 +30,7 @@ from wadi_contracts import (
     StitchedEdge,
     TargetKind,
     UnresolvedCallEntry,
+    UnresolvedReasonCode,
     placeholder_service_id,
 )
 from wadi_stitcher.matching.base import (
@@ -91,13 +92,13 @@ class HttpMatcher:
     def match(self, call: RemoteCall, ctx: MatchContext) -> MatchOutcome:
         if call.url is None:
             if call.evidence and LOMBOK_BLOCKED_MARKER in call.evidence:
-                reason_code = "lombok-generated-interior"
+                reason_code = UnresolvedReasonCode.LOMBOK_GENERATED_INTERIOR.value
             elif call.evidence and BUDGET_TRUNCATED_MARKER in call.evidence:
-                reason_code = "slice-budget-truncated"
+                reason_code = UnresolvedReasonCode.SLICE_BUDGET_TRUNCATED.value
             elif (idiom := _idiom_marker(call.evidence)) is not None:
                 reason_code = idiom
             else:
-                reason_code = "url-undetermined"
+                reason_code = UnresolvedReasonCode.URL_UNDETERMINED.value
             return self._undetermined(
                 call, reason_code, call.evidence or "target is runtime-only (P10)"
             )
@@ -110,7 +111,7 @@ class HttpMatcher:
             if call.evidence and BASE_UNDETERMINED_MARKER in call.evidence:
                 return self._undetermined(
                     call,
-                    "base-undetermined",
+                    UnresolvedReasonCode.BASE_UNDETERMINED.value,
                     f"relative URL, client base not statically recoverable: {expanded!r}",
                 )
             if (idiom := _idiom_marker(call.evidence)) is not None:
@@ -120,7 +121,9 @@ class HttpMatcher:
                 if not keys_resolved
                 else ("relative or template-holed URL has no resolvable authority")
             )
-            return self._undetermined(call, "url-unparseable", f"{detail}: {expanded!r}")
+            return self._undetermined(
+                call, UnresolvedReasonCode.URL_UNPARSEABLE.value, f"{detail}: {expanded!r}"
+            )
         used_config_keys = expanded != call.url
 
         resolution = ctx.phonebook.resolve(parsed.host, parsed.port, parsed.path)
@@ -177,7 +180,7 @@ class HttpMatcher:
                 target_name = boundary.name if boundary is not None else candidate.service_id
                 entry_outcome = self._undetermined(
                     call,
-                    "no-endpoint-match",
+                    UnresolvedReasonCode.NO_ENDPOINT_MATCH.value,
                     f"{resolution.evidence}; resolved to service {target_name!r} but no "
                     f"endpoint matched {effective_path!r}"
                     + (f" {call.http_verb.value}" if call.http_verb else ""),

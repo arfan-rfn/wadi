@@ -3,6 +3,90 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.7.0 — 2026-08-06 (Phase 2.9.2: extraction fidelity — what "still missing" actually was)
+
+A full re-measurement of `train-ticket-aitest` (365 endpoints / 22 services) to
+answer "what is extraction still missing?" The answer was mostly *not what it
+looked like*, and that finding shaped the release.
+
+**Endpoint extraction was already complete: 365 of 365.** The one controller
+with no extracted endpoints is wholly enclosed in `/* */`; the service impls
+that looked like missed call sites are a method whose only caller is commented
+out and classes no controller in their own service reaches. An independent
+DI-aware reachability oracle agreed with wadi on 365 of 382 call sites with
+**zero over-reports**. The corpus, not the extractor, accounted for the bulk of
+what read as missing.
+
+What WAS missing was narrower and sharper — and three of this phase's own
+conclusions were wrong before measurement corrected them. Each survived because
+an aggregate moved in the expected direction; each fell the moment one of its
+members was opened against source. **A count is a hypothesis until you open one
+of its members** is the standing lesson, recorded in §5.2.11.
+
+**Re-analysis is worth it:** contracts moved to 1.21.0 and the export to 2.11.0.
+
+### Added
+- **Response payloads, not just envelopes.** Every endpoint used to publish
+  `{status, msg, data}` with `data` an unbound `T` — a shape naming the wrapper
+  and withholding the only field a reader wants. No signature carries the type
+  (services declare a RAW `Response`); the producer's return statement does. Now
+  read from there, on the declared path as well as the recovered one.
+  **Measured: 0 → 213 of 291 envelopes answered.**
+- **`always-null` as its own shape terminal.** A field every construction sets
+  to `null` is EMPTY, not unknown. Whole TrainTicket services are written this
+  way, and calling them `unresolved` claimed an analysis failure about code that
+  states plainly it sends no payload.
+- **Declared HTTP statuses per endpoint** — 365/365 carry at least one, each
+  marked with how it was read (`builder` / `explicit` / `annotation` /
+  `default`). Named `declared_` deliberately: a 500 from an exception, a 403
+  from the security layer and a 404 from the dispatcher appear in no handler
+  source, so this is never the complete set.
+- **Response shapes recovered from the return expression** where the signature
+  declares a raw wrapper. TrainTicket writes `public HttpEntity query(...)` 376
+  times against 9 generic ones, so the signature genuinely names no payload.
+  **Measured: unresolved 274 → 11.** `TypeShape.origin` keeps an inferred shape
+  distinguishable from a declared one.
+- **CORS, CSRF and rejection handling reach the reader.** The pack had tagged
+  them since export 2.8.0 and the client had parsed them just as long — into a
+  model no service read. Read and discarded is indistinguishable from never
+  extracted. Now on the service boundary and in coverage, never merged into an
+  endpoint's auth claim: they decide which ORIGIN may call, not which principal.
+- **Token propagation on every outbound call** — `forwarded` /
+  `not-forwarded` / `undetermined`. Was `null` on 382/382. The negative is
+  claimed only where provable (a request built with no headers at all), never
+  inferred from silence.
+- **Reachability provenance** on remote calls (`endpoint` / `async-root` /
+  `unreached`), so an excluded call says whether a startup root reaches it.
+- **`unexercised_vocabulary`** in coverage — the idioms a snapshot contains zero
+  of, so `denied: 0` stops reading as evidence the denial path works.
+
+### Fixed
+- **Two admin-only config endpoints were published as public.** `POST` and
+  `PUT /api/v1/configservice/configs` moved from an evidenced `false` to
+  `true [ADMIN]`. Two controllers write `@RequestMapping("api/v1/...")` without
+  a leading slash; a wildcard-free rule requires an exact match, so the
+  slash-less URI matched neither `ROLE_ADMIN` rule and fell through to a later
+  `permitAll`. Served routes are now root-anchored. **No identity churn** —
+  `endpoint_id` already hashed the normalized form, verified across all 365.
+- **The unbound-callee classifier manufactured 585 binding failures.** Every
+  one was `Response.<init>` on a Lombok `@AllArgsConstructor` DTO: matching a
+  declaration by NAME let a bodiless stub stand in for a constructor never
+  present in source, pre-empting the `lombok-generated` branch. It now requires
+  a declaration with a BODY. **`declared-not-bound` 585 → 0** — the corpus has
+  no call-binding holes.
+- **Two latent bugs found in pre-landing review**, neither reachable on this
+  corpus but both now fixture-guarded: the type-argument binding counted static
+  fields the shape walk hides (an envelope with a `static final Logger` would
+  silently bind nothing, or misalign every field index after it), and the
+  status reader scanned every constructor argument, so an integer BODY in the
+  100-599 range would publish a status the endpoint never sends.
+
+### Changed
+- `unresolved-receiver` split into `declared-not-bound`, `not-declared` and
+  `unparseable-callee`. One code served as both a finding and the classifier's
+  fall-through, so a regression collapsing every classification into the
+  default would still have looked covered.
+
 ## 0.6.0 — 2026-08-05 (Phase 2.9: auth fidelity — the enforcement model)
 
 An audit against the live train-ticket snapshot found the auth layer publishing
