@@ -14,6 +14,7 @@ from wadi_contracts import (
     Snapshot,
     StitchedEdge,
     TargetKind,
+    TokenPropagation,
     placeholder_service_id,
 )
 from wadi_storage import GraphRepository
@@ -55,6 +56,51 @@ async def _seed_analyzed(repo: GraphRepository, snapshot: Snapshot) -> _Seeded:
         edges=[edge],
     )
     return _Seeded(caller, callee, target, call, edge)
+
+
+class TestRemoteCallProperties:
+    async def test_token_propagation_survives_the_round_trip(
+        self, graph_repository: GraphRepository
+    ) -> None:
+        """A Cypher property name typo would be SILENT (§5.2.11 T4).
+
+        `all_edges` falls back to `undetermined` when the property is absent,
+        so a misspelled write reads back as "we could not tell" rather than
+        raising — indistinguishable from an honest unknown, and wrong about
+        whether credentials cross the call. Only a round-trip catches it.
+        """
+        snapshot = _snapshot()
+        caller = make_service(snapshot, "services/petstore")
+        callee = make_service(snapshot, "services/inventory")
+        target = make_endpoint(snapshot, callee, uri="/stock/{id}")
+        call = make_remote_call(snapshot, caller).model_copy(
+            update={
+                "auth_propagation": "authorization-header",
+                "auth_propagation_state": TokenPropagation.FORWARDED,
+            }
+        )
+        await graph_repository.replace_snapshot(
+            snapshot.id,
+            boundaries=[caller, callee],
+            endpoints=[target],
+            remote_calls=[call],
+            edges=[make_analyzed_edge(call, target)],
+        )
+        edges = await graph_repository.all_edges(snapshot.id)
+        assert len(edges) == 1
+        assert edges[0].auth_propagation_state is TokenPropagation.FORWARDED
+        assert edges[0].auth_propagation == "authorization-header"
+
+    async def test_a_call_without_the_property_reads_undetermined(
+        self, graph_repository: GraphRepository
+    ) -> None:
+        # Snapshots written before §5.2.11 T4 carry no such property; they must
+        # load as "could not tell", never as a claim in either direction.
+        snapshot = _snapshot()
+        seeded = await _seed_analyzed(graph_repository, snapshot)
+        assert seeded.call.auth_propagation_state is TokenPropagation.UNDETERMINED
+        edges = await graph_repository.all_edges(snapshot.id)
+        assert edges[0].auth_propagation_state is TokenPropagation.UNDETERMINED
 
 
 class TestSchema:

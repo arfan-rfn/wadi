@@ -11,10 +11,30 @@ import json
 import pytest
 
 from wadi_contracts.boundary import CfgAnomaly, ServiceBoundary
-from wadi_contracts.enums import CfgAnomalyCode, ClientLibrary, UnresolvedReasonCode
-from wadi_contracts.source import SourceAnchor
+from wadi_contracts.comms import Reachability, RemoteCall, TokenPropagation
+from wadi_contracts.endpoint import (
+    EndpointStatus,
+    ShapeKind,
+    ShapeOrigin,
+    StatusOrigin,
+    TypeShape,
+)
+from wadi_contracts.enums import (
+    CalleeUnboundReason,
+    CfgAnomalyCode,
+    ClientLibrary,
+    IcfgNodeKind,
+    UnresolvedReasonCode,
+)
+from wadi_contracts.icfg import IcfgNode
+from wadi_contracts.source import MethodRef, SourceAnchor
 from wadi_contracts.stitching import UnresolvedCallEntry
-from wadi_testing.builders import make_service, make_snapshot, make_system
+from wadi_testing.builders import (
+    make_remote_call,
+    make_service,
+    make_snapshot,
+    make_system,
+)
 
 
 def _anchor() -> SourceAnchor:
@@ -86,3 +106,89 @@ class TestUnresolvedReasonCodes:
                 reason_code="unsupported-idiom:",
                 reason="probe",
             )
+
+
+class TestShapeVocabularies:
+    """§5.2.7 T8/T9 vocabularies. `always-null` is the one that matters most:
+    it exists ONLY to be distinguishable from `unresolved`, so a serialization
+    that collapsed the two would silently undo the distinction it was added for.
+    """
+
+    @pytest.mark.parametrize("kind", list(ShapeKind))
+    def test_shape_kind_round_trips(self, kind: ShapeKind) -> None:
+        shape = TypeShape(kind=kind, type_name="com.acme.Thing")
+        restored = TypeShape.model_validate(json.loads(shape.model_dump_json()))
+        assert restored.kind is kind
+
+    @pytest.mark.parametrize("origin", list(ShapeOrigin))
+    def test_shape_origin_round_trips(self, origin: ShapeOrigin) -> None:
+        shape = TypeShape(kind=ShapeKind.OBJECT, origin=origin, type_name="com.acme.Thing")
+        restored = TypeShape.model_validate(json.loads(shape.model_dump_json()))
+        assert restored.origin is origin
+
+    @pytest.mark.parametrize("origin", list(StatusOrigin))
+    def test_status_origin_round_trips(self, origin: StatusOrigin) -> None:
+        status = EndpointStatus(code=200, origin=origin, detail="ok(...)", anchor=_anchor())
+        restored = EndpointStatus.model_validate(json.loads(status.model_dump_json()))
+        assert restored.origin is origin
+
+
+class TestRemoteCallVocabularies:
+    """§5.2.11 T2/T4. Both of these REFINE an older boolean, and both have a
+    validator keeping them consistent with it — so a value that cannot survive
+    the round trip would surface as a contradiction rather than a wrong answer.
+    """
+
+    @pytest.mark.parametrize("reachability", list(Reachability))
+    def test_reachability_round_trips(self, reachability: Reachability) -> None:
+        snapshot = make_snapshot(make_system())
+        boundary = make_service(snapshot, "services/petstore")
+        call = make_remote_call(
+            snapshot,
+            boundary,
+            reachable=reachability is Reachability.ENDPOINT,
+            reachability=reachability,
+        )
+        restored = RemoteCall.model_validate(json.loads(call.model_dump_json()))
+        assert restored.reachability is reachability
+
+    @pytest.mark.parametrize("state", list(TokenPropagation))
+    def test_token_propagation_round_trips(self, state: TokenPropagation) -> None:
+        snapshot = make_snapshot(make_system())
+        boundary = make_service(snapshot, "services/petstore")
+        call = make_remote_call(snapshot, boundary).model_copy(
+            update={
+                "auth_propagation_state": state,
+                # A named mechanism only ever accompanies `forwarded`; the
+                # contract rejects the pair otherwise.
+                "auth_propagation": (
+                    "authorization-header" if state is TokenPropagation.FORWARDED else None
+                ),
+            }
+        )
+        restored = RemoteCall.model_validate(json.loads(call.model_dump_json()))
+        assert restored.auth_propagation_state is state
+
+
+class TestUnboundReasonVocabulary:
+    """§5.4.2 T5 / §5.2.11 T7. The export maps these EXPLICITLY rather than by
+    value coercion, so a value the contract knows and the worker does not is a
+    real drift — this pins the contract half.
+    """
+
+    @pytest.mark.parametrize("reason", list(CalleeUnboundReason))
+    def test_unbound_reason_round_trips(self, reason: CalleeUnboundReason) -> None:
+        node = IcfgNode(
+            id="m1:n1",
+            kind=IcfgNodeKind.CALL,
+            anchor=_anchor(),
+            source_text="service.find(id);",
+            method=MethodRef(id="m_" + "0" * 16, signature="com.acme.A.b:void()"),
+            # A reason without a callee is rejected by the contract: the reason
+            # explains why THAT callee has no interior, so it is meaningless
+            # without one.
+            callee=MethodRef(id="m_" + "1" * 16, signature="com.acme.C.d:void()"),
+            callee_unbound_reason=reason,
+        )
+        restored = IcfgNode.model_validate(json.loads(node.model_dump_json()))
+        assert restored.callee_unbound_reason is reason
