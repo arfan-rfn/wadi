@@ -44,6 +44,7 @@ from wadi_contracts import (
     ServiceBoundary,
     StitchedEdge,
     TargetKind,
+    TokenPropagation,
 )
 
 _DELETE_BATCH = 5_000
@@ -195,7 +196,8 @@ class GraphRepository:
             "SET rc.service_id = row.service_id, rc.mechanism = row.mechanism, "
             "    rc.http_verb = row.http_verb, rc.url = row.url, "
             "    rc.url_confidence = row.url_confidence, rc.file = row.file, rc.line = row.line, "
-            "    rc.auth_propagation = row.auth_propagation "
+            "    rc.auth_propagation = row.auth_propagation, "
+            "    rc.auth_propagation_state = row.auth_propagation_state "
             "WITH rc, row "
             "MATCH (s:Service {snapshot_id: $snapshot_id, service_id: row.service_id}) "
             "MERGE (s)-[:HAS_CALL_SITE]->(rc)",
@@ -212,6 +214,7 @@ class GraphRepository:
                     # was dropped at the graph boundary, so the UI could
                     # never show whether a call forwards the caller token.
                     "auth_propagation": c.auth_propagation,
+                    "auth_propagation_state": c.auth_propagation_state.value,
                     "file": c.site.file,
                     "line": c.site.start_line,
                 }
@@ -317,6 +320,7 @@ class GraphRepository:
         "e.target_kind AS target_kind, e.confidence AS confidence, "
         "e.provenance AS provenance, e.evidence AS evidence, "
         "rc.auth_propagation AS auth_propagation, "
+        "rc.auth_propagation_state AS auth_propagation_state, "
         "CASE WHEN target:Endpoint THEN target.service_id "
         "     WHEN target:PlaceholderService THEN target.placeholder_id END AS target_service_id, "
         "CASE WHEN target:Endpoint THEN target_svc.name "
@@ -397,4 +401,6 @@ class GraphRepository:
             provenance=Provenance(row["provenance"]),
             evidence=row.get("evidence"),
             auth_propagation=row.get("auth_propagation"),
+            auth_propagation_state=row.get("auth_propagation_state")
+            or TokenPropagation.UNDETERMINED,
         )

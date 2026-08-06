@@ -70,6 +70,25 @@ export function authGapLabel(code: string): string {
   return AUTH_GAP_LABELS[code] ?? code
 }
 
+/** Request-level policy: what may REACH the service, not who may act (§5.2.10 T6).
+ *
+ * Worded to keep that boundary visible. "CSRF disabled" beside a list of
+ * authorization rules invites reading it as a gap in who may act, when it is a
+ * statement about which request shapes need a token — a different question,
+ * with a different answer, that the reader has to be able to tell apart.
+ */
+const REQUEST_POLICY_LABELS: Record<string, string> = {
+  cors: "CORS origin rules",
+  "csrf-disabled": "chains with CSRF disabled",
+  "csrf-exempt": "paths exempt from CSRF",
+  "entry-point": "custom 401 challenges",
+  "access-denied": "custom 403 handlers",
+}
+
+export function requestPolicyLabel(code: string): string {
+  return REQUEST_POLICY_LABELS[code] ?? code
+}
+
 /** Evidence kinds that do NOT gate a request (§5.2.10 T7).
  *
  * An `authority-model` record says what a grant MEANS or where it is minted —

@@ -251,6 +251,15 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                               : "s"}
                           </span>
                         )}
+                        {/* What this service lets REACH it — CORS/CSRF are
+                            declared per service, so the rollup on the coverage
+                            tab cannot say which one declared what. */}
+                        {(service.request_policies ?? []).map((policy) => (
+                          <span key={`${policy.kind}:${policy.scope}`}>
+                            {" · "}
+                            {policy.kind}
+                          </span>
+                        ))}
                       </p>
                     </div>
                     <span

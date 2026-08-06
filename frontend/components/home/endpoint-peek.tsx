@@ -171,6 +171,24 @@ export function EndpointPeek({
                     >
                       {edge.confidence}
                     </span>
+                    {/* Whether the caller's credentials cross THIS call. The
+                        negative is only shown where it is provable, so absence
+                        of a chip is not a claim either way (§5.2.11 T4). */}
+                    {edge.auth_propagation_state &&
+                      edge.auth_propagation_state !== "undetermined" && (
+                        <span
+                          className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+                          title={
+                            edge.auth_propagation_state === "forwarded"
+                              ? `The caller's credentials are passed on${edge.auth_propagation ? ` (${edge.auth_propagation})` : ""}`
+                              : "This call builds its request with no headers at all — the caller's token does not travel with it"
+                          }
+                        >
+                          {edge.auth_propagation_state === "forwarded"
+                            ? "token fwd"
+                            : "no token"}
+                        </span>
+                      )}
                   </div>
                   {edge.target_simplified_uri ? (
                     <p className="mt-1 flex items-center gap-1.5 pl-[3.25rem] font-mono text-[10px] text-muted-foreground">

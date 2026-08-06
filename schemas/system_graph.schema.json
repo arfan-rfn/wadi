@@ -52,8 +52,13 @@
             }
           ],
           "default": null,
-          "description": "1.13.0: how auth crosses this call when statically visible \u2014 'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall artifact, which has always recorded it. None is NOT 'does not forward': detection currently misses the inbound-HttpHeaders pass-through idiom (\u00a75.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present.",
+          "description": "How auth crosses this call when statically visible \u2014 'authorization-header' | 'feign-interceptor'. See `auth_propagation_state` for WHETHER it crosses: None here no longer has to be read as 'we did not look', because the state says which (\u00a75.2.11 T4 fixed the pass-through idiom this used to miss).",
           "title": "Auth Propagation"
+        },
+        "auth_propagation_state": {
+          "$ref": "#/$defs/TokenPropagation",
+          "default": "undetermined",
+          "description": "Whether the caller's credentials cross this call (\u00a75.2.11 T4): forwarded | not-forwarded | undetermined. The negative is claimed only where provable, never inferred from silence"
         },
         "caller_service_id": {
           "title": "Caller Service Id",
@@ -301,6 +306,16 @@
         "undetermined"
       ],
       "title": "TargetKind",
+      "type": "string"
+    },
+    "TokenPropagation": {
+      "description": "WHETHER the caller's credentials cross this call (\u00a75.2.11 T4).\n\n``auth_propagation`` names the mechanism when there is one; this says\nwhether there is one at all, and \u2014 the part a nullable string could not\nexpress \u2014 distinguishes \"we proved it does not\" from \"we could not tell\".\nThe difference decides whether a downstream 401 is a finding or a shrug.",
+      "enum": [
+        "forwarded",
+        "not-forwarded",
+        "undetermined"
+      ],
+      "title": "TokenPropagation",
       "type": "string"
     }
   },

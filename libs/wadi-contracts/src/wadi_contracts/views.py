@@ -12,6 +12,7 @@ from pydantic import Field, model_validator
 
 from wadi_contracts.base import WadiModel
 from wadi_contracts.boundary import ServiceBoundary
+from wadi_contracts.comms import TokenPropagation
 from wadi_contracts.endpoint import AuthEvidenceKind, AuthMechanismKind, Endpoint
 from wadi_contracts.enums import (
     CalleeUnboundReason,
@@ -50,14 +51,22 @@ class RemoteEdgeItem(WadiModel):
     confidence: Confidence
     provenance: Provenance
     evidence: str | None = None
+    auth_propagation_state: TokenPropagation = Field(
+        default=TokenPropagation.UNDETERMINED,
+        description=(
+            "Whether the caller's credentials cross this call (§5.2.11 T4): "
+            "forwarded | not-forwarded | undetermined. The negative is claimed "
+            "only where provable, never inferred from silence"
+        ),
+    )
     auth_propagation: str | None = Field(
         default=None,
         description=(
-            "1.13.0: how auth crosses this call when statically visible — "
-            "'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall "
-            "artifact, which has always recorded it. None is NOT 'does not forward': "
-            "detection currently misses the inbound-HttpHeaders pass-through idiom "
-            "(§5.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present."
+            "How auth crosses this call when statically visible — "
+            "'authorization-header' | 'feign-interceptor'. See "
+            "`auth_propagation_state` for WHETHER it crosses: None here no longer "
+            "has to be read as 'we did not look', because the state says which "
+            "(§5.2.11 T4 fixed the pass-through idiom this used to miss)."
         ),
     )
 

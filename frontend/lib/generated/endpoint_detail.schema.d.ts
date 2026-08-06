@@ -190,9 +190,13 @@ export type IcfgAvailable = boolean
  */
 export type IcfgSchemaVersion = string | null
 /**
- * 1.13.0: how auth crosses this call when statically visible — 'authorization-header' | 'feign-interceptor'. Carried from the RemoteCall artifact, which has always recorded it. None is NOT 'does not forward': detection currently misses the inbound-HttpHeaders pass-through idiom (§5.2.9, measured 0/157 on train-ticket), so read it as evidence-when-present.
+ * How auth crosses this call when statically visible — 'authorization-header' | 'feign-interceptor'. See `auth_propagation_state` for WHETHER it crosses: None here no longer has to be read as 'we did not look', because the state says which (§5.2.11 T4 fixed the pass-through idiom this used to miss).
  */
 export type AuthPropagation = string | null
+/**
+ * Whether the caller's credentials cross this call (§5.2.11 T4): forwarded | not-forwarded | undetermined. The negative is claimed only where provable, never inferred from silence
+ */
+export type TokenPropagation = "forwarded" | "not-forwarded" | "undetermined"
 export type CallerServiceId = string
 export type CallerServiceName = string | null
 /**
@@ -457,6 +461,7 @@ export interface FieldShape {
  */
 export interface RemoteEdgeItem {
   auth_propagation?: AuthPropagation
+  auth_propagation_state?: TokenPropagation
   caller_service_id: CallerServiceId
   caller_service_name?: CallerServiceName
   confidence: Confidence
