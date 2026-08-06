@@ -33,23 +33,32 @@ const GHOST_GAP = 16
  * fully-collapsed (budget honesty over dogma). */
 export const DEFAULT_EXPAND_STATEMENT_BUDGET = 60
 
-// Keep in step with the node components' fixed box classes (method-lane.tsx
-// `h-[72px] w-[240px]`, statement-node, condensed-node, ghost-node): ELK lays
-// out against these numbers, so a divergence lays out to the wrong boxes.
+/**
+ * Canvas node box sizes — the SINGLE source of truth, consumed both by ELK
+ * here and by the node components' inline styles.
+ *
+ * These used to be stated twice: as `w-[240px]`-style classes on the
+ * components and again as literals in this function, with a comment asking
+ * the next reader to keep them in step by hand. ELK lays out against these
+ * numbers, so any divergence lays out to boxes that are not the ones drawn —
+ * and a comment is not a mechanism. The components import these now.
+ *
+ * Widened (2026-08-06) when the type floor moved to 11px: the labels inside
+ * grew, and the honest way to hold a truncation point is to give the box the
+ * width, not to shrink the glyphs back down.
+ */
+export const NODE_BOX = {
+  method: { width: 264, height: 72 },
+  statement: { width: 248, height: 44 },
+  condensed: { width: 164, height: 32 },
+  ghost: { width: 200, height: GHOST_HEIGHT },
+} as const
+
 function nodeSize(node: FlowGraphNode): {
   width: number
   height: number
 } {
-  switch (node.type) {
-    case "method":
-      return { width: 240, height: 72 }
-    case "statement":
-      return { width: 220, height: 44 }
-    case "condensed":
-      return { width: 150, height: 32 }
-    case "ghost":
-      return { width: 180, height: GHOST_HEIGHT }
-  }
+  return NODE_BOX[node.type]
 }
 
 // Execution-order-faithful ELK options (VEIL): model order IS document order

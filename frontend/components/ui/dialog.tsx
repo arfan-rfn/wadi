@@ -1,5 +1,5 @@
 import * as React from "react"
-import * as DialogPrimitive from "@radix-ui/react-dialog"
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -12,45 +12,63 @@ const DialogPortal = DialogPrimitive.Portal
 
 const DialogClose = DialogPrimitive.Close
 
+/** Base UI calls this the Backdrop; the export keeps the `DialogOverlay` name
+ *  the app and shadcn conventions already use. */
 const DialogOverlay = React.forwardRef<
-  React.ComponentRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
+  React.ComponentRef<typeof DialogPrimitive.Backdrop>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Backdrop>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
+  <DialogPrimitive.Backdrop
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-300",
+      "fixed inset-0 z-50 bg-black/70 backdrop-blur-[2px] transition-opacity duration-300",
+      "data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
+      "motion-reduce:transition-none",
       className
     )}
     {...props}
   />
 ))
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
+DialogOverlay.displayName = "DialogOverlay"
 
 const DialogContent = React.forwardRef<
-  React.ComponentRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+  React.ComponentRef<typeof DialogPrimitive.Popup>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Popup>
 >(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
-    <DialogPrimitive.Content
+    <DialogPrimitive.Popup
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 border bg-background p-6 shadow-lg duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-105 data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom sm:rounded-lg max-h-[95vh] sm:max-h-[90vh] overflow-y-auto mx-4 sm:mx-0",
+        "fixed top-1/2 left-1/2 z-50 mx-4 grid max-h-[95vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2",
+        "gap-4 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg outline-none",
+        "transition-[opacity,transform] duration-200 sm:mx-0 sm:max-h-[90vh]",
+        // Base UI publishes the transition phase as `data-starting-style` /
+        // `data-ending-style` instead of Radix's `data-state=open|closed`, so
+        // the enter and exit styles are the offsets from rest rather than
+        // named keyframes.
+        "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
+        "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
+        "motion-reduce:transition-none",
         className
       )}
       {...props}
     >
-      <DialogPrimitive.Title className="sr-only">Dialog</DialogPrimitive.Title>
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+      <DialogPrimitive.Close
+        className={cn(
+          "absolute top-4 right-4 rounded-sm text-muted-foreground transition-colors",
+          "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          "disabled:pointer-events-none"
+        )}
+      >
         <X className="size-4" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
+    </DialogPrimitive.Popup>
   </DialogPortal>
 ))
-DialogContent.displayName = DialogPrimitive.Content.displayName
+DialogContent.displayName = "DialogContent"
 
 const DialogHeader = ({
   className,
@@ -86,14 +104,11 @@ const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn(
-      "text-lg font-semibold leading-none tracking-tight",
-      className
-    )}
+    className={cn("text-lg leading-none font-semibold tracking-tight", className)}
     {...props}
   />
 ))
-DialogTitle.displayName = DialogPrimitive.Title.displayName
+DialogTitle.displayName = "DialogTitle"
 
 const DialogDescription = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Description>,
@@ -105,7 +120,7 @@ const DialogDescription = React.forwardRef<
     {...props}
   />
 ))
-DialogDescription.displayName = DialogPrimitive.Description.displayName
+DialogDescription.displayName = "DialogDescription"
 
 export {
   Dialog,

@@ -36,15 +36,17 @@ export function MobileNav() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="mr-2 px-0 text-base hover:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 md:hidden"
-        >
-          <Icons.Menu className="size-5" />
-          <span className="sr-only">Toggle Menu</span>
-        </Button>
+      <SheetTrigger
+        render={
+          <Button
+            size="icon"
+            variant="ghost"
+            className="mr-2 px-0 text-base hover:bg-transparent focus-visible:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 md:hidden"
+          />
+        }
+      >
+        <Icons.Menu className="size-5" />
+        <span className="sr-only">Toggle Menu</span>
       </SheetTrigger>
       <SheetContent side="left" className="pr-0">
         <SheetTitle className="sr-only">Navigation Menu</SheetTitle>

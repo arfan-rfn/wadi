@@ -82,12 +82,18 @@ function NodeAnchors() {
 export const NodeShell = memo(function NodeShell({
   id,
   className,
+  style,
   children,
   trace,
   onClick,
 }: {
   id: string
   className?: string
+  /** Box dimensions come from `NODE_BOX` (lib/wadi/flow-lanes) as an inline
+   * style rather than a Tailwind class, because ELK lays out against those
+   * same numbers — one constant, consumed by both, instead of two literals
+   * kept in step by a comment. */
+  style?: React.CSSProperties
   children: React.ReactNode
   trace?: "hot" | "dim" | null
   onClick?: () => void
@@ -102,6 +108,7 @@ export const NodeShell = memo(function NodeShell({
     <div
       aria-current={selected ? "true" : undefined}
       onClick={onClick}
+      style={style}
       className={cn(
         // React Flow stamps `pointer-events: none` on the node wrapper whenever
         // a node is neither selectable nor draggable and no node mouse handler

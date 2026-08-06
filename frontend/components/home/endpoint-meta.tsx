@@ -54,7 +54,7 @@ const ACCESS: Record<
 > = {
   required: {
     icon: Lock,
-    tone: "border-emerald-500/30 text-emerald-700 dark:text-emerald-400",
+    tone: "border-ok/30 text-ok",
     fallback: "Authenticated",
     title: "Authentication required",
     detail:
@@ -62,7 +62,7 @@ const ACCESS: Record<
   },
   denied: {
     icon: Ban,
-    tone: "border-red-500/30 text-red-700 dark:text-red-400",
+    tone: "border-bad/30 text-bad",
     fallback: "Denied to all",
     title: "Denied to every caller",
     detail:
@@ -70,7 +70,7 @@ const ACCESS: Record<
   },
   open: {
     icon: Globe,
-    tone: "border-amber-500/30 text-amber-700 dark:text-amber-400",
+    tone: "border-warn/30 text-warn",
     fallback: "Public",
     title: "Public — no authentication",
     detail:
@@ -130,23 +130,28 @@ export function AccessChip({
   const named = state === "required" && granted.length > 0
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          tabIndex={0}
-          aria-label={named ? `${title}: ${granted.join(", ")}` : title}
-          className={cn(
-            "inline-flex cursor-help items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-2xs",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            tone
-          )}
-        >
-          <Icon aria-hidden className="size-3 shrink-0" />
-          {named ? (
-            granted.map((name) => <RoleName key={name} role={name} />)
-          ) : (
-            <span>{fallback}</span>
-          )}
-        </span>
+      {/* Base UI composes with `render` where Radix used `asChild`: the
+          element to render is passed as a prop and the children stay on the
+          trigger, rather than the trigger cloning its only child. */}
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            aria-label={named ? `${title}: ${granted.join(", ")}` : title}
+          />
+        }
+        className={cn(
+          "inline-flex cursor-help items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-2xs",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          tone
+        )}
+      >
+        <Icon aria-hidden className="size-3 shrink-0" />
+        {named ? (
+          granted.map((name) => <RoleName key={name} role={name} />)
+        ) : (
+          <span>{fallback}</span>
+        )}
       </TooltipTrigger>
       <TooltipContent>
         <p className="font-medium">{title}</p>
@@ -182,18 +187,16 @@ export function DependencyChip({
   const label = `${dependencies.length} service${dependencies.length === 1 ? "" : "s"}`
   return (
     <HoverCard>
-      <HoverCardTrigger asChild>
-        <span
-          tabIndex={0}
-          className={cn(
-            "inline-flex cursor-help items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-2xs text-muted-foreground transition-colors",
-            "hover:border-muted-foreground/60 hover:text-foreground",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          )}
-        >
-          <Network aria-hidden className="size-3 shrink-0" />
-          <span className="tabular-nums">{label}</span>
-        </span>
+      <HoverCardTrigger
+        render={<span tabIndex={0} />}
+        className={cn(
+          "inline-flex cursor-help items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-2xs text-muted-foreground transition-colors",
+          "hover:border-muted-foreground/60 hover:text-foreground",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        )}
+      >
+        <Network aria-hidden className="size-3 shrink-0" />
+        <span className="tabular-nums">{label}</span>
       </HoverCardTrigger>
       <HoverCardContent className="w-80">
         <p className="text-2xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
@@ -206,7 +209,7 @@ export function DependencyChip({
                 {dependency.label}
               </span>
               <span
-                className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+                className="shrink-0 rounded-full border px-1.5 text-2xs text-muted-foreground"
                 title={KIND_NOTE[dependency.target_kind]}
               >
                 {dependency.confidence}

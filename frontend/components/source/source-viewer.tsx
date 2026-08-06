@@ -85,17 +85,22 @@ const SINK_ICON: Record<string, typeof Database> = {
   mq: MailWarning,
 }
 
-/** Highest-signal mark class for the gutter strip, by priority. */
+/** Highest-signal mark class for the gutter strip, by priority.
+ *
+ * These are construct marks, so they read from the `--flow-*` vocabulary the
+ * canvas already uses for the same facts. They previously carried their own
+ * private red/amber/sky/violet, which meant a branch in the gutter and a
+ * branch on the canvas were two different colours for one thing. */
 function markClass(marks: LineMark[]): string | null {
-  if (marks.some((m) => m.sink)) return "bg-red-500/80"
-  if (marks.some((m) => m.kind === "branch")) return "bg-amber-500/80"
-  if (marks.some((m) => m.kind === "loop")) return "bg-sky-500/80"
+  if (marks.some((m) => m.sink)) return "bg-flow-remote/80"
+  if (marks.some((m) => m.kind === "branch")) return "bg-flow-case/80"
+  if (marks.some((m) => m.kind === "loop")) return "bg-flow-loop/80"
   if (
     marks.some((m) =>
       ["try", "catch", "finally", "throw"].includes(m.construct ?? "")
     )
   )
-    return "bg-violet-500/80"
+    return "bg-flow-exception/80"
   if (marks.some((m) => m.kind === "call" || m.kind === "return"))
     return "bg-muted-foreground/50"
   return "bg-muted-foreground/30"
@@ -277,10 +282,10 @@ export function SourceSnippet({
                       key={lineNo}
                       className={cn(
                         "flex gap-3 px-2",
-                        inAnchor && "bg-amber-500/10"
+                        inAnchor && "bg-warn/10"
                       )}
                     >
-                      <span className="w-8 shrink-0 select-none text-right text-muted-foreground/60">
+                      <span className="w-8 shrink-0 select-none text-right text-subtle-foreground">
                         {lineNo}
                       </span>
                       <TokenLine
@@ -904,7 +909,7 @@ function SourceFileView({
           {/* Files are listed in the order the flow first reaches them, so the
               position is a fact about the flow, not a row number. */}
           <span
-            className="shrink-0 rounded border border-border/70 bg-background px-1 font-mono text-[10px] text-muted-foreground tabular-nums"
+            className="shrink-0 rounded-sm border border-border/70 bg-background px-1 font-mono text-2xs text-muted-foreground tabular-nums"
             title={`File ${section.order + 1} of ${fileCount}, in the order this endpoint's flow first reaches them`}
           >
             {section.order + 1}
@@ -929,7 +934,7 @@ function SourceFileView({
             <span className="flex-1" />
           )}
         </button>
-        <div className="flex items-baseline gap-2 px-2 pb-1.5 pl-[1.6rem] font-mono text-[10px] text-muted-foreground/70">
+        <div className="flex items-baseline gap-2 px-2 pb-1.5 pl-[1.6rem] font-mono text-2xs text-muted-foreground">
           {directory ? (
             <span className="min-w-0 flex-1 truncate" title={directory}>
               {shortDirectory(directory)}
@@ -970,7 +975,7 @@ function SourceFileView({
       {!expanded ? null : (
         <>
           {first.data?.variant && first.data.variant !== "original" ? (
-            <p className="border-b bg-amber-500/10 px-3 py-1 text-2xs text-amber-700 dark:text-amber-400">
+            <p className="border-b bg-warn/10 px-3 py-1 text-2xs text-warn">
               Generated variant — the text as analysis saw it, not the committed
               file.
             </p>
@@ -1146,7 +1151,7 @@ function SourceRowView({
         data-method-start={row.startLine}
         className="flex h-[22px] items-center gap-1.5 border-t bg-muted/30 px-2"
       >
-        <span className="truncate font-mono text-2xs font-medium text-foreground/80">
+        <span className="truncate font-mono text-2xs font-medium text-foreground">
           {shortSignature(row.signature)}
         </span>
       </div>
@@ -1240,7 +1245,7 @@ function SourceLine({
         touched ? "bg-primary/[0.04]" : "opacity-50",
         inSelection && "bg-primary/10",
         isAnchor && "bg-primary/20",
-        flashLine === lineNo && !inSelection && "bg-amber-500/20",
+        flashLine === lineNo && !inSelection && "bg-warn/20",
         selectable && "cursor-pointer hover:bg-muted/60"
       )}
     >
@@ -1257,7 +1262,7 @@ function SourceLine({
           "sticky left-0 z-[1] w-11 shrink-0 select-none bg-background pr-2 text-right",
           inSelection
             ? "font-medium text-primary"
-            : "text-muted-foreground/60 group-hover:text-muted-foreground"
+            : "text-subtle-foreground group-hover:text-muted-foreground"
         )}
       >
         {inSelection ? (
@@ -1282,7 +1287,7 @@ function SourceLine({
         wrap={wrap}
       />
       {SinkIcon ? (
-        <SinkIcon className="ml-1 size-3 shrink-0 text-red-500/80" />
+        <SinkIcon className="ml-1 size-3 shrink-0 text-bad/80" />
       ) : null}
       {links?.map((link) => (
         <button
@@ -1294,7 +1299,7 @@ function SourceLine({
             onJump(link.targetFile, link.targetLine)
             onJumpNode?.(link.targetMethodId)
           }}
-          className="ml-2 inline-flex shrink-0 items-center gap-0.5 rounded border px-1 text-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="ml-2 inline-flex shrink-0 items-center gap-0.5 rounded-sm border px-1 text-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title={`${link.targetSignature} — ${link.targetFile}:${link.targetLine}`}
         >
           <CornerDownRight className="size-2.5" />

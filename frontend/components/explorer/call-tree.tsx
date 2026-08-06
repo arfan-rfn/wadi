@@ -95,7 +95,7 @@ function TreeRow({
           <button
             onClick={() => setOpen((prev) => !prev)}
             aria-label={open ? "Collapse" : "Expand"}
-            className="shrink-0 text-muted-foreground/60 hover:text-foreground"
+            className="shrink-0 text-subtle-foreground hover:text-foreground"
           >
             {open ? (
               <ChevronDown className="size-3" />
@@ -112,11 +112,11 @@ function TreeRow({
           title={node.signature}
         >
           {depth > 0 ? (
-            <CornerDownRight className="size-2.5 shrink-0 text-muted-foreground/50" />
+            <CornerDownRight className="size-2.5 shrink-0 text-subtle-foreground" />
           ) : null}
           <span
             className={cn(
-              "truncate font-mono text-[11px]",
+              "truncate font-mono text-2xs",
               depth === 0
                 ? "font-semibold"
                 : "text-muted-foreground group-hover:text-foreground"
@@ -126,7 +126,7 @@ function TreeRow({
           </span>
           {node.cycle ? (
             <span
-              className="inline-flex shrink-0 items-center gap-0.5 rounded border px-1 text-[9px] uppercase text-muted-foreground"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-sm border px-1 text-2xs uppercase text-muted-foreground"
               title="Recursion: re-enters a method already on this path"
             >
               <RefreshCw className="size-2" /> cycle
@@ -135,11 +135,11 @@ function TreeRow({
           {sinks.map((sink) => {
             const Icon = SINK_ICON[sink]
             return Icon ? (
-              <Icon key={sink} className="size-2.5 shrink-0 text-red-500/70" />
+              <Icon key={sink} className="size-2.5 shrink-0 text-bad/70" />
             ) : null
           })}
           {constructSummary.length > 0 ? (
-            <span className="hidden shrink-0 font-mono text-[9px] text-muted-foreground/60 xl:inline">
+            <span className="hidden shrink-0 font-mono text-2xs text-subtle-foreground xl:inline">
               {constructSummary.join(" ")}
             </span>
           ) : null}

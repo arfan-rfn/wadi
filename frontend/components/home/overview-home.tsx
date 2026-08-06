@@ -14,6 +14,7 @@ import { useSearchParams } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
 
 import { BREAKPOINT, useMediaQuery } from "@/lib/hooks/use-media-query"
+import { useMounted } from "@/lib/hooks/use-mounted"
 import { cn } from "@/lib/utils"
 import {
   useEndpointDependencies,
@@ -81,15 +82,27 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
     serviceId
   )
 
+  // Every list below comes from a client fetch, so the server renders the
+  // skeleton. Hydrating against a warm query cache, the client would have the
+  // rows on its FIRST render and emit `<button>` where the server emitted a
+  // `<div>` — a DOM-shape disagreement, which fails hydration outright and
+  // regenerates the tree. Holding the lists empty until mounted makes the
+  // first client render identical to the server's, warm cache or cold.
+  const mounted = useMounted()
+  const servicesPending = !mounted || services.isPending
+  const endpointsPending = !mounted || endpoints.isPending
+
   const filteredServices = useMemo(() => {
+    if (!mounted) return []
     const list = services.data ?? []
     const query = serviceFilter.trim().toLowerCase()
     return query
       ? list.filter((s) => s.name.toLowerCase().includes(query))
       : list
-  }, [services.data, serviceFilter])
+  }, [mounted, services.data, serviceFilter])
 
   const filteredEndpoints = useMemo(() => {
+    if (!mounted) return []
     const list = endpoints.data ?? []
     const query = endpointFilter.trim().toLowerCase()
     const byText = query
@@ -105,7 +118,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
         (e) => e.auth?.authenticated === false && unreadKindsOf(e).length === 0
       )
     return byText.filter((e) => (e.auth?.roles ?? []).includes(roleFilter.role))
-  }, [endpoints.data, endpointFilter, roleFilter])
+  }, [mounted, endpoints.data, endpointFilter, roleFilter])
 
   const selectedService = services.data?.find((s) => s.service_id === serviceId)
   const selectedEndpoint =
@@ -206,11 +219,11 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                 placeholder="Filter services"
               />
               <ScrollArea className="min-h-0 flex-1">
-                {services.isPending ? <ListSkeleton /> : null}
+                {servicesPending ? <ListSkeleton /> : null}
                 {/* Without this the pane renders BLANK on a failed fetch: every
                   empty state below is guarded on `.data`, which is undefined,
                   and `isPending` is already false. */}
-                {services.isError ? (
+                {mounted && services.isError ? (
                   <EmptyState>
                     Could not load services —{" "}
                     {(services.error as Error).message}
@@ -228,7 +241,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                       serviceId === service.service_id ? "true" : undefined
                     }
                     className={cn(
-                      // Symmetric selection: an inset rounded block, fill plus a
+                      // Symmetric selection: an inset rounded-sm block, fill plus a
                       // full ring. Never an edge bar.
                       "mx-1.5 my-0.5 flex w-[calc(100%-0.75rem)] cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
                       "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -268,7 +281,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                           ].map((kind) => (
                             <span
                               key={kind}
-                              className="rounded-full border px-1.5 font-mono text-[10px] text-muted-foreground"
+                              className="rounded-full border px-1.5 font-mono text-2xs text-muted-foreground"
                               title="Gates which origin or request shape may reach this service — not which principal"
                             >
                               {kind}
@@ -333,8 +346,8 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                 onChange={setRoleFilter}
               />
               <ScrollArea className="min-h-0 flex-1">
-                {endpoints.isPending && serviceId ? <ListSkeleton /> : null}
-                {endpoints.isError ? (
+                {endpointsPending && serviceId ? <ListSkeleton /> : null}
+                {mounted && endpoints.isError ? (
                   <EmptyState>
                     Could not load endpoints —{" "}
                     {(endpoints.error as Error).message}
@@ -346,7 +359,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                     full end-to-end flow.
                   </EmptyState>
                 ) : null}
-                {endpoints.data?.length === 0 ? (
+                {mounted && endpoints.data?.length === 0 ? (
                   <EmptyState>
                     No endpoints extracted for this service
                   </EmptyState>

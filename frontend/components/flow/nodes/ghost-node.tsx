@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils"
 import type { GoverningCondition } from "@/lib/wadi/conditions"
 import { conditionLabel } from "@/lib/wadi/conditions"
 
+import { NODE_BOX } from "@/lib/wadi/flow-lanes"
+
 import { NodeShell, useFlowActions } from "../flow-chrome"
 
 export interface GhostNodeDatum extends Record<string, unknown> {
@@ -43,8 +45,9 @@ export const GhostNode = memo(function GhostNode({
       id={id}
       trace={data.trace}
       onClick={() => actions.selectNode(id)}
+      style={{ width: NODE_BOX.ghost.width }}
       className={cn(
-        "flex min-h-[44px] w-[180px] flex-col justify-center gap-0.5 px-2.5 py-1",
+        "flex min-h-[44px] flex-col justify-center gap-0.5 px-2.5 py-1",
         unknown && "border-dashed border-destructive/60"
       )}
     >
@@ -67,13 +70,13 @@ export const GhostNode = memo(function GhostNode({
         {data.verbs.map((verb) => (
           <span
             key={verb}
-            className="shrink-0 rounded bg-muted px-1 font-mono text-[9px] font-semibold text-muted-foreground"
+            className="shrink-0 rounded-sm bg-muted px-1 font-mono text-2xs font-semibold text-muted-foreground"
           >
             {verb}
           </span>
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-1 pl-5 text-[9px] text-muted-foreground [.zoom-simplified_&]:hidden">
+      <div className="flex flex-wrap items-center gap-1 pl-5 text-2xs text-muted-foreground [.zoom-simplified_&]:hidden">
         <span>
           {data.targetKind}
           {data.confidence ? ` · ${data.confidence}` : ""}
@@ -82,7 +85,7 @@ export const GhostNode = memo(function GhostNode({
           <span
             key={conditionLabel(condition)}
             title={`Nearest governing branch (heuristic): ${conditionLabel(condition)}`}
-            className="inline-flex max-w-full items-center truncate rounded-full border border-amber-500/40 bg-amber-500/5 px-1.5 leading-3.5 text-amber-700 dark:text-amber-400"
+            className="inline-flex max-w-full items-center truncate rounded-full border border-warn/40 bg-warn/5 px-1.5 leading-3.5 text-warn"
           >
             {conditionLabel(condition)}
           </span>

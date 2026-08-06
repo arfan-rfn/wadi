@@ -56,7 +56,7 @@ export function IdentityHeader({
 }) {
   const methods = icfg ? rollupMethods(icfg) : null
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-4 py-2.5">
+    <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b px-pad-x py-pad-y">
       {/* An actual button, not a breadcrumb crumb: it was reading as the
           first segment of a path, so its job — LEAVING this endpoint — was
           invisible. Border, label and icon now say "go back", and the service

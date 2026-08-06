@@ -80,9 +80,9 @@ export function EndpointRow({
       onClick={() => onOpen(endpoint)}
       aria-current={selected ? "true" : undefined}
       className={cn(
-        // Selection is the row itself: an inset rounded block whose fill
+        // Selection is the row itself: an inset rounded-sm block whose fill
         // deepens and whose ring closes all the way round. Never an edge bar.
-        "mx-1.5 my-0.5 grid w-[calc(100%-0.75rem)] cursor-pointer grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1.5 rounded-lg px-2 py-2 text-left transition-colors",
+        "mx-1.5 my-0.5 grid w-[calc(100%-0.75rem)] cursor-pointer grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1 rounded-lg px-2 py-pad-y text-left transition-colors",
         "hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         selected && "bg-muted/80 ring-1 ring-primary/30 ring-inset"
       )}

@@ -67,7 +67,7 @@ function Stat({
       <span
         className={cn(
           "font-mono text-2xl tabular-nums",
-          tone === "warn" && "text-amber-700 dark:text-amber-400",
+          tone === "warn" && "text-warn",
           tone === "muted" && "text-muted-foreground"
         )}
       >
@@ -194,7 +194,7 @@ export function AuthPane({
                         {(row.roles ?? []).map((role) => (
                           <span
                             key={role}
-                            className="rounded-full bg-muted px-2 py-0.5 font-mono text-[10px]"
+                            className="rounded-full bg-muted px-2 py-0.5 font-mono text-2xs"
                           >
                             {role}
                           </span>
@@ -203,7 +203,7 @@ export function AuthPane({
                           <span
                             key={authority}
                             title="Required authority (hasAuthority), not a role"
-                            className="rounded-full border border-dashed px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                            className="rounded-full border border-dashed px-2 py-0.5 font-mono text-2xs text-muted-foreground"
                           >
                             {authority}
                           </span>
@@ -211,7 +211,7 @@ export function AuthPane({
                         {(row.mechanism_kinds ?? []).map((kind) => (
                           <span
                             key={kind}
-                            className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                            className="rounded-sm bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground"
                           >
                             {kind}
                           </span>

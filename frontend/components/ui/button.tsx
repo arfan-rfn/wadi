@@ -1,11 +1,16 @@
 import * as React from "react"
-import { Slot } from "@radix-ui/react-slot"
+import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background cursor-pointer",
+  cn(
+    "inline-flex cursor-pointer items-center justify-center rounded-md text-sm font-medium",
+    "ring-offset-background transition-colors",
+    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden",
+    "disabled:pointer-events-none disabled:opacity-50"
+  ),
   {
     variants: {
       variant: {
@@ -17,16 +22,16 @@ const buttonVariants = cva(
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "underline-offset-4 hover:underline text-primary",
-        chip: "shadow-chip overflow-hidden border-0 bg-muted w-max hover:brightness-90",
+        link: "text-primary underline-offset-4 hover:underline",
+        chip: "shadow-chip w-max overflow-hidden border-0 bg-muted hover:brightness-90",
       },
       size: {
-        default: "h-10 py-2 px-4",
-        sm: "h-9 px-3 rounded-md",
-        lg: "h-11 px-8 rounded-md",
-        icon: "h-10 w-10",
+        default: "h-10 px-4 py-2",
+        sm: "h-9 rounded-md px-3",
+        lg: "h-11 rounded-md px-8",
+        icon: "size-10",
         text: "h-auto",
-        round: "h-8 px-3 rounded-full",
+        round: "h-8 rounded-full px-3",
       },
     },
     defaultVariants: {
@@ -40,20 +45,29 @@ export interface ButtonProps
   extends
     React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
-  asChild?: boolean
+  /**
+   * Replace the rendered `<button>` with another element, merging this
+   * component's props into it.
+   *
+   * Base UI's composition primitive, in place of Radix's `asChild`. The
+   * difference is where the element goes: `asChild` cloned the single child,
+   * so the shell and the content were the same node; `render` takes the shell
+   * as a prop and leaves `children` free. That is what lets a trigger own its
+   * own content while still rendering as a Button.
+   */
+  render?: useRender.RenderProp
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button"
-    return (
-      <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
-        ref={ref}
-        {...props}
-      />
-    )
-  }
+  ({ className, variant, size, render, ...props }, ref) =>
+    useRender({
+      render: render ?? <button />,
+      ref,
+      props: {
+        className: cn(buttonVariants({ variant, size, className })),
+        ...props,
+      },
+    })
 )
 Button.displayName = "Button"
 

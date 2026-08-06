@@ -121,7 +121,7 @@ describe("SourceViewer honesty states (§11 Phase 2.8)", () => {
     // any hand-rolled vertical scroller — the invariant is ONE of them, never
     // a scroller nested inside a scroller, whichever mechanism provides it.
     const scrollers = container.querySelectorAll(
-      '[data-radix-scroll-area-viewport], [class*="overflow-y-auto"], [class*="overflow-auto"]'
+      '[data-id$="-viewport"], [class*="overflow-y-auto"], [class*="overflow-auto"]'
     )
     expect(scrollers.length).toBe(1)
   })
@@ -204,7 +204,7 @@ describe("SourceSnippet (drill-in peek)", () => {
     fireEvent.click(scoped.getByText(`${FILE}:2`))
     const highlighted = await scoped.findAllByText(
       (_, element) =>
-        (element?.className?.includes?.("bg-amber-500/10") ?? false) &&
+        (element?.className?.includes?.("bg-warn/10") ?? false) &&
         (element?.textContent?.includes("if (n < 0)") ?? false)
     )
     expect(highlighted.length).toBeGreaterThan(0)

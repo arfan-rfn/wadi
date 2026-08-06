@@ -27,12 +27,12 @@ export function FocusBreadcrumb({
         >
           {index > 0 ? (
             <ChevronRight
-              className="size-3 text-muted-foreground/50"
+              className="size-3 text-subtle-foreground"
               aria-hidden
             />
           ) : null}
           <button
-            className="rounded px-1 py-0.5 font-mono text-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="rounded-sm px-1 py-0.5 font-mono text-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => (index === 0 ? onClear() : onFocus(node.methodId))}
             title={node.signature}
           >
@@ -41,7 +41,7 @@ export function FocusBreadcrumb({
         </span>
       ))}
       <button
-        className="ml-1 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="ml-1 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={onClear}
         title="Clear focus (Esc)"
       >

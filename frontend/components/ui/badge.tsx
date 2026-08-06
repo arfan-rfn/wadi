@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Slot } from "@radix-ui/react-slot"
+import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
@@ -17,6 +17,19 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+
+        // Status variants (added 2026-08-06 with the achromatic accent).
+        //
+        // A run's status used to wear `variant="default"`, which is the BRAND
+        // fill. That was quietly wrong all along — "succeeded" is a fact about
+        // the data, not a call to action — and the neutral rebuild made it
+        // visible: with a near-white primary, a routine green-path status
+        // became the single loudest element in the header, out-shouting the
+        // endpoint it describes. These are tinted rather than filled, so the
+        // status reads at a glance without competing for the eye.
+        ok: "border-ok/30 bg-ok/10 text-ok",
+        warn: "border-warn/30 bg-warn/10 text-warn",
+        bad: "border-bad/30 bg-bad/10 text-bad",
       },
     },
     defaultVariants: {
@@ -28,19 +41,21 @@ const badgeVariants = cva(
 function Badge({
   className,
   variant,
-  asChild = false,
+  render,
   ...props
 }: React.ComponentProps<"span"> &
-  VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
-  const Comp = asChild ? Slot : "span"
-
-  return (
-    <Comp
-      data-slot="badge"
-      className={cn(badgeVariants({ variant }), className)}
-      {...props}
-    />
-  )
+  VariantProps<typeof badgeVariants> & {
+    /** Base UI's composition primitive, in place of Radix's `asChild`. */
+    render?: useRender.RenderProp
+  }) {
+  return useRender({
+    render: render ?? <span />,
+    props: {
+      "data-slot": "badge",
+      className: cn(badgeVariants({ variant }), className),
+      ...props,
+    },
+  })
 }
 
 export { Badge, badgeVariants }

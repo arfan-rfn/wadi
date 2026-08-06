@@ -246,7 +246,7 @@ export function InspectorSelection({
               </Chip>
             ))}
           </div>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Nearest governing branch on each path — a recorded heuristic, not
             full dominance analysis.
           </p>

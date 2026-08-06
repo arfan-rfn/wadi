@@ -20,6 +20,8 @@ import type { GoverningCondition } from "@/lib/wadi/conditions"
 import { conditionLabel } from "@/lib/wadi/conditions"
 import { unopenableCopy } from "@/lib/wadi/unopenable"
 
+import { NODE_BOX } from "@/lib/wadi/flow-lanes"
+
 import { NodeShell, useFlowActions } from "../flow-chrome"
 
 const SINK_ICON: Record<string, typeof Database> = {
@@ -81,7 +83,8 @@ export const StatementNode = memo(function StatementNode({
       id={id}
       trace={data.trace}
       onClick={() => actions.selectNode(id)}
-      className="flex min-h-[44px] w-[220px] flex-col justify-center gap-0.5 px-2.5 py-1.5"
+      style={{ width: NODE_BOX.statement.width }}
+      className="flex min-h-[44px] flex-col justify-center gap-0.5 px-2.5 py-1.5"
     >
       {accent ? (
         <span
@@ -92,7 +95,7 @@ export const StatementNode = memo(function StatementNode({
       ) : null}
       <div className="flex items-center gap-1.5">
         <button
-          className="shrink-0 font-mono text-[9px] text-muted-foreground/60 hover:text-foreground"
+          className="shrink-0 font-mono text-2xs text-subtle-foreground hover:text-foreground"
           title={`Open ${data.file}:${data.line} in source`}
           onClick={(event) => {
             event.stopPropagation()
@@ -127,7 +130,7 @@ export const StatementNode = memo(function StatementNode({
           // is the difference between "generated code" and what reads as a
           // hole in the map (§5.4.2 T5).
           <span
-            className="shrink-0 rounded-sm border border-dashed border-muted-foreground/40 px-1 text-[9px] uppercase tracking-wide text-muted-foreground [.zoom-simplified_&]:hidden"
+            className="shrink-0 rounded-sm border border-dashed border-muted-foreground/40 px-1 text-2xs uppercase tracking-wide text-muted-foreground [.zoom-simplified_&]:hidden"
             title={unopenable.detail}
           >
             {unopenable.badge}
@@ -152,7 +155,7 @@ export const StatementNode = memo(function StatementNode({
             <span
               key={arm}
               title={`On ${arm}, control leaves this method`}
-              className="inline-flex items-center gap-0.5 rounded-full border px-1.5 text-[9px] leading-3.5 text-muted-foreground"
+              className="inline-flex items-center gap-0.5 rounded-full border px-1.5 text-2xs leading-3.5 text-muted-foreground"
             >
               {arm} → returns
             </span>
@@ -165,7 +168,7 @@ export const StatementNode = memo(function StatementNode({
             <span
               key={conditionLabel(condition)}
               title={`Nearest governing branch (heuristic): ${conditionLabel(condition)}`}
-              className="inline-flex max-w-full items-center gap-0.5 truncate rounded-full border border-amber-500/40 bg-amber-500/5 px-1.5 text-[9px] leading-3.5 text-amber-700 dark:text-amber-400"
+              className="inline-flex max-w-full items-center gap-0.5 truncate rounded-full border border-warn/40 bg-warn/5 px-1.5 text-2xs leading-3.5 text-warn"
             >
               {conditionLabel(condition)}
             </span>

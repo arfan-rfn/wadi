@@ -6,7 +6,7 @@
   "tailwind": {
     "config": "",
     "css": "styles/globals.css",
-    "baseColor": "slate",
+    "baseColor": "neutral",
     "cssVariables": true,
     "prefix": ""
   },
@@ -18,5 +18,6 @@
     "hooks": "@/hooks",
     "types": "@/types"
   },
-  "iconLibrary": "lucide"
+  "iconLibrary": "lucide",
+  "primitives": "base-ui"
 }

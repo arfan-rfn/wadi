@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
-// The one shared small-label primitive (§11 Phase 2.8): every ad-hoc rounded
+// The one shared small-label primitive (§11 Phase 2.8): every ad-hoc rounded-sm
 // span in the explorer converges here. The `unknown` variant is dashed on
 // purpose — unresolved facts must LOOK unresolved (P10); `condition` is the
 // governing-condition amber; nothing here is saturated (the one saturated
@@ -20,7 +20,7 @@ const chipVariants = cva(
         outline: "text-muted-foreground",
         unknown: "border-dashed border-destructive/60 text-destructive",
         condition:
-          "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400",
+          "border-warn/40 bg-warn/5 text-warn",
         mono: "font-mono text-muted-foreground",
       },
     },

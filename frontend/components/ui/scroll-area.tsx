@@ -1,16 +1,16 @@
 "use client"
 
 import * as React from "react"
-import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area"
+import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area"
 
 import { cn } from "@/lib/utils"
 
 const ScrollArea = React.forwardRef<
-  React.ElementRef<typeof ScrollAreaPrimitive.Root>,
+  React.ComponentRef<typeof ScrollAreaPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> & {
     /** The scrolling element itself. Virtualizers and IntersectionObservers
-     *  need it — Radix nests the real scroller one level below Root, so
-     *  without this a caller can only ever reach the wrong element. */
+     *  need it — the real scroller is nested one level below Root, so without
+     *  this a caller can only ever reach the wrong element. */
     viewportRef?: React.Ref<HTMLDivElement>
     /** Render a horizontal bar too (code, wide tables). */
     orientation?: "vertical" | "horizontal" | "both"
@@ -30,31 +30,21 @@ const ScrollArea = React.forwardRef<
   ) => (
     <ScrollAreaPrimitive.Root
       ref={ref}
-      // `type="hover"` keeps the bars out of the layout entirely and fades
-      // them in on approach. A permanently-reserved native gutter is exactly
-      // the chrome this replaces.
-      type="hover"
-      scrollHideDelay={400}
       className={cn("relative overflow-hidden", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
+        // Base UI's viewport is a plain box. Radix wrapped children in
+        // `display: table; min-width: 100%`, which is shrink-to-fit and so
+        // GREW past the viewport for any unbreakable string — a long URI, an
+        // access rule, a deep file path. Children then sized against that
+        // wider box, `truncate` and `break-all` measured the wrong width, and
+        // the overflow was clipped by Root with no bar to scroll it back.
+        // The `[&>div]:!block` override that existed to undo it is gone with
+        // the behaviour that required it.
         className={cn(
-          "size-full rounded-[inherit]",
-          // Radix wraps children in `display: table; min-width: 100%`. A table
-          // box is shrink-to-fit, so it GROWS past the viewport for any
-          // unbreakable string — a long URI, an access rule, a deep file path.
-          // Children then size against that wider box, so `truncate` and
-          // `break-all` measure the wrong width and the overflow is clipped by
-          // Root's `overflow-hidden` with no bar to scroll it back. Content
-          // simply disappears off the right edge.
-          //
-          // Only correct when there is no horizontal bar: with one, the table
-          // box is exactly what makes wide content reachable. So this follows
-          // the orientation the caller already declared rather than being a
-          // blanket override.
-          orientation === "vertical" && "[&>div]:!block",
+          "size-full rounded-[inherit] focus-visible:outline-none",
           viewportClassName
         )}
       >
@@ -68,32 +58,37 @@ const ScrollArea = React.forwardRef<
     </ScrollAreaPrimitive.Root>
   )
 )
-ScrollArea.displayName = ScrollAreaPrimitive.Root.displayName
+ScrollArea.displayName = "ScrollArea"
 
 const ScrollBar = React.forwardRef<
-  React.ElementRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>,
-  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.ScrollAreaScrollbar>
+  React.ComponentRef<typeof ScrollAreaPrimitive.Scrollbar>,
+  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Scrollbar>
 >(({ className, orientation = "vertical", ...props }, ref) => (
-  <ScrollAreaPrimitive.ScrollAreaScrollbar
+  <ScrollAreaPrimitive.Scrollbar
     ref={ref}
     orientation={orientation}
+    // Bars stay out of the layout and fade in on approach — a permanently
+    // reserved native gutter is exactly the chrome this replaces. Radix drove
+    // this with `type="hover"` + `scrollHideDelay`; Base UI publishes the same
+    // facts as data attributes, so it is expressed in CSS instead of config.
     className={cn(
-      "z-10 flex touch-none p-0.5 transition-opacity select-none",
-      "data-[state=hidden]:opacity-0 motion-reduce:transition-none",
+      "z-10 flex touch-none p-0.5 opacity-0 transition-opacity duration-150 select-none",
+      "data-[hovering]:opacity-100 data-[scrolling]:opacity-100",
+      "motion-reduce:transition-none",
       orientation === "vertical" && "w-2",
       orientation === "horizontal" && "h-2 flex-col",
       className
     )}
     {...props}
   >
-    <ScrollAreaPrimitive.ScrollAreaThumb
+    <ScrollAreaPrimitive.Thumb
       className={cn(
         "relative flex-1 rounded-full bg-muted-foreground/30 transition-colors",
         "hover:bg-muted-foreground/50"
       )}
     />
-  </ScrollAreaPrimitive.ScrollAreaScrollbar>
+  </ScrollAreaPrimitive.Scrollbar>
 ))
-ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName
+ScrollBar.displayName = "ScrollBar"
 
 export { ScrollArea, ScrollBar }

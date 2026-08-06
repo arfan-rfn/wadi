@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { NODE_BOX } from "@/lib/wadi/flow-lanes"
 import { shortSignature } from "@/lib/wadi/rollup"
 import { useWorkspaceStore } from "@/components/endpoint/workspace-store"
 
@@ -53,14 +54,15 @@ export const MethodNode = memo(function MethodNode({
       id={id}
       trace={data.trace}
       onClick={() => actions.selectNode(id)}
+      style={{ width: NODE_BOX.method.width }}
       className={cn(
-        "flex h-[72px] w-[240px] flex-col justify-center gap-1 px-3",
+        "flex h-[72px] flex-col justify-center gap-1 px-3",
         data.isRoot && "border-primary/50"
       )}
     >
       <div className="flex items-center gap-1.5">
         <button
-          className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="Expand into statements"
           onClick={(event) => {
             event.stopPropagation()
@@ -73,7 +75,7 @@ export const MethodNode = memo(function MethodNode({
           {shortSignature(data.signature)}
         </span>
         {data.isRoot ? (
-          <span className="shrink-0 rounded-full bg-primary/10 px-1.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+          <span className="shrink-0 rounded-full bg-primary/10 px-1.5 text-2xs font-semibold uppercase tracking-wider text-primary">
             handler
           </span>
         ) : null}
@@ -150,7 +152,7 @@ export const LaneNode = memo(function LaneNode({
         )}
       >
         <button
-          className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="Collapse to a method card"
           onClick={(event) => {
             // The header selects; the buttons do their own thing. Both firing
@@ -165,12 +167,12 @@ export const LaneNode = memo(function LaneNode({
           {shortSignature(data.signature)}
         </span>
         {data.isRoot ? (
-          <span className="shrink-0 rounded-full bg-primary/10 px-1.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+          <span className="shrink-0 rounded-full bg-primary/10 px-1.5 text-2xs font-semibold uppercase tracking-wider text-primary">
             handler
           </span>
         ) : null}
         <button
-          className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="ml-auto shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="Focus on this method and its callees"
           onClick={(event) => {
             event.stopPropagation()
