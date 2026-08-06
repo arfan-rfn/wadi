@@ -18,5 +18,6 @@
     "hooks": "@/hooks",
     "types": "@/types"
   },
-  "iconLibrary": "lucide"
+  "iconLibrary": "lucide",
+  "primitives": "base-ui"
 }

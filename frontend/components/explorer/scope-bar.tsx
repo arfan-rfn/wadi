@@ -41,12 +41,14 @@ export function ScopeBar(props: ScopeBarProps) {
   return (
     <div className="flex min-w-0 items-center gap-1">
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className="gap-2 px-2 font-medium">
-            <Database className="size-3.5 text-muted-foreground" />
-            {system ? system.name : "Select system"}
-            <ChevronsUpDown className="size-3 text-muted-foreground" />
-          </Button>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="ghost" size="sm" className="gap-2 px-2 font-medium" />
+          }
+        >
+          <Database className="size-3.5 text-muted-foreground" />
+          {system ? system.name : "Select system"}
+          <ChevronsUpDown className="size-3 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">
           <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -84,30 +86,33 @@ export function ScopeBar(props: ScopeBarProps) {
       <span className="text-subtle-foreground">/</span>
 
       <DropdownMenu>
-        <DropdownMenuTrigger asChild disabled={!props.systemId}>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2 px-2 font-mono text-xs"
-          >
-            <GitCommitHorizontal className="size-3.5 text-muted-foreground" />
-            {snapshot ? `${snapshot.id.slice(5, 17)}` : "snapshot"}
-            {snapshot ? (
-              <Badge
-                variant={
-                  snapshot.status === "succeeded"
-                    ? "default"
-                    : snapshot.status === "failed"
-                      ? "destructive"
-                      : "secondary"
-                }
-                className="px-1.5 py-0 text-2xs"
-              >
-                {snapshot.status ?? "pending"}
-              </Badge>
-            ) : null}
-            <ChevronsUpDown className="size-3 text-muted-foreground" />
-          </Button>
+        <DropdownMenuTrigger
+          disabled={!props.systemId}
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2 px-2 font-mono text-xs"
+            />
+          }
+        >
+          <GitCommitHorizontal className="size-3.5 text-muted-foreground" />
+          {snapshot ? `${snapshot.id.slice(5, 17)}` : "snapshot"}
+          {snapshot ? (
+            <Badge
+              variant={
+                snapshot.status === "succeeded"
+                  ? "default"
+                  : snapshot.status === "failed"
+                    ? "destructive"
+                    : "secondary"
+              }
+              className="px-1.5 py-0 text-2xs"
+            >
+              {snapshot.status ?? "pending"}
+            </Badge>
+          ) : null}
+          <ChevronsUpDown className="size-3 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-96">
           <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
