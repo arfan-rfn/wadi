@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from wadi_cli.client import ApiError, ApiUnreachableError, WadiApiClient
+from wadi_cli.client import ApiError, ApiTimeoutError, ApiUnreachableError, WadiApiClient
 from wadi_contracts import RepoSource
 from wadi_testing.builders import make_snapshot, make_system
 
@@ -28,13 +28,35 @@ class TestRequestPlumbing:
         assert seen["auth"] == "Bearer tok"
         assert seen["version"]
 
-    def test_transport_error_maps_to_unreachable(self) -> None:
+    def test_a_refused_connection_is_unreachable(self) -> None:
+        """The exception carries the FACT; the CLI's presenter owns the
+        recovery advice. Asserting on "wadi up" here pinned guidance into a
+        layer that cannot know which command the user was running."""
+
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("refused")
 
         client = _client(httpx.MockTransport(handler))
-        with pytest.raises(ApiUnreachableError, match="wadi up"):
+        with pytest.raises(ApiUnreachableError, match="cannot reach"):
             client.list_systems()
+
+    def test_a_slow_request_is_a_timeout_not_unreachable(self) -> None:
+        """The 0.7.1 report: `analyze` resolves commits synchronously, so a
+        first clone of a large repo outlives the 30s client timeout. The old
+        code raised ApiUnreachableError and told a user with a healthy stack
+        to run `wadi up`, while the request was succeeding server-side."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("too slow")
+
+        client = _client(httpx.MockTransport(handler))
+        with pytest.raises(ApiTimeoutError) as excinfo:
+            client.list_systems()
+        assert not isinstance(excinfo.value, ApiUnreachableError)
+        # It must say how long it waited: "no response within 30s" tells a user
+        # what to change, "timed out" does not.
+        assert "30s" in str(excinfo.value)
+        assert excinfo.value.path == "/api/v1/systems"
 
     def test_http_error_maps_to_api_error_with_detail(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

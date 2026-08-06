@@ -3,6 +3,50 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.7.2 — 2026-08-06 (errors that tell you how to recover)
+
+Three failures reported in one session, all the same defect: the CLI said
+something confident and wrong about what had just happened, and never once said
+what to do next.
+
+- `wadi analyze --repo <github url> --name yas` **silently ignored `--repo`**,
+  reused a system registered from a local path, cloned that instead, and failed
+  on it. Nothing in the output said the flag had been dropped.
+- A first clone of a large repo outlived the 30s client timeout, and the CLI
+  answered **"is the stack up? (wadi up)"** — to a user whose stack was healthy
+  and whose snapshot was `running`. Worse, retrying as invited starts a *second*
+  snapshot beside the first.
+- A damaged git checkout produced a **wall of raw git output** with no
+  interpretation and no next step.
+
+Every error path in the CLI printed `[red]{exception}[/red]` and exited. That
+reads as an accusation rather than help. A user who hits an error is already
+stuck; the message is the only thing between them and being unstuck.
+
+### Changed
+- **Every error now says what failed, why, and what to run** — one shape across
+  all 24 error paths: a plain-language headline, the underlying detail as
+  indented evidence, what is still true *despite* the failure, and runnable
+  commands. Suggested commands are soft-wrapped so a long path stays
+  copy-pasteable instead of being broken mid-token.
+
+### Fixed
+- **A timeout is no longer reported as an unreachable stack.** `ApiTimeoutError`
+  is now distinct from `ApiUnreachableError` — the old code caught
+  `httpx.TransportError`, which covers both, so a request that was *succeeding*
+  server-side told the user their stack was down. The message now says the work
+  may still be running, says how long it waited, and points at
+  `wadi snapshots <system>` rather than inviting a duplicate run.
+- **A name collision is explained instead of silently resolved.** `analyze`
+  reuses a system by NAME; when the registered sources differ from the ones you
+  asked for it now names both, says reusing would analyze something you did not
+  ask for, and suggests a free name — verified free against the API, so the
+  suggested command runs as printed.
+- **Docker failures are diagnosed**: daemon not running, port already taken, and
+  the generic case each get their own headline and first move.
+- Repository failures distinguish *unreachable* from *damaged git metadata*, and
+  the suggested `git fsck` carries the real path rather than a placeholder.
+
 ## 0.7.1 — 2026-08-06 (a self-upgrade that verifies it happened)
 
 `wadi upgrade` announced success without checking. Reported against 0.7.0: the

@@ -30,7 +30,29 @@ CLI_VERSION = version("wadi-sh")
 
 
 class ApiUnreachableError(RuntimeError):
-    """The orchestrator API could not be reached (exit code 3)."""
+    """The orchestrator API could not be reached (exit code 3).
+
+    Strictly a CONNECTION failure — nothing was listening, or the connection
+    dropped before a response. A slow request is :class:`ApiTimeoutError`; the
+    two used to be one class, so a request that was succeeding server-side told
+    the user their stack was down.
+    """
+
+
+class ApiTimeoutError(RuntimeError):
+    """The request outlived the client's patience, not the server's.
+
+    The server may well be completing the work right now. Callers must not
+    describe this as a failed request or invite a blind retry: `analyze`
+    resolves commits synchronously (a first mirror-clone of an arbitrary repo),
+    and retrying starts a SECOND snapshot while the first is still running.
+    """
+
+    def __init__(self, base_url: str, seconds: float, path: str = "") -> None:
+        self.base_url = str(base_url)
+        self.seconds = seconds
+        self.path = path
+        super().__init__(f"no response from {base_url} within {seconds:g}s")
 
 
 class ApiError(RuntimeError):
@@ -51,6 +73,9 @@ class WadiApiClient:
         transport: httpx.BaseTransport | None = None,
         timeout: float = 30.0,
     ) -> None:
+        # Kept so a timeout can say how long it waited — "no response within
+        # 30s" tells a user what to change; "timed out" does not.
+        self._timeout_seconds = timeout
         headers = {"X-Wadi-Cli-Version": CLI_VERSION}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -70,10 +95,14 @@ class WadiApiClient:
     def _request(self, method: str, path: str, **kwargs: object) -> httpx.Response:
         try:
             response = self._http.request(method, path, **kwargs)  # type: ignore[arg-type]
+        except httpx.TimeoutException as exc:
+            # NOT unreachable: the connection was made and the server is
+            # working. Conflating the two is what told a user with a healthy
+            # stack to run `wadi up`.
+            raise ApiTimeoutError(str(self._http.base_url), self._timeout_seconds, path) from exc
         except httpx.TransportError as exc:
             raise ApiUnreachableError(
-                f"cannot reach the wadi API at {self._http.base_url} ({exc}); "
-                "is the stack up? (wadi up)"
+                f"cannot reach the wadi API at {self._http.base_url} ({exc})"
             ) from exc
         if response.status_code >= 400:
             try:
@@ -142,8 +171,9 @@ class WadiApiClient:
     def iter_export(self, snapshot_id: str) -> Iterator[dict[str, Any]]:
         """Stream the snapshot's export bundle (§14): parsed NDJSON records,
         manifest last. Raises like :meth:`_request` on transport/API errors."""
+        path = f"/api/v1/snapshots/{snapshot_id}/export"
         try:
-            with self._http.stream("GET", f"/api/v1/snapshots/{snapshot_id}/export") as response:
+            with self._http.stream("GET", path) as response:
                 if response.status_code >= 400:
                     body = response.read()
                     try:
@@ -155,10 +185,14 @@ class WadiApiClient:
                     if line.strip():
                         record: dict[str, Any] = json.loads(line)
                         yield record
+        except httpx.TimeoutException as exc:
+            # NOT unreachable: the connection was made and the server is
+            # working. Conflating the two is what told a user with a healthy
+            # stack to run `wadi up`.
+            raise ApiTimeoutError(str(self._http.base_url), self._timeout_seconds, path) from exc
         except httpx.TransportError as exc:
             raise ApiUnreachableError(
-                f"cannot reach the wadi API at {self._http.base_url} ({exc}); "
-                "is the stack up? (wadi up)"
+                f"cannot reach the wadi API at {self._http.base_url} ({exc})"
             ) from exc
 
     def get_remote_edges(self, snapshot_id: str, service_id: str) -> RemoteEdgesView:
