@@ -97,7 +97,10 @@ export function requestPolicyLabel(code: string): string {
  * by its `UserDetailsService`, and would suppress the "nothing gates this"
  * empty state on an endpoint that genuinely has no guard.
  */
-const NON_GATING_KINDS: ReadonlySet<string> = new Set(["config", "authority-model"])
+const NON_GATING_KINDS: ReadonlySet<string> = new Set([
+  "config",
+  "authority-model",
+])
 
 export function gatesRequests(kind: AuthEvidenceKind | string): boolean {
   return !NON_GATING_KINDS.has(kind)
@@ -110,9 +113,10 @@ export function gatesRequests(kind: AuthEvidenceKind | string): boolean {
  * list under-states who can get in. Anything else is provenance — useful, but
  * it changes nothing about the answer.
  */
-export function authorityModelNote(
-  resolution: string | null | undefined
-): { text: string; incomplete: boolean } {
+export function authorityModelNote(resolution: string | null | undefined): {
+  text: string
+  incomplete: boolean
+} {
   return resolution === "partial"
     ? {
         text: "the roles above may be incomplete — a grant here is issued or widened elsewhere",

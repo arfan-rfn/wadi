@@ -376,7 +376,9 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
 
       {(report.endpoint_collisions ?? []).length > 0 && (
         <section className="space-y-3">
-          <SectionHeading>Endpoints that could not all be stored</SectionHeading>
+          <SectionHeading>
+            Endpoints that could not all be stored
+          </SectionHeading>
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
             <p className="mb-2 text-xs text-muted-foreground">
               These handlers derived the same content-derived id, so only one of
@@ -420,8 +422,8 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                 Constructs that gate a request but whose effect analysis could
                 not determine. Each one withholds an endpoint&rsquo;s auth
                 answer rather than letting it fall through to whatever rule
-                comes next — the count is how much of this system&rsquo;s
-                access policy is still unreadable.
+                comes next — the count is how much of this system&rsquo;s access
+                policy is still unreadable.
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(report.auth_coverage.unread_by_kind ?? {}).map(
@@ -442,7 +444,9 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
       {report.auth_coverage &&
         Object.keys(report.auth_coverage.extraction_gaps ?? {}).length > 0 && (
           <section className="space-y-3">
-            <SectionHeading>Auth the source names but the map lacks</SectionHeading>
+            <SectionHeading>
+              Auth the source names but the map lacks
+            </SectionHeading>
             <div className="rounded-lg border p-3">
               <p className="mb-2 text-xs text-muted-foreground">
                 Found by reading the source text independently of the code
@@ -481,16 +485,16 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                 claim above and change none of those numbers.
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {Object.entries(report.auth_coverage.request_policies ?? {}).map(
-                  ([kind, count]) => (
-                    <span
-                      key={kind}
-                      className="rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
-                    >
-                      {count} {requestPolicyLabel(kind)}
-                    </span>
-                  )
-                )}
+                {Object.entries(
+                  report.auth_coverage.request_policies ?? {}
+                ).map(([kind, count]) => (
+                  <span
+                    key={kind}
+                    className="rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                  >
+                    {count} {requestPolicyLabel(kind)}
+                  </span>
+                ))}
               </div>
             </div>
           </section>

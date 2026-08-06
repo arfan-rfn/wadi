@@ -17,7 +17,9 @@ import { PanelHeader } from "@/components/shared/panel-header"
 
 describe("panel header hydration", () => {
   it("omits a client-known count from the server markup", () => {
-    const html = renderToStaticMarkup(<PanelHeader label="Services" count={22} />)
+    const html = renderToStaticMarkup(
+      <PanelHeader label="Services" count={22} />
+    )
     expect(html).toContain("Services")
     expect(html).not.toContain("22")
   })

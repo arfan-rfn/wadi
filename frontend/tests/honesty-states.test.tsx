@@ -243,7 +243,9 @@ describe("authority model is not a guard (§5.2.10 T7)", () => {
     )
     const view = within(container)
     expect(view.getByText(/roles above may be incomplete/i)).toBeInTheDocument()
-    expect(view.getByText(/role-hierarchy: RoleHierarchyImpl/)).toBeInTheDocument()
+    expect(
+      view.getByText(/role-hierarchy: RoleHierarchyImpl/)
+    ).toBeInTheDocument()
     // ...and it must not read as a guard: the gating list keeps only the rule.
     expect(
       view.queryByText(/could not be read — no claim is made either way/i)

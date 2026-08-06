@@ -82,9 +82,7 @@ describe("endpoint collisions (§7)", () => {
 
   it("stays silent when nothing collided", () => {
     const { container } = renderPane(makeReport({ endpoint_collisions: [] }))
-    expect(
-      within(container).queryByText(/could not all be stored/i)
-    ).toBeNull()
+    expect(within(container).queryByText(/could not all be stored/i)).toBeNull()
   })
 })
 

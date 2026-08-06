@@ -261,7 +261,9 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                         <div className="mt-1 flex flex-wrap gap-1">
                           {[
                             ...new Set(
-                              (service.request_policies ?? []).map((p) => p.kind)
+                              (service.request_policies ?? []).map(
+                                (p) => p.kind
+                              )
                             ),
                           ].map((kind) => (
                             <span
