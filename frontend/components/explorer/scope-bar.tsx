@@ -7,11 +7,12 @@
 // own: two stacked chrome rows cost 7rem before any content and made the
 // reader correlate two lines to know what they were looking at.
 import {
-  Check,
   ChevronsUpDown,
   Database,
   GitCommitHorizontal,
 } from "lucide-react"
+
+import { format } from "date-fns"
 
 import type { Snapshot, System } from "@/lib/wadi/api"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +26,47 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+
+/**
+ * Status, weighted by how much it tells you.
+ *
+ * The list rendered a filled "succeeded" badge on every row — 33 of 35 in the
+ * live snapshot list — which spends the strongest visual weight in the menu on
+ * the one thing that is almost always true, and leaves the single `failed` run
+ * to compete against a wall of green. The green path is a dot; anything that
+ * is NOT the green path keeps the full badge, so the exception is what the eye
+ * catches. The word itself is not lost — it is on the row's title attribute
+ * and, for the dot, its own label.
+ */
+function SnapshotStatus({ status }: { status?: string | null }) {
+  const value = status ?? "pending"
+  if (value === "succeeded") {
+    return (
+      <span
+        aria-label="succeeded"
+        title="succeeded"
+        className="size-1.5 shrink-0 rounded-full bg-ok"
+      />
+    )
+  }
+  return (
+    <Badge
+      variant={value === "failed" ? "bad" : "warn"}
+      className="shrink-0 px-1.5 py-0 text-2xs"
+    >
+      {value}
+    </Badge>
+  )
+}
+
+/** Date AND time: a dozen rows share one day, so the day alone separates
+ *  nothing. Tabular figures keep the column aligned. */
+function formatStamp(iso?: string | null): string {
+  if (!iso) return ""
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  return format(date, "MMM d HH:mm")
+}
 
 interface ScopeBarProps {
   systems: System[]
@@ -72,16 +114,12 @@ export function ScopeBar(props: ScopeBarProps) {
               <DropdownMenuItem
                 key={s.id}
                 onSelect={() => props.onSystem(s.id)}
-                className="justify-between"
+                selected={s.id === props.systemId}
+                className="gap-3"
               >
-                <span className="truncate">{s.name}</span>
-                <span className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {s.repos.length} repo(s)
-                  </span>
-                  {s.id === props.systemId ? (
-                    <Check className="size-3.5" />
-                  ) : null}
+                <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                <span className="shrink-0 font-mono text-2xs text-subtle-foreground tabular-nums">
+                  {s.repos.length} repo{s.repos.length === 1 ? "" : "s"}
                 </span>
               </DropdownMenuItem>
             ))}
@@ -130,31 +168,21 @@ export function ScopeBar(props: ScopeBarProps) {
               <DropdownMenuItem
                 key={s.id}
                 onSelect={() => props.onSnapshot(s.id)}
-                className="justify-between gap-3"
+                selected={s.id === props.snapshotId}
+                title={`${s.id} — ${s.status ?? "pending"}`}
+                className="gap-3"
               >
-                <span className="truncate font-mono text-xs">{s.id}</span>
-                <span className="flex shrink-0 items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {s.created_at
-                      ? new Date(s.created_at).toLocaleDateString()
-                      : ""}
-                  </span>
-                  <Badge
-                    variant={
-                      s.status === "succeeded"
-                        ? "ok"
-                        : s.status === "failed"
-                          ? "bad"
-                          : "warn"
-                    }
-                    className="px-1.5 py-0 text-2xs"
-                  >
-                    {s.status ?? "pending"}
-                  </Badge>
-                  {s.id === props.snapshotId ? (
-                    <Check className="size-3.5" />
-                  ) : null}
+                {/* The `snap_` prefix is on all 35 rows and distinguishes
+                    none of them; it is five characters of noise per line in a
+                    column the reader is scanning for a difference. The full id
+                    stays in the row's title. */}
+                <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                  {s.id.replace(/^snap_/, "")}
                 </span>
+                <span className="shrink-0 font-mono text-2xs text-subtle-foreground tabular-nums">
+                  {formatStamp(s.created_at)}
+                </span>
+                <SnapshotStatus status={s.status} />
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>

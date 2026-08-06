@@ -34,6 +34,23 @@ const itemClass = cn(
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
 )
 
+/**
+ * The CURRENT value's row, as opposed to the one the pointer happens to be
+ * over. Those are different facts and were not distinguishable: selection was
+ * a lone tick at the far right of a 380px row, hundreds of pixels from where
+ * reading starts, so a list of near-identical hashes gave the eye nothing to
+ * land on.
+ *
+ * Inset fill plus a full ring — never a one-sided accent bar, which reads as
+ * a decorative rule rather than as state and disappears entirely once the row
+ * is also highlighted. The ring survives the hover background because it sits
+ * on a different property.
+ */
+const itemSelectedClass = cn(
+  "bg-accent/60 font-medium text-foreground",
+  "ring-1 ring-ring/40 ring-inset"
+)
+
 /** Shared popup chrome for the menu and its submenus.
  *
  * The height cap is load-bearing: a menu listing every snapshot in a system
@@ -106,13 +123,40 @@ const DropdownMenuItem = React.forwardRef<
   React.ComponentRef<typeof MenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof MenuPrimitive.Item> & {
     inset?: boolean
+    /** This row is the current value. Renders a leading tick in a fixed
+     *  gutter, so selection is legible at the left edge where the eye
+     *  already is rather than at the end of the row. */
+    selected?: boolean
   }
->(({ className, inset, ...props }, ref) => (
+>(({ className, inset, selected, children, ...props }, ref) => (
   <MenuPrimitive.Item
     ref={ref}
-    className={cn(itemClass, inset && "pl-8", className)}
+    aria-selected={selected}
+    className={cn(
+      itemClass,
+      selected && itemSelectedClass,
+      inset && "pl-8",
+      className
+    )}
     {...props}
-  />
+  >
+    {selected === undefined ? (
+      children
+    ) : (
+      <>
+        {/* The gutter is always present, selected or not — otherwise every
+            row shifts sideways as the selection moves, and a list of hashes
+            becomes impossible to compare. */}
+        <span
+          aria-hidden
+          className="flex w-4 shrink-0 items-center justify-center"
+        >
+          {selected ? <Check className="size-3.5" /> : null}
+        </span>
+        {children}
+      </>
+    )}
+  </MenuPrimitive.Item>
 ))
 DropdownMenuItem.displayName = "DropdownMenuItem"
 
