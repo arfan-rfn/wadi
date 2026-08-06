@@ -6,6 +6,7 @@ Exit codes (stable, documented): 0 success · 1 analysis/job failed ·
 
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -21,14 +22,16 @@ from wadi_cli import upgrade as upgrade_support
 from wadi_cli.client import (
     CLI_VERSION,
     ApiError,
+    ApiTimeoutError,
     ApiUnreachableError,
     WadiApiClient,
 )
 from wadi_cli.export_writer import ExportStreamError, write_bundle
-from wadi_cli.output import console, error_console, print_models
+from wadi_cli.output import console, error_console, print_models, problem
 from wadi_contracts import RepoSource, Snapshot, SnapshotStatus
 
 EXIT_ANALYSIS_FAILED = 1
+EXIT_USAGE = 2
 EXIT_UNREACHABLE = 3
 
 MCP_IMAGE = f"ghcr.io/wadi-sh/mcp:{CLI_VERSION}"
@@ -75,13 +78,126 @@ def _api_client() -> WadiApiClient:
 
 
 def _fail_unreachable(exc: ApiUnreachableError) -> "typer.Exit":
-    error_console.print(f"[red]{exc}[/red]")
+    problem(
+        "the wadi API is not answering",
+        detail=str(exc),
+        recover=["wadi up", "wadi status"],
+    )
+    return typer.Exit(EXIT_UNREACHABLE)
+
+
+def _fail_timeout(exc: ApiTimeoutError, *, still_running: str | None = None) -> "typer.Exit":
+    """A timeout is the CLIENT giving up, not the server failing.
+
+    `still_running` is the command that shows what the server is doing, and it
+    is the important half: the request may have succeeded, so a blind retry can
+    duplicate work — `analyze` would start a second snapshot alongside the
+    first.
+    """
+    problem(
+        f"no response within {exc.seconds:g}s — the request may still be running",
+        detail=f"{exc.base_url}{exc.path}",
+        note=(
+            "The stack is probably fine; this call outlived the client's patience, "
+            "not the server's. Check before retrying — a retry may duplicate the work."
+        ),
+        recover=[still_running] if still_running else ["wadi status"],
+    )
     return typer.Exit(EXIT_UNREACHABLE)
 
 
 def _fail_api(exc: ApiError) -> "typer.Exit":
-    error_console.print(f"[red]{exc}[/red]")
+    """Turn the server's detail into something a reader can act on.
+
+    The raw detail is often a wall of git output. Keep it — it is the evidence
+    — but lead with what it MEANS and follow with what to do.
+    """
+    headline, recover = _read_api_failure(exc)
+    problem(headline, detail=exc.detail, recover=recover)
     return typer.Exit(EXIT_ANALYSIS_FAILED)
+
+
+def _fail_compose(exc: "compose.ComposeError", *, doing: str) -> "typer.Exit":
+    """A container-runtime failure, phrased as what the user was trying to do.
+
+    The raw text is `'docker compose ...' failed: <stderr>` — accurate and
+    useless on its own. Most of these are one of three things, and all three
+    have a first move the user can run.
+    """
+    detail = str(exc)
+    lowered = detail.lower()
+    if "cannot connect to the docker daemon" in lowered or "is the docker daemon" in lowered:
+        return _compose_problem(
+            f"cannot {doing} — Docker is not running",
+            detail,
+            ["open -a Docker   # or start your container runtime", "docker info"],
+        )
+    if "port is already allocated" in lowered or "address already in use" in lowered:
+        return _compose_problem(
+            f"cannot {doing} — a port wadi needs is taken",
+            detail,
+            ["wadi status", "wadi down", "lsof -i :9234 -i :9235"],
+        )
+    return _compose_problem(f"cannot {doing}", detail, ["wadi status", "docker ps -a"])
+
+
+def _compose_problem(headline: str, detail: str, recover: list[str]) -> "typer.Exit":
+    problem(headline, detail=detail, recover=recover)
+    return typer.Exit(EXIT_UNREACHABLE)
+
+
+def _read_api_failure(exc: ApiError) -> tuple[str, list[str]]:
+    """Known server failures, phrased as the user's problem rather than ours."""
+    detail = exc.detail
+    if "repository unreachable" in detail:
+        source = _source_in(detail)
+        where = f" at {source}" if source else ""
+        if "has a null OID" in detail or "not a git repository" in detail:
+            return (
+                f"the repository{where} could not be read — its git metadata looks damaged",
+                [
+                    f"git -C {source} fsck" if source else "git fsck",
+                    "git remote prune origin   # in that checkout",
+                    "wadi analyze --repo <url> --name <new-name>   # analyze the remote instead",
+                ],
+            )
+        return (
+            f"the repository{where} could not be reached",
+            [
+                f"git ls-remote {source}" if source else "git ls-remote <url>",
+                "wadi analyze --repo <url> --name <new-name>",
+            ],
+        )
+    if exc.status_code == 404:
+        return ("that does not exist on this stack", ["wadi systems", "wadi snapshots <system>"])
+    return (f"the API rejected the request ({exc.status_code})", [])
+
+
+def _source_flags(sources: list[str]) -> str:
+    """Re-render the sources as the flags that would ask for them again."""
+    return " ".join(f"--repo {s}" if "://" in s or s.endswith(".git") else str(s) for s in sources)
+
+
+def _free_name(client: WadiApiClient, wanted: str) -> str:
+    """A name that is actually free, so the suggestion is runnable as printed.
+
+    Suggesting a name that also collides would send the user round the same
+    loop — the whole point of this message is to end it.
+    """
+    for suffix in range(2, 12):
+        candidate = f"{wanted}-{suffix}"
+        try:
+            if client.get_system_by_name(candidate) is None:
+                return candidate
+        except (ApiError, ApiUnreachableError, ApiTimeoutError):
+            return candidate
+    return f"{wanted}-new"
+
+
+def _source_in(detail: str) -> str | None:
+    """The path/URL out of a `git clone` failure, for a runnable suggestion."""
+    match = re.search(r"git clone --mirror\s+(\S+)", detail)
+    return match.group(1) if match else None
 
 
 def _percent_label(percent: float | None) -> str:
@@ -113,13 +229,19 @@ def up(
     try:
         compose.check_port_free(api_port, "WADI_API_PORT")
     except compose.PortInUseError as exc:
-        error_console.print(f"[red]{exc}[/red]")
+        problem(
+            "a port wadi needs is already in use",
+            detail=str(exc),
+            recover=[
+                "wadi status   # is a wadi stack already running?",
+                f"WADI_API_PORT={api_port + 10} wadi up   # or move wadi's port",
+            ],
+        )
         raise typer.Exit(EXIT_UNREACHABLE) from exc
     try:
         compose.run_compose(["up", "--detach", "--wait"], expose_db=expose_db)
     except compose.ComposeError as exc:
-        error_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(EXIT_UNREACHABLE) from exc
+        raise _fail_compose(exc, doing="start the stack") from exc
     console.print(f"[green]wadi is up[/green] — API at http://127.0.0.1:{api_port}")
 
 
@@ -155,8 +277,7 @@ def down() -> None:
     try:
         _tear_down_stack()
     except compose.ComposeError as exc:
-        error_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(EXIT_UNREACHABLE) from exc
+        raise _fail_compose(exc, doing="stop the stack") from exc
 
 
 @app.command()
@@ -180,8 +301,7 @@ def ui(
     try:
         compose.run_compose(["up", "--detach", "--wait"], profiles=["frontend"])
     except compose.ComposeError as exc:
-        error_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(EXIT_UNREACHABLE) from exc
+        raise _fail_compose(exc, doing="start the UI") from exc
     if not _wait_for_ui(url):
         error_console.print(
             f"[yellow]the UI container is up but {url} is not answering yet — "
@@ -220,8 +340,7 @@ def _prune_old_versions(*, keep_version: str, assume_yes: bool) -> None:
     try:
         images = compose.wadi_images(exclude_version=keep_version)
     except compose.ComposeError as exc:
-        error_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(EXIT_UNREACHABLE) from exc
+        raise _fail_compose(exc, doing="list images") from exc
     files = compose.stale_compose_files()
     if not images and not files:
         console.print(f"nothing to prune — only {keep_version} artifacts are present")
@@ -292,7 +411,12 @@ def upgrade(
     try:
         latest = upgrade_support.latest_released_version()
     except upgrade_support.UpgradeError as exc:
-        error_console.print(f"[red]{exc}[/red]")
+        problem(
+            "could not check for a newer wadi",
+            detail=str(exc),
+            note="Your installed version keeps working; only the check failed.",
+            recover=["wadi --version", "uv tool upgrade wadi-sh --reinstall-package wadi-sh"],
+        )
         raise typer.Exit(EXIT_UNREACHABLE) from exc
 
     if not upgrade_support.is_newer(latest, CLI_VERSION):
@@ -331,7 +455,12 @@ def upgrade(
     try:
         upgrade_support.run_upgrade(command)
     except upgrade_support.UpgradeError as exc:
-        error_console.print(f"[red]{exc}[/red]")
+        problem(
+            "the upgrade command failed",
+            detail=str(exc),
+            note="Old images were left in place, so the version you have still runs.",
+            recover=[" ".join(command), "wadi up"],
+        )
         raise typer.Exit(EXIT_UNREACHABLE) from exc
 
     # A zero exit is not evidence. `uv tool upgrade` prints "Nothing to upgrade"
@@ -371,13 +500,16 @@ def status() -> None:
     try:
         compose.run_compose(["ps"], profiles=compose.ALL_PROFILES)
     except compose.ComposeError as exc:
-        error_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(EXIT_UNREACHABLE) from exc
+        raise _fail_compose(exc, doing="read stack status") from exc
     with _api_client() as client:
         try:
             health = client.healthz()
         except ApiUnreachableError:
-            error_console.print("[yellow]API not reachable[/yellow]")
+            problem(
+                "the stack is running but its API is not answering yet",
+                note="Containers can be up before the orchestrator finishes starting.",
+                recover=["wadi status   # try again in a few seconds", "wadi up"],
+            )
             raise typer.Exit(EXIT_UNREACHABLE) from None
         console.print(f"API: [green]{health['status']}[/green] (v{health['version']})")
 
@@ -410,8 +542,15 @@ def analyze(
     else:
         target = (path or Path.cwd()).resolve()
         if not target.exists():
-            error_console.print(f"[red]path does not exist: {target}[/red]")
-            raise typer.Exit(2)
+            problem(
+                f"no such path: {target}",
+                note="`analyze` takes a LOCAL path; use --repo for a git URL.",
+                recover=[
+                    f"wadi analyze {Path.cwd()}",
+                    "wadi analyze --repo https://github.com/<org>/<repo>.git",
+                ],
+            )
+            raise typer.Exit(EXIT_USAGE)
         sources = [RepoSource(source=str(target), branch=branch)]
         default_name = target.name
     system_name = name or default_name
@@ -423,9 +562,40 @@ def analyze(
                 system = client.create_system(system_name, sources)
                 console.print(f"registered system [bold]{system.name}[/bold] ({system.id})")
             else:
+                # Reuse is by NAME, and the name is derived from the source when
+                # --name is absent. Silently reusing a system registered from a
+                # DIFFERENT source analyzed something the user did not ask for:
+                # `--repo <github url>` cloned a local checkout of the same name
+                # and failed on it, with nothing in the output saying why.
+                registered = [r.source for r in existing.repos]
+                asked = [r.source for r in sources]
+                if sorted(registered) != sorted(asked):
+                    suggestion = _free_name(client, system_name)
+                    problem(
+                        f"a system named '{system_name}' already exists, "
+                        "registered from a different source",
+                        detail=(
+                            "registered: " + ", ".join(registered) + "\n"
+                            "you asked for: " + ", ".join(asked)
+                        ),
+                        note=(
+                            "Reusing it would analyze the registered source, not the one you named."
+                        ),
+                        recover=[
+                            f"wadi analyze {_source_flags(asked)} --name {suggestion}",
+                            f"wadi snapshots {system_name}   # what the existing system has",
+                        ],
+                    )
+                    # A usage problem, like "path does not exist": the user
+                    # fixes it by changing the invocation, not by retrying.
+                    raise typer.Exit(EXIT_USAGE)
                 system = existing
                 console.print(f"using existing system [bold]{system.name}[/bold] ({system.id})")
             snapshot = client.analyze(system.id)
+        except ApiTimeoutError as exc:
+            # A retry here starts a SECOND snapshot beside the one already
+            # running, so point at the check rather than at the command.
+            raise _fail_timeout(exc, still_running=f"wadi snapshots {system_name}") from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
         except ApiError as exc:
@@ -441,7 +611,16 @@ def analyze(
         if output_json:
             console.print_json(final.model_dump_json())
         if final.status is not SnapshotStatus.SUCCEEDED:
-            error_console.print(f"[red]analysis {final.status.value}: {final.error}[/red]")
+            # The snapshot exists and holds partial results, so the recovery
+            # is to look at it — not to re-run blind.
+            problem(
+                f"analysis {final.status.value}",
+                detail=final.error,
+                recover=[
+                    f"wadi coverage {final.id}",
+                    "docker compose -p wadi logs extraction-worker --tail 50",
+                ],
+            )
             raise typer.Exit(EXIT_ANALYSIS_FAILED)
         console.print("[green]analysis succeeded[/green]")
 
@@ -453,6 +632,8 @@ def _wait_for_snapshot(
         while True:
             try:
                 snapshot = client.get_snapshot(snapshot_id)
+            except ApiTimeoutError as exc:
+                raise _fail_timeout(exc) from exc
             except ApiUnreachableError as exc:
                 raise _fail_unreachable(exc) from exc
             if snapshot.status in (SnapshotStatus.SUCCEEDED, SnapshotStatus.FAILED):
@@ -469,6 +650,8 @@ def systems(output_json: JsonFlag = False) -> None:
     with _api_client() as client:
         try:
             items = client.list_systems()
+        except ApiTimeoutError as exc:
+            raise _fail_timeout(exc) from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
     print_models(
@@ -485,6 +668,8 @@ def snapshots(system_id: str, output_json: JsonFlag = False) -> None:
     with _api_client() as client:
         try:
             items = client.list_snapshots(system_id)
+        except ApiTimeoutError as exc:
+            raise _fail_timeout(exc) from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
         except ApiError as exc:
@@ -503,6 +688,8 @@ def services(snapshot_id: str, output_json: JsonFlag = False) -> None:
     with _api_client() as client:
         try:
             items = client.list_services(snapshot_id)
+        except ApiTimeoutError as exc:
+            raise _fail_timeout(exc) from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
         except ApiError as exc:
@@ -528,6 +715,8 @@ def endpoints(snapshot_id: str, service_id: str, output_json: JsonFlag = False) 
     with _api_client() as client:
         try:
             items = client.list_endpoints(snapshot_id, service_id)
+        except ApiTimeoutError as exc:
+            raise _fail_timeout(exc) from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
         except ApiError as exc:
@@ -552,6 +741,8 @@ def coverage(snapshot_id: str, output_json: JsonFlag = False) -> None:
     with _api_client() as client:
         try:
             report = client.get_coverage(snapshot_id)
+        except ApiTimeoutError as exc:
+            raise _fail_timeout(exc) from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
         except ApiError as exc:
@@ -647,12 +838,19 @@ def export(
     with _api_client() as client:
         try:
             counts = write_bundle(client.iter_export(snapshot_id), target)
+        except ApiTimeoutError as exc:
+            raise _fail_timeout(exc) from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
         except ApiError as exc:
             raise _fail_api(exc) from exc
         except ExportStreamError as exc:
-            error_console.print(f"[red]{exc}[/red]")
+            problem(
+                "the export did not finish",
+                detail=str(exc),
+                note="Any files already written are incomplete — re-run rather than use them.",
+                recover=[f"wadi coverage {snapshot_id}", "wadi status"],
+            )
             raise typer.Exit(EXIT_ANALYSIS_FAILED) from exc
     if output_json:
         console.print_json(
@@ -674,6 +872,8 @@ def restitch(
     with _api_client() as client:
         try:
             snapshot = client.restitch(snapshot_id)
+        except ApiTimeoutError as exc:
+            raise _fail_timeout(exc) from exc
         except ApiUnreachableError as exc:
             raise _fail_unreachable(exc) from exc
         except ApiError as exc:
@@ -685,7 +885,14 @@ def restitch(
     else:
         console.print(f"snapshot {snapshot_id}: {snapshot.status.value}")
     if snapshot.status is SnapshotStatus.FAILED:
-        error_console.print(f"[red]restitch failed: {snapshot.error}[/red]")
+        problem(
+            "restitch failed",
+            detail=snapshot.error,
+            recover=[
+                f"wadi coverage {snapshot.id}",
+                "docker compose -p wadi logs stitcher --tail 50",
+            ],
+        )
         raise typer.Exit(EXIT_ANALYSIS_FAILED)
 
 
