@@ -334,11 +334,35 @@ def upgrade(
         error_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(EXIT_UNREACHABLE) from exc
 
+    # A zero exit is not evidence. `uv tool upgrade` prints "Nothing to upgrade"
+    # and exits 0 when its cached index shows nothing newer, and the old code
+    # took that as success — it pruned the images of the version still
+    # installed and announced an upgrade that had not happened. Ask the
+    # executable what it is now.
+    actual = upgrade_support.installed_version()
+    if actual is None:
+        error_console.print(
+            "[yellow]could not confirm the upgrade — `wadi` is not on PATH to ask.[/yellow]\n"
+            f"Check with `wadi --version`; it should report {latest}. "
+            "Old images were left in place."
+        )
+        raise typer.Exit(EXIT_UNREACHABLE)
+    if upgrade_support.is_newer(latest, actual):
+        error_console.print(
+            f"[red]the installer reported success but wadi is still {actual}.[/red]\n"
+            f"'{' '.join(command)}' exited 0 without installing {latest} — most often a "
+            "stale package index right after a release.\n"
+            f"Try `{' '.join(command)}` again, or install {latest} explicitly. "
+            "Old images were left in place, so the current version still runs."
+        )
+        raise typer.Exit(EXIT_UNREACHABLE)
+
     if prune_old and compose.container_runtime_available():
-        # Keep the version we just upgraded *to*, not this process's stale
-        # CLI_VERSION — the new tags are what `wadi up` is about to pull.
-        _prune_old_versions(keep_version=latest, assume_yes=assume_yes)
-    console.print(f"[green]upgraded to {latest}[/green] — run `wadi up` to start the new stack")
+        # Only now: pruning removes the images of every other version, so doing
+        # it on an unverified upgrade strands the user on a release whose images
+        # were just deleted.
+        _prune_old_versions(keep_version=actual, assume_yes=assume_yes)
+    console.print(f"[green]upgraded to {actual}[/green] — run `wadi up` to start the new stack")
 
 
 @app.command()

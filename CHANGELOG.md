@@ -3,6 +3,40 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.7.1 — 2026-08-06 (a self-upgrade that verifies it happened)
+
+`wadi upgrade` announced success without checking. Reported against 0.7.0: the
+CLI said `upgraded to 0.7.0`, removed the six 0.6.0 images, and `wadi --version`
+still answered `0.6.0` — leaving a CLI whose images had just been deleted.
+
+Two causes, one of which is the more serious:
+
+**A zero exit is not evidence.** `uv tool upgrade` prints "Nothing to upgrade"
+and exits 0 when its cached index shows nothing newer, and `run_upgrade` checked
+only the return code. Everything after it — the prune, the success line — ran on
+an upgrade that had not happened. This is the failure class wadi exists to
+prevent, in wadi's own tooling: a confident claim with no verification behind it,
+followed by a destructive action taken on the strength of it.
+
+**And the reason there was nothing to upgrade:** the CLI asks PyPI directly over
+HTTP for the latest version, while uv resolves from a cached package index. The
+moment someone runs `wadi upgrade` is exactly when that cache is most likely
+stale — minutes after a release. Measured on the 0.7.0 report: a cached resolve
+returned 0.6.0 while `--refresh` returned 0.7.0 for the same PyPI state.
+
+### Fixed
+- **The upgrade is verified before anything is claimed or deleted.** After the
+  installer runs, the CLI asks the `wadi` executable what version it is now —
+  the only channel-agnostic check, since this process still has the old
+  `CLI_VERSION` baked in and parsing installer output would need one rule per
+  channel. If the version did not move, the CLI says so, names the likely cause,
+  and **leaves the old images in place** so the version you are still running
+  keeps working. If the check cannot run at all, that is reported as unverified
+  rather than as either success or failure — an unknown is not a negative (P10).
+- **The uv command forces a fresh index for this package**
+  (`--reinstall-package`, which implies `--refresh-package`). Scoped to
+  `wadi-sh` so an upgrade never invalidates the cache for everything else.
+
 ## 0.7.0 — 2026-08-06 (Phase 2.9.2: extraction fidelity — what "still missing" actually was)
 
 A full re-measurement of `train-ticket-aitest` (365 endpoints / 22 services) to
