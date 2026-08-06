@@ -6,6 +6,7 @@ import { siteConfig } from "@/config/site"
 import { fontMono, fontSans } from "@/lib/fonts"
 import { getSEOTags } from "@/lib/seo"
 import { cn } from "@/lib/utils"
+import { DENSITY_INIT_SCRIPT } from "@/lib/wadi/density"
 import { Toaster } from "@/components/ui/sonner"
 import { JsonLd } from "@/components/json-ld"
 import Providers from "@/components/providers"
@@ -40,7 +41,15 @@ export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <>
       <html lang="en" suppressHydrationWarning>
-        <head />
+        <head>
+          {/* Stamps the density attribute before first paint. Without it the
+              first frame is always comfortable and a compact reader watches
+              every row snap shorter on load — the same flash next-themes
+              solves the same way. */}
+          <script
+            dangerouslySetInnerHTML={{ __html: DENSITY_INIT_SCRIPT }}
+          />
+        </head>
         <body
           className={`min-h-screen bg-background font-sans antialiased ${fontSans.variable} ${fontMono.variable}`}
           suppressHydrationWarning

@@ -121,7 +121,7 @@ export const FlowEdge = memo(function FlowEdge({
         <EdgeLabelRenderer>
           <span
             className={cn(
-              "pointer-events-none absolute rounded border bg-background px-1 font-mono text-[9px] leading-3.5 text-muted-foreground",
+              "pointer-events-none absolute rounded-sm border bg-background px-1 font-mono text-2xs leading-3.5 text-muted-foreground",
               trace === "dim" && "opacity-15"
             )}
             style={{

@@ -56,7 +56,7 @@ export function ScopeBar(props: ScopeBarProps) {
           {props.systems.length === 0 ? (
             <DropdownMenuItem disabled>
               No systems yet — run{" "}
-              <code className="ml-1 rounded bg-muted px-1 font-mono">
+              <code className="ml-1 rounded-sm bg-muted px-1 font-mono">
                 wadi analyze .
               </code>
             </DropdownMenuItem>
@@ -81,7 +81,7 @@ export function ScopeBar(props: ScopeBarProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <span className="text-muted-foreground/50">/</span>
+      <span className="text-subtle-foreground">/</span>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild disabled={!props.systemId}>
@@ -101,7 +101,7 @@ export function ScopeBar(props: ScopeBarProps) {
                       ? "destructive"
                       : "secondary"
                 }
-                className="px-1.5 py-0 text-[10px]"
+                className="px-1.5 py-0 text-2xs"
               >
                 {snapshot.status ?? "pending"}
               </Badge>
@@ -135,7 +135,7 @@ export function ScopeBar(props: ScopeBarProps) {
                         ? "destructive"
                         : "secondary"
                   }
-                  className="px-1.5 py-0 text-[10px]"
+                  className="px-1.5 py-0 text-2xs"
                 >
                   {s.status ?? "pending"}
                 </Badge>

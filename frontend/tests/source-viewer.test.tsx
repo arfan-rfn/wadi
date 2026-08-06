@@ -204,7 +204,7 @@ describe("SourceSnippet (drill-in peek)", () => {
     fireEvent.click(scoped.getByText(`${FILE}:2`))
     const highlighted = await scoped.findAllByText(
       (_, element) =>
-        (element?.className?.includes?.("bg-amber-500/10") ?? false) &&
+        (element?.className?.includes?.("bg-warn/10") ?? false) &&
         (element?.textContent?.includes("if (n < 0)") ?? false)
     )
     expect(highlighted.length).toBeGreaterThan(0)

@@ -228,7 +228,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                       serviceId === service.service_id ? "true" : undefined
                     }
                     className={cn(
-                      // Symmetric selection: an inset rounded block, fill plus a
+                      // Symmetric selection: an inset rounded-sm block, fill plus a
                       // full ring. Never an edge bar.
                       "mx-1.5 my-0.5 flex w-[calc(100%-0.75rem)] cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
                       "hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -268,7 +268,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                           ].map((kind) => (
                             <span
                               key={kind}
-                              className="rounded-full border px-1.5 font-mono text-[10px] text-muted-foreground"
+                              className="rounded-full border px-1.5 font-mono text-2xs text-muted-foreground"
                               title="Gates which origin or request shape may reach this service — not which principal"
                             >
                               {kind}

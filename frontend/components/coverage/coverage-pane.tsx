@@ -221,7 +221,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                 className="space-y-1 px-3 py-2"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[11px] text-amber-700 dark:text-amber-400">
+                  <span className="inline-flex items-center gap-1 rounded-sm bg-warn/10 px-1.5 py-0.5 font-mono text-2xs text-warn">
                     <AlertTriangle className="size-3" aria-hidden />
                     {entry.reason_code}
                   </span>
@@ -341,7 +341,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                   .filter((service) => (service.anomalies ?? []).length > 0)
                   .map((service) => (
                     <div key={service.service_id} className="space-y-1">
-                      <p className="font-mono text-[11px] text-muted-foreground">
+                      <p className="font-mono text-2xs text-muted-foreground">
                         {service.name}
                       </p>
                       {(service.anomalies ?? []).flatMap((anomaly) =>
@@ -379,7 +379,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
           <SectionHeading>
             Endpoints that could not all be stored
           </SectionHeading>
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+          <div className="rounded-lg border border-warn/40 bg-warn/5 p-3">
             <p className="mb-2 text-xs text-muted-foreground">
               These handlers derived the same content-derived id, so only one of
               each pair could be stored — the rest are{" "}
@@ -395,13 +395,13 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                   <span className="font-mono">
                     {collision.http_method} {collision.uri}
                   </span>
-                  <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                  <p className="mt-0.5 font-mono text-2xs text-muted-foreground">
                     kept {collision.kept_handler}
                   </p>
                   {(collision.dropped_handlers ?? []).map((handler) => (
                     <p
                       key={handler}
-                      className="font-mono text-[11px] text-amber-700 dark:text-amber-400"
+                      className="font-mono text-2xs text-warn"
                     >
                       dropped {handler}
                     </p>
@@ -430,7 +430,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                   ([kind, count]) => (
                     <span
                       key={kind}
-                      className="rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                      className="rounded-full border px-2 py-0.5 font-mono text-2xs text-muted-foreground"
                     >
                       {count} {unreadLabel(kind)}
                     </span>
@@ -490,7 +490,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                 ).map(([kind, count]) => (
                   <span
                     key={kind}
-                    className="rounded-full border px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                    className="rounded-full border px-2 py-0.5 font-mono text-2xs text-muted-foreground"
                   >
                     {count} {requestPolicyLabel(kind)}
                   </span>
@@ -516,7 +516,7 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
                 (name) => (
                   <span
                     key={name}
-                    className="rounded-full border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                    className="rounded-full border border-dashed px-2 py-0.5 font-mono text-2xs text-muted-foreground"
                   >
                     {name}
                   </span>

@@ -45,7 +45,7 @@ export function CollapsibleSection({
           <ChevronRight
             aria-hidden
             className={cn(
-              "size-3 shrink-0 text-muted-foreground/70 transition-transform motion-reduce:transition-none",
+              "size-3 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
               open && "rotate-90"
             )}
           />
@@ -53,12 +53,12 @@ export function CollapsibleSection({
             {title}
           </span>
           {hint ? (
-            <span className="truncate font-mono text-2xs text-muted-foreground/70">
+            <span className="truncate font-mono text-2xs text-muted-foreground">
               {hint}
             </span>
           ) : null}
           {count != null ? (
-            <span className="ml-auto font-mono text-2xs tabular-nums text-muted-foreground/70">
+            <span className="ml-auto font-mono text-2xs tabular-nums text-muted-foreground">
               {count}
             </span>
           ) : null}

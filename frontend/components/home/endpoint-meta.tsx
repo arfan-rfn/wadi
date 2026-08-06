@@ -54,7 +54,7 @@ const ACCESS: Record<
 > = {
   required: {
     icon: Lock,
-    tone: "border-emerald-500/30 text-emerald-700 dark:text-emerald-400",
+    tone: "border-ok/30 text-ok",
     fallback: "Authenticated",
     title: "Authentication required",
     detail:
@@ -62,7 +62,7 @@ const ACCESS: Record<
   },
   denied: {
     icon: Ban,
-    tone: "border-red-500/30 text-red-700 dark:text-red-400",
+    tone: "border-bad/30 text-bad",
     fallback: "Denied to all",
     title: "Denied to every caller",
     detail:
@@ -70,7 +70,7 @@ const ACCESS: Record<
   },
   open: {
     icon: Globe,
-    tone: "border-amber-500/30 text-amber-700 dark:text-amber-400",
+    tone: "border-warn/30 text-warn",
     fallback: "Public",
     title: "Public — no authentication",
     detail:
@@ -206,7 +206,7 @@ export function DependencyChip({
                 {dependency.label}
               </span>
               <span
-                className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+                className="shrink-0 rounded-full border px-1.5 text-2xs text-muted-foreground"
                 title={KIND_NOTE[dependency.target_kind]}
               >
                 {dependency.confidence}

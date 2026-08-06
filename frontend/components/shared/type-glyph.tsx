@@ -44,24 +44,24 @@ function scalarGlyph(typeName: string): GlyphSpec {
   if (NUMERIC.has(simple))
     return {
       mark: "#",
-      tone: "text-sky-600 dark:text-sky-400",
+      tone: "text-type-number",
       title: "number",
     }
   if (BOOLEAN.has(simple))
     return {
       mark: "01",
-      tone: "text-violet-600 dark:text-violet-400",
+      tone: "text-type-boolean",
       title: "boolean",
     }
   if (TEMPORAL.has(simple))
     return {
       mark: "◷",
-      tone: "text-amber-600 dark:text-amber-400",
+      tone: "text-type-temporal",
       title: "date / time",
     }
   return {
     mark: "Aa",
-    tone: "text-emerald-600 dark:text-emerald-400",
+    tone: "text-type-string",
     title: "string",
   }
 }
@@ -71,19 +71,22 @@ function glyphFor(kind: ShapeKind, typeName: string): GlyphSpec {
     case "object":
       return {
         mark: "{}",
-        tone: "text-violet-600 dark:text-violet-400",
+        // Shares hue 295 with `boolean` — a collision that predates the token
+        // rebuild. Named distinctly so it is visible and separable later; the
+        // glyph mark ({} vs 01) is what currently keeps them apart.
+        tone: "text-type-object",
         title: "object",
       }
     case "array":
       return {
         mark: "[]",
-        tone: "text-fuchsia-600 dark:text-fuchsia-400",
+        tone: "text-type-collection",
         title: "array",
       }
     case "map":
       return {
         mark: "⋮⋮",
-        tone: "text-fuchsia-600 dark:text-fuchsia-400",
+        tone: "text-type-collection",
         title: "map",
       }
     // The honest terminals (P10) share the dashed treatment the rest of the UI
@@ -133,7 +136,7 @@ export function TypeGlyph({
       aria-label={title}
       role="img"
       className={cn(
-        "grid size-[17px] shrink-0 place-items-center rounded font-mono text-[8.5px] leading-none font-semibold",
+        "grid size-[19px] shrink-0 place-items-center rounded-sm font-mono text-2xs leading-none font-semibold",
         terminal ? "border border-dashed border-destructive/50" : "bg-muted",
         tone,
         className

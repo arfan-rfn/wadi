@@ -65,7 +65,7 @@ export function CanvasToolbar({
     // into the inspector — the same class as the long-code-line blowout.
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <div className="relative min-w-0 flex-1 basis-32">
-        <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
+        <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
         <Input
           value={search}
           onChange={(event) => onSearch(event.target.value)}
@@ -86,7 +86,7 @@ export function CanvasToolbar({
         ) : null}
       </div>
       <button
-        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+        className="rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
         onClick={() => onStep(-1)}
         disabled={matches.length === 0}
         title="Previous match (Shift+Enter)"
@@ -94,7 +94,7 @@ export function CanvasToolbar({
         <ChevronUp className="size-3.5" />
       </button>
       <button
-        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+        className="rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
         onClick={() => onStep(1)}
         disabled={matches.length === 0}
         title="Next match (Enter)"
@@ -105,7 +105,7 @@ export function CanvasToolbar({
       <span className="mx-0.5 h-4 w-px bg-border" />
 
       <button
-        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-2xs text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => (overBudget ? setConfirmOpen(true) : onExpandAll())}
         title="Expand every method"
       >
@@ -113,7 +113,7 @@ export function CanvasToolbar({
         all
       </button>
       <button
-        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-2xs text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={onExpandDepth1}
         title="Expand the handler and its direct callees"
       >
@@ -121,7 +121,7 @@ export function CanvasToolbar({
         depth 1
       </button>
       <button
-        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-2xs text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 text-2xs text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={onCollapseAll}
         title="Collapse every method"
       >
@@ -133,7 +133,7 @@ export function CanvasToolbar({
 
       <button
         className={cn(
-          "inline-flex items-center gap-1 rounded px-1.5 py-1 text-2xs transition-colors",
+          "inline-flex items-center gap-1 rounded-sm px-1.5 py-1 text-2xs transition-colors",
           traceEnabled
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted hover:text-foreground"

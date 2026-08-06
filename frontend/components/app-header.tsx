@@ -13,6 +13,7 @@ import { GitMerge } from "lucide-react"
 
 import { siteConfig } from "@/config/site"
 import { cn } from "@/lib/utils"
+import { DensityToggle } from "@/components/density-toggle"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 export function AppHeader({
@@ -54,7 +55,7 @@ export function AppHeader({
 
       {scope && mounted ? (
         <>
-          <span aria-hidden className="text-muted-foreground/40">
+          <span aria-hidden className="text-subtle-foreground">
             /
           </span>
           <div className="flex min-w-0 items-center gap-1.5">{scope}</div>
@@ -67,6 +68,7 @@ export function AppHeader({
             {summary}
           </span>
         ) : null}
+        <DensityToggle />
         <ThemeToggle />
       </div>
     </header>

@@ -58,14 +58,14 @@ function ParamRow({
     // entries, no cell grid. The grid was what made this read as a spreadsheet.
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-t py-1.5 first:border-t-0">
       <span className="font-mono text-xs">{name}</span>
-      <span className="font-mono text-2xs text-muted-foreground/80">
+      <span className="font-mono text-2xs text-muted-foreground">
         {location}
         {typeName
           ? ` · ${typeName.substring(typeName.lastIndexOf(".") + 1)}`
           : ""}
       </span>
       {required ? (
-        <span className="rounded-full border border-amber-500/35 px-1.5 text-[9.5px] tracking-wide text-amber-700 uppercase dark:text-amber-400">
+        <span className="rounded-full border border-warn/35 px-1.5 text-2xs tracking-wide text-warn uppercase">
           required
         </span>
       ) : null}
@@ -115,11 +115,11 @@ export function EndpointPeek({
           <MethodBadge method={endpoint.http_method} />
           <SecurityLine endpoint={endpoint} />
         </div>
-        <h2 className="font-mono text-[13px] leading-snug break-all">
+        <h2 className="font-mono text-sm leading-snug break-all">
           {endpoint.full_uri}
         </h2>
         <p
-          className="truncate font-mono text-2xs text-muted-foreground/80"
+          className="truncate font-mono text-2xs text-muted-foreground"
           title={endpoint.handler.signature}
         >
           {endpoint.handler.signature.split(":")[0]}
@@ -150,7 +150,7 @@ export function EndpointPeek({
                     {edge.http_verb ? (
                       <MethodBadge method={edge.http_verb} className="w-11" />
                     ) : (
-                      <span className="w-11 shrink-0 text-center font-mono text-[10px] text-muted-foreground">
+                      <span className="w-11 shrink-0 text-center font-mono text-2xs text-muted-foreground">
                         verb?
                       </span>
                     )}
@@ -160,13 +160,13 @@ export function EndpointPeek({
                         "target undetermined"}
                     </span>
                     <span
-                      className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+                      className="shrink-0 rounded-full border px-1.5 text-2xs text-muted-foreground"
                       title={TARGET_NOTE[edge.target_kind]}
                     >
                       {edge.target_kind}
                     </span>
                     <span
-                      className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+                      className="shrink-0 rounded-full border px-1.5 text-2xs text-muted-foreground"
                       title="How sure the match is — not how often it runs"
                     >
                       {edge.confidence}
@@ -177,7 +177,7 @@ export function EndpointPeek({
                     {edge.auth_propagation_state &&
                       edge.auth_propagation_state !== "undetermined" && (
                         <span
-                          className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+                          className="shrink-0 rounded-full border px-1.5 text-2xs text-muted-foreground"
                           title={
                             edge.auth_propagation_state === "forwarded"
                               ? `The caller's credentials are passed on${edge.auth_propagation ? ` (${edge.auth_propagation})` : ""}`
@@ -191,7 +191,7 @@ export function EndpointPeek({
                       )}
                   </div>
                   {edge.target_simplified_uri ? (
-                    <p className="mt-1 flex items-center gap-1.5 pl-[3.25rem] font-mono text-[10px] text-muted-foreground">
+                    <p className="mt-1 flex items-center gap-1.5 pl-[3.25rem] font-mono text-2xs text-muted-foreground">
                       <CornerDownRight
                         aria-hidden
                         className="size-2.5 shrink-0"
@@ -202,12 +202,12 @@ export function EndpointPeek({
                       </span>
                     </p>
                   ) : edge.url ? (
-                    <p className="mt-1 truncate pl-[3.25rem] font-mono text-[10px] text-muted-foreground">
+                    <p className="mt-1 truncate pl-[3.25rem] font-mono text-2xs text-muted-foreground">
                       {edge.url}
                     </p>
                   ) : null}
                   {edge.auth_propagation ? (
-                    <p className="mt-1 flex items-center gap-1.5 pl-[3.25rem] text-[10px] text-muted-foreground">
+                    <p className="mt-1 flex items-center gap-1.5 pl-[3.25rem] text-2xs text-muted-foreground">
                       <KeyRound aria-hidden className="size-2.5 shrink-0" />
                       forwards the caller&apos;s credentials
                     </p>
@@ -225,7 +225,7 @@ export function EndpointPeek({
                     <span
                       key={entry.reason}
                       title={copy?.detail}
-                      className="rounded-full border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      className="rounded-full border px-2 py-0.5 font-mono text-2xs text-muted-foreground"
                     >
                       {entry.call_count} {copy?.badge ?? entry.reason}
                     </span>
@@ -251,7 +251,7 @@ export function EndpointPeek({
                 <li key={index} className="space-y-1">
                   <p
                     className={cn(
-                      "rounded-md bg-muted px-2 py-1.5 font-mono text-[11px] leading-relaxed break-all",
+                      "rounded-md bg-muted px-2 py-1.5 font-mono text-2xs leading-relaxed break-all",
                       item.active === false &&
                         "text-muted-foreground line-through"
                     )}
@@ -263,16 +263,16 @@ export function EndpointPeek({
                       not in effect — {item.inactive_reason}
                     </p>
                   ) : item.resolution === "opaque" ? (
-                    <p className="text-2xs text-amber-700 dark:text-amber-400">
+                    <p className="text-2xs text-warn">
                       could not be read — no claim is made either way
                     </p>
                   ) : item.resolution === "partial" ? (
-                    <p className="text-2xs text-amber-700 dark:text-amber-400">
+                    <p className="text-2xs text-warn">
                       partly read — the role list may be incomplete
                     </p>
                   ) : null}
                   {item.anchor ? (
-                    <p className="font-mono text-[10px] break-all text-muted-foreground/75">
+                    <p className="font-mono text-2xs break-all text-muted-foreground">
                       ↳ {item.anchor.file}:{item.anchor.start_line}
                     </p>
                   ) : null}
@@ -290,17 +290,17 @@ export function EndpointPeek({
                       className={cn(
                         "text-2xs",
                         note.incomplete
-                          ? "text-amber-700 dark:text-amber-400"
-                          : "text-muted-foreground/70"
+                          ? "text-warn"
+                          : "text-muted-foreground"
                       )}
                     >
                       {note.text}
                     </p>
-                    <p className="font-mono text-[11px] break-all text-muted-foreground">
+                    <p className="font-mono text-2xs break-all text-muted-foreground">
                       {item.detail}
                     </p>
                     {item.anchor ? (
-                      <p className="font-mono text-[10px] break-all text-muted-foreground/75">
+                      <p className="font-mono text-2xs break-all text-muted-foreground">
                         ↳ {item.anchor.file}:{item.anchor.start_line}
                       </p>
                     ) : null}
@@ -311,7 +311,7 @@ export function EndpointPeek({
           ) : null}
           {mechanisms.length > 0 ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-              <span className="text-2xs text-muted-foreground/70">
+              <span className="text-2xs text-muted-foreground">
                 authenticates via
               </span>
               {mechanisms.map((mechanism, index) => (
@@ -325,7 +325,7 @@ export function EndpointPeek({
                   className={cn(
                     "rounded-full border px-2 py-0.5 text-2xs text-muted-foreground",
                     mechanism.active === false &&
-                      "border-dashed text-muted-foreground/60 line-through"
+                      "border-dashed text-subtle-foreground line-through"
                   )}
                 >
                   {mechanism.kind}
@@ -374,10 +374,10 @@ export function EndpointPeek({
                   <span
                     key={`${status.code}:${status.origin}`}
                     className={cn(
-                      "rounded-full border px-1.5 py-0.5 font-mono text-[10px]",
+                      "rounded-full border px-1.5 py-0.5 font-mono text-2xs",
                       status.code < 300
                         ? "text-muted-foreground"
-                        : "border-amber-500/40 text-amber-600 dark:text-amber-400"
+                        : "border-warn/40 text-warn"
                     )}
                     title={`${status.detail} — read from the ${status.origin}`}
                   >
@@ -389,7 +389,7 @@ export function EndpointPeek({
                   exception, a 403 from the security layer and a 404 from the
                   dispatcher are in no handler source, so silence here is not
                   a claim that this endpoint cannot fail (P10). */}
-              <p className="mt-1 text-[10px] text-muted-foreground/80">
+              <p className="mt-1 text-2xs text-muted-foreground">
                 Named in the handler — errors raised elsewhere are not listed.
               </p>
             </div>
@@ -416,7 +416,7 @@ export function EndpointPeek({
           Open full flow
           <ArrowRight aria-hidden className="size-3.5" />
         </Link>
-        <p className="mt-1.5 flex items-center justify-center gap-1.5 text-center text-2xs text-muted-foreground/70">
+        <p className="mt-1.5 flex items-center justify-center gap-1.5 text-center text-2xs text-muted-foreground">
           <ExternalLink aria-hidden className="size-3" />
           call tree · flow graph · source
         </p>

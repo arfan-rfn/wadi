@@ -82,7 +82,7 @@ export function SelectionStrip({
         {signature ? shortSignature(signature) : "selection"}
       </span>
       {methodNodes.length > 0 ? (
-        <span className="shrink-0 text-muted-foreground/75 tabular-nums">
+        <span className="shrink-0 text-muted-foreground tabular-nums">
           {methodNodes.length} stmt
           {branches > 0 ? ` · ${branches} br` : ""}
           {loops > 0 ? ` · ${loops} loop` : ""}
@@ -93,7 +93,7 @@ export function SelectionStrip({
         <span
           key={conditionLabel(condition)}
           title="Nearest governing branch (§11 heuristic — nearest branch, not full dominance)"
-          className="inline-flex max-w-full shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/5 px-1.5 text-[10px] text-amber-700 dark:text-amber-400"
+          className="inline-flex max-w-full shrink-0 items-center gap-1 rounded-full border border-warn/40 bg-warn/5 px-1.5 text-2xs text-warn"
         >
           <Split aria-hidden className="size-2.5 shrink-0" />
           <span className="truncate">{conditionLabel(condition)}</span>
@@ -103,7 +103,7 @@ export function SelectionStrip({
       {edges.map((edge) => (
         <span
           key={edge.edge_id}
-          className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground"
+          className="shrink-0 rounded-full border px-1.5 text-2xs text-muted-foreground"
           title={edge.evidence ?? undefined}
         >
           → {edge.target_service_name ?? edge.external_host ?? "undetermined"} ·{" "}

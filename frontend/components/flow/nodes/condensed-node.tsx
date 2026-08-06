@@ -7,6 +7,8 @@ import { memo } from "react"
 import type { Node, NodeProps } from "@xyflow/react"
 import { UnfoldVertical } from "lucide-react"
 
+import { NODE_BOX } from "@/lib/wadi/flow-lanes"
+
 import { NodeShell, useFlowActions } from "../flow-chrome"
 
 export interface CondensedNodeDatum extends Record<string, unknown> {
@@ -31,10 +33,11 @@ export const CondensedNode = memo(function CondensedNode({
       id={id}
       trace={data.trace}
       onClick={() => actions.expandRun(data.runId)}
-      className="flex h-8 w-[150px] items-center justify-center gap-1 border-dashed bg-muted/40 text-muted-foreground"
+      style={{ width: NODE_BOX.condensed.width }}
+      className="flex h-8 items-center justify-center gap-1 border-dashed bg-muted/40 text-muted-foreground"
     >
       <UnfoldVertical className="size-3" aria-hidden />
-      <span className="font-mono text-[10px]">
+      <span className="font-mono text-2xs">
         {data.count} statements · {data.startLine}–{data.endLine}
       </span>
     </NodeShell>

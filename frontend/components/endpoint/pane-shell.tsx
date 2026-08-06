@@ -26,7 +26,7 @@ export function PaneShell({
   const Chevron = side === "left" ? ChevronLeft : ChevronRight
   return (
     <>
-      <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5">
+      <div className="flex shrink-0 items-center gap-2 border-b px-pad-x py-pad-y">
         <span className="text-2xs font-medium tracking-[0.08em] text-muted-foreground uppercase">
           {label}
         </span>
@@ -36,7 +36,7 @@ export function PaneShell({
           aria-label={`Collapse ${label}`}
           title={`Collapse ${label}`}
           className={cn(
-            "ml-auto cursor-pointer rounded p-1 text-muted-foreground/70 transition-colors",
+            "ml-auto cursor-pointer rounded-sm p-1 text-muted-foreground transition-colors",
             "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           )}
         >
@@ -73,7 +73,7 @@ export function PaneRail({
     >
       <Chevron
         aria-hidden
-        className="size-3.5 shrink-0 text-muted-foreground/70"
+        className="size-3.5 shrink-0 text-muted-foreground"
       />
       <span
         className="text-2xs tracking-[0.1em] whitespace-nowrap text-muted-foreground uppercase"

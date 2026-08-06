@@ -28,25 +28,25 @@ export function PanelHeader(props: {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
   return (
-    <div className="shrink-0 space-y-2 border-b px-3 py-2.5">
+    <div className="shrink-0 space-y-dense border-b px-pad-x py-pad-y">
       <div className="flex items-baseline justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {props.label}
           {mounted && props.count !== undefined ? (
-            <span className="ml-1.5 font-mono tabular-nums text-muted-foreground/60">
+            <span className="ml-1.5 font-mono tabular-nums text-subtle-foreground">
               {props.count}
             </span>
           ) : null}
         </h2>
         {props.hint ? (
-          <span className="truncate pl-2 font-mono text-2xs text-muted-foreground/60">
+          <span className="truncate pl-2 font-mono text-2xs text-subtle-foreground">
             {props.hint}
           </span>
         ) : null}
       </div>
       {props.onFilter ? (
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
+          <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
           <Input
             value={props.filter ?? ""}
             onChange={(event) => props.onFilter?.(event.target.value)}

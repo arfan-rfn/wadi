@@ -61,7 +61,7 @@ export function RoleLegend({
         className
       )}
     >
-      <span className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground/70 uppercase">
+      <span className="text-2xs font-medium tracking-[0.08em] text-muted-foreground uppercase">
         Roles
       </span>
       {roles.map(({ role, count }) => (
@@ -90,7 +90,7 @@ export function RoleLegend({
             className="size-2 shrink-0 rounded-full border border-dashed border-muted-foreground"
           />
           no auth
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          <span className="font-mono text-2xs tabular-nums text-muted-foreground">
             {unauthenticated}
           </span>
         </button>
@@ -131,7 +131,7 @@ function LegendRole({
         style={swatch}
       />
       {role}
-      <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+      <span className="font-mono text-2xs tabular-nums text-muted-foreground">
         {count}
       </span>
     </button>

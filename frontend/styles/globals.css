@@ -3,19 +3,81 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ============================================================================
+   TYPE
+   One family, two voices (IBM Plex). The scale below is closed: `2xs` is the
+   floor and there is nothing under it. The 60 arbitrary `text-[9px]`-style
+   sizes this replaces were not encoding anything a token could not — they were
+   each solving one layout squeeze locally, and the sum read as uneven density.
+   Space is recovered from spacing (see DENSITY), never from glyphs.
+   ============================================================================ */
 @theme inline {
   --font-sans: var(--font-sans-next), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-mono-next), ui-monospace, "SF Mono", monospace;
 }
 
 @theme {
-  /* Dense-UI caption size (§11 Phase 2.8): the one step below text-xs.
-     Replaces the arbitrary text-[10px]/text-[11px] long tail. */
-  --text-2xs: 0.6875rem;
+  /* The dense-UI floor. Nothing in this app may set a smaller size. */
+  --text-2xs: 0.6875rem; /* 11px */
   --text-2xs--line-height: 1rem;
 }
 
+/* ============================================================================
+   GEOMETRY — one radius scale, five steps.
 
+   Previously six values were in play and 29 of them were a bare `rounded`,
+   which is Tailwind's own 4px default and never touched `--radius` at all — so
+   a chip and the card holding it landed on their corners independently.
+
+   The nesting rule: an inner corner is always ONE STEP BELOW its container.
+   A statement node inside a lane inside a panel reads md -> lg -> xl. Equal
+   radii at two nesting levels is what makes a surface look pasted on.
+
+   `rounded-full` is reserved for STATE, not shape — chips, auth badges, role
+   dots, switches. A fully-round button would dilute that signal.
+   ============================================================================ */
+@theme {
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+}
+
+/* ============================================================================
+   DENSITY — spacing, never type.
+
+   The answer to "we need to fit a lot of information" is not a smaller font;
+   below ~11px legibility falls off a cliff while the space saved is marginal.
+   These tokens drive row height, padding and gap from one `data-density`
+   attribute on <html>, so compact mode buys roughly 20% more rows per screen
+   at zero legibility cost — and stays a reader's preference rather than a
+   decision baked into every component.
+   ============================================================================ */
+:root {
+  --row-h: 1.875rem;   /* 30px */
+  --pad-x: 0.75rem;    /* 12px */
+  --pad-y: 0.5rem;     /* 8px  */
+  --gap-dense: 0.5rem; /* 8px  */
+  --ctl-h: 1.875rem;   /* 30px */
+}
+
+:root[data-density="compact"] {
+  --row-h: 1.5rem;      /* 24px */
+  --pad-x: 0.5625rem;   /* 9px  */
+  --pad-y: 0.3125rem;   /* 5px  */
+  --gap-dense: 0.3125rem;
+  --ctl-h: 1.625rem;    /* 26px */
+}
+
+@theme inline {
+  --spacing-row: var(--row-h);
+  --spacing-pad-x: var(--pad-x);
+  --spacing-pad-y: var(--pad-y);
+  --spacing-dense: var(--gap-dense);
+  --spacing-ctl: var(--ctl-h);
+}
 
 @utility container {
   margin-inline: auto;
@@ -30,25 +92,6 @@
   }
 }
 
-/*
-  The default border color has changed to `currentcolor` in Tailwind CSS v4,
-  so we've added these compatibility styles to make sure everything still
-  looks the same as it did with Tailwind CSS v3.
-
-  If we ever want to remove these styles, we need to add an explicit border
-  color utility to any element that depends on these defaults.
-*/
-@layer base {
-
-  *,
-  ::after,
-  ::before,
-  ::backdrop,
-  ::file-selector-button {
-    border-color: var(--color-gray-200, currentcolor);
-  }
-}
-
 @utility no-scrollbar {
   &::-webkit-scrollbar {
     display: none;
@@ -58,30 +101,22 @@
   scrollbar-width: none;
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
-  }
-}
-
-/*
-  ---break---
-*/
-
+/* ============================================================================
+   TOKEN BINDINGS
+   ============================================================================ */
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* The elevation ladder. Four surfaces, deepest to highest. Light mode is the
+     INVERSE of what it was: the ground is off-white and cards are pure white,
+     so a card lifts off the page. Previously both were oklch(1 0 0) — a card
+     had nowhere to rise to, which is the washed-out flat read. */
+  --color-panel: var(--panel);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-raised: var(--raised);
+
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
@@ -90,13 +125,49 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+
+  /* The third foreground step. This exists so the 34 `text-muted-foreground/60`
+     dilutions have somewhere legitimate to go: an already-low-contrast token
+     behind 60% opacity lands near 2.4:1, well under the 4.5:1 floor, and it is
+     the single largest cause of "the text is hard to read". Opacity modifiers
+     on foreground colours are banned; use this token. */
+  --color-subtle-foreground: var(--subtle-foreground);
+
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  /* Semantic status. Separate from the accent on purpose — "this succeeded" is
+     a fact about the data, not a brand gesture. */
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+
+  /* HTTP verbs: the one saturated element in the UI. Everything else is calm
+     so these carry the scannability. */
+  --color-verb-get: var(--verb-get);
+  --color-verb-post: var(--verb-post);
+  --color-verb-put: var(--verb-put);
+  --color-verb-patch: var(--verb-patch);
+  --color-verb-delete: var(--verb-delete);
+
+  /* Field-type glyphs (§5.2.7 shapes) — a channel of their own. They may reuse
+     hues from the verb and role wheels because they never co-occur with them:
+     glyphs appear only as a column inside the schema tree. Naming them
+     separately is what lets that stay true — and lets them be retuned without
+     touching a verb. */
+  --color-type-string: var(--type-string);
+  --color-type-number: var(--type-number);
+  --color-type-boolean: var(--type-boolean);
+  --color-type-temporal: var(--type-temporal);
+  --color-type-object: var(--type-object);
+  --color-type-collection: var(--type-collection);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -119,59 +190,107 @@
   --color-flow-remote: var(--flow-remote);
 }
 
-/*
-  ---break---
-*/
+/* ============================================================================
+   THE PALETTE — "Graphite": achromatic chrome, saturated data.
 
+   Recorded 2026-08-06. Replaces the shadcn `slate` base, which carried real
+   chroma at hue 265 (`oklch(0.129 0.042 264.695)`) — the blue cast — and, in
+   light mode, set `--background` and `--card` both to pure white.
+
+   The load-bearing decision is that HUE IS A DATA CHANNEL AND NOTHING ELSE.
+   wadi already spends 17 hues on facts: five HTTP verbs (155/240/75/300/22),
+   seven flow constructs (155/20/75/300/230/255/25), and an eight-step role
+   wheel derived from role NAMES (350/285/200/130/60/310/258/35). There is no
+   40-degree gap left anywhere on that wheel, so any brand hue necessarily
+   lands next to a fact and competes with it — the old teal `--primary`
+   (chroma 0.12) sat 5 degrees from `--role-2` and carried MORE chroma than
+   every flow token, while four separate comments in this codebase assert that
+   "the one saturated element in the UI stays the HTTP-method chip". The
+   primary was breaking the rule the project had already written down.
+
+   So chrome is achromatic: `--primary` is near-white on dark and near-black on
+   light. The one chromatic piece of chrome is `--ring`, held at chroma ~0.05 —
+   below every data token — so a focus ring is separable from a role dot by
+   SATURATION rather than by hue, and no fact has to move to make room for it.
+   ============================================================================ */
 :root {
-  /* MDX highlight colors */
-  --sh-class: #7aa2f7;
-  --sh-sign: #89ddff;
-  --sh-string: #9ece6a;
-  --sh-keyword: #bb9af7;
-  --sh-comment: #565f89;
-  --sh-jsxliterals: #7aa2f7;
-  --sh-property: #73daca;
-  --sh-entity: #e0af68;
+  --radius: 0.5rem;
 
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
+  /* Elevation: off-white ground, pure-white cards. */
+  --background: oklch(0.977 0.002 285);
+  --panel: oklch(0.992 0.001 285);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.5 0.11 195);
-  --primary-foreground: oklch(0.985 0.01 195);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.984 0.003 247.858);
-  --sidebar-foreground: oklch(0.129 0.042 264.695);
-  --sidebar-primary: oklch(0.208 0.042 265.755);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.968 0.007 247.896);
-  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-  --sidebar-border: oklch(0.929 0.013 255.508);
-  --sidebar-ring: oklch(0.704 0.04 256.788);
+  --raised: oklch(0.968 0.003 285);
 
-  /* Flow-canvas edge/construct hues (§11 Phase 2.8): low-chroma on purpose —
-     edge kind is triple-encoded (hue + dash + label chip), color is never
-     load-bearing, and the one saturated element in the UI stays the
-     HTTP-method chip. */
+  /* Three foreground steps, each measured against the surface it sits on. */
+  --foreground: oklch(0.2 0.004 285);
+  --muted-foreground: oklch(0.455 0.011 285);
+  --subtle-foreground: oklch(0.565 0.011 285);
+
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+
+  /* Chrome. Achromatic by design — see the note above. */
+  --primary: oklch(0.235 0.005 285);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.968 0.003 285);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.968 0.003 285);
+  --accent: oklch(0.955 0.004 285);
+  --accent-foreground: var(--foreground);
+
+  --border: oklch(0.916 0.004 285);
+  --border-strong: oklch(0.86 0.006 285);
+  --input: oklch(0.916 0.004 285);
+
+  /* The one chromatic piece of chrome. Chroma 0.085 sits below every role
+     (0.11–0.15), so it reads as chrome even where hue is crowded. */
+  --ring: oklch(0.475 0.085 280);
+
+  /* Status — facts about the data, not brand. */
+  --ok: oklch(0.52 0.13 152);
+  --warn: oklch(0.52 0.11 75);
+  --bad: oklch(0.518 0.19 25);
+  --destructive: var(--bad);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  /* HTTP verbs. Hues unchanged from the original vocabulary — an achromatic
+     accent means none of them had to move. */
+  --verb-get: oklch(0.52 0.13 158);
+  --verb-post: oklch(0.5 0.16 250);
+  --verb-put: oklch(0.5 0.11 75);
+  --verb-patch: oklch(0.48 0.19 295);
+  --verb-delete: oklch(0.51 0.19 25);
+
+  /* Field-type glyphs. Hues preserved exactly from the pre-token mapping.
+     NOTE: `object` and `boolean` share hue 295 — that collision predates this
+     rebuild and is preserved rather than silently changed, since which glyph
+     wears which colour is a semantic call, not a theming one. */
+  --type-string: oklch(0.52 0.13 158);
+  --type-number: oklch(0.5 0.15 250);
+  --type-boolean: oklch(0.48 0.19 295);
+  --type-temporal: oklch(0.5 0.11 75);
+  --type-object: oklch(0.48 0.19 295);
+  --type-collection: oklch(0.53 0.2 330);
+
+  --chart-1: oklch(0.55 0.16 250);
+  --chart-2: oklch(0.55 0.13 158);
+  --chart-3: oklch(0.55 0.11 75);
+  --chart-4: oklch(0.52 0.17 295);
+  --chart-5: oklch(0.55 0.17 25);
+
+  --sidebar: var(--panel);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Flow-canvas edge/construct hues: low-chroma on purpose — edge kind is
+     triple-encoded (hue + dash + label chip) and colour is never load-bearing. */
   --flow-true: oklch(0.55 0.08 155);
   --flow-false: oklch(0.55 0.08 20);
   --flow-case: oklch(0.6 0.08 75);
@@ -180,11 +299,9 @@
   --flow-call: oklch(0.55 0.03 255);
   --flow-remote: oklch(0.55 0.09 25);
 
-  /* Role hue wheel (§5.2.9 UI): a role's swatch is derived from its NAME, so
-     ADMIN is the same colour everywhere. Hues are spaced to stay separable at
-     7px, and deliberately avoid the HTTP-method hues (155 / 240 / 75 / 22) —
-     a role dot must never read as another verb badge. Chroma is held below the
-     method chips' so the one saturated element in the UI stays the verb. */
+  /* Role hue wheel: a role's swatch is derived from its NAME, so ADMIN is the
+     same colour everywhere. Hues are spaced to stay separable at 7px and avoid
+     the HTTP-method hues — a role dot must never read as another verb badge. */
   --role-0: oklch(0.55 0.15 350);
   --role-1: oklch(0.52 0.14 285);
   --role-2: oklch(0.52 0.11 200);
@@ -195,43 +312,69 @@
   --role-7: oklch(0.56 0.14 35);
 }
 
-/*
-  ---break---
-*/
-
 .dark {
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.208 0.042 265.755);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.83 0.12 195);
-  --primary-foreground: oklch(0.17 0.04 210);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.279 0.041 260.031);
-  --accent-foreground: oklch(0.984 0.003 247.858);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.208 0.042 265.755);
-  --sidebar-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.279 0.041 260.031);
-  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.551 0.027 264.364);
+  /* Near-neutral near-black. The whisper of chroma (0.004–0.007) keeps it from
+     reading as dead flat CRT grey without introducing a colour cast. */
+  --background: oklch(0.145 0.004 285);
+  --panel: oklch(0.185 0.005 285);
+  --card: oklch(0.218 0.006 285);
+  --raised: oklch(0.262 0.007 285);
+
+  --foreground: oklch(0.945 0.003 285);
+  --muted-foreground: oklch(0.72 0.008 285);
+  --subtle-foreground: oklch(0.6 0.009 285);
+
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.218 0.006 285);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.962 0.002 285);
+  --primary-foreground: oklch(0.17 0.005 285);
+  --secondary: oklch(0.262 0.007 285);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.262 0.007 285);
+  --accent: oklch(0.285 0.008 285);
+  --accent-foreground: var(--foreground);
+
+  --border: oklch(1 0 0 / 9%);
+  --border-strong: oklch(1 0 0 / 17%);
+  --input: oklch(1 0 0 / 13%);
+
+  --ring: oklch(0.655 0.055 280);
+
+  --ok: oklch(0.79 0.15 158);
+  --warn: oklch(0.81 0.12 82);
+  --bad: oklch(0.7 0.16 22);
+  --destructive: var(--bad);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --verb-get: oklch(0.78 0.14 158);
+  --verb-post: oklch(0.74 0.13 250);
+  --verb-put: oklch(0.81 0.12 82);
+  --verb-patch: oklch(0.75 0.15 295);
+  --verb-delete: oklch(0.71 0.16 22);
+
+  --type-string: oklch(0.78 0.14 158);
+  --type-number: oklch(0.74 0.13 250);
+  --type-boolean: oklch(0.75 0.15 295);
+  --type-temporal: oklch(0.81 0.12 82);
+  --type-object: oklch(0.75 0.15 295);
+  --type-collection: oklch(0.76 0.16 330);
+
+  --chart-1: oklch(0.74 0.13 250);
+  --chart-2: oklch(0.78 0.14 158);
+  --chart-3: oklch(0.81 0.12 82);
+  --chart-4: oklch(0.75 0.15 295);
+  --chart-5: oklch(0.71 0.16 22);
+
+  --sidebar: var(--panel);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 
   --flow-true: oklch(0.72 0.09 155);
   --flow-false: oklch(0.72 0.09 20);
@@ -252,18 +395,38 @@
   --role-7: oklch(0.75 0.13 35);
 }
 
-/*
-  ---break---
-*/
-
+/* ============================================================================
+   BASE
+   ============================================================================ */
 @layer base {
+
+  /* Tailwind v4 defaults the border colour to `currentcolor`. The template's
+     compat shim pinned it to a hardcoded `--color-gray-200`, which ignored the
+     theme entirely and painted light-grey hairlines onto the dark ground. It
+     resolves against the token now. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border, currentcolor);
+  }
+
   * {
     @apply border-border outline-ring/50;
   }
 
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
     text-rendering: optimizeLegibility;
+  }
+
+  /* Digits line up into columns wherever they stack. Node counts, line
+     numbers and statement tallies are read as a column, not as prose. */
+  .tabular,
+  [data-slot="count"] {
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -272,6 +435,10 @@ h2,
 h3,
 h4 {
   text-wrap: balance;
+}
+
+hr {
+  border-color: var(--color-border);
 }
 
 /*
@@ -285,7 +452,3 @@ h4 {
  * dark theme got black text on a near-white pill over dark code. There is no
  * MDX in this app; the rules had nothing left to style but the bug.
  */
-
-hr {
-  color: var(--color-gray-200);
-}

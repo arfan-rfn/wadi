@@ -51,9 +51,9 @@ function Row({
     >
       <TypeGlyph kind={shape.kind} typeName={shape.type_name} />
       {name ? (
-        <span className="min-w-0 truncate font-mono text-[11.5px]">{name}</span>
+        <span className="min-w-0 truncate font-mono text-xs">{name}</span>
       ) : null}
-      <span className="ml-auto shrink-0 pl-2 font-mono text-2xs text-muted-foreground/75">
+      <span className="ml-auto shrink-0 pl-2 font-mono text-2xs text-muted-foreground">
         {shortType(shape.type_name)}
       </span>
     </div>

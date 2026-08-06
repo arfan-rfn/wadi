@@ -78,21 +78,21 @@ function ServiceNode({ data }: NodeProps<Node<ServiceData>>) {
           {service.gateway ? (
             <Router className="size-3 shrink-0 text-muted-foreground" />
           ) : null}
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium">
+          <span className="min-w-0 flex-1 truncate font-mono text-2xs font-medium">
             {service.name}
           </span>
           {broken ? (
             <AlertTriangle className="size-3 shrink-0 text-destructive" />
           ) : null}
         </div>
-        <div className="mt-0.5 flex items-center gap-2 font-mono text-[9px] text-muted-foreground">
+        <div className="mt-0.5 flex items-center gap-2 font-mono text-2xs text-muted-foreground">
           <span>{service.endpoint_count} endpoints</span>
           {service.async_root_count > 0 ? (
             <span>{service.async_root_count} roots</span>
           ) : null}
           {service.cfg_anomaly_count != null &&
           service.cfg_anomaly_count > 0 ? (
-            <span className="text-amber-600 dark:text-amber-400">
+            <span className="text-warn">
               {service.cfg_anomaly_count} anomalies
             </span>
           ) : null}
@@ -136,10 +136,10 @@ function TargetNode({ data }: NodeProps<Node<TargetData>>) {
         ) : (
           <Globe className="size-3 shrink-0" />
         )}
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
+        <span className="min-w-0 flex-1 truncate font-mono text-2xs">
           {node.label}
         </span>
-        <span className="shrink-0 font-mono text-[8px] uppercase opacity-70">
+        <span className="shrink-0 font-mono text-2xs uppercase opacity-70">
           {node.type}
         </span>
       </div>
@@ -323,7 +323,7 @@ export function SystemMapPane({
                     {item.url ?? "(no url)"}
                   </span>
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-muted-foreground">
                   <span>{item.mechanism}</span>
                   <span>confidence: {item.confidence}</span>
                   <span>{item.provenance}</span>
@@ -335,7 +335,7 @@ export function SystemMapPane({
                   ) : null}
                 </div>
                 {item.evidence ? (
-                  <p className="mt-1 text-[10px] text-muted-foreground">
+                  <p className="mt-1 text-2xs text-muted-foreground">
                     {item.evidence}
                   </p>
                 ) : null}
