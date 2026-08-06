@@ -3,6 +3,54 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.7.4 — 2026-08-06 (a design system, not a repaint)
+
+Frontend only; no contract, CLI, or analysis behaviour changes.
+
+The UI read as a template — a blue-slate ground in dark mode, pure-white cards
+on a pure-white page in light mode, six unrelated radius values, and text that
+was hard to read for a reason that was not its size.
+
+- **Colour.** `components.json` declared `baseColor: slate`, so the ground
+  carried real chroma at hue 265. Replaced with an achromatic palette. The
+  load-bearing decision is that hue is a data channel and nothing else: wadi
+  already spends 17 hues on facts (five HTTP verbs, seven flow constructs, an
+  eight-step role wheel), leaving no gap for a brand hue. The old teal
+  `--primary` sat 5 degrees from `--role-2` and carried more chroma than every
+  flow token, while four comments in the codebase asserted that "the one
+  saturated element in the UI stays the HTTP-method chip". Chrome is now
+  near-white on dark / near-black on light; the one chromatic piece of chrome
+  is the focus ring, held below every data token so it separates by saturation
+  rather than by hue.
+- **Elevation.** Light mode had `--background` and `--card` both at pure
+  white, so a card had nowhere to lift to. The ladder is bg/panel/card/raised.
+- **Legibility.** 34 uses of `text-muted-foreground/40..80` put an
+  already-low-contrast token behind opacity, landing near 2.4:1 against a
+  4.5:1 floor — a bigger cause of "hard to read" than size. Resolved to three
+  real foreground steps. 61 arbitrary sizes down to 8px collapse onto a closed
+  scale with an 11px floor.
+- **Geometry.** One five-step radius scale; 29 bare `rounded` were Tailwind's
+  own 4px default and never touched `--radius`.
+- **Density.** Fitting more information is answered by spacing, not smaller
+  type: `data-density` drives row height, padding and gap for ~20% more rows
+  per screen with every glyph unchanged, stamped before first paint.
+- **Type.** IBM Plex gives way to Geist, chosen on measurement. Every
+  mainstream monospace is exactly 0.600em advance, so changing mono buys no
+  density; what differs is x-height, which governs legibility at the 11px
+  floor. Geist Sans is 3.1% narrower and 2.7% taller than Plex Sans, and Geist
+  Sans and Geist Mono share an x-height exactly — this UI mixes them inline
+  constantly.
+- **Primitives.** Migrated from Radix to Base UI (shadcn's default since July
+  2026); all 15 `@radix-ui` packages and `cmdk` are gone. Eight `ui/`
+  components that no code imported were removed rather than migrated.
+- **Fixes found by using it:** a menu crash (`MenuGroupContext is missing`),
+  menus that could not scroll past the viewport, a hydration mismatch on the
+  overview home, a primary action styled as a tinted outline, and a snapshot
+  menu whose selected row was a tick 340px from where reading starts.
+
+0.7.3 was tagged during a GitHub Actions outage and never published — its
+release run failed the §13 version guard because nothing had been bumped.
+
 ## 0.7.2 — 2026-08-06 (errors that tell you how to recover)
 
 Three failures reported in one session, all the same defect: the CLI said
