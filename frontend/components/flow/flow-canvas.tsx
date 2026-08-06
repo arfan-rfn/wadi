@@ -682,13 +682,24 @@ function FlowCanvasInner({
             <MiniMap
               pannable
               zoomable
-              className="!h-40 !w-56"
+              // `bgColor` and the border: React Flow paints the minimap's own
+              // surface from its stylesheet default (#fff), which no token
+              // reaches — so it rendered as a bare white rectangle on the
+              // light ground and never picked up the theme at all. It is a
+              // panel like any other now, with the same elevation and corner
+              // as the surfaces around it.
+              bgColor="var(--panel)"
+              className="!h-40 !w-56 overflow-hidden rounded-md border !border-border"
+              // Node marks read against the PANEL, not the page ground, so
+              // border-weight greys vanish into it. These are the foreground
+              // steps instead: a method outranks a statement, and a remote
+              // hop keeps its own colour.
               nodeColor={(node) =>
                 node.type === "ghost"
                   ? "var(--flow-remote)"
                   : node.type === "method" || node.type === "lane"
                     ? "var(--muted-foreground)"
-                    : "var(--border)"
+                    : "var(--subtle-foreground)"
               }
               maskColor="color-mix(in oklch, var(--background) 70%, transparent)"
             />

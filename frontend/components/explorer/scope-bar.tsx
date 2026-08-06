@@ -102,10 +102,10 @@ export function ScopeBar(props: ScopeBarProps) {
             <Badge
               variant={
                 snapshot.status === "succeeded"
-                  ? "default"
+                  ? "ok"
                   : snapshot.status === "failed"
-                    ? "destructive"
-                    : "secondary"
+                    ? "bad"
+                    : "warn"
               }
               className="px-1.5 py-0 text-2xs"
             >
@@ -135,10 +135,10 @@ export function ScopeBar(props: ScopeBarProps) {
                 <Badge
                   variant={
                     s.status === "succeeded"
-                      ? "default"
+                      ? "ok"
                       : s.status === "failed"
-                        ? "destructive"
-                        : "secondary"
+                        ? "bad"
+                        : "warn"
                   }
                   className="px-1.5 py-0 text-2xs"
                 >

@@ -42,7 +42,6 @@ describe("density preference", () => {
 
   it("the pre-paint script stamps compact and survives blocked storage", () => {
     window.localStorage.setItem("wadi.density", "compact")
-    // eslint-disable-next-line no-new-func
     new Function(DENSITY_INIT_SCRIPT)()
     expect(document.documentElement.getAttribute("data-density")).toBe("compact")
 

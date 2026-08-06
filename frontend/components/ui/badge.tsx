@@ -17,6 +17,19 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+
+        // Status variants (added 2026-08-06 with the achromatic accent).
+        //
+        // A run's status used to wear `variant="default"`, which is the BRAND
+        // fill. That was quietly wrong all along — "succeeded" is a fact about
+        // the data, not a call to action — and the neutral rebuild made it
+        // visible: with a near-white primary, a routine green-path status
+        // became the single loudest element in the header, out-shouting the
+        // endpoint it describes. These are tinted rather than filled, so the
+        // status reads at a glance without competing for the eye.
+        ok: "border-ok/30 bg-ok/10 text-ok",
+        warn: "border-warn/30 bg-warn/10 text-warn",
+        bad: "border-bad/30 bg-bad/10 text-bad",
       },
     },
     defaultVariants: {
