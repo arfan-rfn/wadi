@@ -1,6 +1,6 @@
 [project]
 name = "wadi-orchestrator"
-version = "0.6.0"
+version = "0.7.0"
 description = "Wadi orchestrator: systems/snapshots/jobs owner + /api/v1 read API (architecture.md §5.3)"
 requires-python = ">=3.12"
 dependencies = [
