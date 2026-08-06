@@ -189,6 +189,13 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
     statusesOf("GET", "/shapes/status-annotated") shouldBe List((202, "annotation"))
   }
 
+  test("an integer BODY in status range is not mistaken for the status") {
+    // `new ResponseEntity<>(404, HttpStatus.OK)` answers 200 with the number
+    // 404 as its body. Scanning every argument published a 404 this endpoint
+    // never sends — the status is always the LAST argument.
+    statusesOf("GET", "/shapes/status-int-body") shouldBe List((200, "explicit"))
+  }
+
   test("every endpoint carries the field, and a plain ok() reads 200") {
     statusesOf("GET", "/shapes/one") shouldBe List((200, "builder"))
   }

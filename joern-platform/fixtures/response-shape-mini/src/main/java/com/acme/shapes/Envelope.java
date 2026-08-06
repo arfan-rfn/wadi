@@ -10,6 +10,14 @@ package com.acme.shapes;
  */
 public class Envelope<T> {
 
+    /**
+     * A static field the generated constructor never takes. The binding maps
+     * field POSITION onto argument position, so counting this one skipped the
+     * binding entirely (arity mismatch) and would have shifted every index
+     * after it had the count happened to match.
+     */
+    private static final String KIND = "envelope";
+
     private Integer status;
 
     private String msg;

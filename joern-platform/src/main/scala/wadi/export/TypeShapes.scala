@@ -146,6 +146,19 @@ object TypeShapes {
     * text keeps `List<InsidePayment>` — the same "read the declared text, not
     * typeFullName" rule this section already rests on, applied one hop deeper.
     */
+  /** The members that make up the WIRE shape, in declaration order.
+    *
+    * Shared by the shape walk and the type-argument binding so the two cannot
+    * disagree about which fields exist: the binding maps field POSITION onto
+    * constructor argument position, so a member the walk hides but the binding
+    * counts corrupts every index after it.
+    */
+  private def wireMembers(typeDecl: TypeDecl): List[Member] =
+    typeDecl.member.l
+      .filterNot(isJsonIgnored)
+      .filterNot(_.name.startsWith("$"))
+      .filterNot(m => m.modifier.modifierType.l.contains("STATIC"))
+
   private def typeArgumentBindings(
     cpg: Cpg,
     typeText: String,
@@ -154,7 +167,12 @@ object TypeShapes {
     val bindings = for {
       raw      <- parseTypeText(typeText).toList
       typeDecl <- resolveTypeDecl(cpg, raw.name).toList
-      members = typeDecl.member.l
+      // The SAME member set the shape walk renders. Using the raw member list
+      // here silently broke every envelope with a `static final Logger` — the
+      // arity guard counted a field the generated constructor never takes, so
+      // the binding was skipped, and had the count happened to match, the
+      // field-to-argument mapping would have been off by one.
+      members = wireMembers(typeDecl)
       // Only the all-args shape is safe to bind positionally: field order maps
       // to argument order (argument 0 is the allocation receiver). Any other
       // arity means the mapping is a guess, and a guessed payload type is
@@ -467,10 +485,7 @@ object TypeShapes {
       case Some(typeDecl) =>
         if (path.contains(typeDecl.fullName)) node("cycle", raw.name)
         else {
-          val fields = typeDecl.member.l
-            .filterNot(isJsonIgnored)
-            .filterNot(_.name.startsWith("$"))
-            .filterNot(m => m.modifier.modifierType.l.contains("STATIC"))
+          val fields = wireMembers(typeDecl)
             .map(fieldShape(cpg, _, path + typeDecl.fullName, depth - 1, bindings))
           node("object", raw.name, fields = fields)
         }

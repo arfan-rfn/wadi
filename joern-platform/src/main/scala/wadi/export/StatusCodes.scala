@@ -121,10 +121,18 @@ object StatusCodes {
             .flatMap(argument => codeOfArgument(argument))
             .map(code => Declared(code, "explicit", firstLine(call.code), line))
         case "<init>" if call.methodFullName.contains("ResponseEntity") =>
+          // ONLY the last argument. Every `ResponseEntity` constructor puts the
+          // status last (`(body, status)`, `(body, headers, status)`,
+          // `(status)`), and scanning them all made any integer BODY in the
+          // 100-599 range read as a status — `new ResponseEntity<>(404, OK)`
+          // returning the number 404 would have published a 404 the endpoint
+          // never sends.
           call.argument.l
             .filter(_.argumentIndex >= 1)
-            .flatMap(argument => codeOfArgument(argument))
+            .maxByOption(_.argumentIndex)
+            .flatMap(codeOfArgument)
             .map(code => Declared(code, "explicit", firstLine(call.code), line))
+            .toList
         case name =>
           BuilderStatus.get(name).map(Declared(_, "builder", firstLine(call.code), line)).toList
       }

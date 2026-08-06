@@ -67,6 +67,16 @@ public class ShapeController {
         return ok(envelopes.acknowledgeOnly(true));
     }
 
+    /**
+     * The body is an integer in the status range. Scanning every constructor
+     * argument for a code made this publish a 404 the endpoint never sends;
+     * the status is always the LAST argument.
+     */
+    @GetMapping("/status-int-body")
+    public HttpEntity statusIntBody() {
+        return new ResponseEntity<>(404, HttpStatus.OK);
+    }
+
     /** Two constructions that disagree about T: it must stay unresolved. */
     @GetMapping("/envelope-conflict")
     public HttpEntity envelopeConflict() {

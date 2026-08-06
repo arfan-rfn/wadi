@@ -98,6 +98,13 @@ function glyphFor(kind: ShapeKind, typeName: string): GlyphSpec {
       return { mark: "↻", tone: "text-destructive", title: "self-reference" }
     case "truncated":
       return { mark: "…", tone: "text-destructive", title: "depth cap reached" }
+    // Terminal, but NOT an honest-unknown: the code determined this field is
+    // always null. It must not wear the destructive dashed treatment (that
+    // says "we could not determine this") and it must not fall through to a
+    // scalar glyph either, which would render a known-empty field as an
+    // ordinary typed one and erase the distinction entirely.
+    case "always-null":
+      return { mark: "∅", tone: "text-muted-foreground", title: "always null" }
     default:
       return scalarGlyph(typeName)
   }
