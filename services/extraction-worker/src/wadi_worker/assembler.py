@@ -24,6 +24,7 @@ from wadi_contracts import (
     Endpoint,
     EndpointCollision,
     EndpointParam,
+    EndpointStatus,
     FieldShape,
     HttpMethod,
     Icfg,
@@ -43,6 +44,7 @@ from wadi_contracts import (
     ShapeOrigin,
     SinkKind,
     SourceAnchor,
+    StatusOrigin,
     TokenPropagation,
     TypeShape,
     method_id,
@@ -246,6 +248,17 @@ class Assembler:
                     for param in export_endpoint.params
                 ],
                 response_type=handler.return_type,
+                declared_statuses=[
+                    EndpointStatus(
+                        code=status.code,
+                        origin=StatusOrigin(status.origin),
+                        detail=status.detail,
+                        anchor=self._anchor(
+                            handler.filename, max(status.line, 1), max(status.line, 1)
+                        ),
+                    )
+                    for status in export_endpoint.status_codes
+                ],
                 request_schema=_shape(export_endpoint.request_schema),
                 response_schema=_shape(export_endpoint.response_schema),
                 auth=merge_endpoint_auth(

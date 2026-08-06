@@ -131,7 +131,7 @@ class ControlFlowMatrixConformanceTest extends AnyFunSuite with Matchers with Fi
   }
 
   test("the export declares schema 2.8.0") {
-    exportJson("export_schema_version").str shouldBe "2.10.0"
+    exportJson("export_schema_version").str shouldBe "2.11.0"
   }
 
   test("§5.2.8 cross-cutting: enriched vocabulary is present in the fixture") {

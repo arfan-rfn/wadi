@@ -81,7 +81,7 @@ class PetstoreConformanceTest extends AnyFunSuite with Matchers with BeforeAndAf
   }
 
   test("export document declares the contract version") {
-    exportJson("export_schema_version").str shouldBe "2.10.0"
+    exportJson("export_schema_version").str shouldBe "2.11.0"
   }
 
   test("analysis coverage counts production vs reachable methods (§5.4.3)") {

@@ -263,6 +263,14 @@
           "title": "Created At",
           "type": "string"
         },
+        "declared_statuses": {
+          "description": "HTTP statuses the handler's own code NAMES (\u00a75.2.7 T9). Named `declared_` because it is not the set this endpoint can answer with: a 500 from an uncaught exception, a 403 from the security layer and a 404 from the dispatcher appear in no handler source. An empty list means nothing was named, never that the endpoint cannot fail (P10)",
+          "items": {
+            "$ref": "#/$defs/EndpointStatus"
+          },
+          "title": "Declared Statuses",
+          "type": "array"
+        },
         "full_uri": {
           "description": "Route as written, e.g. /orders/{orderId}",
           "minLength": 1,
@@ -324,7 +332,7 @@
           "title": "Response Type"
         },
         "schema_version": {
-          "default": "1.20.0",
+          "default": "1.21.0",
           "title": "Schema Version",
           "type": "string"
         },
@@ -463,6 +471,37 @@
         "location"
       ],
       "title": "EndpointParam",
+      "type": "object"
+    },
+    "EndpointStatus": {
+      "additionalProperties": false,
+      "description": "One HTTP status a handler's own code names (\u00a75.2.7 T9).",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "code": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Code",
+          "type": "integer"
+        },
+        "detail": {
+          "description": "The source text that named it",
+          "title": "Detail",
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/StatusOrigin"
+        }
+      },
+      "required": [
+        "code",
+        "origin",
+        "detail",
+        "anchor"
+      ],
+      "title": "EndpointStatus",
       "type": "object"
     },
     "EndpointTouchedFile": {
@@ -831,6 +870,17 @@
       "title": "SourceVariant",
       "type": "string"
     },
+    "StatusOrigin": {
+      "description": "How a declared status was read (\u00a75.2.7 T9).",
+      "enum": [
+        "builder",
+        "explicit",
+        "annotation",
+        "default"
+      ],
+      "title": "StatusOrigin",
+      "type": "string"
+    },
     "TargetKind": {
       "description": "What a stitched edge lands on (\u00a75.4.2) \u2014 the three target kinds that\nkeep partial coverage honest, plus the explicit undetermined fact (P10).",
       "enum": [
@@ -931,7 +981,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.20.0/endpoint_detail.schema.json",
+  "$id": "https://trywadi.com/schemas/1.21.0/endpoint_detail.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Everything the endpoint workspace needs in one read (\u00a711 Phase 2.8).\n\n1.11.0 (additive): replaces the client-side compose of endpoint +\nservice-wide remote edges. The ICFG stays its own fetch (it is large) and\nsource stays on demand (\u00a75.3) \u2014 ``touched_files`` carries names, never\ncontent.\n\n**Reading the empty lists.** Each one has a flag that says whether empty\nmeans 'none' or 'not known', because on their own they cannot be told\napart (P10):\n\n* ``outbound`` \u2014 ``stitched=False`` means the stitcher has not run, so\n  empty is 'not yet'.\n* ``touched_files`` and ``unopenable_calls`` \u2014 both are DERIVED from the\n  ICFG, so ``icfg_available=False`` makes empty 'not known'. Without that\n  reading, an endpoint with no flow graph reports the same shape as one\n  whose every call opens cleanly.",

@@ -34,10 +34,12 @@ from wadi_contracts.endpoint import (
     Endpoint,
     EndpointAuth,
     EndpointParam,
+    EndpointStatus,
     FieldShape,
     ParamLocation,
     ShapeKind,
     ShapeOrigin,
+    StatusOrigin,
     TypeShape,
 )
 from wadi_contracts.enums import (
@@ -174,6 +176,7 @@ __all__ = [
     "EndpointDependency",
     "EndpointDetailView",
     "EndpointParam",
+    "EndpointStatus",
     "EndpointTouchedFile",
     "ExportManifest",
     "ExternalApiEntry",
@@ -221,6 +224,7 @@ __all__ = [
     "SourceAnchor",
     "SourceVariant",
     "SourceView",
+    "StatusOrigin",
     "StitchedEdge",
     "System",
     "SystemAuthView",

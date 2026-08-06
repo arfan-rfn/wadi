@@ -63,6 +63,35 @@ class ShapeOrigin(StrEnum):
     RETURN_EXPRESSION = "return-expression"
 
 
+class StatusOrigin(StrEnum):
+    """How a declared status was read (§5.2.7 T9)."""
+
+    BUILDER = "builder"
+    """The `ResponseEntity` builder's own name fixes it: `noContent()` is 204."""
+
+    EXPLICIT = "explicit"
+    """A constant the handler names: `new ResponseEntity<>(body, CREATED)`."""
+
+    ANNOTATION = "annotation"
+    """`@ResponseStatus` on the handler, which REPLACES what the body implies."""
+
+    DEFAULT = "default"
+    """Nothing was named and the return type is not a `ResponseEntity`, so the
+    framework decides: Spring serializes the value with 200. Kept distinct from
+    `builder` because the code did not say it — and claimed only where the
+    status is NOT under program control, since guessing 200 for a handler that
+    controls its own status would dress a guess as a framework rule."""
+
+
+class EndpointStatus(WadiModel):
+    """One HTTP status a handler's own code names (§5.2.7 T9)."""
+
+    code: int = Field(ge=100, le=599)
+    origin: StatusOrigin
+    detail: str = Field(description="The source text that named it")
+    anchor: SourceAnchor
+
+
 class TypeShape(WadiModel):
     """A recovered request/response shape (§5.2.7): the wire contract, walked
     from in-CPG type structure with honest terminals."""
@@ -353,6 +382,17 @@ class Endpoint(ArtifactEnvelope):
     simplified_uri: str = Field(min_length=1, description="Identity form, e.g. /orders/{?}")
     params: list[EndpointParam] = Field(default_factory=list[EndpointParam])
     response_type: str | None = None
+    declared_statuses: list[EndpointStatus] = Field(
+        default_factory=list[EndpointStatus],
+        description=(
+            "HTTP statuses the handler's own code NAMES (§5.2.7 T9). Named "
+            "`declared_` because it is not the set this endpoint can answer "
+            "with: a 500 from an uncaught exception, a 403 from the security "
+            "layer and a 404 from the dispatcher appear in no handler source. "
+            "An empty list means nothing was named, never that the endpoint "
+            "cannot fail (P10)"
+        ),
+    )
     request_schema: TypeShape | None = Field(
         default=None,
         description="Field-level @RequestBody shape (§5.2.7); None = no body or pre-1.6",
@@ -419,6 +459,7 @@ class Endpoint(ArtifactEnvelope):
         handler: MethodRef,
         params: list[EndpointParam] | None = None,
         response_type: str | None = None,
+        declared_statuses: list[EndpointStatus] | None = None,
         request_schema: TypeShape | None = None,
         response_schema: TypeShape | None = None,
         auth: EndpointAuth | None = None,
@@ -434,6 +475,7 @@ class Endpoint(ArtifactEnvelope):
             simplified_uri=simplify_uri(full_uri),
             params=params or [],
             response_type=response_type,
+            declared_statuses=declared_statuses or [],
             request_schema=request_schema,
             response_schema=response_schema,
             auth=auth or EndpointAuth(),

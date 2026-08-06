@@ -78,7 +78,7 @@ object WadiExport {
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
     */
-  val ExportSchemaVersion = "2.10.0"
+  val ExportSchemaVersion = "2.11.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -121,7 +121,10 @@ object WadiExport {
                 "http_method" -> httpMethod,
                 "uri"         -> uri,
                 "auth_tags"   -> method.tag.nameExact("auth").value.l.map(v => s"auth=$v"),
-                "params"      -> endpointParamObjs(method)
+                "params"      -> endpointParamObjs(method),
+                // §5.2.7 T9: what the handler's own code names. NOT the
+                // complete set of statuses the endpoint can answer with.
+                "status_codes" -> StatusCodes.declaredBy(cpg, method)
               )
               // §5.2.7: field-level wire shapes, honest terminals. The response
               // shape falls back to the return expression when the signature

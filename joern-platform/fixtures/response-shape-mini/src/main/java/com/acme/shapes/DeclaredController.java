@@ -29,4 +29,10 @@ public class DeclaredController {
     public ResponseEntity<Item> one() {
         return ok(service.findOne());
     }
+
+    /** Names no status at all: the framework answers 200, the code does not. */
+    @GetMapping("/welcome")
+    public String welcome() {
+        return "Welcome";
+    }
 }

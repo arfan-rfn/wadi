@@ -1,6 +1,6 @@
 {
   "name": "async_root_kinds",
-  "schema_version": "1.20.0",
+  "schema_version": "1.21.0",
   "values": [
     "application-runner",
     "bean",

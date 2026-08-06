@@ -651,7 +651,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.20.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.21.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What the map knows it doesn't know (\u00a75.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
@@ -752,7 +752,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.20.0",
+      "default": "1.21.0",
       "title": "Schema Version",
       "type": "string"
     },

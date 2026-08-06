@@ -128,6 +128,51 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
     shape("GET", "/shapes/offcpg").obj.get("fields") shouldBe None
   }
 
+  // ---- declared status codes (T9) ----------------------------------------
+
+  private def statusesOf(httpMethod: String, uri: String): List[(Int, String)] =
+    endpoint(httpMethod, uri)("status_codes").arr.toList
+      .map(s => (s("code").num.toInt, s("origin").str))
+
+  test("a builder's NAME fixes the status") {
+    statusesOf("GET", "/shapes/status-builder") shouldBe List((204, "builder"))
+  }
+
+  test("an explicit constant is read from the construction") {
+    statusesOf("POST", "/shapes/status-explicit") shouldBe List((201, "explicit"))
+  }
+
+  test("status(X).body(y) takes X, not the body's implied 200") {
+    // The chain nests, so a walk that kept descending would find `body` and
+    // report nothing, or find a builder further in and report the wrong code.
+    statusesOf("POST", "/shapes/status-chain") shouldBe List((202, "explicit"))
+  }
+
+  test("two paths declare two statuses and neither is elected") {
+    // Unlike a response SHAPE, where disagreement means we cannot know, an
+    // endpoint genuinely answers with several statuses — the honest answer is
+    // the set, not a refusal.
+    statusesOf("GET", "/shapes/status-branching").map(_._1) shouldBe List(200, 404)
+  }
+
+  test("@ResponseStatus replaces the builder's status rather than joining it") {
+    // The framework sends 202. Publishing the co-located `ok(...)` 200 beside
+    // it would name a status this endpoint never answers with.
+    statusesOf("GET", "/shapes/status-annotated") shouldBe List((202, "annotation"))
+  }
+
+  test("every endpoint carries the field, and a plain ok() reads 200") {
+    statusesOf("GET", "/shapes/one") shouldBe List((200, "builder"))
+  }
+
+  test("a handler that names nothing gets the framework's answer, marked as such") {
+    // `/declared/welcome` returns a bare String: Spring serializes it with 200
+    // and the code never says so. Leaving it empty beside endpoints showing
+    // `200` made an identical outcome look like an unknown — but the origin
+    // has to stay `default`, because the handler did not declare it.
+    statusesOf("GET", "/declared/welcome") shouldBe List((200, "default"))
+  }
+
   // ---- the regression guard ---------------------------------------------
 
   test("a declared generic is never overridden by recovery") {

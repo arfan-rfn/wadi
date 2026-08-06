@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import static org.springframework.http.ResponseEntity.ok;
@@ -64,6 +65,44 @@ public class ShapeController {
     @GetMapping("/envelope-conflict")
     public HttpEntity envelopeConflict() {
         return ok(envelopes.conflicting(true));
+    }
+
+    /** The builder's NAME fixes the status: 204, no body anywhere. */
+    @GetMapping("/status-builder")
+    public HttpEntity statusBuilder() {
+        return ResponseEntity.noContent().build();
+    }
+
+    /** An explicit constant beats any builder default. */
+    @PostMapping("/status-explicit")
+    public HttpEntity statusExplicit() {
+        return new ResponseEntity<>(service.findOne(), HttpStatus.CREATED);
+    }
+
+    /** `status(X).body(y)` — the chain fixes X, the body is not the status. */
+    @PostMapping("/status-chain")
+    public HttpEntity statusChain() {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.findOne());
+    }
+
+    /** Two paths, two statuses: both are declared, neither wins. */
+    @GetMapping("/status-branching")
+    public HttpEntity statusBranching(@RequestParam boolean flag) {
+        if (flag) {
+            return ResponseEntity.notFound().build();
+        }
+        return ok(service.findOne());
+    }
+
+    /**
+     * `@ResponseStatus` REPLACES what the builder would imply — the framework
+     * sends 202 here, so publishing the `ok(...)` 200 beside it would name a
+     * status this endpoint never answers with.
+     */
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @GetMapping("/status-annotated")
+    public HttpEntity statusAnnotated() {
+        return ok(service.findOne());
     }
 
     /**

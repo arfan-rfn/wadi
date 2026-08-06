@@ -12,7 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.10.0"
+EXPORT_SCHEMA_VERSION = "2.11.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -100,7 +100,15 @@ outbound sink exists. The forwarding idiom it missed is
 ``new HttpEntity(null)`` (98 sites): a provable NEGATIVE, which the old
 nullable field could not express apart from "we did not look". Resolution is
 per CALL SITE, because one method routinely builds both. Pre-2.10.0 documents
-still parse as ``undetermined``, which is what a null meant."""
+still parse as ``undetermined``, which is what a null meant.
+
+2.11.0 (additive, §5.2.7 T9): endpoints carry ``status_codes`` — the HTTP
+statuses the handler's own code NAMES, each with how it was read
+(``builder``/``explicit``/``annotation``), its source text and line.
+Deliberately not "the statuses this endpoint returns": a 500 from an uncaught
+exception, a 403 from the security layer and a 404 from the dispatcher appear
+in no handler source, so a reader must not take this list as proof an endpoint
+cannot fail. Empty on pre-2.11.0 exports."""
 
 
 class ExportModelBase(BaseModel):
@@ -283,10 +291,23 @@ class ExportFieldShape(ExportModelBase):
     shape: ExportTypeShape
 
 
+class ExportStatusCode(ExportModelBase):
+    """One HTTP status the handler's own code names (§5.2.7 T9)."""
+
+    code: int = Field(ge=100, le=599)
+    origin: str = Field(description="builder | explicit | annotation | default")
+    detail: str
+    line: int = Field(ge=0)
+
+
 class ExportEndpoint(ExportModelBase):
     method_id: int = Field(description="Handler method's Joern id")
     http_method: str
     uri: str
+    status_codes: list[ExportStatusCode] = Field(
+        default_factory=list["ExportStatusCode"],
+        description="Statuses the handler DECLARES; empty on pre-2.11.0 exports",
+    )
     auth_tags: list[str] = Field(
         default_factory=list[str],
         description="Registered auth= tags on the handler (raw annotation evidence)",

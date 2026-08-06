@@ -367,6 +367,33 @@ export function EndpointPeek({
         </CollapsibleSection>
 
         <CollapsibleSection title="Response">
+          {(endpoint.declared_statuses ?? []).length > 0 && (
+            <div className="mb-2.5">
+              <div className="flex flex-wrap gap-1">
+                {(endpoint.declared_statuses ?? []).map((status) => (
+                  <span
+                    key={`${status.code}:${status.origin}`}
+                    className={cn(
+                      "rounded-full border px-1.5 py-0.5 font-mono text-[10px]",
+                      status.code < 300
+                        ? "text-muted-foreground"
+                        : "border-amber-500/40 text-amber-600 dark:text-amber-400"
+                    )}
+                    title={`${status.detail} — read from the ${status.origin}`}
+                  >
+                    {status.code}
+                  </span>
+                ))}
+              </div>
+              {/* The list is what the handler NAMES. A 500 from an uncaught
+                  exception, a 403 from the security layer and a 404 from the
+                  dispatcher are in no handler source, so silence here is not
+                  a claim that this endpoint cannot fail (P10). */}
+              <p className="mt-1 text-[10px] text-muted-foreground/80">
+                Named in the handler — errors raised elsewhere are not listed.
+              </p>
+            </div>
+          )}
           {endpoint.response_schema ? (
             <SchemaTree shape={endpoint.response_schema} />
           ) : (

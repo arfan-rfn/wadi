@@ -131,6 +131,19 @@ export type AuthMechanismKind =
 export type Mechanisms = AuthMechanism[]
 export type Roles1 = string[]
 export type CreatedAt = string
+export type Code = number
+/**
+ * The source text that named it
+ */
+export type Detail2 = string
+/**
+ * How a declared status was read (§5.2.7 T9).
+ */
+export type StatusOrigin = "builder" | "explicit" | "annotation" | "default"
+/**
+ * HTTP statuses the handler's own code NAMES (§5.2.7 T9). Named `declared_` because it is not the set this endpoint can answer with: a 500 from an uncaught exception, a 403 from the security layer and a 404 from the dispatcher appear in no handler source. An empty list means nothing was named, never that the endpoint cannot fail (P10)
+ */
+export type DeclaredStatuses = EndpointStatus[]
 /**
  * Route as written, e.g. /orders/{orderId}
  */
@@ -318,6 +331,7 @@ export interface EndpointDetailView {
 export interface Endpoint {
   auth?: EndpointAuth
   created_at?: CreatedAt
+  declared_statuses?: DeclaredStatuses
   full_uri: FullUri
   handler: MethodRef
   http_method: HttpMethod
@@ -420,6 +434,15 @@ export interface AuthMechanism {
   detail: Detail1
   inactive_reason?: InactiveReason1
   kind: AuthMechanismKind
+}
+/**
+ * One HTTP status a handler's own code names (§5.2.7 T9).
+ */
+export interface EndpointStatus {
+  anchor: SourceAnchor
+  code: Code
+  detail: Detail2
+  origin: StatusOrigin
 }
 /**
  * Reference to a method: stable content-derived id + human-readable signature.

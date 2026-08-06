@@ -330,6 +330,37 @@
       "title": "EndpointParam",
       "type": "object"
     },
+    "EndpointStatus": {
+      "additionalProperties": false,
+      "description": "One HTTP status a handler's own code names (\u00a75.2.7 T9).",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "code": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Code",
+          "type": "integer"
+        },
+        "detail": {
+          "description": "The source text that named it",
+          "title": "Detail",
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/StatusOrigin"
+        }
+      },
+      "required": [
+        "code",
+        "origin",
+        "detail",
+        "anchor"
+      ],
+      "title": "EndpointStatus",
+      "type": "object"
+    },
     "FieldShape": {
       "additionalProperties": false,
       "description": "One serialized field: the WIRE name (Jackson renames applied).",
@@ -477,6 +508,17 @@
       "title": "SourceVariant",
       "type": "string"
     },
+    "StatusOrigin": {
+      "description": "How a declared status was read (\u00a75.2.7 T9).",
+      "enum": [
+        "builder",
+        "explicit",
+        "annotation",
+        "default"
+      ],
+      "title": "StatusOrigin",
+      "type": "string"
+    },
     "TriggerKind": {
       "description": "v1: http. Reserved (\u00a77): queue, stream, schedule.",
       "enum": [
@@ -535,7 +577,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.20.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.21.0/endpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One REST endpoint of one service within a snapshot.",
@@ -547,6 +589,14 @@
       "format": "date-time",
       "title": "Created At",
       "type": "string"
+    },
+    "declared_statuses": {
+      "description": "HTTP statuses the handler's own code NAMES (\u00a75.2.7 T9). Named `declared_` because it is not the set this endpoint can answer with: a 500 from an uncaught exception, a 403 from the security layer and a 404 from the dispatcher appear in no handler source. An empty list means nothing was named, never that the endpoint cannot fail (P10)",
+      "items": {
+        "$ref": "#/$defs/EndpointStatus"
+      },
+      "title": "Declared Statuses",
+      "type": "array"
     },
     "full_uri": {
       "description": "Route as written, e.g. /orders/{orderId}",
@@ -609,7 +659,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.20.0",
+      "default": "1.21.0",
       "title": "Schema Version",
       "type": "string"
     },
