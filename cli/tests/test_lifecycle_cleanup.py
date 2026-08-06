@@ -396,6 +396,30 @@ class TestUpgradeChannelDetection:
             upgrade_support.PACKAGE_NAME,
         ]
 
+    def test_the_uv_command_forces_a_fresh_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """uv resolves from a CACHED package index, and `wadi upgrade` runs at
+        exactly the moment that cache is most likely stale — minutes after a
+        release. Without the refresh uv reads its cache, sees the version
+        already installed, prints "Nothing to upgrade" and exits 0 while PyPI
+        (which this CLI queries directly) has the new one. That is the 0.7.0
+        incident. `--reinstall-package` implies `--refresh-package`.
+        """
+
+        def which(name: str) -> str:
+            return f"/usr/bin/{name}"
+
+        def installed_via(probe: list[str], needle: str) -> bool:
+            return probe[0] == "uv"
+
+        monkeypatch.setattr(upgrade_support.shutil, "which", which)
+        monkeypatch.setattr(upgrade_support, "installed_via", installed_via)
+        command = upgrade_support.upgrade_command()
+        assert command is not None
+        assert "--reinstall-package" in command
+        # Scoped to this package: an upgrade must never invalidate the whole
+        # cache for everything else the user has installed.
+        assert command[command.index("--reinstall-package") + 1] == upgrade_support.PACKAGE_NAME
+
     def test_a_formula_that_merely_ends_in_the_name_is_not_a_match(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -434,11 +458,115 @@ class TestUpgradeChannelDetection:
         assert upgrade_support.upgrade_command() is None
 
 
+def _installed(version: str | None) -> Callable[..., str | None]:
+    def reported(**_kwargs: object) -> str | None:
+        return version
+
+    return reported
+
+
+def _channel() -> list[str]:
+    return ["uv", "tool", "upgrade", "wadi-sh"]
+
+
+def _silent_upgrade(command: list[str]) -> None:
+    """An installer that exits 0. Whether it DID anything is the question."""
+
+
+def _yes() -> bool:
+    return True
+
+
+def _no_reap() -> list[str]:
+    return []
+
+
+def _quiet_compose(action: list[str], **_kwargs: object) -> None:
+    return None
+
+
+def _no_stragglers() -> tuple[list[str], list[str]]:
+    return [], []
+
+
 def _release(version: str) -> Callable[..., str]:
     def latest(**_kwargs: object) -> str:
         return version
 
     return latest
+
+
+class TestInstalledVersionProbe:
+    """This process cannot answer "what version am I now?" after an upgrade —
+    CLI_VERSION was baked in at import. Asking the executable is also the only
+    channel-agnostic check: parsing installer output would need one rule per
+    channel and would break whenever any of them reworded a line.
+    """
+
+    def test_reads_the_version_the_executable_reports(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def which(name: str) -> str:
+            return "/usr/local/bin/wadi"
+
+        def fake_run(command: list[str], **_kwargs: object) -> FakeCompleted:
+            result = FakeCompleted()
+            result.stdout = "wadi 0.7.1\n"
+            return result
+
+        monkeypatch.setattr(upgrade_support.shutil, "which", which)
+        monkeypatch.setattr(upgrade_support.subprocess, "run", fake_run)
+        assert upgrade_support.installed_version() == "0.7.1"
+
+    def test_a_v_prefix_is_tolerated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def which(name: str) -> str:
+            return "/usr/local/bin/wadi"
+
+        def fake_run(command: list[str], **_kwargs: object) -> FakeCompleted:
+            result = FakeCompleted()
+            result.stdout = "wadi v0.7.1"
+            return result
+
+        monkeypatch.setattr(upgrade_support.shutil, "which", which)
+        monkeypatch.setattr(upgrade_support.subprocess, "run", fake_run)
+        assert upgrade_support.installed_version() == "0.7.1"
+
+    @pytest.mark.parametrize("stdout", ["", "wadi unknown", "not a version at all"])
+    def test_unreadable_output_is_none_not_a_guess(
+        self, stdout: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """None means "could not determine", and the caller treats it as
+        unverified rather than as failure — an unknown is not a negative."""
+
+        def which(name: str) -> str:
+            return "/usr/local/bin/wadi"
+
+        def fake_run(command: list[str], **_kwargs: object) -> FakeCompleted:
+            result = FakeCompleted()
+            result.stdout = stdout
+            return result
+
+        monkeypatch.setattr(upgrade_support.shutil, "which", which)
+        monkeypatch.setattr(upgrade_support.subprocess, "run", fake_run)
+        assert upgrade_support.installed_version() is None
+
+    def test_not_on_path_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def which(name: str) -> None:
+            return None
+
+        monkeypatch.setattr(upgrade_support.shutil, "which", which)
+        assert upgrade_support.installed_version() is None
+
+    def test_a_probe_that_cannot_run_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def which(name: str) -> str:
+            return "/usr/local/bin/wadi"
+
+        def explode(command: list[str], **_kwargs: object) -> FakeCompleted:
+            raise OSError("exec format error")
+
+        monkeypatch.setattr(upgrade_support.shutil, "which", which)
+        monkeypatch.setattr(upgrade_support.subprocess, "run", explode)
+        assert upgrade_support.installed_version() is None
 
 
 class TestUpgradeCommand:
@@ -512,6 +640,7 @@ class TestUpgradeCommand:
         monkeypatch.setattr(upgrade_support, "latest_released_version", _release("9.9.9"))
         monkeypatch.setattr(upgrade_support, "upgrade_command", channel)
         monkeypatch.setattr(upgrade_support, "run_upgrade", run_upgrade)
+        monkeypatch.setattr(upgrade_support, "installed_version", _installed("9.9.9"))
         monkeypatch.setattr(compose, "container_runtime_available", runtime_available)
         monkeypatch.setattr(compose, "reap_managed_containers", fake_reap)
         monkeypatch.setattr(compose, "run_compose", fake_run_compose)
@@ -523,6 +652,72 @@ class TestUpgradeCommand:
         assert result.exit_code == 0, result.output
         assert steps == ["reap", "down", "upgrade"]
         assert kept == ["9.9.9"]
+
+    def test_an_installer_that_exits_zero_without_upgrading_is_not_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The 0.7.0 incident: `uv tool upgrade` prints "Nothing to upgrade" and
+        exits 0 when its cached index shows nothing newer. The old code took the
+        exit code as proof, pruned the images of the version still installed,
+        and announced an upgrade that had not happened — leaving a CLI whose
+        images had just been deleted."""
+        pruned: list[str] = []
+
+        def fake_remove(references: list[str]) -> tuple[list[str], list[str]]:
+            pruned.extend(references)
+            return references, []
+
+        def one_old_image(*, exclude_version: str | None = None) -> Images:
+            return [("ghcr.io/wadi-sh/joern:0.6.0", "2.43GB")]
+
+        monkeypatch.setattr(upgrade_support, "latest_released_version", _release("9.9.9"))
+        monkeypatch.setattr(upgrade_support, "upgrade_command", _channel)
+        monkeypatch.setattr(upgrade_support, "run_upgrade", _silent_upgrade)
+        # The installer "succeeded" and the version did not move.
+        monkeypatch.setattr(upgrade_support, "installed_version", _installed(CLI_VERSION))
+        monkeypatch.setattr(compose, "container_runtime_available", _yes)
+        monkeypatch.setattr(compose, "reap_managed_containers", _no_reap)
+        monkeypatch.setattr(compose, "run_compose", _quiet_compose)
+        monkeypatch.setattr(compose, "finish_network_teardown", _no_stragglers)
+        monkeypatch.setattr(compose, "stale_compose_files", _no_compose_files)
+        monkeypatch.setattr(compose, "wadi_images", one_old_image)
+        monkeypatch.setattr(compose, "remove_images", fake_remove)
+        result = runner.invoke(app, ["upgrade", "--yes"])
+
+        assert result.exit_code == 3, result.output
+        output = plain(result.output)
+        assert "still" in output
+        assert CLI_VERSION in output
+        # The load-bearing half: images of the version the user is still
+        # running must survive a failed upgrade.
+        assert pruned == []
+        assert "upgraded to" not in output
+
+    def test_an_unverifiable_upgrade_makes_no_claim_either_way(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`wadi` not on PATH means the check cannot run — which is an unknown,
+        not a failure. It must not claim success, and must not prune."""
+        pruned: list[str] = []
+
+        def fake_remove(references: list[str]) -> tuple[list[str], list[str]]:
+            pruned.extend(references)
+            return references, []
+
+        monkeypatch.setattr(upgrade_support, "latest_released_version", _release("9.9.9"))
+        monkeypatch.setattr(upgrade_support, "upgrade_command", _channel)
+        monkeypatch.setattr(upgrade_support, "run_upgrade", _silent_upgrade)
+        monkeypatch.setattr(upgrade_support, "installed_version", _installed(None))
+        monkeypatch.setattr(compose, "container_runtime_available", _yes)
+        monkeypatch.setattr(compose, "reap_managed_containers", _no_reap)
+        monkeypatch.setattr(compose, "run_compose", _quiet_compose)
+        monkeypatch.setattr(compose, "finish_network_teardown", _no_stragglers)
+        monkeypatch.setattr(compose, "remove_images", fake_remove)
+        result = runner.invoke(app, ["upgrade", "--yes"])
+
+        assert result.exit_code == 3, result.output
+        assert "could not confirm" in plain(result.output)
+        assert pruned == []
 
     def test_unknown_channel_tells_the_user_what_to_run(
         self, monkeypatch: pytest.MonkeyPatch
