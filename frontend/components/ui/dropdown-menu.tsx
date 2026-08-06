@@ -34,9 +34,17 @@ const itemClass = cn(
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
 )
 
-/** Shared popup chrome for the menu and its submenus. */
+/** Shared popup chrome for the menu and its submenus.
+ *
+ * The height cap is load-bearing: a menu listing every snapshot in a system
+ * runs past the viewport, and without a bound it simply overflowed with no
+ * way to reach the items below the fold. `--available-height` is published by
+ * the Positioner — it is the room actually left between the anchor and the
+ * viewport edge on the side the menu opened — so the cap follows the trigger
+ * up and down the page instead of being a guessed constant. */
 const popupClass = cn(
-  "min-w-32 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
+  "min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
+  "max-h-[var(--available-height)] overflow-x-hidden overflow-y-auto overscroll-contain",
   "origin-[var(--transform-origin)] transition-[opacity,transform] duration-150",
   "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
   "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
@@ -147,7 +155,30 @@ const DropdownMenuRadioItem = React.forwardRef<
 ))
 DropdownMenuRadioItem.displayName = "DropdownMenuRadioItem"
 
+const labelClass = "px-2 py-1.5 text-sm font-semibold"
+
+/**
+ * A standalone heading inside a menu — presentational, no group semantics.
+ *
+ * This renders a plain element ON PURPOSE. Base UI's `Menu.GroupLabel` throws
+ * "MenuGroupContext is missing" unless it has a `Menu.Group` ancestor, and
+ * Radix's `Menu.Label` had no such requirement — so the direct port turned a
+ * label that had always been legal into a crash the moment the header's
+ * system picker opened. A component that explodes based on where it is placed
+ * is a trap; when the heading really does name a set of items, use
+ * `DropdownMenuGroup` + `DropdownMenuGroupLabel`, which associates the two for
+ * assistive tech.
+ */
 const DropdownMenuLabel = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentPropsWithoutRef<"div"> & { inset?: boolean }
+>(({ className, inset, ...props }, ref) => (
+  <div ref={ref} className={cn(labelClass, inset && "pl-8", className)} {...props} />
+))
+DropdownMenuLabel.displayName = "DropdownMenuLabel"
+
+/** The accessible heading for a `DropdownMenuGroup`. Must be inside one. */
+const DropdownMenuGroupLabel = React.forwardRef<
   React.ComponentRef<typeof MenuPrimitive.GroupLabel>,
   React.ComponentPropsWithoutRef<typeof MenuPrimitive.GroupLabel> & {
     inset?: boolean
@@ -155,11 +186,11 @@ const DropdownMenuLabel = React.forwardRef<
 >(({ className, inset, ...props }, ref) => (
   <MenuPrimitive.GroupLabel
     ref={ref}
-    className={cn("px-2 py-1.5 text-sm font-semibold", inset && "pl-8", className)}
+    className={cn(labelClass, inset && "pl-8", className)}
     {...props}
   />
 ))
-DropdownMenuLabel.displayName = "DropdownMenuLabel"
+DropdownMenuGroupLabel.displayName = "DropdownMenuGroupLabel"
 
 const DropdownMenuSeparator = React.forwardRef<
   React.ComponentRef<typeof MenuPrimitive.Separator>,
@@ -197,6 +228,7 @@ export {
   DropdownMenuCheckboxItem,
   DropdownMenuRadioItem,
   DropdownMenuLabel,
+  DropdownMenuGroupLabel,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuGroup,

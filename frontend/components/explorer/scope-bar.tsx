@@ -20,7 +20,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
+  DropdownMenuGroup,
+  DropdownMenuGroupLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -51,35 +52,40 @@ export function ScopeBar(props: ScopeBarProps) {
           <ChevronsUpDown className="size-3 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">
-          <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
-            Systems
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {props.systems.length === 0 ? (
-            <DropdownMenuItem disabled>
-              No systems yet — run{" "}
-              <code className="ml-1 rounded-sm bg-muted px-1 font-mono">
-                wadi analyze .
-              </code>
-            </DropdownMenuItem>
-          ) : null}
-          {props.systems.map((s) => (
-            <DropdownMenuItem
-              key={s.id}
-              onSelect={() => props.onSystem(s.id)}
-              className="justify-between"
-            >
-              <span className="truncate">{s.name}</span>
-              <span className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  {s.repos.length} repo(s)
+          {/* A real group: the heading names the list below it, so screen
+              readers announce "Systems, list, 3 items" instead of reading a
+              stray heading and then an unlabelled menu. */}
+          <DropdownMenuGroup>
+            <DropdownMenuGroupLabel className="text-xs tracking-wider text-muted-foreground uppercase">
+              Systems
+            </DropdownMenuGroupLabel>
+            <DropdownMenuSeparator />
+            {props.systems.length === 0 ? (
+              <DropdownMenuItem disabled>
+                No systems yet — run{" "}
+                <code className="ml-1 rounded-sm bg-muted px-1 font-mono">
+                  wadi analyze .
+                </code>
+              </DropdownMenuItem>
+            ) : null}
+            {props.systems.map((s) => (
+              <DropdownMenuItem
+                key={s.id}
+                onSelect={() => props.onSystem(s.id)}
+                className="justify-between"
+              >
+                <span className="truncate">{s.name}</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {s.repos.length} repo(s)
+                  </span>
+                  {s.id === props.systemId ? (
+                    <Check className="size-3.5" />
+                  ) : null}
                 </span>
-                {s.id === props.systemId ? (
-                  <Check className="size-3.5" />
-                ) : null}
-              </span>
-            </DropdownMenuItem>
-          ))}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -115,41 +121,43 @@ export function ScopeBar(props: ScopeBarProps) {
           <ChevronsUpDown className="size-3 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-96">
-          <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
-            Snapshots — newest first
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {props.snapshots.map((s) => (
-            <DropdownMenuItem
-              key={s.id}
-              onSelect={() => props.onSnapshot(s.id)}
-              className="justify-between gap-3"
-            >
-              <span className="truncate font-mono text-xs">{s.id}</span>
-              <span className="flex shrink-0 items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  {s.created_at
-                    ? new Date(s.created_at).toLocaleDateString()
-                    : ""}
+          <DropdownMenuGroup>
+            <DropdownMenuGroupLabel className="text-xs tracking-wider text-muted-foreground uppercase">
+              Snapshots — newest first
+            </DropdownMenuGroupLabel>
+            <DropdownMenuSeparator />
+            {props.snapshots.map((s) => (
+              <DropdownMenuItem
+                key={s.id}
+                onSelect={() => props.onSnapshot(s.id)}
+                className="justify-between gap-3"
+              >
+                <span className="truncate font-mono text-xs">{s.id}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {s.created_at
+                      ? new Date(s.created_at).toLocaleDateString()
+                      : ""}
+                  </span>
+                  <Badge
+                    variant={
+                      s.status === "succeeded"
+                        ? "ok"
+                        : s.status === "failed"
+                          ? "bad"
+                          : "warn"
+                    }
+                    className="px-1.5 py-0 text-2xs"
+                  >
+                    {s.status ?? "pending"}
+                  </Badge>
+                  {s.id === props.snapshotId ? (
+                    <Check className="size-3.5" />
+                  ) : null}
                 </span>
-                <Badge
-                  variant={
-                    s.status === "succeeded"
-                      ? "ok"
-                      : s.status === "failed"
-                        ? "bad"
-                        : "warn"
-                  }
-                  className="px-1.5 py-0 text-2xs"
-                >
-                  {s.status ?? "pending"}
-                </Badge>
-                {s.id === props.snapshotId ? (
-                  <Check className="size-3.5" />
-                ) : null}
-              </span>
-            </DropdownMenuItem>
-          ))}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

@@ -21,6 +21,7 @@ import type { Endpoint } from "@/lib/wadi/api"
 import { useEndpointDetail } from "@/lib/wadi/hooks"
 import { endpointPath } from "@/lib/wadi/routes"
 import { unopenableCopy } from "@/lib/wadi/unopenable"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MethodBadge } from "@/components/explorer/method-badge"
@@ -405,18 +406,28 @@ export function EndpointPeek({
         </CollapsibleSection>
       </ScrollArea>
 
-      <footer className="shrink-0 border-t bg-muted/25 p-3.5">
-        <Link
-          href={endpointPath(snapshotId, endpoint.id)}
-          className={cn(
-            "flex w-full items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-xs font-semibold text-primary transition-colors",
-            "hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          )}
+      {/* The one primary action on this panel, and it must look like it.
+          It used to be a tinted outline (`border-primary/40 bg-primary/10`),
+          which reads as one more chip in a panel already full of chips — the
+          eye has no reason to land on it. A SOLID fill is unambiguous, and it
+          is affordable precisely because the accent is achromatic: this is
+          the loudest element on the surface without spending a hue that
+          data needs. The panel edge is a real shoulder above it (thicker top
+          rule, deeper ground) so the action reads as a footer, not as the
+          next row in the list. */}
+      <footer className="shrink-0 border-t-2 bg-panel px-3.5 pt-3 pb-3.5">
+        <Button
+          size="lg"
+          render={<Link href={endpointPath(snapshotId, endpoint.id)} />}
+          className="group h-10 w-full gap-2 px-3 text-sm font-semibold shadow-sm"
         >
           Open full flow
-          <ArrowRight aria-hidden className="size-3.5" />
-        </Link>
-        <p className="mt-1.5 flex items-center justify-center gap-1.5 text-center text-2xs text-muted-foreground">
+          <ArrowRight
+            aria-hidden
+            className="size-4 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none"
+          />
+        </Button>
+        <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-2xs text-subtle-foreground">
           <ExternalLink aria-hidden className="size-3" />
           call tree · flow graph · source
         </p>

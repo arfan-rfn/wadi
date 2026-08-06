@@ -7,11 +7,11 @@
 // horizontal rules before any content. They are one bar now: brand, then the
 // scope you are looking at, then what is in it. The panes get the height back,
 // and there is a single line to read left-to-right instead of two to correlate.
-import { useEffect, useState } from "react"
 import Link from "next/link"
 import { GitMerge } from "lucide-react"
 
 import { siteConfig } from "@/config/site"
+import { useMounted } from "@/lib/hooks/use-mounted"
 import { cn } from "@/lib/utils"
 import { DensityToggle } from "@/components/density-toggle"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -29,12 +29,11 @@ export function AppHeader({
 }) {
   // The scope pickers are driven entirely by client-fetched data, so the
   // server has nothing real to render for them — and rendering the shell
-  // anyway made the markup disagree with the client, which shifts every Radix
+  // anyway made the markup disagree with the client, which shifts every
   // `useId` after it and surfaces as a hydration mismatch on the dropdown
   // triggers. Mounting them after hydration is not a workaround: it matches
   // where the data actually comes from.
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  const mounted = useMounted()
   return (
     <header
       className={cn(
