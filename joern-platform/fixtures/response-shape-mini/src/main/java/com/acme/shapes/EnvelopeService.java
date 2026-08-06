@@ -18,6 +18,21 @@ public class EnvelopeService {
         return new Envelope<>(1, "ok", items);
     }
 
+    /**
+     * EVERY path sends null: the payload is empty, not unknown.
+     *
+     * TrainTicket writes whole services this way — `pay(...)` returns
+     * `new Response<>(_, _, null)` on all five paths — and calling that
+     * `unresolved` claims an analysis failure about code that states plainly
+     * it sends no payload.
+     */
+    public Envelope acknowledgeOnly(boolean flag) {
+        if (flag) {
+            return new Envelope<>(1, "done", null);
+        }
+        return new Envelope<>(0, "failed", null);
+    }
+
     /** Two constructions that genuinely disagree: T stays unresolved. */
     public Envelope conflicting(boolean flag) {
         Item item = new Item();

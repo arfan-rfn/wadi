@@ -176,7 +176,14 @@ export type Fields = FieldShape[]
  * ``truncated`` are honest terminals — never fabricated fields (P10).
  */
 export type ShapeKind =
-  "object" | "scalar" | "array" | "map" | "cycle" | "truncated" | "unresolved"
+  | "object"
+  | "scalar"
+  | "array"
+  | "map"
+  | "cycle"
+  | "truncated"
+  | "unresolved"
+  | "always-null"
 /**
  * Evidence the shape was read from; nested shapes are always declared
  */

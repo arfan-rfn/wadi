@@ -251,16 +251,29 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
                               : "s"}
                           </span>
                         )}
-                        {/* What this service lets REACH it — CORS/CSRF are
-                            declared per service, so the rollup on the coverage
-                            tab cannot say which one declared what. */}
-                        {(service.request_policies ?? []).map((policy) => (
-                          <span key={`${policy.kind}:${policy.scope}`}>
-                            {" · "}
-                            {policy.kind}
-                          </span>
-                        ))}
                       </p>
+                      {/* What this service lets REACH it — CORS/CSRF are
+                          declared per service, so the coverage rollup cannot
+                          say which one declared what. On its own row: appended
+                          to the line above it fell off the end of a `truncate`
+                          and was invisible on every service that had one. */}
+                      {(service.request_policies ?? []).length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {[
+                            ...new Set(
+                              (service.request_policies ?? []).map((p) => p.kind)
+                            ),
+                          ].map((kind) => (
+                            <span
+                              key={kind}
+                              className="rounded-full border px-1.5 font-mono text-[10px] text-muted-foreground"
+                              title="Gates which origin or request shape may reach this service — not which principal"
+                            >
+                              {kind}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <span
                       className={cn(

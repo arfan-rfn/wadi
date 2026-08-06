@@ -61,6 +61,12 @@ public class ShapeController {
         return ok(envelopes.findAll());
     }
 
+    /** Every path sends null: `data` is empty, and says so. */
+    @GetMapping("/envelope-empty")
+    public HttpEntity envelopeEmpty() {
+        return ok(envelopes.acknowledgeOnly(true));
+    }
+
     /** Two constructions that disagree about T: it must stay unresolved. */
     @GetMapping("/envelope-conflict")
     public HttpEntity envelopeConflict() {

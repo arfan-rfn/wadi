@@ -37,6 +37,14 @@ class ShapeKind(StrEnum):
     TRUNCATED = "truncated"
     UNRESOLVED = "unresolved"
 
+    ALWAYS_NULL = "always-null"
+    """Every construction of the enclosing type sets this field to `null`, so
+    the wire value is always null. Distinct from `unresolved`, which says the
+    type could not be determined: this says there is no value to determine.
+    TrainTicket writes whole services this way, and reporting them as
+    unresolved claimed an analysis failure about code that states plainly it
+    sends no payload."""
+
 
 class FieldShape(WadiModel):
     """One serialized field: the WIRE name (Jackson renames applied)."""

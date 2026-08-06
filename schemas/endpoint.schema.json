@@ -452,7 +452,8 @@
         "map",
         "cycle",
         "truncated",
-        "unresolved"
+        "unresolved",
+        "always-null"
       ],
       "title": "ShapeKind",
       "type": "string"

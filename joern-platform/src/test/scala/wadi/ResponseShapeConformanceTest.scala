@@ -100,6 +100,34 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
     fields.find(_("name").str == "data").get("shape")("kind").str should not be "unresolved"
   }
 
+  test("a DECLARED generic wrapping a raw envelope binds too") {
+    // `ResponseEntity<Envelope>` has a type argument, so it never took the
+    // recovery path — while the `Envelope` inside is as raw as any recovered
+    // one. Binding only on recovery left this showing `data: T` while a
+    // handler one line different resolved fully.
+    val fields = shape("GET", "/declared/wrapped-envelope")("fields").arr
+    val data = fields.find(_("name").str == "data").getOrElse(fail("no data field"))
+    data("shape")("kind").str shouldBe "array"
+  }
+
+  test("a declared type ARGUMENT answers without touching the producer") {
+    // `Envelope<Item>` says T=Item outright. Preferring it over the return
+    // expression keeps the strongest evidence first, as the rest of §5.2.7 does.
+    val fields = shape("GET", "/declared/declared-argument")("fields").arr
+    val data = fields.find(_("name").str == "data").getOrElse(fail("no data field"))
+    data("shape")("kind").str shouldBe "object"
+    data("shape")("fields").arr.map(_("name").str) should contain("display_name")
+  }
+
+  test("a payload every path sets to null is EMPTY, not unknown") {
+    // The distinction a reader acts on: `unresolved` says analysis could not
+    // determine the type, `always-null` says the code determined it sends
+    // nothing. Both of the endpoints that prompted this were the second.
+    val fields = shape("GET", "/shapes/envelope-empty")("fields").arr
+    val data = fields.find(_("name").str == "data").getOrElse(fail("no data field"))
+    data("shape")("kind").str shouldBe "always-null"
+  }
+
   test("two constructions that genuinely disagree leave T unresolved") {
     // The guard: `Item` on one path and `String` on the other is a real
     // conflict, and recovery must not pick. This is the case the null rule

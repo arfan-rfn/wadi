@@ -195,13 +195,23 @@ object TypeShapes {
     inits: List[Call],
     fieldIndex: Int
   ): Option[RawType] = {
-    val texts = inits
-      .flatMap(_.argument.l.find(_.argumentIndex == fieldIndex + 1))
+    val arguments = inits.flatMap(_.argument.l.find(_.argumentIndex == fieldIndex + 1))
+    // EVERY construction passes null: the field is not unknown, it is empty.
+    // TrainTicket writes whole services this way — `pay(...)` returns
+    // `new Response<>(_, _, null)` on all five paths — and reporting that as
+    // `unresolved` says analysis failed about code that states plainly it
+    // sends no payload.
+    if (arguments.nonEmpty && arguments.forall(isNullLiteral))
+      return Some(RawType(AlwaysNullMarker, Nil))
+    val texts = arguments
       .filterNot(isNullLiteral)
       .flatMap(declaredTextOfValue(cpg, producer, _))
       .distinct
     if (texts.sizeIs == 1) texts.headOption.flatMap(parseTypeText) else None
   }
+
+  /** Internal sentinel: a field every construction sets to `null`. */
+  private val AlwaysNullMarker = "<always-null>"
 
   private def isNullLiteral(argument: AstNode): Boolean = argument match {
     case literal: Literal => literal.code.trim == "null"
@@ -254,21 +264,75 @@ object TypeShapes {
     * declared generic, and it yields nothing unless every return agrees.
     */
   private[`export`] def responseShapeOf(cpg: Cpg, method: Method): Option[ujson.Obj] = {
-    val declaredText  = returnTypeTextOf(method)
-    val declaredShape = declaredText.flatMap(shapeOf(cpg, _)).map(withOrigin(_, "declared"))
+    val declaredText = returnTypeTextOf(method)
+    // The producer is needed on BOTH paths. `ResponseEntity<Response>` is a
+    // DECLARED generic — so it never took the recovery path — wrapping a RAW
+    // `Response` whose `T` is exactly as unbound as the recovered case's.
+    // Binding only on recovery left those endpoints showing `data: T` while a
+    // handler one line different resolved fully.
+    val producer = producerFromReturns(cpg, method)
+    val declaredShape = declaredText
+      .flatMap(text => shapeOf(cpg, text, bindingsForText(cpg, text, producer)))
+      .map(withOrigin(_, "declared"))
     val rawWrapper = declaredText
       .flatMap(parseTypeText)
       .exists(raw => UnwrapOne.contains(simpleName(raw.name)) && raw.args.isEmpty)
     if (!rawWrapper) declaredShape
     else
       inferredPayloadOf(cpg, method)
-        .flatMap { case (text, producer) =>
-          val bindings = producer.map(typeArgumentBindings(cpg, text, _)).getOrElse(Map.empty)
-          shapeOf(cpg, text, bindings)
+        .flatMap { case (text, inferredProducer) =>
+          shapeOf(cpg, text, bindingsForText(cpg, text, inferredProducer.orElse(producer)))
         }
         .map(withOrigin(_, "return-expression"))
         .orElse(declaredShape)
   }
+
+  /** Bindings for the PAYLOAD type inside a wrapper, not the wrapper itself.
+    *
+    * `ResponseEntity<Response>` needs `Response`'s `T` bound; asking about
+    * `ResponseEntity` finds an external type with no members and no answer.
+    */
+  private def bindingsForText(
+    cpg: Cpg,
+    typeText: String,
+    producer: Option[Method]
+  ): Map[String, RawType] =
+    parseTypeText(typeText)
+      .map(unwrapToPayload)
+      .map { payload =>
+        // A declared argument is the better evidence when there is one:
+        // `Response<Order>` says T=Order outright, no dataflow needed.
+        val fromDeclaration = declaredArgumentBindings(cpg, payload)
+        if (fromDeclaration.nonEmpty) fromDeclaration
+        else producer.map(typeArgumentBindings(cpg, payload.name, _)).getOrElse(Map.empty)
+      }
+      .getOrElse(Map.empty)
+
+  private def unwrapToPayload(raw: RawType): RawType =
+    if (UnwrapOne.contains(simpleName(raw.name)) && raw.args.nonEmpty) unwrapToPayload(raw.args.head)
+    else raw
+
+  /** `Response<Order>` -> `T` = `Order`, when the class has ONE parameter.
+    *
+    * Positional beyond one is not safe: javasrc2cpg materializes no
+    * TYPE_PARAMETER nodes for these classes, so with two parameters there is
+    * no order to map arguments onto and the binding would be a guess.
+    */
+  private def declaredArgumentBindings(cpg: Cpg, payload: RawType): Map[String, RawType] = {
+    if (payload.args.sizeIs != 1) return Map.empty
+    val parameterNames = resolveTypeDecl(cpg, payload.name).toList
+      .flatMap(_.member.l)
+      .flatMap(typeParameterNameOf(cpg, _))
+      .distinct
+    if (parameterNames.sizeIs == 1) Map(parameterNames.head -> payload.args.head) else Map.empty
+  }
+
+  /** The body-carrying callee of whatever the handler's returns hand back. */
+  private def producerFromReturns(cpg: Cpg, method: Method): Option[Method] =
+    method.ast.isReturn.l
+      .flatMap(ret => payloadExpressionOf(ret.astChildren.l))
+      .flatMap(producerOf(cpg, _))
+      .headOption
 
   private def withOrigin(shape: ujson.Obj, origin: String): ujson.Obj = {
     shape("origin") = origin
@@ -376,6 +440,7 @@ object TypeShapes {
   ): ujson.Obj = {
     // A bound type PARAMETER stands for the type the producer actually supplies
     // (T8): substitute before anything else, or the walk resolves `T` itself.
+    if (raw.name == AlwaysNullMarker) return node("always-null", "null")
     bindings.get(raw.name) match {
       case Some(bound) if bound.name != raw.name =>
         return build(cpg, bound, path, depth, bindings - raw.name)
