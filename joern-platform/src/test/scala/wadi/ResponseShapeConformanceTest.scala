@@ -75,6 +75,39 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
     originOf("POST", "/shapes/created") shouldBe "return-expression"
   }
 
+  // ---- the envelope: one field deeper than the wrapper -------------------
+
+  test("a raw generic envelope resolves T from the producer's return statement") {
+    // What 291 of 365 train-ticket-aitest endpoints published before this:
+    // `{status, msg, data}` where `data` was an unbound `T`. The shape named
+    // the wrapper and withheld the only field a reader wants. No signature
+    // anywhere carries the argument — the service declares a RAW `Envelope`
+    // and only its return statement says what went in.
+    kindOf("GET", "/shapes/envelope") shouldBe "object"
+    val fields = shape("GET", "/shapes/envelope")("fields").arr
+    val data = fields.find(_("name").str == "data").getOrElse(fail("no data field"))
+    data("shape")("kind").str shouldBe "array"
+    data("shape")("element")("kind").str shouldBe "object"
+    // ...and it is the real payload entity, walked like any other type.
+    data("shape")("element")("fields").arr.map(_("name").str) should contain("display_name")
+  }
+
+  test("a null payload is an absence, not a disagreement") {
+    // The failure branch is `new Envelope<>(0, "empty", null)`. Treating that
+    // as a competing claim would withhold the type the success branch states
+    // plainly — every TrainTicket service writes exactly this pair.
+    val fields = shape("GET", "/shapes/envelope")("fields").arr
+    fields.find(_("name").str == "data").get("shape")("kind").str should not be "unresolved"
+  }
+
+  test("two constructions that genuinely disagree leave T unresolved") {
+    // The guard: `Item` on one path and `String` on the other is a real
+    // conflict, and recovery must not pick. This is the case the null rule
+    // above must NOT swallow.
+    val fields = shape("GET", "/shapes/envelope-conflict")("fields").arr
+    fields.find(_("name").str == "data").get("shape")("kind").str shouldBe "unresolved"
+  }
+
   // ---- honest unknowns ---------------------------------------------------
 
   test("returns that disagree elect no winner") {

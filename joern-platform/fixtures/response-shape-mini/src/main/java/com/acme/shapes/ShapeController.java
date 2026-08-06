@@ -29,6 +29,8 @@ public class ShapeController {
 
     private final ItemService service = new ItemService();
 
+    private final EnvelopeService envelopes = new EnvelopeService();
+
     /** Recovery: `ok(expr)` where the callee declares the payload. */
     @GetMapping("/one")
     public HttpEntity one() {
@@ -45,6 +47,23 @@ public class ShapeController {
     @PostMapping("/created")
     public HttpEntity created() {
         return new ResponseEntity<>(service.findOne(), HttpStatus.CREATED);
+    }
+
+    /**
+     * The envelope case: the payload type lives in the producer's return
+     * statement and nowhere else (§5.2.7 T8). Recovering only `{status, msg,
+     * data: T}` named the wrapper and withheld the one field a reader wants —
+     * which is what 291 of 365 train-ticket-aitest endpoints published.
+     */
+    @GetMapping("/envelope")
+    public HttpEntity envelope() {
+        return ok(envelopes.findAll());
+    }
+
+    /** Two constructions that disagree about T: it must stay unresolved. */
+    @GetMapping("/envelope-conflict")
+    public HttpEntity envelopeConflict() {
+        return ok(envelopes.conflicting(true));
     }
 
     /**

@@ -122,7 +122,125 @@ object TypeShapes {
 
   /** Build the wire shape for a declared type text. */
   def shapeOf(cpg: Cpg, typeText: String): Option[ujson.Obj] =
-    parseTypeText(typeText).map(raw => build(cpg, raw, Set.empty, MaxDepth))
+    shapeOf(cpg, typeText, Map.empty)
+
+  private def shapeOf(
+    cpg: Cpg,
+    typeText: String,
+    bindings: Map[String, RawType]
+  ): Option[ujson.Obj] =
+    parseTypeText(typeText).map(raw => build(cpg, raw, Set.empty, MaxDepth, bindings))
+
+  /** `T` -> the type the producing method actually puts in that field.
+    *
+    * §5.2.7 (amended again 2026-08-05, T8): recovering the ENVELOPE is not
+    * recovering the response. TrainTicket wraps every payload in
+    * `Response<T>` and declares the service method that builds it as a RAW
+    * `Response`, so the walk reached `{status, msg, data}` with `data` an
+    * unbound `T` on **291 of 365 endpoints** — a shape that names the wrapper
+    * and withholds the only field a reader wants.
+    *
+    * The type argument is not in any signature; it is in the producer's return
+    * statement (`return new Response<>(1, "ok", payments)`). javasrc2cpg erases
+    * the argument's own type to `java.util.List`, but the LOCAL's declaration
+    * text keeps `List<InsidePayment>` — the same "read the declared text, not
+    * typeFullName" rule this section already rests on, applied one hop deeper.
+    */
+  private def typeArgumentBindings(
+    cpg: Cpg,
+    typeText: String,
+    producer: Method
+  ): Map[String, RawType] = {
+    val bindings = for {
+      raw      <- parseTypeText(typeText).toList
+      typeDecl <- resolveTypeDecl(cpg, raw.name).toList
+      members = typeDecl.member.l
+      // Only the all-args shape is safe to bind positionally: field order maps
+      // to argument order (argument 0 is the allocation receiver). Any other
+      // arity means the mapping is a guess, and a guessed payload type is
+      // worse than an honest `T` (P10).
+      inits = producer.ast.isCall
+        .filter(c => c.name == "<init>" && c.methodFullName.startsWith(typeDecl.fullName + "."))
+        .filter(_.argument.size == members.size + 1)
+        .l
+      if inits.nonEmpty
+      (member, index) <- members.zipWithIndex
+      parameterName   <- typeParameterNameOf(cpg, member).toList
+      bound           <- reconcileArgument(cpg, producer, inits, index).toList
+    } yield parameterName -> bound
+    bindings.toMap
+  }
+
+  /** The member's declared text when it names a TYPE PARAMETER rather than a
+    * type: `T data` on a class the CPG holds no `T` for.
+    */
+  private def typeParameterNameOf(cpg: Cpg, member: Member): Option[String] =
+    memberTypeTextOf(member)
+      .filter(text => !text.contains('<') && !text.contains('.'))
+      .filter(text => !ScalarSimpleNames.contains(text))
+      .filter(text => !ArrayLike.contains(text) && !MapLike.contains(text))
+      .filter(text => resolveTypeDecl(cpg, text).isEmpty)
+
+  /** The type every construction agrees this field holds, ignoring `null`.
+    *
+    * A `null` in the payload position is an ABSENCE, not a competing claim:
+    * TrainTicket's failure branches are all `new Response<>(0, "failed",
+    * null)`, and treating that as a disagreement would withhold the type the
+    * success branch states plainly. Two non-null constructions that disagree
+    * still yield nothing.
+    */
+  private def reconcileArgument(
+    cpg: Cpg,
+    producer: Method,
+    inits: List[Call],
+    fieldIndex: Int
+  ): Option[RawType] = {
+    val texts = inits
+      .flatMap(_.argument.l.find(_.argumentIndex == fieldIndex + 1))
+      .filterNot(isNullLiteral)
+      .flatMap(declaredTextOfValue(cpg, producer, _))
+      .distinct
+    if (texts.sizeIs == 1) texts.headOption.flatMap(parseTypeText) else None
+  }
+
+  private def isNullLiteral(argument: AstNode): Boolean = argument match {
+    case literal: Literal => literal.code.trim == "null"
+    case _                => false
+  }
+
+  /** The declared type text of a value inside `producer`, generics intact. */
+  private def declaredTextOfValue(cpg: Cpg, producer: Method, value: AstNode): Option[String] =
+    value match {
+      case identifier: Identifier =>
+        producer.local
+          .nameExact(identifier.name)
+          .l
+          .flatMap(local => declarationTypeText(local.code, local.name))
+          .headOption
+          .orElse(
+            producer.parameter
+              .nameExact(identifier.name)
+              .l
+              .flatMap(p => declarationTypeText(p.code, p.name))
+              .headOption
+          )
+          .orElse(usableTypeName(identifier.typeFullName))
+      case call: Call =>
+        cpg.method
+          .fullNameExact(call.methodFullName)
+          .filterNot(_.isExternal)
+          .headOption
+          .flatMap(returnTypeTextOf)
+          .orElse(usableTypeName(call.typeFullName))
+      case literal: Literal => usableTypeName(literal.typeFullName)
+      case _                => None
+    }
+
+  /** `List<InsidePayment> payments` -> `List<InsidePayment>`. */
+  private def declarationTypeText(code: String, name: String): Option[String] = {
+    val nameIdx = code.lastIndexOf(name)
+    if (nameIdx <= 0) None else trailingTypeToken(code.substring(0, nameIdx))
+  }
 
   /** The response shape for a handler, carrying the provenance of the type it read.
     *
@@ -143,8 +261,11 @@ object TypeShapes {
       .exists(raw => UnwrapOne.contains(simpleName(raw.name)) && raw.args.isEmpty)
     if (!rawWrapper) declaredShape
     else
-      inferredPayloadTextOf(cpg, method)
-        .flatMap(shapeOf(cpg, _))
+      inferredPayloadOf(cpg, method)
+        .flatMap { case (text, producer) =>
+          val bindings = producer.map(typeArgumentBindings(cpg, text, _)).getOrElse(Map.empty)
+          shapeOf(cpg, text, bindings)
+        }
         .map(withOrigin(_, "return-expression"))
         .orElse(declaredShape)
   }
@@ -161,13 +282,24 @@ object TypeShapes {
     * winner. `return ok()` with no argument contributes nothing, as does any
     * expression whose type is off-CPG.
     */
-  private def inferredPayloadTextOf(cpg: Cpg, method: Method): Option[String] = {
-    val texts = method.ast.isReturn.l
+  private def inferredPayloadOf(cpg: Cpg, method: Method): Option[(String, Option[Method])] = {
+    val resolved = method.ast.isReturn.l
       .flatMap(ret => payloadExpressionOf(ret.astChildren.l))
-      .flatMap(typeTextOfExpression(cpg, _))
-      .filterNot(isRawWrapperText)
-      .distinct
-    if (texts.sizeIs == 1) texts.headOption else None
+      .flatMap { expression =>
+        typeTextOfExpression(cpg, expression)
+          .filterNot(isRawWrapperText)
+          .map(text => (text, producerOf(cpg, expression)))
+      }
+    val texts = resolved.map(_._1).distinct
+    // The producer is the method whose body constructs the value, reached
+    // through the DI edge — the interface declaration carries the type name but
+    // only the implementation carries the type ARGUMENT.
+    if (texts.sizeIs == 1) Some((texts.head, resolved.flatMap(_._2).headOption)) else None
+  }
+
+  private def producerOf(cpg: Cpg, expression: AstNode): Option[Method] = expression match {
+    case call: Call => call.callee(using NoResolve).filterNot(_.isExternal).find(_.body.astChildren.nonEmpty)
+    case _          => None
   }
 
   /** A recovered type that is ITSELF a raw wrapper is not a recovery.
@@ -235,18 +367,31 @@ object TypeShapes {
     stripped.substring(stripped.lastIndexOf('.') + 1)
   }
 
-  private def build(cpg: Cpg, raw: RawType, path: Set[String], depth: Int): ujson.Obj = {
+  private def build(
+    cpg: Cpg,
+    raw: RawType,
+    path: Set[String],
+    depth: Int,
+    bindings: Map[String, RawType] = Map.empty
+  ): ujson.Obj = {
+    // A bound type PARAMETER stands for the type the producer actually supplies
+    // (T8): substitute before anything else, or the walk resolves `T` itself.
+    bindings.get(raw.name) match {
+      case Some(bound) if bound.name != raw.name =>
+        return build(cpg, bound, path, depth, bindings - raw.name)
+      case _ =>
+    }
     val simple = simpleName(raw.name)
     if (raw.array)
-      return node("array", raw.name, element = Some(build(cpg, raw.copy(array = false), path, depth)))
+      return node("array", raw.name, element = Some(build(cpg, raw.copy(array = false), path, depth, bindings)))
     if (UnwrapOne.contains(simple) && raw.args.nonEmpty)
-      return build(cpg, raw.args.head, path, depth)
+      return build(cpg, raw.args.head, path, depth, bindings)
     if (ArrayLike.contains(simple)) {
-      val element = raw.args.headOption.map(build(cpg, _, path, depth))
+      val element = raw.args.headOption.map(build(cpg, _, path, depth, bindings))
       return node("array", raw.name, element = element)
     }
     if (MapLike.contains(simple)) {
-      val value = raw.args.lift(1).map(build(cpg, _, path, depth))
+      val value = raw.args.lift(1).map(build(cpg, _, path, depth, bindings))
       return node("map", raw.name, element = value)
     }
     if (ScalarSimpleNames.contains(simple)) return node("scalar", raw.name)
@@ -261,16 +406,22 @@ object TypeShapes {
             .filterNot(isJsonIgnored)
             .filterNot(_.name.startsWith("$"))
             .filterNot(m => m.modifier.modifierType.l.contains("STATIC"))
-            .map(fieldShape(cpg, _, path + typeDecl.fullName, depth - 1))
+            .map(fieldShape(cpg, _, path + typeDecl.fullName, depth - 1, bindings))
           node("object", raw.name, fields = fields)
         }
     }
   }
 
-  private def fieldShape(cpg: Cpg, member: Member, path: Set[String], depth: Int): ujson.Obj = {
+  private def fieldShape(
+    cpg: Cpg,
+    member: Member,
+    path: Set[String],
+    depth: Int,
+    bindings: Map[String, RawType] = Map.empty
+  ): ujson.Obj = {
     val declaredText = memberTypeTextOf(member).getOrElse(member.typeFullName)
     val shape = parseTypeText(declaredText)
-      .map(build(cpg, _, path, depth))
+      .map(build(cpg, _, path, depth, bindings))
       .getOrElse(node("unresolved", member.typeFullName))
     val wireName = jsonPropertyName(member)
     val obj = ujson.Obj("name" -> wireName.getOrElse(member.name), "shape" -> shape)
