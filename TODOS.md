@@ -55,7 +55,7 @@ folklore.
 
 ## Coverage — vocabulary exercised only by fixtures
 
-### Five vocabularies have never run against a real corpus
+### Four vocabularies have never run against a real corpus
 **Priority:** P2
 **Opened:** v0.7.0
 
@@ -63,10 +63,14 @@ Each is fixture-proven and reads zero on `train-ticket-aitest` because that
 corpus does not contain the idiom. By the `unexercised_vocabulary` logic wadi
 itself ships, a zero here proves nothing about whether the path works:
 
-- `authorities` — the corpus uses only `hasAnyRole`; the role/authority split
-  shipped in 0.6.0 has never been exercised outside the matrix fixture.
-- `denied` — no `denyAll()` route survives in the corpus.
-- `withheld` — every auth idiom in the corpus is now readable.
+- ~~`authorities`~~ — **exercised in 0.8.0**: the ICPC corpus publishes 14
+  distinct permission constants across 282 endpoints, read from the arguments of
+  a project-defined annotation (§5.2.12).
+- `denied` — no `denyAll()` route survives in either corpus.
+- ~~`withheld`~~ — **exercised in 0.8.0**: fired on 7 ICPC endpoints before the
+  relationship model landed, and the state left `unexercised_vocabulary`. It
+  reads 0 again now because every annotation-bound guard resolves — which is the
+  counter working, not the path going untested.
 - `async-root` reachability — measured 0 across 14 services; no HTTP sink is
   reachable only from a startup root there.
 - `declared-not-bound` — 585 → 0 after the T7 fix, so the code path that emits
@@ -98,7 +102,7 @@ become a standing check rather than a claim in a document.
 
 ### The aspect that actually answers 403 is not detected
 **Priority:** P1
-**Opened:** v0.7.5
+**Opened:** v0.8.0
 
 ICPC's `UserAuthorizer` is the construct that throws `AccessDeniedException` for
 every controller method in the system, and M1 does not see it. Its own body
@@ -120,7 +124,7 @@ safely.
 
 ### Enforcement scope is URI-granular, with no HTTP method
 **Priority:** P2
-**Opened:** v0.7.5
+**Opened:** v0.8.0
 
 `ExportAuthEnforcement` carries `pattern` and no verb, so an annotation-bound
 guard on `GET /x` also covers `POST /x`. The direction is safe — it withholds
@@ -134,7 +138,7 @@ not a `wadi-contracts` change.
 
 ### A library compiled into a service is modelled as a peer service
 **Priority:** P1
-**Opened:** v0.7.5
+**Opened:** v0.8.0
 
 `global.icpc:base` is a jar inside `contest`, and the snapshot pipeline gives it
 its own service. The annotations and two of the authorizers live there, so in a
@@ -164,7 +168,7 @@ which origin may call, not which principal — but a scoped read is still useful
 ## Completed
 
 ### A path template could match a literal into a `permitAll`
-**Closed:** v0.7.5 (§5.2.13)
+**Closed:** v0.8.0 (§5.2.13)
 
 `_ant_match` let an endpoint's `{id}` absorb a literal pattern segment, so
 `/help/cms/{space}/{page}` inherited the `permitAll` written for

@@ -3,6 +3,76 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.8.0 — 2026-08-06 (the words a project invents for its own policy)
+
+Wadi could only recognise authorization it had been taught the name of. Measured
+on a real enterprise system (804 endpoints, 118 controllers), that meant 637
+endpoints publishing `roles: []` with nothing beside it while a project-defined
+vocabulary of eight annotations governed them, and nine endpoints publishing as
+`authenticated=false` — no authentication, evidenced — on routes that require it.
+
+### Added
+
+- **The authorization vocabulary is derived, not matched.** A security
+  annotation is no longer a name on a list; it is an annotation whose consumer
+  can deny the request, which is a property of the graph. Wadi reads the binding
+  three ways — an AspectJ advice parameter type, an `@annotation(...)`
+  designator, and a `getMethodAnnotation(X.class)` read inside an interceptor —
+  and the scope that follows is exactly the methods carrying the annotation, so
+  a guard reports on the endpoints it governs instead of blanketing a service.
+  Run cold against a system it had never seen, it recovered all eight of that
+  system's annotations with no names supplied.
+- **Relationship-scoped authorization is something the map can say.**
+  `@ContestManager(context = Contest.class)` requires that the caller manage
+  *the contest this request names* — a fact about a pair, not about the
+  principal, and the commonest authorization model there is (ownership,
+  tenancy, every resource-scoped role). Endpoints now carry `relationships[]`
+  beside `roles[]` and `authorities[]`, with the resource it is required on and
+  any permissions demanded alongside it. Where several guards apply and how they
+  combine could not be read, `composition_unresolved` says so rather than
+  letting the requirements read as exact.
+- **Gating constructs are identified by whether they can deny, not by name.**
+  An aspect that records its verdict on a request-scoped bean gates just as
+  surely as one that throws; what separates a guard from instrumentation is that
+  a guard must know who the caller is. A tracing aspect over the same handlers
+  is left alone.
+
+### Fixed
+
+- **Nine endpoints published as public require authentication.** A path template
+  in an endpoint's URI could absorb a literal in a security rule, so
+  `/help/cms/{space}/{page}` inherited the `permitAll` written for
+  `/help/cms/virtpublic/**` — true of the single request whose space is
+  literally `virtpublic`, false of every other. Matching now reports whether it
+  was reached exactly or speculatively, and only rules that can *weaken* a claim
+  — a `permitAll`, a chain bypass — refuse to act on speculation. Rules that add
+  restriction keep over-approximating, which is the safe direction.
+- **A guard scoped to one endpoint no longer lends itself to a sibling.** An
+  annotation-bound guard on `/common/country/{a2}` was ant-matched against
+  `/common/country/export`, so an admin-only route would have covered every
+  route beside it.
+- **A handler serving several routes guards all of them.** Only the first route
+  was read, leaving the rest looking unguarded.
+- **A rule written with a path template still covers the whole route it names.**
+  `/orders/{orderId}` and `/orders/{id}` are the same route and the variable
+  names need not agree; reading that as a partial match would have stopped a
+  real `permitAll` from answering, publishing an over-restrictive claim. Only a
+  literal absorbed by a template is partial.
+- **A guard's policy is read from the whole annotation.** It was parsed from a
+  truncated first line, so a long annotation could lose the second of two
+  candidate resource types and name the first one instead of declining.
+
+### Changed
+
+- Contracts 1.23.0, export 2.12.0. Every addition carries a default, so stored
+  artifacts and older exports load unchanged. `covers_route` is deliberately
+  separate from `resolution`: a rule can be read perfectly and still govern part
+  of a route, and the two answer different questions.
+- The system auth view and endpoint rows name the relation a caller must stand
+  in rather than showing a bare "protected" with an empty role list — on the
+  measured system that shape is 562 of 804 rows.
+- The wadi mark ships with the frontend.
+
 ## 0.7.4 — 2026-08-06 (a design system, not a repaint)
 
 Frontend only; no contract, CLI, or analysis behaviour changes.
