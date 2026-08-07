@@ -553,6 +553,27 @@ class TestClaimWithholding:
         )
         assert auth.authenticated is False
 
+    def test_a_templated_permit_all_covers_the_whole_route_it_names(self) -> None:
+        # Caught by adversarial review of §5.2.13's own change, and it is the
+        # trap a prior learning named: a rule written WITH a template covers the
+        # whole parameterised route, and its variable name need not match the
+        # handler's — `/orders/{orderId}` and `/orders/{id}` are one route.
+        # Reading that as speculative would stop a real permitAll establishing
+        # `open`, publishing an over-restrictive claim. Over-restriction is
+        # still a wrong fact.
+        auth = merge_endpoint_auth(
+            full_uri="/team/wf/{teamId}/published",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("/team/wf/{id}/published", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is False
+
     def test_a_speculative_permit_all_with_nothing_else_withholds(self) -> None:
         # No later rule requires auth, so "open" would rest entirely on a match
         # that is false for every request but one. That is the same shape as an

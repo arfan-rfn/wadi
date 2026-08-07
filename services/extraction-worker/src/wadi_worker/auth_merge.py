@@ -1099,12 +1099,21 @@ def _match_segments(pattern: list[str], path: list[str]) -> str | None:
     return _EXACT if here == _EXACT and tail == _EXACT else _SPECULATIVE
 
 
+def _is_template(segment: str) -> bool:
+    return segment.startswith("{") and segment.endswith("}")
+
+
 def _match_one(pattern_segment: str, path_segment: str) -> str | None:
     # The literal/wildcard reading first: `*` really does cover a template, so
     # `/orders/*` over `/orders/{id}` is exact, not speculative.
     regex = re.escape(pattern_segment).replace(r"\*", "[^/]*").replace(r"\?", ".")
     if re.fullmatch(regex, path_segment) is not None:
         return _EXACT
-    if path_segment.startswith("{") and path_segment.endswith("}"):
-        return _SPECULATIVE  # true of one value of the template, not of the route
+    if _is_template(path_segment):
+        # A rule written WITH a template covers the whole parameterised route,
+        # and the variable name in the rule need not match the handler's —
+        # `/orders/{orderId}` and `/orders/{id}` are the same route. Only a
+        # LITERAL pattern segment absorbed by a template is speculative: that
+        # one is true of a single value and false of every other.
+        return _EXACT if _is_template(pattern_segment) else _SPECULATIVE
     return None
