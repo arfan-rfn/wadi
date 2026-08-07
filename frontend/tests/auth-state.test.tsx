@@ -109,6 +109,59 @@ describe("AccessChip — the endpoint row's one auth fact", () => {
     expect(view.queryByText("Authenticated")).toBeNull()
   })
 
+  it("names the RELATION when the policy is relational, not a bare label", () => {
+    // §5.2.12. `authenticated: true` with an empty role list used to render as
+    // "Authenticated", which reads as "any logged-in caller" — on ICPC that
+    // was 562 of 804 endpoints, and it is the misreading this tranche removes.
+    const view = within(
+      renderWithQuery(
+        <AccessChip
+          state="required"
+          roles={[]}
+          relationships={[
+            { relation: "contest-manager", resource_type: "Contest" },
+          ]}
+        />
+      ).container
+    )
+    expect(view.getByText("contest-manager")).toBeInTheDocument()
+    expect(view.getByText("·Contest")).toBeInTheDocument()
+    expect(view.queryByText("Authenticated")).toBeNull()
+  })
+
+  it("keeps a relation legible when the resource could not be claimed", () => {
+    // Two Class-valued arguments leave the resource ambiguous, and the pack
+    // declines to guess (P10). The relation is still a policy worth showing.
+    const view = within(
+      renderWithQuery(
+        <AccessChip
+          state="required"
+          roles={[]}
+          relationships={[{ relation: "owner" }]}
+        />
+      ).container
+    )
+    expect(view.getByText("owner")).toBeInTheDocument()
+    expect(view.queryByText("Authenticated")).toBeNull()
+  })
+
+  it("labels a relational endpoint for assistive tech, not only visually", () => {
+    const view = within(
+      renderWithQuery(
+        <AccessChip
+          state="required"
+          roles={[]}
+          relationships={[
+            { relation: "contest-manager", resource_type: "Contest" },
+          ]}
+        />
+      ).container
+    )
+    expect(
+      view.getByLabelText(/contest-manager on Contest/)
+    ).toBeInTheDocument()
+  })
+
   it("falls back to the state label when the roles are not known", () => {
     expect(
       renderChip("required").getByText("Authenticated")
