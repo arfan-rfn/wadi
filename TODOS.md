@@ -146,24 +146,6 @@ vocabulary silently shrinks. **Measured end to end: 8 annotations derived with
 both repos in one CPG versus 7 through the shipping pipeline, and 643 guarded
 endpoints versus 566 — the per-service CPG costs 77 endpoints their guard.**
 
-### A path template can match a literal into a `permitAll`
-**Priority:** P1
-**Opened:** v0.7.5
-
-`_ant_match` lets an endpoint's `{id}` template segment match any literal in a
-rule pattern, documented as the honest over-approximation for a path pattern.
-It is honest while the rule *adds* restriction and wrong when the rule removes
-it: `/contest/{contestId}/camp/create` matches `/contest/public/**`, so the
-chain's `permitAll` appeared to cover seven contest-administration write routes
-and they published as `authenticated=false` — no authentication, evidenced.
-
-Found by the M1 end-to-end run, which withholds those seven for an unrelated
-reason (they carry an opaque annotation guard, and §5.2.10 escalates opacity on
-`PERMIT_ALL`). **The underlying defect is untouched**: an endpoint in the same
-URI shape with no annotation guard still reads as public. This is §5.2.10's
-permissive-direction rule applying to template-vs-literal matching, where it was
-only ever applied to unread scope.
-
 ---
 
 ## Analysis surfaces not yet consumed
@@ -180,6 +162,16 @@ which origin may call, not which principal — but a scoped read is still useful
 ---
 
 ## Completed
+
+### A path template could match a literal into a `permitAll`
+**Closed:** v0.7.5 (§5.2.13)
+
+`_ant_match` let an endpoint's `{id}` absorb a literal pattern segment, so
+`/help/cms/{space}/{page}` inherited the `permitAll` written for
+`/help/cms/virtpublic/**`. Matching now reports whether it was exact or
+speculative, and only callers that can be *weakened* by a match — a
+`permitAll`, a chain bypass — refuse to act on speculation. **Measured: 9
+endpoints moved from evidenced-public to protected, 0 regressions.**
 
 ### Response payload depth — envelopes resolved past `T`
 **Completed:** v0.7.0 (2026-08-06)

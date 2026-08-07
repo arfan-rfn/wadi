@@ -43,6 +43,12 @@
           "title": "Authorities",
           "type": "array"
         },
+        "covers_route": {
+          "default": true,
+          "description": "False when this enforcement governs only SOME requests the endpoint serves (\u00a75.2.13). Distinct from `resolution`, which says how completely the enforcement was READ: a rule can be read perfectly and still cover part of a route, and conflating the two hides why a `permitAll` sits beside a protected claim",
+          "title": "Covers Route",
+          "type": "boolean"
+        },
         "detail": {
           "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
           "minLength": 1,
@@ -656,7 +662,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.22.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.23.0/endpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One REST endpoint of one service within a snapshot.",
@@ -738,7 +744,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.22.0",
+      "default": "1.23.0",
       "title": "Schema Version",
       "type": "string"
     },

@@ -53,7 +53,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.22.0/extraction_job.schema.json",
+  "$id": "https://trywadi.com/schemas/1.23.0/extraction_job.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -117,7 +117,7 @@
       "type": "integer"
     },
     "schema_version": {
-      "default": "1.22.0",
+      "default": "1.23.0",
       "title": "Schema Version",
       "type": "string"
     },

@@ -643,6 +643,8 @@ def create_app(
                 denied=endpoint.auth.denied,
                 roles=endpoint.auth.roles,
                 authorities=endpoint.auth.authorities,
+                relationships=endpoint.auth.relationships,
+                composition_unresolved=endpoint.auth.composition_unresolved,
                 mechanism_kinds=sorted(
                     {m.kind for m in endpoint.auth.mechanisms if m.active},
                     key=lambda kind: kind.value,

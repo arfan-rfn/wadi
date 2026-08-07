@@ -473,6 +473,138 @@ class TestClaimWithholding:
         assert auth.authenticated is None
         assert auth.relationships == []
 
+    def test_a_permit_all_reached_by_template_absorption_does_not_open_a_route(self) -> None:
+        # §5.2.13, the live ICPC defect with the annotation guard removed so the
+        # matcher alone decides. `/contest/{contestId}/camp/create` "matches"
+        # `/contest/public/**` only for the single request whose contestId is
+        # the string `public`; a later rule requires auth for every other. The
+        # answer is protected, and it used to be `authenticated=false` —
+        # no authentication, evidenced, on a sub-contest creation route.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/**", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is True
+
+    def test_partial_coverage_is_its_own_fact_not_a_reading_failure(self) -> None:
+        # `resolution` says how completely the enforcement was READ, and this
+        # rule was read perfectly — `/contest/public/** -> permitAll()`, every
+        # character of it. What is partial is its SCOPE. Overloading resolution
+        # would tell a reader the analysis failed on a rule it understood, and
+        # would leave no way to explain why a permitAll sits on a protected
+        # endpoint without opening the code.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/**", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        permit = next(item for item in auth.evidence if item.effect is AuthEffect.PERMIT_ALL)
+        assert permit.covers_route is False
+        assert permit.resolution is AuthResolution.RESOLVED
+        catch_all = next(
+            item for item in auth.evidence if item.effect is AuthEffect.REQUIRE_AUTHENTICATED
+        )
+        assert catch_all.covers_route is True
+
+    def test_a_literal_permit_all_still_opens_the_route_it_names(self) -> None:
+        # The control. Narrowing the matcher must not cost real answers: this
+        # endpoint's path is literal all the way, so the rule covers every
+        # request it serves and `open` is the correct, evidenced claim.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/public/list",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/**", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is False
+
+    def test_a_wildcard_permit_all_over_a_template_is_still_exact(self) -> None:
+        # `*` genuinely covers a template segment — every value of `{id}` — so
+        # this is not speculation and must keep answering. Conflating the two
+        # would withhold every public templated route in every system.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/public/{contestId}",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/*", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is False
+
+    def test_a_speculative_permit_all_with_nothing_else_withholds(self) -> None:
+        # No later rule requires auth, so "open" would rest entirely on a match
+        # that is false for every request but one. That is the same shape as an
+        # unread permit, and it withholds the same way rather than claiming.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/public/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is None
+
+    def test_a_speculative_match_still_restricts_where_that_is_the_safe_direction(self) -> None:
+        # The asymmetry stated plainly: over-approximating a template into a
+        # literal adds restriction here, so it stands. Only the permissive
+        # direction is narrowed — withdrawing enforcement on a guess is what
+        # publishes wrong facts.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/admin/**", "hasRole('ADMIN')")],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is True
+        assert auth.roles == ["ADMIN"]
+
+    def test_a_chain_bypass_reached_by_template_absorption_is_ignored(self) -> None:
+        # A bypass switches the chain off entirely, so it is held to an exact
+        # match: granting it on one possible value of a template would take the
+        # security chain off a whole route.
+        auth = merge_endpoint_auth(
+            full_uri="/api/{resource}/data",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "authenticated()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="chain-bypass",
+                    pattern="/api/static/**",
+                    detail="ignoring()",
+                    anchor=ExportAnchor(file="src/SecurityConfig.java", line=40),
+                )
+            ],
+        )
+        assert auth.authenticated is True
+
     def test_a_chain_bypass_means_nothing_runs(self) -> None:
         auth = merge_endpoint_auth(
             full_uri="/static/app.js",

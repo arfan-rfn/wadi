@@ -40,6 +40,10 @@ export type SourceVariant = "original" | "generated"
  */
 export type Authorities1 = string[]
 /**
+ * False when this enforcement governs only SOME requests the endpoint serves (§5.2.13). Distinct from `resolution`, which says how completely the enforcement was READ: a rule can be read perfectly and still cover part of a route, and conflating the two hides why a `permitAll` sits beside a protected claim
+ */
+export type CoversRoute = boolean
+/**
  * e.g. '@PreAuthorize("hasRole('ADMIN')")'
  */
 export type Detail = string
@@ -302,6 +306,7 @@ export interface AuthEvidence {
   active?: Active
   anchor?: SourceAnchor | null
   authorities?: Authorities1
+  covers_route?: CoversRoute
   detail: Detail
   effect?: AuthEffect
   expression?: Expression

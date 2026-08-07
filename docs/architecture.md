@@ -711,6 +711,33 @@ The relation vocabulary comes out as `contest-manager on Contest`, `site-manager
 
 **Validation layers.** The §5.2.9 and §5.2.10 layers, plus the one this class requires: a fixture that pins **both** polarities — an annotation-bound gating aspect that must be detected and a tracing aspect over the same handlers that must not be — because a presence-only golden cannot fail on the false positive that makes the feature unusable (the P8 amendment). Goldens assert the derived vocabulary as a *set* and the guarded-handler *count*, so a binding form that stops resolving shows up as a number rather than a quieter map. The `unexercised_vocabulary` signal already fired correctly here (`roles`, `authorities`, `denied`, `withheld` all reported unexercised on a 804-endpoint enterprise system) and was the only layer that did — **it is a working instrument that nothing was watching**, which is its own finding about where the coverage report sits in the reading order.
 
+**§5.2.13 Path-template matching is not symmetric (recorded 2026-08-06, binding; Phase 2.9.3 M3).**
+
+Surfaced by M1's end-to-end run rather than by review, and it is the last of the wrong-fact class in this area: **9 ICPC endpoints were published as `authenticated=false` — no authentication, evidenced — on routes that require it.**
+
+*The mechanism.* `_ant_match` lets an endpoint's `{id}` template segment match any literal in a rule pattern, documented as the honest over-approximation for a path *pattern*. `/help/cms/{space}/{page}` therefore "matches" `/help/cms/virtpublic/**`, and `/team/search/site/{id}` matches `/team/search/site/accepted/**`. Both are true of exactly one value of the template and false of every other — but the chain's `permitAll` was taken as covering the whole route, and `CmsPageController`'s two handlers, which carry no guard at all, published as fully public.
+
+**The rule this section states: over-approximation is honest while it ADDS restriction and wrong the moment it removes one.** That is the same asymmetry §5.2.10 found for unread scope, arriving through matching rather than through reading, and it had to be found twice because the first fix was written as a special case (`opacity escalates on PERMIT_ALL`) rather than as the principle.
+
+*Decision — matching reports its precision.* `_ant_precision` returns `exact` or `speculative`: speculative means the match needed a path template to absorb a literal pattern segment. Callers that can only be *strengthened* by a match ignore it and keep over-approximating; callers that can be *weakened* — a `permitAll`, a chain bypass — decline to act on it. A `*` wildcard over a template stays exact, because `*` really does cover every value.
+
+Three consequences, each a distinct site: a speculatively-matched rule **forks** the first-match-wins walk instead of winning it (it governs one request of many, so control passes on for the rest); a chain **bypass** is held to an exact match, because granting one on a possible value would switch the security chain off for a whole route; and a permissive rule that is the *only* thing that would establish `open` **withholds** instead, since the claim would rest entirely on a match false for every other request.
+
+*Contract — `AuthEvidence.covers_route` (contracts 1.23.0).* Partial coverage is deliberately NOT folded into `resolution`. That field means *how completely the enforcement was read*, and these rules were read perfectly — `/contest/public/** -> permitAll()`, every character. What is partial is the scope. Overloading it would tell a reader the analysis failed on a rule it understood, and would leave no way to explain why a `permitAll` sits beside a protected claim without opening the code. The UI renders it as "covers part of this route — it applies to some requests this endpoint serves, not all of them".
+
+*Measured (snapshot `snap_ca6168d9…`, same corpus and pipeline).* **9 endpoints moved from evidenced-public to protected; 0 regressed; 9 claim changes in 804.** `/help/cms/{space}/{page}`, `/help/cms/{wiki}/{space}/{page}`, `/team/search/site/{id}` and `/count`, and five `/contest/{contestId}/…` reads. Every one is a route with no guard of its own that was inheriting a `permitAll` written for a sibling literal.
+
+**Source-oracle verification (recorded 2026-08-06).** An independent comment-stripped reader over both ICPC repos, compared against the published snapshot:
+
+| | Source | Published | |
+|---|---|---|---|
+| Handler methods (method-level mappings) | 804 | **804** | exact |
+| Distinct ACL permissions in guard annotations | 14 | **14** | exact |
+| Guarded handlers | 620 | 562 | −58, all `@Admin` (library-as-service) |
+| `@StaffMember` / `@Owner` / `@Coach` / … | per-annotation | ≥ source | published counts endpoints, source counts methods |
+
+*And the oracle was wrong twice, in wadi's favour, which is the point of recording it.* Its first run reported **−110 handler methods** and **an authority published that was not in source** — both read as extraction defects, and both dissolved on inspection: the 110 were class-level `@RequestMapping` prefixes the oracle counted as handlers, and `REGISTRATION_UPLOAD` is written at `ContestController.java:108`, missed by the oracle's own line-accumulation. §5.2.11's lesson holds in the other direction too: **a naive oracle over real code manufactures phantom misses, and a delta is a hypothesis until one of its members is opened.**
+
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**
 
 The frontier of what stitching handles is recorded here — every scenario is *handled*, *planned* (tranche-tagged, tracked as a GitHub issue), or *honestly undecidable* (permanent, surfaced via reason codes). A scenario absent from this matrix is a gap in the matrix, not an accepted limitation. Wherever the pipeline can perceive an unhandled shape it must emit a reason code (the audit's core lesson: the difference between a gap and a blind spot is whether you can count it); shapes it cannot perceive at all are exactly why this matrix exists.

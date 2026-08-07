@@ -14,6 +14,10 @@ export type Authenticated = boolean | null
  */
 export type Authorities = string[]
 /**
+ * Several guards apply and how they combine was not read (§5.2.12)
+ */
+export type CompositionUnresolved = boolean
+/**
  * A read rule admits nobody — the endpoint is unreachable
  */
 export type Denied = boolean
@@ -40,6 +44,26 @@ export type AuthMechanismKind =
  * Distinct active mechanisms
  */
 export type MechanismKinds = AuthMechanismKind[]
+/**
+ * Permissions required IN ADDITION to the relation
+ */
+export type Authorities1 = string[]
+/**
+ * The relation required, e.g. 'contest-manager', 'owner'
+ */
+export type Relation = string
+/**
+ * Which request parameter names the instance, e.g. 'contestId'; None when the binding could not be read — best-effort, never invented
+ */
+export type ResourceBinding = string | null
+/**
+ * The resource it is required ON, e.g. 'Contest'
+ */
+export type ResourceType = string | null
+/**
+ * Relations the caller must stand in to a resource (§5.2.12). Carried on the ROW, not only in the endpoint detail, because a system whose policy is relational shows every row `protected` with an empty role list otherwise — which is the reading this whole tranche exists to remove. Measured on ICPC: 562 of 804 rows
+ */
+export type Relationships = AuthRelationship[]
 export type Roles = string[]
 export type ServiceId = string
 export type ServiceName = string
@@ -95,16 +119,41 @@ export interface SystemAuthView {
 export interface AuthEndpointRow {
   authenticated: Authenticated
   authorities?: Authorities
+  composition_unresolved?: CompositionUnresolved
   denied?: Denied
   endpoint_id: EndpointId
   full_uri: FullUri
   http_method: HttpMethod
   mechanism_kinds?: MechanismKinds
+  relationships?: Relationships
   roles?: Roles
   service_id: ServiceId
   service_name: ServiceName
   simplified_uri: SimplifiedUri
   unread_kinds?: UnreadKinds
+}
+/**
+ * A required relation between the caller and a resource (§5.2.12).
+ *
+ * **Kinds are closed, content is open.** ``relation`` and ``resource_type``
+ * are free strings read from the application, never a vocabulary this model
+ * enumerates. That asymmetry is the whole design: the defect §5.2.12 records
+ * is wadi encoding open-ended content — annotation names, decision-call names
+ * — in closed lists, and a fixed set of relations or entity types would
+ * reproduce it exactly one field over. A system wadi has never seen, with
+ * entities it has never heard of, needs no schema change to be expressed here.
+ *
+ * ``authorities`` are permissions required *in addition to* the relation, not
+ * alternatives to it: `@ContestManager(context = Contest.class, acl =
+ * ACLEnum.CONTEST_UPDATE)` demands both. They live on the relationship rather
+ * than beside it so the conjunction survives; two guards' worth of
+ * requirements pooled into one flat list would read as a menu.
+ */
+export interface AuthRelationship {
+  authorities?: Authorities1
+  relation: Relation
+  resource_binding?: ResourceBinding
+  resource_type?: ResourceType
 }
 /**
  * Snapshot-wide auth tally. The five states are disjoint and sum to ``endpoints``.

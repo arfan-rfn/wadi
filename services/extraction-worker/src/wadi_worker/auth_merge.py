@@ -200,6 +200,16 @@ def _opacity_could_change_the_answer(
     by different mechanisms; only the mechanism differed, so only the bypass
     was caught.
     """
+    # §5.2.13: a permissive rule that matched only because a path template
+    # absorbed a literal covers ONE value of that template, not the route. If
+    # nothing else requires auth, "open" would rest entirely on a match that is
+    # false for every other request — the same shape as an unread permit, so it
+    # withholds the same way. When a later rule DOES require auth, the answer
+    # stands: over-approximating toward protected only adds restriction.
+    if not requiring and any(
+        item.effect is AuthEffect.PERMIT_ALL and not item.covers_route for item in gating
+    ):
+        return True
     opaque = [item for item in gating if item.resolution is AuthResolution.OPAQUE]
     if not opaque:
         return False
@@ -303,7 +313,11 @@ def _bypass_evidence(
         if enforcement.kind != AuthEvidenceKind.CHAIN_BYPASS.value:
             continue
         unresolvable = enforcement.pattern == UNRESOLVABLE_PATTERN
-        if not unresolvable and not _ant_match(enforcement.pattern, full_uri):
+        # A bypass is the one construct that REMOVES enforcement, so it is held
+        # to an exact match (§5.2.13): letting a path template absorb a literal
+        # here would switch the security chain off for a whole templated route
+        # on the strength of one value it might carry.
+        if not unresolvable and _ant_precision(enforcement.pattern, full_uri) != _EXACT:
             continue
         evidence.append(
             AuthEvidence(
@@ -635,6 +649,14 @@ def _rule_evidence(
             effect, roles, authorities, resolution = _read_access(matched.access)
             if unresolvable or ambiguous:
                 resolution = AuthResolution.OPAQUE
+            # §5.2.13: the rule was read fine — it simply does not cover the
+            # whole route. Carried on its own field, because "we could not read
+            # this" and "this governs one request of many" are different facts
+            # and `resolution` already means the first.
+            covers_route = not (
+                matched.pattern is not None
+                and _governs_precision(matched.pattern, full_uri) == _SPECULATIVE
+            )
             # Which HALF was unreadable is what the reader needs: a rule whose
             # scope is unknown might not govern this endpoint at all, while one
             # whose scope is known and whose effect is not definitely does.
@@ -666,6 +688,7 @@ def _rule_evidence(
                     authorities=authorities,
                     expression=matched.access,
                     pattern=matched.pattern,
+                    covers_route=covers_route,
                     http_method=HttpMethod(matched.http_method.upper())
                     if matched.http_method
                     else None,
@@ -941,14 +964,22 @@ def _matching_rules(
         if not rule.resolvable or rule.pattern is None:
             matched.append(rule)
             continue  # the fork: keep walking for the alternative branch
-        if _governs(rule.pattern, full_uri):
-            matched.append(rule)
+        precision = _governs_precision(rule.pattern, full_uri)
+        if precision is None:
+            continue
+        matched.append(rule)
+        if precision == _EXACT:
             return matched
+        # §5.2.13: a speculative match wins for ONE value of the template and
+        # loses for every other, so it forks the walk exactly as an unreadable
+        # pattern does — stopping here would hand the whole route to a rule
+        # that governs a single request of it.
     return matched
 
 
-def _governs(pattern: str, full_uri: str) -> bool:
-    """Does this rule decide THIS endpoint — not merely a request it could serve?
+def _governs_precision(pattern: str, full_uri: str) -> str | None:
+    """Does this rule decide THIS endpoint, and does it decide ALL of it?
+
 
     Ant matching over-approximates on purpose (§5.2): an endpoint's ``{orderId}``
     template segment matches any literal, so ``/orders/legacy`` "matches"
@@ -964,10 +995,19 @@ def _governs(pattern: str, full_uri: str) -> bool:
     A rule written WITH a template (``antMatchers("/orders/{orderId}")``) is
     not literal either: it covers the whole parameterised route, and the
     variable name in the rule need not match the one on the handler.
+
+
+    The literal-rule guard above stops `/orders/legacy` governing
+    `/orders/{orderId}`. Its mirror image is a rule that *does* carry a
+    wildcard but still needs a template to absorb a literal —
+    `/contest/public/**` over `/contest/{contestId}/camp/create` — which
+    governs the one request whose `contestId` is `public` and no other. That is
+    a partial match, and calling it total is what published seven ICPC
+    contest-administration write routes as `authenticated=false` (§5.2.13).
     """
     if not any(marker in pattern for marker in ("*", "?", "{")):
-        return pattern == full_uri
-    return _ant_match(pattern, full_uri)
+        return _EXACT if pattern == full_uri else None
+    return _ant_precision(pattern, full_uri)
 
 
 #: Kinds whose pattern names ONE endpoint rather than a path scope (§5.2.12).
@@ -1000,26 +1040,71 @@ def _in_scope(kind: AuthEvidenceKind, pattern: str, full_uri: str) -> bool:
     return _ant_match(pattern, full_uri)
 
 
+#: A match that holds for every request the endpoint serves.
+_EXACT = "exact"
+
+#: A match that holds only for SOME of them (§5.2.13): it needed a path
+#: template to absorb a literal pattern segment, so `/contest/{contestId}/camp`
+#: "matches" `/contest/public/**` — true of the single request whose contestId
+#: is the string `public`, false of every other.
+_SPECULATIVE = "speculative"
+
+
 def _ant_match(pattern: str, path: str) -> bool:
     """Ant-style matching: ``**`` any segments (incl. none), ``*`` one segment,
     ``?`` one char. Endpoint template segments (``{id}``) match any single
     pattern segment — over-approximation is the honest direction (§5.2)."""
-    return _match_segments([s for s in pattern.split("/") if s], [s for s in path.split("/") if s])
+    return _ant_precision(pattern, path) is not None
 
 
-def _match_segments(pattern: list[str], path: list[str]) -> bool:
+def _ant_precision(pattern: str, path: str) -> str | None:
+    """As :func:`_ant_match`, but says HOW the match was reached.
+
+    Over-approximating a template into a literal is honest while the rule adds
+    restriction and wrong when it removes one, which is the same asymmetry
+    §5.2.10 found for unread scope. Callers that can be *weakened* by a match —
+    a ``permitAll``, a chain bypass — ask for the precision and decline to act
+    on a speculative one; callers that can only be strengthened ignore it.
+    """
+    return _match_segments(
+        [segment for segment in pattern.split("/") if segment],
+        [segment for segment in path.split("/") if segment],
+    )
+
+
+def _match_segments(pattern: list[str], path: list[str]) -> str | None:
     if not pattern:
-        return not path
+        return _EXACT if not path else None
     head, rest = pattern[0], pattern[1:]
     if head == "**":
-        return any(_match_segments(rest, path[i:]) for i in range(len(path) + 1))
+        # `**` may consume any number of segments; prefer the most precise
+        # split that matches, so one speculative alternative does not taint a
+        # pattern that also matches exactly.
+        best: str | None = None
+        for index in range(len(path) + 1):
+            result = _match_segments(rest, path[index:])
+            if result == _EXACT:
+                return _EXACT
+            if result is not None:
+                best = result
+        return best
     if not path:
-        return False
-    return _match_one(head, path[0]) and _match_segments(rest, path[1:])
+        return None
+    here = _match_one(head, path[0])
+    if here is None:
+        return None
+    tail = _match_segments(rest, path[1:])
+    if tail is None:
+        return None
+    return _EXACT if here == _EXACT and tail == _EXACT else _SPECULATIVE
 
 
-def _match_one(pattern_segment: str, path_segment: str) -> bool:
-    if path_segment.startswith("{") and path_segment.endswith("}"):
-        return True  # a path template can carry any value
+def _match_one(pattern_segment: str, path_segment: str) -> str | None:
+    # The literal/wildcard reading first: `*` really does cover a template, so
+    # `/orders/*` over `/orders/{id}` is exact, not speculative.
     regex = re.escape(pattern_segment).replace(r"\*", "[^/]*").replace(r"\?", ".")
-    return re.fullmatch(regex, path_segment) is not None
+    if re.fullmatch(regex, path_segment) is not None:
+        return _EXACT
+    if path_segment.startswith("{") and path_segment.endswith("}"):
+        return _SPECULATIVE  # true of one value of the template, not of the route
+    return None

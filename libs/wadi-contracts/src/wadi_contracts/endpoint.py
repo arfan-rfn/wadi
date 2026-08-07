@@ -298,6 +298,16 @@ class AuthEvidence(_ActiveFlagged):
         description="Set when effect is require-relationship (§5.2.12); the relation this "
         "enforcement demands between caller and resource",
     )
+    covers_route: bool = Field(
+        default=True,
+        description=(
+            "False when this enforcement governs only SOME requests the endpoint serves "
+            "(§5.2.13). Distinct from `resolution`, which says how completely the "
+            "enforcement was READ: a rule can be read perfectly and still cover part of "
+            "a route, and conflating the two hides why a `permitAll` sits beside a "
+            "protected claim"
+        ),
+    )
 
     @model_validator(mode="after")
     def _relationship_matches_effect(self) -> Self:

@@ -13,7 +13,12 @@ from pydantic import Field, model_validator
 from wadi_contracts.base import WadiModel
 from wadi_contracts.boundary import ServiceBoundary
 from wadi_contracts.comms import TokenPropagation
-from wadi_contracts.endpoint import AuthEvidenceKind, AuthMechanismKind, Endpoint
+from wadi_contracts.endpoint import (
+    AuthEvidenceKind,
+    AuthMechanismKind,
+    AuthRelationship,
+    Endpoint,
+)
 from wadi_contracts.enums import (
     CalleeUnboundReason,
     Confidence,
@@ -168,6 +173,20 @@ class AuthEndpointRow(WadiModel):
     roles: list[str] = Field(default_factory=list[str])
     authorities: list[str] = Field(
         default_factory=list[str], description="Required authorities, when named as authorities"
+    )
+    relationships: list[AuthRelationship] = Field(
+        default_factory=list[AuthRelationship],
+        description=(
+            "Relations the caller must stand in to a resource (§5.2.12). Carried on the "
+            "ROW, not only in the endpoint detail, because a system whose policy is "
+            "relational shows every row `protected` with an empty role list otherwise — "
+            "which is the reading this whole tranche exists to remove. Measured on ICPC: "
+            "562 of 804 rows"
+        ),
+    )
+    composition_unresolved: bool = Field(
+        default=False,
+        description="Several guards apply and how they combine was not read (§5.2.12)",
     )
     mechanism_kinds: list[AuthMechanismKind] = Field(
         default_factory=list[AuthMechanismKind], description="Distinct active mechanisms"

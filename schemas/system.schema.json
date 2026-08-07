@@ -44,7 +44,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.22.0/system.schema.json",
+  "$id": "https://trywadi.com/schemas/1.23.0/system.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "A registered analysis target \u2014 the only place repo topology exists (P3).",
@@ -75,7 +75,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.22.0",
+      "default": "1.23.0",
       "title": "Schema Version",
       "type": "string"
     }
