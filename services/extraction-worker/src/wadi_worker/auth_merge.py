@@ -924,6 +924,14 @@ def _governs(pattern: str, full_uri: str) -> bool:
     return _ant_match(pattern, full_uri)
 
 
+#: Kinds whose pattern names ONE endpoint rather than a path scope (§5.2.12).
+#: An in-handler check is the code inside a single handler; an annotation-bound
+#: aspect is bound to the exact set of methods bearing its annotation, and each
+#: record carries one of them. Neither is a pattern, so neither may be matched
+#: like one.
+_ENDPOINT_SCOPED = frozenset({AuthEvidenceKind.IN_HANDLER, AuthEvidenceKind.ASPECT})
+
+
 def _in_scope(kind: AuthEvidenceKind, pattern: str, full_uri: str) -> bool:
     """Does this enforcement cover this endpoint?
 
@@ -932,8 +940,16 @@ def _in_scope(kind: AuthEvidenceKind, pattern: str, full_uri: str) -> bool:
     purpose (§5.2) — a `{orderId}` template segment matches any literal — which
     is right for a path *pattern* and wrong here: it attached the guard written
     inside `/orders/export` to `/orders/{orderId}` as well.
+
+    Annotation-bound aspects (§5.2.12) carry the same hazard and are the reason
+    this list is a set rather than one branch: a guard on
+    ``/common/country/{a2}`` ant-matches ``/common/country/export``, so an
+    ADMIN-only route would lend its guard to every sibling and the count of
+    genuinely unguarded endpoints — the finding the tranche exists to surface —
+    would silently collapse. Aspects whose scope really is unresolvable never
+    reach here; the caller short-circuits them on the ``{?}`` sentinel.
     """
-    if kind is AuthEvidenceKind.IN_HANDLER:
+    if kind in _ENDPOINT_SCOPED:
         return pattern == full_uri
     return _ant_match(pattern, full_uri)
 

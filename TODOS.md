@@ -94,6 +94,78 @@ become a standing check rather than a claim in a document.
 
 ---
 
+## Auth — project-defined vocabularies (§5.2.12)
+
+### The aspect that actually answers 403 is not detected
+**Priority:** P1
+**Opened:** v0.7.5
+
+ICPC's `UserAuthorizer` is the construct that throws `AccessDeniedException` for
+every controller method in the system, and M1 does not see it. Its own body
+neither denies visibly nor reads identity: it calls `permissionChecker.isAllowed()`
+on a request-scoped bean that the *other* advice writes, and the identity access
+lives in an inherited `AbstractAuthorizer.validate()`.
+
+**Do not close this by adding `AccessDeniedException` to `RejectionMarkers`.**
+That was tried on paper and is worse than the gap: `UserAuthorizer` is
+`execution(...)`-scoped, so detecting it emits one `{?}` and withholds all 804
+endpoints — re-creating the wall of unknowns M1 exists to avoid, and destroying
+the ~157 genuinely-unguarded finding. Growing a name list is also the exact
+anti-pattern §5.2.12 records.
+
+The real shape is a **deferred-verdict consumer**: advice whose decision derives
+entirely from state other advice wrote, which adds no requirement of its own and
+must not withhold. Recognising it is the prerequisite for detecting this class
+safely.
+
+### Enforcement scope is URI-granular, with no HTTP method
+**Priority:** P2
+**Opened:** v0.7.5
+
+`ExportAuthEnforcement` carries `pattern` and no verb, so an annotation-bound
+guard on `GET /x` also covers `POST /x`. The direction is safe — it withholds
+more, never publishes an endpoint as open — but it costs precision in exactly
+the number the tranche exists to surface. **Measured on ICPC: 804 endpoints over
+734 distinct URIs, with 63 URIs served by more than one verb (133 endpoints).**
+133 is the upper bound on endpoints that could be over-withheld; how many of
+those 63 URIs actually carry *differing* guards across verbs is **not measured**,
+so the real cost is somewhere in [0, 133]. Closing it is an export-schema field,
+not a `wadi-contracts` change.
+
+### A library compiled into a service is modelled as a peer service
+**Priority:** P1
+**Opened:** v0.7.5
+
+`global.icpc:base` is a jar inside `contest`, and the snapshot pipeline gives it
+its own service. The annotations and two of the authorizers live there, so in a
+per-service CPG the `Admin` typeDecl is external and its binding is invisible —
+cause (3) in §5.2.12, and the reason the M1 acceptance run had to build one CPG
+across both repos rather than go through the worker. Until this is modelled,
+this class of system must be analyzed with the library in scope or the
+vocabulary silently shrinks. **Measured end to end: 8 annotations derived with
+both repos in one CPG versus 7 through the shipping pipeline, and 643 guarded
+endpoints versus 566 — the per-service CPG costs 77 endpoints their guard.**
+
+### A path template can match a literal into a `permitAll`
+**Priority:** P1
+**Opened:** v0.7.5
+
+`_ant_match` lets an endpoint's `{id}` template segment match any literal in a
+rule pattern, documented as the honest over-approximation for a path pattern.
+It is honest while the rule *adds* restriction and wrong when the rule removes
+it: `/contest/{contestId}/camp/create` matches `/contest/public/**`, so the
+chain's `permitAll` appeared to cover seven contest-administration write routes
+and they published as `authenticated=false` — no authentication, evidenced.
+
+Found by the M1 end-to-end run, which withholds those seven for an unrelated
+reason (they carry an opaque annotation guard, and §5.2.10 escalates opacity on
+`PERMIT_ALL`). **The underlying defect is untouched**: an endpoint in the same
+URI shape with no annotation guard still reads as public. This is §5.2.10's
+permissive-direction rule applying to template-vs-literal matching, where it was
+only ever applied to unread scope.
+
+---
+
 ## Analysis surfaces not yet consumed
 
 ### CORS/CSRF policy is published but not scoped to endpoints

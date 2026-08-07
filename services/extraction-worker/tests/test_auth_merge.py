@@ -289,6 +289,76 @@ class TestClaimWithholding:
         )
         assert auth.authenticated is False
 
+    def test_an_annotation_bound_aspect_withholds_the_endpoint_it_names(self) -> None:
+        # §5.2.12. The chain says permitAll and the project's own vocabulary
+        # says ADMIN; without the aspect record the endpoint publishes an
+        # evidenced-open claim, which is the ICPC defect exactly (637 of 803).
+        auth = merge_endpoint_auth(
+            full_uri="/common/country/export",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/common/country/export",
+                    detail="AdminAuthorizer via @Admin",
+                    anchor=ExportAnchor(file="src/AdminAuthorizer.java", line=26),
+                )
+            ],
+        )
+        assert auth.authenticated is None
+        assert auth.unread_enforcement[0].kind is AuthEvidenceKind.ASPECT
+
+    def test_an_annotation_bound_aspect_does_not_leak_across_a_template_sibling(self) -> None:
+        # The hazard that makes this kind endpoint-scoped rather than
+        # pattern-scoped: `{a2}` ant-matches the literal `export`, so a guard
+        # on the template route would lend itself to every sibling and the
+        # count of genuinely unguarded endpoints — the finding the tranche
+        # exists to surface — would quietly collapse to zero.
+        auth = merge_endpoint_auth(
+            full_uri="/common/country/export",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/common/country/{a2}",
+                    detail="AdminAuthorizer via @Admin",
+                    anchor=ExportAnchor(file="src/AdminAuthorizer.java", line=26),
+                )
+            ],
+        )
+        assert auth.authenticated is False
+
+    def test_an_aspect_of_unresolvable_scope_still_withholds_everything(self) -> None:
+        # Exact matching must not cost the blanket case: an `execution(...)`
+        # pointcut is honestly unreadable and has to withhold service-wide, or
+        # the §5.2.9 rule that an unread guard withholds becomes conditional on
+        # the guard happening to be annotation-bound.
+        auth = merge_endpoint_auth(
+            full_uri="/anything/at/all",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="{?}",
+                    detail="UserAuthorizer",
+                    anchor=ExportAnchor(file="src/UserAuthorizer.java", line=15),
+                )
+            ],
+        )
+        assert auth.authenticated is None
+
     def test_a_chain_bypass_means_nothing_runs(self) -> None:
         auth = merge_endpoint_auth(
             full_uri="/static/app.js",

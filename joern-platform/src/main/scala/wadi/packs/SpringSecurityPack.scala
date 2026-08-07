@@ -989,7 +989,50 @@ object SpringSecurityPack {
       "hasrole"
     )
 
+    /** Calls that read WHO the caller is (§5.2.12).
+      *
+      * The load-bearing discriminator for annotation-bound advice. A guard must
+      * know the caller's identity; instrumentation need not. Measured **8/8**
+      * on the ICPC authorizers — which spell their deny path
+      * `permissionChecker.addFailure()` and hit no rejection marker at all, so
+      * `RejectionMarkers`/`DecisionCalls` score 0/8 — and **0/4** on
+      * train-ticket's `ms-monitoring-core` tracing advice, which would
+      * otherwise withhold auth claims across that entire corpus.
+      */
+    private val IdentityCalls = List(
+      "getauthentication",
+      "getprincipal",
+      "getsubject",
+      "getcurrentuser",
+      "getcurrentuserid",
+      "getcurrentusername",
+      "getcurrentprincipal",
+      "getloginid",
+      "getloginuser"
+    )
+
+    /** AspectJ advice kinds. `@Pointcut` is not advice but names the same
+      * designators, so it is read for binding and never for gating.
+      */
+    private val AdviceAnnotations =
+      Set("Around", "Before", "After", "AfterReturning", "AfterThrowing")
+
+    private val PointcutAnnotations = AdviceAnnotations + "Pointcut"
+
+    /** Bound by the pointcut, not by the annotation — never vocabulary. */
+    private val JoinPointTypes =
+      Set("org.aspectj.lang.ProceedingJoinPoint", "org.aspectj.lang.JoinPoint")
+
+    /** How a `HandlerInterceptor`/`MethodInterceptor` reads its vocabulary. */
+    private val AnnotationReads =
+      Set("getMethodAnnotation", "isAnnotationPresent", "findAnnotation", "getAnnotation")
+
+    private val AnnotationDesignator = """@annotation\(\s*([A-Za-z_][\w.]*)\s*\)""".r
+
+    private val ClassLiteral = """^([A-Za-z_][\w.]*)\.class$""".r
+
     override def run(builder: DiffGraphBuilder): Unit = {
+      tagAnnotationBound(builder)
       tagInterceptors(builder)
       tagServletFilters(builder)
       tagAspects(builder)
@@ -1000,7 +1043,11 @@ object SpringSecurityPack {
     private def tagInterceptors(builder: DiffGraphBuilder): Unit =
       cpg.call.nameExact("addInterceptor").l.foreach { registration =>
         implementingTypeOf(registration).foreach { interceptor =>
-          if (gates(interceptor)) {
+          // An annotation-bound interceptor already emitted an exact record per
+          // guarded endpoint. Its registered path scope is `/**` whenever no
+          // `addPathPatterns` follows, so emitting both would withhold the
+          // whole service and throw away the precision.
+          if (gates(interceptor) && boundAnnotationsOf(interceptor).isEmpty) {
             val patterns = chainedPatterns(registration, "addPathPatterns")
             emit(registration, "interceptor", patterns, interceptor.name, builder)
           }
@@ -1052,14 +1099,208 @@ object SpringSecurityPack {
       }
     }
 
-    /** `@Aspect` advice whose pointcut reaches controllers. */
+    /** Enforcement bound to a PROJECT-DEFINED annotation (§5.2.12).
+      *
+      * The vocabulary is derived from the binding, never matched against a list
+      * of names. A name list can only ever recognise the policies its author
+      * had already seen; `@ContestManager` is invisible to one, and so is every
+      * other word a project invents for its own policy. What is not
+      * project-specific is how the word is *consumed* — an advice parameter
+      * type, an `@annotation(...)` designator, a `getMethodAnnotation` read —
+      * and that is a graph property.
+      *
+      * The scope of `@annotation(X)` is exactly the methods bearing X: as
+      * readable as `@PreAuthorize`, and nothing like the pointcut-expression
+      * problem that makes `execution(...)` honestly unresolvable. So this emits
+      * one record per guarded ENDPOINT rather than one blanket per aspect, and
+      * an endpoint the advice cannot reach keeps its claim. Measured on ICPC:
+      * 643 of 804 endpoints guarded and 161 left alone, versus one blanket that
+      * would have withheld all 804 and said nothing about any of them.
+      */
+    private def tagAnnotationBound(builder: DiffGraphBuilder): Unit =
+      endpointHandlers.foreach { case (handler, uri, borne) =>
+        borne.toList.sorted.foreach { annotation =>
+          annotationBindings.getOrElse(annotation, Nil).foreach { guard =>
+            emitOn(handler, "aspect", List(uri), s"${guard.name} via @$annotation", builder)
+          }
+        }
+      }
+
+    /** Annotation name → the gating constructs that consume it.
+      *
+      * Only names that are ACTUALLY annotations somewhere in the graph survive:
+      * AspectJ binds non-annotation parameters too (`args(order)` binds an
+      * `Order`), and without the cross-check a DTO type would enter the
+      * security vocabulary.
+      */
+    private lazy val annotationBindings: Map[String, List[TypeDecl]] =
+      cpg.typeDecl
+        .filterNot(_.isExternal)
+        .l
+        // Bounded to constructs that can intercept a request, before any AST
+        // walk: a service class that happens to call `isAnnotationPresent` is
+        // doing reflection, not enforcement, and walking every type's AST to
+        // find out costs a full traversal of the program on every snapshot.
+        .filter(typeDecl => canIntercept(typeDecl) || typeDecl.method.exists(isAdvice))
+        .flatMap { typeDecl =>
+          val bound = boundAnnotationsOf(typeDecl)
+          if (bound.isEmpty || !gates(typeDecl)) Nil else bound.toList.map(_ -> typeDecl)
+        }
+        .groupMap(_._1)(_._2)
+
+    /** Can this type see a request before the handler does? */
+    private def canIntercept(typeDecl: TypeDecl): Boolean =
+      typeDecl.ast.isAnnotation.filter(_.astParent == typeDecl).exists(_.name == "Aspect") ||
+        typeDecl.inheritsFromTypeFullName.exists(name =>
+          name.contains("Interceptor") || name.contains("Filter")
+        )
+
+    /** Every endpoint handler with its URI and the annotations governing it.
+      *
+      * Class-level declarations count: these annotations are `@Target({TYPE,
+      * METHOD})` by convention, and a policy declared once on the controller
+      * governs every route it declares.
+      */
+    private lazy val endpointHandlers: List[(Method, String, Set[String])] =
+      cpg.typeDecl.filterNot(_.isExternal).l.flatMap { typeDecl =>
+        val classLevel = typeDecl.ast.isAnnotation.filter(_.astParent == typeDecl).name.toSet
+        typeDecl.method.l.flatMap { method =>
+          val own = method.ast.isAnnotation.filter(_.astParent == method).name.toSet
+          // EVERY route the handler serves, not just the first. One method can
+          // carry several (`@RequestMapping(method = {GET, POST})`, a value
+          // array), and reading only the head would leave the siblings looking
+          // unguarded — an under-approximation, which in auth is the one
+          // direction that publishes a wrong fact rather than a missing one.
+          method.tag.nameExact("endpoint").value.l.map { endpointTag =>
+            (method, endpointTag.split(' ').lastOption.getOrElse(Unresolvable), own ++ classLevel)
+          }
+        }
+      }
+
+    /** The annotation vocabulary this type consumes, by any binding route.
+      *
+      * The two routes are filtered differently, and that asymmetry is the fix
+      * for a real defect. An `@annotation(...)` designator PROVES its bound
+      * names are annotations — that is what the designator means — so those
+      * names need no confirmation. A `getMethodAnnotation(X.class)` read proves
+      * nothing about `X`, so those are confirmed against the graph.
+      */
+    private def boundAnnotationsOf(typeDecl: TypeDecl): Set[String] = {
+      val fromAdvice = typeDecl.method.l.filter(isAdvice).flatMap(boundAnnotationsOfMethod).toSet
+      val fromReads = typeDecl.method.ast.isCall
+        .filter(call => AnnotationReads.contains(call.name))
+        .argument
+        .argumentIndexGt(0)
+        .code
+        .l
+        .flatMap(code => ClassLiteral.findFirstMatchIn(code.trim).map(m => simpleNameOf(m.group(1))))
+        .toSet
+      fromAdvice ++ fromReads.filter(annotationNames.contains)
+    }
+
+    private def isAdvice(method: Method): Boolean =
+      method.ast.isAnnotation
+        .filter(_.astParent == method)
+        .exists(a => AdviceAnnotations.contains(a.name))
+
+    /** `@Around(value = "@annotation(x)") … (JoinPoint jp, ContestManager x)`.
+      *
+      * Read from the PARAMETER TYPE first and the expression second, because
+      * the two carry the binding redundantly and the parameter survives the
+      * cases the string does not: `@annotation(acl)` names a variable, and an
+      * unresolved type still keeps its FQN suffix
+      * (`<unresolvedNamespace>.…​.TeamMember`).
+      */
+    private def boundAnnotationsOfMethod(method: Method): Set[String] =
+      if (!isAnnotationBound(method)) Set.empty
+      else {
+        val fromParameters = method.parameter
+          .filterNot(parameter =>
+            parameter.name == "this" || JoinPointTypes.contains(parameter.typeFullName)
+          )
+          .typeFullName
+          .l
+          .map(simpleNameOf)
+        val fromExpression = adviceExpressions(method)
+          .flatMap(code =>
+            AnnotationDesignator.findAllMatchIn(code).map(m => simpleNameOf(m.group(1)))
+          )
+        (fromParameters ++ fromExpression).toSet
+      }
+
+    /** Is this advice scoped by the annotations its targets carry?
+      *
+      * Read from the DESIGNATOR, not from whether the bound type resolves. The
+      * first cut asked "is the bound name confirmably an annotation?", which
+      * conflated two questions and re-created the blanket through a second
+      * door: in a per-service CPG, ICPC's `@ACL` is declared in a sibling jar,
+      * so it is neither used nor internally declared, the advice read as
+      * unbound, and one `{?}` withheld all 803 endpoints of the service — the
+      * same 804-endpoint failure as the unused-annotation case, arriving from
+      * the opposite direction.
+      *
+      * `@annotation(x)` means the advice runs on methods carrying an
+      * annotation. That is true whether or not the annotation's declaration is
+      * on the CPG, so it — and nothing else — decides whether the scope is a
+      * method set or an honest unknown.
+      */
+    private def isAnnotationBound(method: Method): Boolean =
+      adviceExpressions(method).exists(_.contains("@annotation("))
+
+    private def adviceExpressions(method: Method): List[String] =
+      method.ast.isAnnotation
+        .filter(_.astParent == method)
+        .filter(a => PointcutAnnotations.contains(a.name))
+        .code
+        .l
+
+    /** Names that really are annotation types.
+      *
+      * Two sources, because neither alone is right. USAGE alone misses an
+      * annotation that is declared and not yet applied — ICPC's `@ACL` is
+      * exactly that, and treating its authorizer as unbound sent it down the
+      * `execution(...)` path and emitted a service-wide `{?}` that withheld all
+      * 804 endpoints. DECLARATION alone misses annotations declared in a jar.
+      *
+      * javasrc gives an `@interface` no distinguishing TypeDecl property — it
+      * reads as `public class ACL` with no supertype — so the declaration test
+      * is its meta-annotations. That is not a heuristic here: an annotation a
+      * running aspect can bind to MUST carry `@Retention(RUNTIME)`, or the
+      * advice would never fire.
+      */
+    private lazy val annotationNames: Set[String] = {
+      val used = cpg.annotation.name.toSet
+      val declared = cpg.typeDecl
+        .filterNot(_.isExternal)
+        .filter(td =>
+          td.ast.isAnnotation
+            .filter(_.astParent == td)
+            .exists(a => a.name == "Retention" || a.name == "Target")
+        )
+        .name
+        .toSet
+      used ++ declared
+    }
+
+    private def simpleNameOf(typeName: String): String =
+      typeName.split('.').last.split('$').last
+
+    /** `@Aspect` advice whose pointcut reaches controllers by SHAPE.
+      *
+      * Only advice that is not annotation-bound lands here. An annotation-bound
+      * aspect has already emitted an exact record per guarded endpoint, and
+      * adding the blanket would withhold every endpoint in the service — undoing
+      * the precision that made it worth reading.
+      */
     private def tagAspects(builder: DiffGraphBuilder): Unit =
       cpg.typeDecl
         .filterNot(_.isExternal)
         .filter(td => td.ast.isAnnotation.filter(_.astParent == td).exists(_.name == "Aspect"))
         .l
         .foreach { aspect =>
-          if (gates(aspect)) {
+          val advice = aspect.method.l.filter(isAdvice)
+          val fullyBound = advice.nonEmpty && advice.forall(isAnnotationBound)
+          if (gates(aspect) && !fullyBound) {
             aspect.method.headOption.foreach { anchor =>
               // A pointcut is an expression language of its own; reading it is
               // a project in itself, so the scope is honestly unresolvable.
@@ -1075,11 +1316,16 @@ object SpringSecurityPack {
       */
     private def tagInHandlerChecks(builder: DiffGraphBuilder): Unit =
       cpg.method.where(_.tag.nameExact("endpoint")).l.foreach { handler =>
-        handler.tag.nameExact("endpoint").value.headOption.foreach { endpointTag =>
-          if (gatesMethod(handler)) {
-            val uri = endpointTag.split(' ').lastOption.getOrElse(Unresolvable)
-            emitOn(handler, "in-handler", List(uri), s"${handler.name}()", builder)
-          }
+        if (gatesMethod(handler)) {
+          // Every route the handler serves — the guard is written once and
+          // governs all of them (§5.2.12, same reason as `endpointHandlers`).
+          val uris = handler.tag
+            .nameExact("endpoint")
+            .value
+            .l
+            .map(_.split(' ').lastOption.getOrElse(Unresolvable))
+            .distinct
+          emitOn(handler, "in-handler", orUnresolvable(uris), s"${handler.name}()", builder)
         }
       }
 
@@ -1098,8 +1344,20 @@ object SpringSecurityPack {
       val decides = method.ast.isCall.name.exists(name =>
         DecisionCalls.contains(name.toLowerCase)
       )
-      rejects || decides
+      // §5.2.12: advice that VOTES rather than throws still gates. Requiring a
+      // deny-shape scored 1/8 on the ICPC authorizers, which record the verdict
+      // on a request-scoped bean that a LATER aspect turns into a 403 — the
+      // deny is real and simply is not written here. Reading the caller's
+      // identity and branching on it scored 8/8, and still excludes tracing
+      // and timing advice, which branches constantly but never asks who you
+      // are (0/4 on train-ticket's `ms-monitoring-core`).
+      val judges = touchesIdentity(method) && method.ast.isControlStructure.nonEmpty
+      rejects || decides || judges
     }
+
+    private def touchesIdentity(method: Method): Boolean =
+      method.ast.isCall.name.exists(name => IdentityCalls.contains(name.toLowerCase)) ||
+        method.ast.isCall.code.exists(_.contains("SecurityContextHolder"))
 
     /** The class an `addInterceptor(new X())`-style registration installs. */
     private def implementingTypeOf(registration: Call): Option[TypeDecl] =

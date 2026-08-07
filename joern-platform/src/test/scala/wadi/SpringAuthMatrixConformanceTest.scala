@@ -373,6 +373,79 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
       "/api/v1/orders/export"
   }
 
+  // ---- §5.2.12: a project-defined authorization vocabulary ----
+
+  test("a project-defined annotation is derived from its BINDING, not a name list") {
+    // @TenantAdmin is neither a Spring name nor composed from one, so the
+    // annotation pass sees nothing. What makes it readable is that an advice
+    // parameter is typed with it. Measured on ICPC: this rule run cold, with
+    // no vocabulary list at all, recovers all 8 of that system's annotations
+    // and scopes 637 of 803 handlers.
+    enforcements should contain(
+      ("aspect", "/api/v1/tenant/settings", "TenantAdminAuthorizer via @TenantAdmin")
+    )
+  }
+
+  test("a non-gating aspect with the SAME binding shape is not a guard") {
+    // The counterweight, and the one that decides whether the feature is
+    // usable. TracingAspect is byte-for-byte the same shape — @Around,
+    // @annotation(...), a bound parameter, a branch — and differs only in
+    // never asking who the caller is. Treating "an aspect reads it" as "it
+    // guards" would withhold every endpoint of every system that traces by
+    // annotation; train-ticket's ms-monitoring-core alone (@NewSpan,
+    // @ContinueSpan) would take that whole corpus down.
+    enforcements.map(_._3) should not contain "TracingAspect via @Traced"
+    enforcements.map(_._2) should not contain "/api/v1/tenant/activity"
+  }
+
+  test("annotation-bound scope is per-endpoint, never a blanket over the service") {
+    // The scope of @annotation(X) is exactly the methods bearing X — as
+    // readable as @PreAuthorize, and nothing like the pointcut-expression
+    // problem that makes execution(...) honestly unresolvable. An aspect-wide
+    // `{?}` here would withhold all three handlers and pass a presence-only
+    // golden while making the state meaningless.
+    enforcements.map(_._2) should not contain "/api/v1/tenant/status"
+    enforcements.filter(_._3.startsWith("TenantAdminAuthorizer")).map(_._2) should contain only
+      "/api/v1/tenant/settings"
+  }
+
+  test("an annotation-bound aspect emits no unresolvable blanket alongside it") {
+    // Emitting both would undo the precision: the `{?}` pattern is in scope for
+    // every endpoint in the service, so one blanket record withholds all of
+    // them regardless of how exactly the per-endpoint records were scoped.
+    enforcements.filter(_._1 == "aspect").map(_._2) should not contain "{?}"
+  }
+
+  test("an aspect bound to an UNUSED annotation gates nothing, and says nothing") {
+    // Caught by the first ICPC acceptance run, not by review. @ACL is declared
+    // with an authorizer and applied to zero handlers; a vocabulary test
+    // written against annotation USAGE concluded the aspect was not
+    // annotation-bound, fell back to the execution(...) path, and emitted one
+    // `{?}` that withheld all 804 endpoints — a precise result turned into a
+    // wall of unknowns by a single record.
+    enforcements.map(_._3) should not contain "UnusedScopeAuthorizer"
+    enforcements.filter(_._3.contains("UnusedScope")) shouldBe empty
+  }
+
+  test("an annotation declared in a JAR still scopes its aspect, rather than blanketing") {
+    // The same failure from the opposite direction, and the one the end-to-end
+    // run caught after the fixture above was already green: in a per-service
+    // CPG the annotation's declaration is external, so it is neither used nor
+    // internally declared. Deciding boundness by "can I confirm this is an
+    // annotation?" answered no and withheld all 803 endpoints of the service.
+    // The `@annotation(...)` designator settles it without resolving anything.
+    enforcements.map(_._3) should not contain "UnusedScopeAuthorizer"
+    enforcements.filter(_._1 == "aspect").map(_._2) should not contain "{?}"
+  }
+
+  test("the derived vocabulary does not leak non-annotation advice parameters") {
+    // AspectJ binds plain types too (`args(order)` binds an Order), so a rule
+    // reading parameter types alone would enrol a DTO in the security
+    // vocabulary. Only names that are ACTUALLY annotations in the graph survive.
+    enforcements.map(_._3).filter(_.contains(" via @")) should contain only
+      "TenantAdminAuthorizer via @TenantAdmin"
+  }
+
   // ---- D5: the policy lives in config, not in the Java ----
 
   test("D5: a config-bound matcher names its binding instead of vanishing") {
