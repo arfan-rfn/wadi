@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from wadi_worker.boundary import discover_services
+from wadi_worker.boundary import discover_services, discover_system_services
 
 POM = """<?xml version="1.0"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
@@ -21,12 +21,15 @@ def write_pom(
     modules: list[str] | None = None,
     dependencies: list[str] | None = None,
     java_source: str | None = "@RestController class App {}",
+    packaging: str | None = None,
 ) -> None:
     """Write a pom; non-aggregators get a Java source (no-Java modules are
-    skipped by discovery, §5.2.6). Default source carries a service marker.
+    skipped by discovery, §5.2.6). The default source carries a CONTROLLER,
+    which since §5.2.14 marks web presence and not deployability — pass
+    `@SpringBootApplication` (or `packaging="war"`) for a module that runs.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    extra = ""
+    extra = f"<packaging>{packaging}</packaging>" if packaging else ""
     if modules:
         module_tags = "".join(f"<module>{m}</module>" for m in modules)
         extra = f"<modules>{module_tags}</modules>"
@@ -205,14 +208,31 @@ class TestModuleClassification:
         assert by_root["svc"].library_roots == ["libA", "libB"]
         assert by_root["libA"].library_roots == []
 
-    def test_module_with_service_markers_is_never_a_library(self, tmp_path: Path) -> None:
-        # payment -> payment-paypal where the dep HAS controllers: not staged.
+    def test_a_deployable_module_is_never_a_library(self, tmp_path: Path) -> None:
+        # payment -> payment-paypal where the dep really does run on its own:
+        # not staged, not absorbed. §5.2.14 narrowed the signal from "has a
+        # controller" to "has an entry point", because a library shipping a
+        # controller is an ordinary Spring pattern — but a module with a boot
+        # main is a service no matter who depends on it, and that is what this
+        # protects.
         write_pom(tmp_path, "parent", modules=["a", "b"])
         write_pom(tmp_path / "a", "a", dependencies=["b"])
-        write_pom(tmp_path / "b", "b")  # default source carries @RestController
+        write_pom(
+            tmp_path / "b",
+            "b",
+            java_source="@SpringBootApplication class App {}",
+        )
         by_root = {s.build_root: s for s in discover_services(tmp_path)}
         assert by_root["b"].kind == "service"
         assert by_root["a"].library_roots == []
+
+    def test_a_war_packaged_module_is_never_a_library(self, tmp_path: Path) -> None:
+        # A plain Spring MVC app has no @SpringBootApplication and is still a
+        # thing you deploy. Packaging declares that on its own.
+        write_pom(tmp_path, "parent", modules=["a", "b"])
+        write_pom(tmp_path / "a", "a", dependencies=["b"])
+        write_pom(tmp_path / "b", "b", packaging="war")
+        assert {s.build_root: s.kind for s in discover_services(tmp_path)}["b"] == "service"
 
     def test_no_java_module_is_skipped(self, tmp_path: Path) -> None:
         write_pom(tmp_path, "parent", modules=["svc", "frontend"])
@@ -247,15 +267,79 @@ class TestServiceMarkerBoundaries:
         )
         assert {s.build_root: s.kind for s in discover_services(tmp_path)}["shared"] == "library"
 
-    def test_real_controller_still_marks_a_service(self, tmp_path: Path) -> None:
+    def test_a_library_may_ship_a_controller(self, tmp_path: Path) -> None:
+        # §5.2.14, and the case that motivated it. ICPC's `base` ships exactly
+        # one @RestController — a reusable web fragment — and the consuming
+        # app's own SecurityConfig carries the rule for its route, which is
+        # only sayable if the CONSUMER serves it. Treating the controller as
+        # proof of a service gave that library its own CPG, cost the auth
+        # vocabulary an annotation, and left 335 response shapes unresolved
+        # for the app that actually deploys it.
         write_pom(tmp_path, "parent", modules=["svc", "shared"])
-        write_pom(tmp_path / "svc", "svc", dependencies=["shared"])
+        write_pom(
+            tmp_path / "svc",
+            "svc",
+            dependencies=["shared"],
+            java_source="@SpringBootApplication class App {}",
+        )
         write_pom(
             tmp_path / "shared",
             "shared",
             java_source='@Controller class Web { @GetMapping("/x") void x() {} }',
         )
-        assert {s.build_root: s.kind for s in discover_services(tmp_path)}["shared"] == "service"
+        by_root = {s.build_root: s for s in discover_services(tmp_path)}
+        assert by_root["shared"].kind == "library"
+        # ...and its sources are staged into the app that deploys them.
+        assert by_root["svc"].library_roots == ["shared"]
+
+
+class TestCrossRepoLibraries:
+    """§5.2.14: a shared internal jar in its OWN repository.
+
+    The shape that produced the defect. Per-repo classification resolves
+    `<artifactId>base</artifactId>` against one checkout's module map, which
+    cannot contain a sibling repo's module — so the edge was never seen, the
+    library got its own service and its own CPG, and the app that deploys it
+    lost 77 guarded endpoints and 335 response shapes to types it could no
+    longer see.
+    """
+
+    def test_a_library_in_a_sibling_repo_is_classified_as_one(self, tmp_path: Path) -> None:
+        app, lib = tmp_path / "app", tmp_path / "lib"
+        write_pom(
+            app, "backend", dependencies=["base"], java_source="@SpringBootApplication class App {}"
+        )
+        write_pom(lib, "base", java_source="@RestController class Fragment {}")
+
+        by_repo = discover_system_services({"app": app, "lib": lib})
+
+        assert by_repo["lib"][0].kind == "library"
+        assert by_repo["app"][0].kind == "service"
+        # `repo::root` is what lets the stage reach the other checkout.
+        assert by_repo["app"][0].library_roots == ["lib::."]
+
+    def test_per_repo_discovery_alone_cannot_see_the_edge(self, tmp_path: Path) -> None:
+        # The counterweight that names the mechanism: analyzed on its own, the
+        # library repo has no dependency edge to observe and is a service. This
+        # is not a bug in single-repo discovery — it is why classification has
+        # to be system-wide.
+        lib = tmp_path / "lib"
+        write_pom(lib, "base", java_source="@RestController class Fragment {}")
+        assert discover_services(lib)[0].kind == "service"
+
+    def test_a_same_repo_library_keeps_its_bare_root(self, tmp_path: Path) -> None:
+        # No qualifier when there is nothing to qualify: single-repo staging is
+        # byte-identical to what it was before the change.
+        write_pom(tmp_path, "parent", modules=["svc", "shared"])
+        write_pom(
+            tmp_path / "svc",
+            "svc",
+            dependencies=["shared"],
+            java_source="@SpringBootApplication class App {}",
+        )
+        write_pom(tmp_path / "shared", "shared", java_source="class Util {}")
+        by_root = {s.build_root: s for s in discover_services(tmp_path)}
+        assert by_root["svc"].library_roots == ["shared"]
 
 
 class TestClientLibraryCensus:

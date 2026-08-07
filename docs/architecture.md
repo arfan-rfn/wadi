@@ -653,7 +653,7 @@ Measured properly across 14 services — endpoint-closure versus endpoint-plus-a
 
 **Stated limits, so they are countable rather than discovered.** Attribute-based rules (`user.department == resource.department`, clearance levels, time-of-day) are not relations between caller and resource and remain `UNKNOWN`/withheld. Policy delegated to an external engine (OPA/Rego, Casbin, Cerbos, OpenFGA) is decided outside the code entirely; "delegated, unreadable" is a different fact from "we failed to read this" and both presently collapse to `UNKNOWN`. Neither appears in ICPC, so neither is modelled now — `UNKNOWN` keeps doing its documented job as the first-class honest answer, and both are cheap to add later precisely because the closed-kind/open-content split is established. **The discipline that keeps `AuthEffect` from becoming a junk drawer: a new member is justified only when it changes how a consumer must reason** — whether to withhold, or how two guards compose. `REQUIRE_RELATIONSHIP` earns it on both counts. Anything that is merely a new label for "requires something nameable" belongs in the open fields.
 
-*The finding this section exists to prevent being lost.* 166 of 803 handlers carry no guard annotation at all; under OR-of-votes, zero failures means allowed, so those are reachable by any authenticated caller. Netting out the 58 public routes — near-certain to be the same endpoints, though the overlap is **not measured** — roughly 110 endpoints have "logged in" as their entire policy, and today they are indistinguishable from the 637 that are admin-and-manager-gated. Making that distinction visible is the single most actionable output of the tranche. One claim carried here is **derived from source and not verified in a CPG**: that `@Admin` resolves to `Role.ADMIN` via `AdminAuthorizer.validate` → `AdminRoleService.isAdmin` → `hasRole(userId, Role.ADMIN)`. `base` was absent from the probed CPG, so the 120-instance figure is plausible-not-proven — recorded as a hypothesis, per §5.2.11's standing lesson that a count is a hypothesis until one of its members is opened.
+*The finding this section exists to prevent being lost.* 166 of 803 handlers carry no guard annotation at all; under OR-of-votes, zero failures means allowed, so those are reachable by any authenticated caller. Netting out the 58 public routes — near-certain to be the same endpoints, though the overlap is **not measured** — roughly 110 endpoints have "logged in" as their entire policy, and today they are indistinguishable from the 637 that are admin-and-manager-gated. Making that distinction visible is the single most actionable output of the tranche. One claim carried here was **derived from source and not verified in a CPG**: that `@Admin` resolves to `Role.ADMIN` via `AdminAuthorizer.validate` → `AdminRoleService.isAdmin` → `hasRole(userId, Role.ADMIN)`. `base` was absent from the probed CPG, so the 120-instance figure was recorded as a hypothesis rather than a result, per §5.2.11's standing lesson. **§5.2.14 settled half of it:** with the library in scope the vocabulary derives to 8 and `admin` appears in the published relation set, so the binding is proven end to end. The dataflow to the `Role.ADMIN` constant is a separate Tier-2 claim and stays unproven.
 
 **Measured after M1 (recorded 2026-08-06; analyzer rebuilt, both ICPC repos in one CPG).** M1 is the pack half — derivation, discriminator, exact scoping — and lands with **no contract change**, using `AuthEvidenceKind.ASPECT` + `AuthResolution.OPAQUE`, which already exist.
 
@@ -737,6 +737,53 @@ Three consequences, each a distinct site: a speculatively-matched rule **forks**
 | `@StaffMember` / `@Owner` / `@Coach` / … | per-annotation | ≥ source | published counts endpoints, source counts methods |
 
 *And the oracle was wrong twice, in wadi's favour, which is the point of recording it.* Its first run reported **−110 handler methods** and **an authority published that was not in source** — both read as extraction defects, and both dissolved on inspection: the 110 were class-level `@RequestMapping` prefixes the oracle counted as handlers, and `REGISTRATION_UPLOAD` is written at `ContestController.java:108`, missed by the oracle's own line-accumulation. §5.2.11's lesson holds in the other direction too: **a naive oracle over real code manufactures phantom misses, and a delta is a hypothesis until one of its members is opened.**
+
+**§5.2.14 A library is not a service, even when it ships a controller (recorded 2026-08-06, binding; Phase 2.9.4).**
+
+§5.2.6 already classifies an in-repo Maven module as a *library* when another module depends on it, and stages its sources into each dependent's parse root. ICPC defeats that machinery twice over, and the cost is not confined to auth.
+
+*The measurement.* `global.icpc:base` is a jar compiled into `contest`; the pipeline gives it its own service, its own CPG, and one phantom endpoint. Two consequences, both measured on `snap_ca6168d9…`:
+
+| | with `base` as a peer service | with it as a library |
+|---|---|---|
+| Auth vocabulary derived | 7 of 8 | 8 |
+| Endpoints carrying a guard | 566 | **643** (+77) |
+| Response schemas `unresolved` | **336 of 804 (42%)** | up to 335 recoverable |
+
+**335 of the 336 unresolved response shapes are types `base` declares** — `DownloadableFile` on 121 endpoints, then `Contest`, `Person`, `Site`, `StaffMember`, `IdNameDto`. From the source side, **472 of 790 handler return types (59%) name a type from `base`**. §5.2.7's recovery is behaving correctly and honestly — *"a payload whose type is off-CPG stays unresolved, never fabricated"* is a pinned test — it simply cannot see types the input told it belong to someone else. This is an input-modelling defect with two large, unrelated payoffs, and it is the largest single accuracy gain available on this corpus.
+
+*Cause 1 — dependency resolution is repo-wide, classification is system-wide.* `discover_services(repo_root)` builds `root_by_artifact` from ONE checkout, so `backend/pom.xml`'s `<artifactId>base</artifactId>` resolves against a map that cannot contain it. A system whose library is a *sibling repo* — the ordinary shape for a shared internal artifact — never sees the edge. **Modules are pooled across every repo in the snapshot before classification.**
+
+*Cause 2 — web presence was mistaken for deployability.* `_has_service_markers` treats `@Controller`/`@RestController` as proof of a service, and `base` ships exactly one: `AspectFacesController`, a reusable web fragment. That veto would misclassify `base` even in one repo. **A library shipping a controller is a normal Spring pattern, not a contradiction** — the routes are mounted by whatever application depends on it. The proof is in the consuming app's own config: `SecurityConfig` carries `.requestMatchers(GET, "/aspectfaces/**").permitAll()`, a rule that is only meaningful if **contest** serves that route. So deployability, not web presence, marks a service: `@SpringBootApplication` or a compose identity. `base` has 0 of the former and `backend` has 1.
+
+*Consequence, stated rather than discovered.* `base` stops being a service; its one endpoint moves to `contest`, and because `endpoint_id` hashes the service id, **that endpoint's identity changes**. This is a correction, not churn — the endpoint was always served by `contest` — but a snapshot written before this rule holds the old id, and the two do not join. No other endpoint moves.
+
+*Rejected: merge every repo of a system into one CPG.* Simple, and it destroys the product. Per-service boundaries are what wadi extracts; pooling train-ticket's 41 deployables into one graph would erase every cross-service edge the stitcher exists to find.
+
+*Rejected: classify by "has no endpoints".* Fails on the case that motivated the work — `base` has one — and a library with zero endpoints is common without being definitional.
+
+*Rejected: require a Dockerfile.* ICPC's `backend` Dockerfile sits at the repo root, not the module root, and plenty of deployables are built by CI without one in-tree.
+
+*Blast radius, measured before the change.* train-ticket: 41 `@SpringBootApplication` across 45 poms. yas: 21 across 25. Nearly every module in both corpora is independently deployable, so the reclassification is expected to be inert there — asserted by re-analysis rather than assumed.
+
+**Measured (snapshot `snap_6934558c…`, same corpus, through the shipping pipeline).**
+
+| | base as a peer service | base as a library |
+|---|---|---|
+| Services | `base`, `contest` | `contest` (base is `library`) |
+| Endpoints | 804 | 804 |
+| Response shapes **resolved** | 468 | **803** |
+| Response shapes `unresolved` | 336 (335 base-declared) | **1** |
+| Relationship-scoped endpoints | 562 | **643** |
+| Relation vocabulary | 7 | **8** (`admin` recovered) |
+
+**335 of 336 unresolved response shapes resolved.** The one that remains is `PUT /help/topic/{id}/visibility` returning a raw `ResponseEntity` — the §5.2.7 raw-wrapper case, unrelated to this and honestly reported.
+
+*The moved endpoint, checked rather than assumed.* `/aspectfaces/{param}` is now served by **contest**, which is what its rule in contest's own `SecurityConfig` always implied. Total endpoints are unchanged at 804: it moved, it did not vanish or duplicate.
+
+*This settles §5.2.12's open hypothesis.* That section recorded `@Admin`'s binding as "derived from source and not verified in a CPG" because `base` was absent from the probed graph. With the library in scope the vocabulary derives to **8** through the real pipeline and `admin` appears in the published relation set — the *binding* (`@Admin` ↔ `AdminAuthorizer`) is now proven end to end. The separate Tier-2 claim, that the advice's dataflow reaches the `Role.ADMIN` constant, remains unproven and unclaimed.
+
+*A capacity consequence, found by running it.* A source union is the sum of its parts, not the larger of them: 563 service files plus 840 library files OOM-killed the frontend at the old 6 GB limit (exit 137). Raised to 10 GB. The failure is worth recording because of how it *presents* — the killed container surfaces on the next service as `CPGQL server unreachable: Name or service not known`, which names neither memory nor the container that died. Diagnosing an OOM from that message is guesswork, and it is tracked separately.
 
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**
 

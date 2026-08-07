@@ -136,19 +136,24 @@ those 63 URIs actually carry *differing* guards across verbs is **not measured**
 so the real cost is somewhere in [0, 133]. Closing it is an export-schema field,
 not a `wadi-contracts` change.
 
-### A library compiled into a service is modelled as a peer service
-**Priority:** P1
-**Opened:** v0.8.0
+---
 
-`global.icpc:base` is a jar inside `contest`, and the snapshot pipeline gives it
-its own service. The annotations and two of the authorizers live there, so in a
-per-service CPG the `Admin` typeDecl is external and its binding is invisible —
-cause (3) in §5.2.12, and the reason the M1 acceptance run had to build one CPG
-across both repos rather than go through the worker. Until this is modelled,
-this class of system must be analyzed with the library in scope or the
-vocabulary silently shrinks. **Measured end to end: 8 annotations derived with
-both repos in one CPG versus 7 through the shipping pipeline, and 643 guarded
-endpoints versus 566 — the per-service CPG costs 77 endpoints their guard.**
+## Infrastructure
+
+### An OOM-killed analyzer reports as a DNS failure
+**Priority:** P2
+**Opened:** v0.8.1
+
+When the Joern container is OOM-killed (exit 137), the worker's next request
+fails with `CPGQL server unreachable: [Errno -2] Name or service not known` —
+a message that names neither memory nor the container that died, and sends the
+reader looking at networking. Found while sizing for source unions (§5.2.14),
+where it cost real diagnosis time.
+
+The worker should distinguish "the container is gone" from "the name does not
+resolve", and say which. Checking container liveness on a connection failure,
+or surfacing the exit code, would turn a misleading error into an actionable
+one.
 
 ---
 
@@ -166,6 +171,18 @@ which origin may call, not which principal — but a scoped read is still useful
 ---
 
 ## Completed
+
+### A library compiled into a service was modelled as a peer service
+**Closed:** v0.8.1 (§5.2.14)
+
+Dependency resolution was repo-wide while classification needed to be
+system-wide, and web presence was mistaken for deployability — so a shared
+internal jar in its own repository got its own service and its own CPG.
+**Measured on ICPC: response shapes resolved 468 -> 803 (335 of 336 unresolved
+recovered), relationship-scoped endpoints 562 -> 643, relation vocabulary 7 ->
+8.** The library's one controller endpoint moved to the app that deploys it,
+with the endpoint total unchanged.
+
 
 ### A path template could match a literal into a `permitAll`
 **Closed:** v0.8.0 (§5.2.13)

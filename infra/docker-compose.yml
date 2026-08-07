@@ -71,7 +71,14 @@ services:
       # (joern-cli/bin/repl-bridge) honors JAVA_OPTS at lowest precedence, so this
       # composes with the -J flags the `joern` script already passes.
       JAVA_OPTS: -XX:MaxRAMPercentage=75.0
-    mem_limit: 6g
+    # Sized for a SOURCE UNION, not a single module (§5.2.14). A service that
+    # depends on an in-system library is parsed together with it — that is the
+    # whole point, since the library declares the types the service returns —
+    # so the parse root is the sum, not the larger of the two. ICPC is 563
+    # service files + 840 library files and OOM-killed the frontend at 6g
+    # (exit 137), which surfaces on the NEXT service as a misleading
+    # "CPGQL server unreachable".
+    mem_limit: 10g
     logging: *default-logging
     healthcheck:
       # A liveness probe MUST NOT evaluate anything. The CPGQL server's /query is a
