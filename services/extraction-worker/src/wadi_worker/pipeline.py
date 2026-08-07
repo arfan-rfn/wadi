@@ -39,7 +39,7 @@ from wadi_repo import RepoCache
 from wadi_storage import ArtifactRepository, SnapshotRepository, SystemRepository
 from wadi_worker.assembler import Assembler
 from wadi_worker.auth_oracle import scan_auth_extraction
-from wadi_worker.boundary import DiscoveredService, discover_services
+from wadi_worker.boundary import DiscoveredService, discover_system_services
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,12 @@ class ExtractionPipeline:
         service_count = 0
         extracted_count = 0
 
+        # Materialize EVERY repo before classifying any of them (§5.2.14).
+        # Whether a module is a library depends on what the other repos of the
+        # system declare, so a per-repo pass cannot see a shared internal jar
+        # that lives in its own repository — the ordinary shape, and the one
+        # that gave ICPC's `base` a service of its own.
+        checkouts: dict[str, Path] = {}
         for repo in system.repos:
             normalized = normalize_repo_source(repo.source)
             sha = snapshot.commits.get(normalized)
@@ -121,8 +127,14 @@ class ExtractionPipeline:
             checkout = workspace / _path_slug(normalized)
             await asyncio.to_thread(self._repo_cache.ensure_mirror, repo.source)
             await asyncio.to_thread(self._repo_cache.materialize, repo.source, sha, checkout)
+            checkouts[normalized] = checkout
 
-            discovered = await asyncio.to_thread(discover_services, checkout)
+        by_repo = await asyncio.to_thread(discover_system_services, checkouts)
+
+        for repo in system.repos:
+            normalized = normalize_repo_source(repo.source)
+            checkout = checkouts[normalized]
+            discovered = by_repo.get(normalized, [])
             if not discovered:
                 logger.warning("no analyzable services found in %s", normalized)
             for service in discovered:
@@ -168,7 +180,7 @@ class ExtractionPipeline:
                 # Per-service isolation (§5.2.6): one bad module is a queryable
                 # fact on its boundary, not a snapshot outage.
                 try:
-                    parse_root = self._parse_root(workspace, checkout, service, svc_id)
+                    parse_root = stage_parse_root(workspace, checkout, checkouts, service, svc_id)
                     export_dir = workspace / "exports" / svc_id
                     export = await asyncio.to_thread(
                         self._extractor.extract,
@@ -293,33 +305,49 @@ class ExtractionPipeline:
             service_count,
         )
 
-    def _parse_root(
-        self, workspace: Path, checkout: Path, service: DiscoveredService, svc_id: str
-    ) -> Path:
-        """The frontend's inputPath: the build root itself, or — when the
-        service has in-repo library dependencies — a staged union (§5.2.6):
-        the service tree at the stage root (service-relative anchors and ids
-        stay byte-identical) plus each library's `src/main/java` under
-        `wadi-libs/<dirname>/`.
-        """
-        build_root_path = checkout if service.build_root == "." else checkout / service.build_root
-        if not service.library_roots:
-            return build_root_path
-        stage = workspace / "stage" / svc_id
-        if stage.exists():
-            shutil.rmtree(stage)
-        shutil.copytree(
-            build_root_path,
-            stage,
-            ignore=shutil.ignore_patterns("target", "build", "node_modules", ".git"),
-        )
-        for lib_root in service.library_roots:
-            lib_main = checkout / lib_root / "src" / "main" / "java"
-            if not lib_main.is_dir():
-                continue
-            destination = stage / "wadi-libs" / Path(lib_root).name / "src" / "main" / "java"
-            shutil.copytree(lib_main, destination)
-        return stage
+
+def stage_parse_root(
+    workspace: Path,
+    checkout: Path,
+    checkouts: dict[str, Path],
+    service: DiscoveredService,
+    svc_id: str,
+) -> Path:
+    """The frontend's inputPath: the build root itself, or — when the service
+    has library dependencies — a staged union (§5.2.6): the service tree at the
+    stage root (service-relative anchors and ids stay byte-identical) plus each
+    library's `src/main/java` under `wadi-libs/<dirname>/`.
+
+    A free function rather than a method because it is pure filesystem work
+    over its arguments; `checkouts` maps normalized repo -> checkout dir so a
+    library in a SIBLING repo can be reached (§5.2.14).
+    """
+    build_root_path = checkout if service.build_root == "." else checkout / service.build_root
+    if not service.library_roots:
+        return build_root_path
+    stage = workspace / "stage" / svc_id
+    if stage.exists():
+        shutil.rmtree(stage)
+    shutil.copytree(
+        build_root_path,
+        stage,
+        ignore=shutil.ignore_patterns("target", "build", "node_modules", ".git"),
+    )
+    for lib_root in service.library_roots:
+        # `repo::root` names a library in a SIBLING repo of the same system
+        # (§5.2.14); a bare root is same-repo and keeps its old meaning, so
+        # single-repo staging is byte-identical to what it was.
+        repo_key, _, root = lib_root.rpartition("::")
+        lib_checkout = checkouts.get(repo_key, checkout) if repo_key else checkout
+        lib_main = lib_checkout / root / "src" / "main" / "java"
+        if not lib_main.is_dir():
+            logger.warning("library root %s has no Java sources — not staged", lib_root)
+            continue
+        destination = stage / "wadi-libs" / Path(root).name / "src" / "main" / "java"
+        if destination.exists():
+            continue  # two dependents can name the same library root
+        shutil.copytree(lib_main, destination)
+    return stage
 
 
 def _path_slug(normalized_source: str) -> str:

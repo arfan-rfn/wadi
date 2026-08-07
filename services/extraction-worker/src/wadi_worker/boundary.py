@@ -23,13 +23,13 @@ logger = logging.getLogger(__name__)
 
 _SKIP_DIRS = {"target", "build", "node_modules", ".git", ".idea", "src", "old-docs"}
 
-# Annotations that mark a module as a runnable service (§5.2.6 classification).
-# Word-boundary matched: @ControllerAdvice / @RestControllerAdvice are library
-# code (yas common-library ships a global exception handler) and must NOT trip
-# the @Controller / @RestController markers by substring.
-_SERVICE_MARKER_PATTERN = re.compile(
-    r"@(?:SpringBootApplication|RestController|Controller)(?![A-Za-z0-9_])"
-)
+# What makes a module DEPLOYABLE (§5.2.14). Deliberately NOT the controller
+# annotations: web presence is not deployability. A library shipping a
+# `@RestController` is an ordinary Spring pattern — its routes are mounted by
+# whatever application depends on it — and treating that as proof of a service
+# vetoed the library classification for the one module that most needed it.
+# Word-boundary matched so `@SpringBootApplicationX` cannot trip it.
+_DEPLOYABLE_MARKER_PATTERN = re.compile(r"@SpringBootApplication(?![A-Za-z0-9_])")
 
 # Client-library census (§5.4.2): import-line markers -> KNOWN_CLIENT_LIBRARIES
 # labels. Deterministic text scan; presence facts only (an import is not a
@@ -65,85 +65,175 @@ class DiscoveredService:
     """§5.4.2 census: HTTP client libraries detected by import scan."""
 
 
-def discover_services(repo_root: Path) -> list[DiscoveredService]:
-    """Find analyzable services + in-repo library modules in one repo checkout.
+@dataclass(frozen=True)
+class _ModuleScan:
+    """One Maven leaf module, read but not yet classified (§5.2.14).
 
-    §5.2.6: every Maven leaf module is classified — *service* (Spring Boot
-    main / controller markers or a compose identity), *library* (depended on
-    by another in-repo module, no service markers), or skipped when it has no
-    Java sources at all (frontend/pom-only modules). Libraries are never
-    analyzed as services; their build roots land on each dependent service's
-    ``library_roots`` (transitively) so the worker can stage a source union.
+    Classification moved out of the scan because it needs the whole system:
+    whether a module is a library depends on what OTHER repos declare.
     """
+
+    module_dir: Path
+    build_root: str
+    artifact: str
+    deps: set[str]
+    deployable: bool
+    identity: "_ComposeIdentity | None"
+
+
+def _scan_modules(repo_root: Path) -> list[_ModuleScan]:
     maven_roots = _find_maven_leaf_modules(repo_root)
     compose_identities = _parse_compose_identities(repo_root)
-
-    modules: list[tuple[Path, str, str]] = []  # (pom, build_root, artifact)
+    scans: list[_ModuleScan] = []
     for pom_path in maven_roots:
         if not _has_java_sources(pom_path.parent):
             logger.info("module %s has no Java sources — skipped", pom_path.parent)
             continue
         build_root = pom_path.parent.relative_to(repo_root).as_posix() or "."
         artifact = _artifact_id(pom_path) or pom_path.parent.name or repo_root.name
-        modules.append((pom_path, build_root, artifact))
-
-    root_by_artifact = {artifact: build_root for _, build_root, artifact in modules}
-    deps_by_root: dict[str, set[str]] = {}
-    depended_on: set[str] = set()
-    for pom_path, build_root, _ in modules:
-        in_repo = {
-            dep for dep in _declared_dependency_artifacts(pom_path) if dep in root_by_artifact
-        }
-        deps_by_root[build_root] = in_repo
-        depended_on.update(in_repo)
-
-    services: list[DiscoveredService] = []
-    library_artifacts: set[str] = set()
-    for pom_path, build_root, artifact in modules:
-        identity = compose_identities.get(build_root) or compose_identities.get(artifact)
-        is_library = (
-            artifact in depended_on
-            and identity is None
-            and not _has_service_markers(pom_path.parent)
-        )
-        if is_library:
-            library_artifacts.add(artifact)
-        config = parse_app_config(
-            pom_path.parent,
-            active_profiles=identity.profiles if identity and identity.profiles else None,
-        )
-        if identity and identity.env:
-            # Compose env overrides application files (Spring precedence, T3);
-            # keys stay in their raw env-var spelling — the stitcher's relaxed-
-            # binding lookup bridges to ${dotted.keys}.
-            config = replace(config, env={**config.env, **identity.env})
-        services.append(
-            DiscoveredService(
-                name=artifact,
+        scans.append(
+            _ModuleScan(
+                module_dir=pom_path.parent,
                 build_root=build_root,
-                build_system="maven",
-                languages=["java"],
-                hostnames=identity.hostnames if identity else [],
-                ports=identity.ports if identity else [],
-                config=config,
-                kind="library" if is_library else "service",
-                client_libraries=_client_library_census(pom_path.parent),
+                artifact=artifact,
+                deps=_declared_dependency_artifacts(pom_path),
+                deployable=_is_deployable(pom_path.parent),
+                identity=compose_identities.get(build_root) or compose_identities.get(artifact),
             )
         )
+    return scans
 
-    services = [
-        replace(
-            service,
-            library_roots=_transitive_library_roots(
-                service.build_root, deps_by_root, root_by_artifact, library_artifacts
-            ),
-        )
-        if service.kind == "service"
-        else service
-        for service in services
-    ]
-    services.sort(key=lambda s: s.build_root)
-    return _disambiguate_names(services)
+
+def _to_service(module: _ModuleScan, is_library: bool) -> DiscoveredService:
+    identity = module.identity
+    config = parse_app_config(
+        module.module_dir,
+        active_profiles=identity.profiles if identity and identity.profiles else None,
+    )
+    if identity and identity.env:
+        # Compose env overrides application files (Spring precedence, T3);
+        # keys stay in their raw env-var spelling — the stitcher's relaxed-
+        # binding lookup bridges to ${dotted.keys}.
+        config = replace(config, env={**config.env, **identity.env})
+    return DiscoveredService(
+        name=module.artifact,
+        build_root=module.build_root,
+        build_system="maven",
+        languages=["java"],
+        hostnames=identity.hostnames if identity else [],
+        ports=identity.ports if identity else [],
+        config=config,
+        kind="library" if is_library else "service",
+        client_libraries=_client_library_census(module.module_dir),
+    )
+
+
+def discover_system_services(checkouts: dict[str, Path]) -> dict[str, list[DiscoveredService]]:
+    """Classify every module of a SYSTEM, keyed by repo (§5.2.14).
+
+    Dependency resolution has to be system-wide because the artifact and the
+    module that depends on it need not share a repo: a shared internal jar in
+    its own repository is the ordinary shape, and resolving
+    `<artifactId>base</artifactId>` against one checkout's module map can only
+    ever miss it. Pooling first is the whole fix — ICPC's `base` is depended on
+    from a sibling repo, so per-repo classification saw no edge at all and gave
+    it its own service, its own CPG, and 335 response shapes it could not
+    resolve for the app that actually deploys it.
+
+    Returns the same shape `discover_services` returns, per repo, so callers
+    that already loop over repos change only where the list comes from.
+    """
+    scans = {repo: _scan_modules(root) for repo, root in checkouts.items()}
+    # One artifact map across the system. A duplicate artifactId in two repos
+    # is ambiguous, and guessing which one a dependency meant would invent a
+    # build graph — first repo in iteration order wins and the collision is
+    # logged, so a wrong union is visible rather than silent (P10).
+    owner: dict[str, tuple[str, str]] = {}
+    for repo, modules in scans.items():
+        for module in modules:
+            if module.artifact in owner:
+                logger.warning(
+                    "artifact %s declared in two repos (%s, %s) — using the first",
+                    module.artifact,
+                    owner[module.artifact][0],
+                    repo,
+                )
+                continue
+            owner[module.artifact] = (repo, module.build_root)
+
+    depended_on: set[str] = set()
+    deps_by_module: dict[tuple[str, str], set[str]] = {}
+    for repo, modules in scans.items():
+        for module in modules:
+            in_system = {dep for dep in module.deps if dep in owner}
+            deps_by_module[(repo, module.build_root)] = in_system
+            depended_on.update(in_system)
+
+    library_artifacts = {
+        module.artifact
+        for modules in scans.values()
+        for module in modules
+        if module.artifact in depended_on and module.identity is None and not module.deployable
+    }
+
+    result: dict[str, list[DiscoveredService]] = {}
+    for repo, modules in scans.items():
+        services = [_to_service(module, module.artifact in library_artifacts) for module in modules]
+        services = [
+            replace(
+                service,
+                library_roots=_transitive_system_library_roots(
+                    (repo, service.build_root), deps_by_module, owner, library_artifacts
+                ),
+            )
+            if service.kind == "service"
+            else service
+            for service in services
+        ]
+        services.sort(key=lambda s: s.build_root)
+        result[repo] = _disambiguate_names(services)
+    return result
+
+
+def _transitive_system_library_roots(
+    start: tuple[str, str],
+    deps_by_module: dict[tuple[str, str], set[str]],
+    owner: dict[str, tuple[str, str]],
+    library_artifacts: set[str],
+) -> list[str]:
+    """Library build roots this module needs staged, `repo::root`-qualified.
+
+    The qualifier is what lets the stage reach another repo's checkout. A
+    same-repo root keeps its bare spelling so existing single-repo behaviour —
+    and every golden written against it — is byte-identical.
+    """
+    seen: set[tuple[str, str]] = set()
+    roots: list[str] = []
+    queue = list(deps_by_module.get(start, set()))
+    while queue:
+        artifact = queue.pop()
+        if artifact not in library_artifacts or artifact not in owner:
+            continue
+        located = owner[artifact]
+        if located in seen:
+            continue
+        seen.add(located)
+        repo, root = located
+        roots.append(root if repo == start[0] else f"{repo}::{root}")
+        queue.extend(deps_by_module.get(located, set()))
+    return sorted(roots)
+
+
+def discover_services(repo_root: Path) -> list[DiscoveredService]:
+    """Find analyzable services + library modules in ONE repo checkout.
+
+    The single-repo case of :func:`discover_system_services`, kept as its own
+    entry point because most callers (and every fixture) analyze one tree. It
+    shares the classifier rather than reimplementing it, so the two cannot
+    drift into disagreeing about what a service is — which is exactly how a
+    library came to be modelled as a peer service (§5.2.14).
+    """
+    return discover_system_services({".": repo_root})["."]
 
 
 def _has_java_sources(module_dir: Path) -> bool:
@@ -173,7 +263,37 @@ def _client_library_census(module_dir: Path) -> list[ClientLibrary]:
     return sorted(found)
 
 
-def _has_service_markers(module_dir: Path) -> bool:
+def _is_deployable(module_dir: Path) -> bool:
+    """Does this module RUN on its own? (§5.2.14)
+
+    Web presence is not deployability. A library shipping a `@RestController`
+    is an ordinary Spring pattern — the routes are mounted by whatever
+    application depends on it — and treating the controller as proof of a
+    service vetoed the library classification for the one module that most
+    needed it. ICPC's `base` ships exactly one, `AspectFacesController`, and
+    the consuming app's own `SecurityConfig` carries a rule for
+    `/aspectfaces/**`: that route is served by *contest*, which is only
+    sayable if contest is what deploys it.
+
+    What marks a deployable is an entry point — `@SpringBootApplication` — or
+    a compose identity, which the caller checks separately. `base` has 0 of
+    the former; `backend` has 1.
+    """
+    # `war` packaging declares deployability on its own: a plain Spring MVC
+    # application has no `@SpringBootApplication` and is still a thing you
+    # deploy. Without this the rule would absorb every non-Boot web app into
+    # whatever depends on it.
+    pom = module_dir / "pom.xml"
+    if pom.is_file():
+        try:
+            root = ElementTree.parse(pom).getroot()
+        except ElementTree.ParseError:
+            root = None
+        if root is not None:
+            packaging = root.find(f"{_pom_namespace(root)}packaging")
+            if packaging is not None and (packaging.text or "").strip() == "war":
+                return True
+
     main = module_dir / "src" / "main" / "java"
     if not main.is_dir():
         return False
@@ -182,7 +302,7 @@ def _has_service_markers(module_dir: Path) -> bool:
             text = source.read_text(errors="replace")
         except OSError:
             continue
-        if _SERVICE_MARKER_PATTERN.search(text):
+        if _DEPLOYABLE_MARKER_PATTERN.search(text):
             return True
     return False
 
@@ -200,37 +320,6 @@ def _declared_dependency_artifacts(pom_path: Path) -> set[str]:
         if element is not None and element.text:
             artifacts.add(element.text.strip())
     return artifacts
-
-
-def _transitive_library_roots(
-    build_root: str,
-    deps_by_root: dict[str, set[str]],
-    root_by_artifact: dict[str, str],
-    library_artifacts: set[str],
-) -> list[str]:
-    """BFS over in-repo deps, collecting library build roots (lib→lib chains
-    included). A dependency on another *service* module is not staged —
-    merging two services' sources would blur their identities.
-    """
-    roots: list[str] = []
-    queue = list(deps_by_root.get(build_root, ()))
-    seen: set[str] = set()
-    while queue:
-        artifact = queue.pop(0)
-        if artifact in seen:
-            continue
-        seen.add(artifact)
-        if artifact not in library_artifacts:
-            logger.info(
-                "module %s depends on service module %s — not staged (§5.2.6)",
-                build_root,
-                artifact,
-            )
-            continue
-        lib_root = root_by_artifact[artifact]
-        roots.append(lib_root)
-        queue.extend(deps_by_root.get(lib_root, ()))
-    return sorted(roots)
 
 
 def _disambiguate_names(services: list[DiscoveredService]) -> list[DiscoveredService]:

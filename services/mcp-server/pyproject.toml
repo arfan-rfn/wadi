@@ -1,6 +1,6 @@
 [project]
 name = "wadi-mcp-server"
-version = "0.8.0"
+version = "0.8.1"
 description = "Wadi MCP server: architecture-level tools for coding agents (architecture.md §8)"
 requires-python = ">=3.12"
 dependencies = [

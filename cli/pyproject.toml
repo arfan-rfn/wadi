@@ -1,6 +1,6 @@
 [project]
 name = "wadi-sh"
-version = "0.8.0"
+version = "0.8.1"
 description = "The wadi command: compose-wrapper + REST client, nothing more (architecture.md §15)"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -13,7 +13,7 @@ dependencies = [
     "httpx>=0.28",
     "rich>=13.9",
     "pydantic>=2.10",
-    "wadi-contracts==0.8.0",
+    "wadi-contracts==0.8.1",
 ]
 
 [project.scripts]

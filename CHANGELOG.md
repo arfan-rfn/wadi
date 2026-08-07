@@ -3,6 +3,42 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.8.1 — 2026-08-07 (a library is not a service)
+
+A shared internal jar that lives in its own repository was being analyzed as if
+it were a service of its own. The cost was mostly not what you would guess:
+**335 of 336 unresolved response shapes on a real system were types that jar
+declares**, invisible from inside the graph of the application that returns them.
+
+### Fixed
+
+- **A library compiled into a service is no longer modelled as a peer service.**
+  Two things were wrong at once. Dependency resolution ran per repository while
+  the answer needs the whole system, so a `<dependency>` on a module in a
+  sibling repo resolved against a map that could never contain it — no edge, no
+  library, its own service. And a module carrying a `@RestController` was read
+  as deployable, which a library shipping a reusable web fragment plainly is
+  not. Modules are now pooled across every repository of a system before
+  anything is classified, and what marks a service is an entry point or war
+  packaging, not web presence.
+- **A library's sources reach the application that deploys them.** They are
+  staged into its parse, so the types it returns are visible where they are
+  used. On the system that prompted this: response shapes resolved **468 →
+  803**, endpoints carrying a guard **562 → 643**, and the authorization
+  vocabulary recovered its eighth annotation.
+- **The library's own routes belong to whoever mounts them.** Its one endpoint
+  now reads as served by the application, which is what that application's
+  security config always said. Total endpoints are unchanged.
+
+### Changed
+
+- The analyzer container is sized for a source union rather than a single
+  module: a service parsed together with its library is the sum of both, and
+  the old limit killed the parse outright. **A wadi stack now wants about 10 GB
+  available to Docker.**
+- `library_roots` on a service boundary can name a module in a sibling
+  repository. A bare root still means the service's own repo.
+
 ## 0.8.0 — 2026-08-06 (the words a project invents for its own policy)
 
 Wadi could only recognise authorization it had been taught the name of. Measured

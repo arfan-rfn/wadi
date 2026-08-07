@@ -1,6 +1,6 @@
 [project]
 name = "wadi-repo"
-version = "0.8.0"
+version = "0.8.1"
 description = "Wadi git intake: bare-clone cache, SHA pinning, worktree materialization, path deltas (architecture.md §3)"
 requires-python = ">=3.12"
 dependencies = [

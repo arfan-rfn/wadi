@@ -317,9 +317,12 @@ class ServiceBoundary(ArtifactEnvelope):
     library_roots: list[str] = Field(
         default_factory=list[str],
         description=(
-            "Build roots of in-repo library modules whose sources were staged "
-            "into this service's parse (§5.2.6 source union); empty for "
-            "kind=library and for services with no in-repo dependencies"
+            "Build roots of library modules whose sources were staged into this "
+            "service's parse (§5.2.6 source union). A bare root is a module in "
+            "this service's own repo; `repo::root` names one in a SIBLING repo "
+            "of the same system (§5.2.14), since a shared internal artifact "
+            "commonly lives in its own repository. Empty for kind=library and "
+            "for services with no library dependencies"
         ),
     )
     extraction_error: str | None = Field(
