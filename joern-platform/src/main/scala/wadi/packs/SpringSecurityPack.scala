@@ -1133,7 +1133,10 @@ object SpringSecurityPack {
           annotationBindings.getOrElse(annotation.name, Nil).foreach { guard =>
             emitOn(
               handler,
-              "aspect",
+              // The record names what the construct IS. Both routes produce an
+              // exactly-scoped guard, but calling a `HandlerInterceptor` an
+              // aspect sends a reader to look for a pointcut that is not there.
+              if (isAspect(guard)) "aspect" else "interceptor",
               List(uri),
               s"${guard.name} via ${firstLine(annotation.code)}",
               policyOf(annotation),
@@ -1160,7 +1163,12 @@ object SpringSecurityPack {
       * interpret rather than a confident half-answer.
       */
     private def policyOf(annotation: Annotation): Policy = {
-      val text        = firstLine(annotation.code)
+      // The FULL annotation, not `firstLine`. That helper truncates at 500
+      // characters, which is right for a display string and wrong for reading
+      // a policy: losing a second `Class`-valued argument past the cut would
+      // turn "two candidates, decline to name the resource" into "claim the
+      // first one" — the confidently-wrong direction (§12).
+      val text        = annotation.code
       val typeValued  = ClassValued.findAllMatchIn(text).map(_.group(1)).toList.distinct
       val authorities =
         EnumConstant.findAllMatchIn(text).map(_.group(1)).toList.distinct.sorted
@@ -1206,10 +1214,13 @@ object SpringSecurityPack {
 
     /** Can this type see a request before the handler does? */
     private def canIntercept(typeDecl: TypeDecl): Boolean =
-      typeDecl.ast.isAnnotation.filter(_.astParent == typeDecl).exists(_.name == "Aspect") ||
+      isAspect(typeDecl) ||
         typeDecl.inheritsFromTypeFullName.exists(name =>
           name.contains("Interceptor") || name.contains("Filter")
         )
+
+    private def isAspect(typeDecl: TypeDecl): Boolean =
+      typeDecl.ast.isAnnotation.filter(_.astParent == typeDecl).exists(_.name == "Aspect")
 
     /** Every endpoint handler with its URI and the annotations governing it.
       *
