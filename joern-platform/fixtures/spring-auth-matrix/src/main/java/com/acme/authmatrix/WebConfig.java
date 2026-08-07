@@ -25,6 +25,9 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new TenantAuthInterceptor()).addPathPatterns("/api/v1/audit");
         registry.addInterceptor(new TimingInterceptor());
+        // Registered service-wide, but annotation-bound: its scope is the
+        // handlers carrying @RequiresLogin, not `/**` (§5.2.12).
+        registry.addInterceptor(new RequiresLoginInterceptor());
     }
 }
 

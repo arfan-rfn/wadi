@@ -421,6 +421,37 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     detail should include("Membership.class")
   }
 
+  test("an interceptor that READS the annotation binds by the same rule") {
+    // The third derivation route, and the one with no AspectJ in it at all:
+    // `getMethodAnnotation(RequiresLogin.class)` inside a HandlerInterceptor.
+    // This is the commonest hand-rolled auth idiom in Spring, and a rule that
+    // only understood pointcuts would miss every codebase that uses it.
+    enforcements should contain(
+      ("interceptor", "/api/v1/tenant/audit", "RequiresLoginInterceptor via @RequiresLogin")
+    )
+  }
+
+  test("an annotation-bound interceptor does not ALSO report its registered scope") {
+    // It is registered on `/**` with no addPathPatterns, so emitting the
+    // registration would withhold every endpoint in the service and undo the
+    // exact scoping. Its real scope is the handlers carrying the annotation.
+    enforcements.filter { case (kind, _, detail) =>
+      kind == "interceptor" && detail == "RequiresLoginInterceptor"
+    } shouldBe empty
+    enforcements.map(_._2) should not contain "/**"
+  }
+
+  test("the record names what the construct IS, aspect or interceptor") {
+    // Both routes produce an exactly-scoped guard, but calling a
+    // HandlerInterceptor an aspect sends a reader looking for a pointcut that
+    // does not exist.
+    val bound = enforcements.filter(_._3.contains(" via @"))
+    bound.filter(_._3.startsWith("TenantAdminAuthorizer")).map(_._1).distinct shouldBe
+      List("aspect")
+    bound.filter(_._3.startsWith("RequiresLoginInterceptor")).map(_._1).distinct shouldBe
+      List("interceptor")
+  }
+
   test("M2: a guard that states no policy carries no policy fields") {
     // The in-handler check is still an unread guard, and gaining a vocabulary
     // for the guards we CAN read must not quietly dress up the ones we cannot.
@@ -503,8 +534,11 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     // AspectJ binds plain types too (`args(order)` binds an Order), so a rule
     // reading parameter types alone would enrol a DTO in the security
     // vocabulary. Only names that are ACTUALLY annotations in the graph survive.
-    enforcements.map(_._3).filter(_.contains(" via @")).map(_.takeWhile(_ != '(')) should
-      contain only "TenantAdminAuthorizer via @TenantAdmin"
+    enforcements.map(_._3).filter(_.contains(" via @")).map(_.takeWhile(_ != '(')).distinct should
+      contain theSameElementsAs List(
+        "TenantAdminAuthorizer via @TenantAdmin",
+        "RequiresLoginInterceptor via @RequiresLogin"
+      )
   }
 
   // ---- D5: the policy lives in config, not in the Java ----

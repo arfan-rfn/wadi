@@ -64,6 +64,19 @@ public class TenantController {
         return "activity";
     }
 
+    /**
+     * Guarded by an INTERCEPTOR that reads the annotation (§5.2.12 route c).
+     *
+     * <p>No AspectJ involved, and the interceptor is registered on
+     * {@code /**} — so its real scope is this handler alone, and reporting
+     * its registration scope would withhold the whole service.
+     */
+    @RequiresLogin
+    @GetMapping("/api/v1/tenant/audit")
+    public String audit() {
+        return "audit";
+    }
+
     /** Neither: the control that proves scoping is per-endpoint. */
     @GetMapping("/api/v1/tenant/status")
     public String status() {
