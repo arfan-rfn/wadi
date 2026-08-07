@@ -25,11 +25,36 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class TenantController {
 
-    /** Guarded by a project-defined vocabulary: withheld, exact scope. */
-    @TenantAdmin(scope = "billing")
+    /**
+     * Guarded by a project-defined vocabulary, and READ (§5.2.12 M2).
+     *
+     * <p>The annotation states its own policy: a relation (from the annotation
+     * name), the resource it is required on, and a permission required in
+     * addition. None of that is interpretation — it is what the developer
+     * wrote — so this publishes a requirement rather than withholding.
+     */
+    @TenantAdmin(resource = Tenant.class, permissions = Permission.BILLING_WRITE)
     @GetMapping("/api/v1/tenant/settings")
     public String settings() {
         return "settings";
+    }
+
+    /**
+     * TWO type-valued attributes, so the resource is ambiguous by shape.
+     *
+     * <p>ICPC writes `@ContestManager(context = Contest.class, entity =
+     * Standings.class)`, where the context is the resource and the entity is
+     * how it is reached — but nothing in the shape says which is which, and
+     * "the first one is the resource" is an invention. The relation is still
+     * published; `resource_type` is not, and both types stay visible verbatim
+     * in `detail` so the reader sees what was declined rather than a confident
+     * half-answer (P10).
+     */
+    @TenantAdmin(resource = Tenant.class, via = Membership.class,
+            permissions = Permission.TENANT_DELETE)
+    @GetMapping("/api/v1/tenant/members")
+    public String members() {
+        return "members";
     }
 
     /** Same binding shape, non-gating advice: the claim must SURVIVE. */

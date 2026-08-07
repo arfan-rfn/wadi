@@ -690,6 +690,25 @@ Measured properly across 14 services — endpoint-closure versus endpoint-plus-a
 
 *The gap between 643 and 566 is the library-as-service modelling, now measured rather than argued.* The worker builds one CPG per service, so `AdminAuthorizer` — which lives in `base` — is absent from `contest`'s graph, the vocabulary derives to 7 instead of 8, and **77 endpoints lose the guard they were shown in the single-CPG run**. Nothing about the rule changes; the input does. This is why the entry in `TODOS.md` is P1 rather than a footnote: for this shape of system, per-service CPGs silently cost an eighth of the policy.
 
+**Measured after M2 (recorded 2026-08-06; snapshot `snap_f108db04…`, contracts 1.22.0 + export 2.12.0, same corpus and pipeline).** M1 made the map honest; M2 makes it answer.
+
+| | Before M1 | After M1 | After M2 |
+|---|---|---|---|
+| Endpoints with a **read** policy, not a withheld one | 0 | 0 | **562** |
+| `authenticated` | 745 | 745 | **752** |
+| `withheld` | 0 (nothing detected) | 7 | **0** — every annotation-bound guard now reads |
+| `unread_by_kind` | `in-handler: 1` | `aspect: 826, in-handler: 9` | **`in-handler: 9`** |
+| Permissions published | 0 | 0 | **14 distinct across 282 endpoints** |
+| `composition_unresolved` | not expressible | not expressible | **185** |
+
+The relation vocabulary comes out as `contest-manager on Contest`, `site-manager on Site`, `owner on Person`, `coach on Team` — seven distinct pairs, none of them a name wadi was taught.
+
+*The endpoint that opened this whole investigation, end to end.* `POST /contest/{contestId}/camp/create` began as `authenticated=false` — *no authentication, evidenced* — on a route that creates a sub-contest. After M1 it was `withheld`. After M2 it reads `authenticated=true`, `relationships=[contest-manager on Contest]`, `authorities=[CONTEST_CREATE_SUBCONTEST]`, on `require-relationship`/`resolved` evidence anchored at `ContestManagerAuthorizer.java:59`, with the annotation quoted verbatim. Wrong → honest → answered, and the answer is a fact no role list could have carried.
+
+*`composition_unresolved` at 185 is a feature of the result, not a shortfall.* ICPC stacks guards on 185 endpoints and admits the caller if ANY vote passes, while Spring's layered enforcement composes conjunctively; nothing read so far says which applies. Publishing the union silently would overstate what a caller needs, and an over-restrictive answer is still a wrong one. The counter exists so the relationship numbers are never read as exact.
+
+*What is still unexercised:* `roles`, `denied` and `withheld` — the first two because ICPC genuinely has no route reducible to a role once `@Admin`'s authorizer is out of scope, and the third because every guard that reaches an endpoint now reads. `authorities` LEFT the unexercised list, which is the counter doing its job: a vocabulary that had never fired on this system now has 282 instances.
+
 **Validation layers.** The §5.2.9 and §5.2.10 layers, plus the one this class requires: a fixture that pins **both** polarities — an annotation-bound gating aspect that must be detected and a tracing aspect over the same handlers that must not be — because a presence-only golden cannot fail on the false positive that makes the feature unusable (the P8 amendment). Goldens assert the derived vocabulary as a *set* and the guarded-handler *count*, so a binding form that stops resolving shows up as a number rather than a quieter map. The `unexercised_vocabulary` signal already fired correctly here (`roles`, `authorities`, `denied`, `withheld` all reported unexercised on a 804-endpoint enterprise system) and was the only layer that did — **it is a working instrument that nothing was watching**, which is its own finding about where the coverage report sits in the reading order.
 
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**

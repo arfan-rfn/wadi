@@ -29,6 +29,7 @@ from wadi_contracts import (
     AuthEvidenceKind,
     AuthMechanism,
     AuthMechanismKind,
+    AuthRelationship,
     AuthResolution,
     HttpMethod,
     SourceAnchor,
@@ -127,7 +128,15 @@ def merge_endpoint_auth(
 
     authenticated = bool(requiring) and not bypassed
     roles = sorted({role for item in requiring for role in item.roles})
-    authorities = sorted({name for item in requiring for name in item.authorities})
+    relationships = [item.relationship for item in requiring if item.relationship is not None]
+    # A relationship's authorities are required IN ADDITION to the relation, so
+    # they belong in the flat list too — a caller really must hold them. The
+    # relationship keeps its own copy because that is where the conjunction
+    # survives; pooled alone they would read as an unconditional permission.
+    authorities = sorted(
+        {name for item in requiring for name in item.authorities}
+        | {name for relationship in relationships for name in relationship.authorities}
+    )
     # `denyAll()` admits nobody, so the endpoint is unreachable rather than
     # merely protected. Only a rule that actually applies counts — a bypassed
     # chain never runs it, and an unread rule cannot be claimed as a denial.
@@ -137,6 +146,14 @@ def merge_endpoint_auth(
         denied=denied,
         roles=roles,
         authorities=authorities,
+        relationships=relationships,
+        # Two guards on one handler may be alternatives or may both be
+        # required, and nothing read so far says which: ICPC's authorizers vote
+        # into a request-scoped bean that admits the caller if ANY vote passed,
+        # while Spring's layered enforcement composes conjunctively. Publishing
+        # the union of their requirements without saying so would overstate what
+        # a caller needs — an over-restrictive answer is still a wrong one.
+        composition_unresolved=len(relationships) > 1,
         mechanism="spring-security",
         mechanisms=mechanisms,
         evidence=evidence,
@@ -306,9 +323,16 @@ def _enforcement_evidence(
 ) -> list[AuthEvidence]:
     """Interceptors, servlet filters, aspects, in-handler checks.
 
-    Deliberately never interpreted into an effect: a guard we can see but
-    cannot read must withhold the endpoint's claim, which is the whole point of
-    detecting it. Reading it as "no auth" is what a missing detector does.
+    A guard we can see but cannot read withholds the endpoint's claim, which is
+    the whole point of detecting it — reading it as "no auth" is what a missing
+    detector does.
+
+    Since §5.2.12 a guard can also arrive READ. An annotation-bound aspect
+    states its policy in the annotation the developer wrote, so the record
+    carries a relation and the requirement is published rather than withheld.
+    The distinction is the whole tranche: "something guards this and we cannot
+    say what" and "this requires contest-manager on Contest" are different
+    answers, and before there was one representation for both.
     """
     evidence: list[AuthEvidence] = []
     for enforcement in enforcements:
@@ -321,17 +345,39 @@ def _enforcement_evidence(
         unresolvable = enforcement.pattern == UNRESOLVABLE_PATTERN
         if not unresolvable and not _in_scope(kind, enforcement.pattern, full_uri):
             continue
+        relationship = _relationship_of(enforcement)
         evidence.append(
             AuthEvidence(
                 kind=kind,
                 detail=enforcement.detail,
                 anchor=_anchor_of(enforcement),
-                effect=AuthEffect.UNKNOWN,
-                resolution=AuthResolution.OPAQUE,
+                effect=(AuthEffect.REQUIRE_RELATIONSHIP if relationship else AuthEffect.UNKNOWN),
+                resolution=(AuthResolution.RESOLVED if relationship else AuthResolution.OPAQUE),
                 pattern=enforcement.pattern,
+                relationship=relationship,
             )
         )
     return evidence
+
+
+def _relationship_of(enforcement: ExportAuthEnforcement) -> AuthRelationship | None:
+    """The relation an annotation-bound guard states, if it stated one.
+
+    ``relation`` alone decides this. A guard may well name no resource type —
+    ICPC writes two ``Class``-valued arguments where only one is the resource,
+    and the pack declines to guess which (P10) — but "the caller must be a
+    contest-manager" is already a policy worth publishing, and withholding the
+    whole record for want of the resource would trade a read answer for an
+    unread one.
+    """
+    if not enforcement.relation:
+        return None
+    return AuthRelationship(
+        relation=enforcement.relation,
+        resource_type=enforcement.resource_type,
+        resource_binding=enforcement.resource_binding,
+        authorities=list(enforcement.authorities),
+    )
 
 
 #: HTTP verbs, for shape-inferring a config rule's method restriction.

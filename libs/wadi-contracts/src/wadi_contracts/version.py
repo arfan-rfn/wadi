@@ -6,7 +6,7 @@ migration note in the affected model's docstring. Snapshot keying means old
 artifacts are never rewritten in place.
 """
 
-SCHEMA_VERSION = "1.21.0"
+SCHEMA_VERSION = "1.22.0"
 
 TAG_REGISTRY_VERSION = "1.4.0"
 """Version of the tag vocabulary (see :mod:`wadi_contracts.tags`).

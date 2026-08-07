@@ -42,7 +42,7 @@ def inventory() -> ServiceExport:
 
 class TestPetstoreModule:
     def test_parses_under_schema_2(self, petstore: ServiceExport) -> None:
-        assert petstore.export_schema_version == "2.11.0"
+        assert petstore.export_schema_version == "2.12.0"
         assert petstore.compatible_with_reader()
 
     def test_analysis_coverage_matches_pinned_conformance(

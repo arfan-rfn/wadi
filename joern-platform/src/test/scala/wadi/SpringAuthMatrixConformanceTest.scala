@@ -375,14 +375,75 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
 
   // ---- §5.2.12: a project-defined authorization vocabulary ----
 
+  /** Every enforcement row with its §5.2.12 policy fields. */
+  private lazy val policies: List[(String, String, String, String, List[String])] =
+    exportJson("auth_enforcements").arr.toList.map { e =>
+      def opt(key: String) = e(key) match {
+        case ujson.Null => ""
+        case other      => other.str
+      }
+      (
+        e("detail").str,
+        e("pattern").str,
+        opt("relation"),
+        opt("resource_type"),
+        e("authorities").arr.toList.map(_.str)
+      )
+    }
+
+  private def policyFor(uri: String) =
+    policies
+      .find { case (detail, pattern, _, _, _) => pattern == uri && detail.contains(" via ") }
+      .getOrElse(fail(s"no annotation-bound enforcement for $uri; have ${policies.map(_._2)}"))
+
+  test("M2: the guard's own arguments become the policy it states") {
+    // Nothing here is interpreted — relation from the annotation's name,
+    // resource from its type-valued argument, permission from its constant.
+    // Read by SHAPE, never by attribute name: this fixture deliberately spells
+    // them `resource`/`permissions` where ICPC spells them `context`/`acl`.
+    val (_, _, relation, resource, authorities) = policyFor("/api/v1/tenant/settings")
+    relation shouldBe "tenant-admin"
+    resource shouldBe "Tenant"
+    authorities shouldBe List("BILLING_WRITE")
+  }
+
+  test("M2: two type-valued arguments leave the resource unclaimed, not guessed") {
+    // ICPC's `@ContestManager(context = Contest.class, entity = Standings.class)`:
+    // the context is the resource and the entity is how it is reached, but
+    // nothing in the shape says which, and "the first is the resource" is an
+    // invention (P10). The relation and permission still publish; both types
+    // stay legible in `detail`.
+    val (detail, _, relation, resource, authorities) = policyFor("/api/v1/tenant/members")
+    relation shouldBe "tenant-admin"
+    resource shouldBe ""
+    authorities shouldBe List("TENANT_DELETE")
+    detail should include("Tenant.class")
+    detail should include("Membership.class")
+  }
+
+  test("M2: a guard that states no policy carries no policy fields") {
+    // The in-handler check is still an unread guard, and gaining a vocabulary
+    // for the guards we CAN read must not quietly dress up the ones we cannot.
+    val inHandler = policies.filter { case (_, pattern, _, _, _) =>
+      pattern == "/api/v1/orders/export"
+    }
+    inHandler.map(_._3) should contain only ""
+  }
+
   test("a project-defined annotation is derived from its BINDING, not a name list") {
     // @TenantAdmin is neither a Spring name nor composed from one, so the
     // annotation pass sees nothing. What makes it readable is that an advice
     // parameter is typed with it. Measured on ICPC: this rule run cold, with
     // no vocabulary list at all, recovers all 8 of that system's annotations
     // and scopes 637 of 803 handlers.
-    enforcements should contain(
-      ("aspect", "/api/v1/tenant/settings", "TenantAdminAuthorizer via @TenantAdmin")
+    // `detail` carries the annotation VERBATIM since M2, so match its shape
+    // rather than a fixed string — the point is which guard bound which
+    // annotation, not how many arguments that annotation happened to have.
+    enforcements.filter { case (kind, pattern, _) =>
+      kind == "aspect" && pattern == "/api/v1/tenant/settings"
+    }.map(_._3) should contain(
+      "TenantAdminAuthorizer via @TenantAdmin(resource = Tenant.class, "
+        + "permissions = Permission.BILLING_WRITE)"
     )
   }
 
@@ -405,8 +466,8 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     // `{?}` here would withhold all three handlers and pass a presence-only
     // golden while making the state meaningless.
     enforcements.map(_._2) should not contain "/api/v1/tenant/status"
-    enforcements.filter(_._3.startsWith("TenantAdminAuthorizer")).map(_._2) should contain only
-      "/api/v1/tenant/settings"
+    enforcements.filter(_._3.startsWith("TenantAdminAuthorizer")).map(_._2).distinct should
+      contain theSameElementsAs List("/api/v1/tenant/settings", "/api/v1/tenant/members")
   }
 
   test("an annotation-bound aspect emits no unresolvable blanket alongside it") {
@@ -442,8 +503,8 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
     // AspectJ binds plain types too (`args(order)` binds an Order), so a rule
     // reading parameter types alone would enrol a DTO in the security
     // vocabulary. Only names that are ACTUALLY annotations in the graph survive.
-    enforcements.map(_._3).filter(_.contains(" via @")) should contain only
-      "TenantAdminAuthorizer via @TenantAdmin"
+    enforcements.map(_._3).filter(_.contains(" via @")).map(_.takeWhile(_ != '(')) should
+      contain only "TenantAdminAuthorizer via @TenantAdmin"
   }
 
   // ---- D5: the policy lives in config, not in the Java ----

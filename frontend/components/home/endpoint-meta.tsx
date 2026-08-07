@@ -25,9 +25,11 @@ import {
   Network,
   ShieldQuestion,
   ShieldX,
+  UserCheck,
 } from "lucide-react"
 
 import type { EndpointDependency } from "@/lib/generated/endpoint_dependencies.schema"
+import type { AuthRelationship } from "@/lib/generated/endpoint.schema"
 import { cn } from "@/lib/utils"
 import { useRoleSwatchStyle } from "@/lib/wadi/role-colors"
 import {
@@ -108,26 +110,62 @@ function RoleName({ role }: { role: string }) {
   )
 }
 
+/** A relation the caller must stand in, rendered so it cannot be misread as a role.
+ *
+ * `contest-manager · Contest` is not a grant the caller carries around — it is
+ * a fact about this caller and *the resource this request names*, so two
+ * callers with identical roles get different answers. It deliberately takes no
+ * colour swatch: the palette means "role" everywhere else in the UI, and
+ * lending it to a relation would say these are the same kind of thing. */
+function RelationName({
+  relation,
+  resourceType,
+}: {
+  relation: string
+  resourceType?: string | null
+}) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <UserCheck aria-hidden className="size-2.5 shrink-0 opacity-70" />
+      {relation}
+      {resourceType ? (
+        <span className="opacity-60">·{resourceType}</span>
+      ) : null}
+    </span>
+  )
+}
+
 /** Who can call this endpoint — the state and who it admits, as one chip.
  *
  * Roles and authorities both name a grant the caller must hold, so they read
  * as one list here; the tooltip keeps them apart, because `hasRole("ADMIN")`
- * and `hasAuthority("ADMIN")` match different grants in Spring. */
+ * and `hasAuthority("ADMIN")` match different grants in Spring.
+ *
+ * Relationships are NOT folded into that list (§5.2.12). An endpoint requiring
+ * `contest-manager` on the contest it names has an empty role list for a
+ * reason, and before this it rendered as a bare "Authenticated" — which reads
+ * as "any logged-in caller", the exact misreading the tranche exists to
+ * remove. On ICPC that is 85% of the guarded surface. */
 export function AccessChip({
   state,
   roles,
   authorities = [],
+  relationships = [],
+  compositionUnresolved = false,
 }: {
   state: AuthState
   roles: readonly string[]
   authorities?: readonly string[]
+  relationships?: readonly AuthRelationship[]
+  compositionUnresolved?: boolean
 }) {
   const { icon: Icon, tone, fallback, title, detail } = ACCESS[state]
   // Deduped: one rule can require the role ADMIN while another requires the
   // authority ADMIN, and rendering the same name twice reads as two grants —
   // besides colliding on the React key.
   const granted = [...new Set([...roles, ...authorities])]
-  const named = state === "required" && granted.length > 0
+  const named =
+    state === "required" && (granted.length > 0 || relationships.length > 0)
   return (
     <Tooltip>
       {/* Base UI composes with `render` where Radix used `asChild`: the
@@ -137,7 +175,18 @@ export function AccessChip({
         render={
           <span
             tabIndex={0}
-            aria-label={named ? `${title}: ${granted.join(", ")}` : title}
+            aria-label={
+              named
+                ? `${title}: ${[
+                    ...granted,
+                    ...relationships.map((relationship) =>
+                      relationship.resource_type
+                        ? `${relationship.relation} on ${relationship.resource_type}`
+                        : relationship.relation
+                    ),
+                  ].join(", ")}`
+                : title
+            }
           />
         }
         className={cn(
@@ -148,7 +197,18 @@ export function AccessChip({
       >
         <Icon aria-hidden className="size-3 shrink-0" />
         {named ? (
-          granted.map((name) => <RoleName key={name} role={name} />)
+          <>
+            {granted.map((name) => (
+              <RoleName key={name} role={name} />
+            ))}
+            {relationships.map((relationship) => (
+              <RelationName
+                key={`${relationship.relation}:${relationship.resource_type ?? ""}`}
+                relation={relationship.relation}
+                resourceType={relationship.resource_type}
+              />
+            ))}
+          </>
         ) : (
           <span>{fallback}</span>
         )}
@@ -162,6 +222,31 @@ export function AccessChip({
         {authorities.length > 0 ? (
           <p className="mt-1 font-mono text-2xs">
             Authorities: {authorities.join(", ")}
+          </p>
+        ) : null}
+        {relationships.length > 0 ? (
+          <>
+            <p className="mt-1 font-mono text-2xs">
+              Relationships:{" "}
+              {relationships
+                .map((relationship) =>
+                  relationship.resource_type
+                    ? `${relationship.relation} on ${relationship.resource_type}`
+                    : relationship.relation
+                )
+                .join(", ")}
+            </p>
+            <p className="mt-1 text-2xs text-muted-foreground">
+              A relation to the resource this request names — not a grant the
+              caller holds everywhere. Two callers with the same roles can get
+              different answers here.
+            </p>
+          </>
+        ) : null}
+        {compositionUnresolved ? (
+          <p className="mt-1 text-2xs text-warn">
+            Several guards apply and how they combine was not read — these may
+            be alternatives rather than all required.
           </p>
         ) : null}
       </TooltipContent>

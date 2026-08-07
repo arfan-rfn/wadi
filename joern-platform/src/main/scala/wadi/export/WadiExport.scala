@@ -78,7 +78,7 @@ object WadiExport {
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
     */
-  val ExportSchemaVersion = "2.11.0"
+  val ExportSchemaVersion = "2.12.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -2068,16 +2068,25 @@ object WadiExport {
               .map(v => (v, method.filename, lineOf(method.lineNumber), method.id))
           )
 
+    // Fields are positional up to `detail`, which is last and joined back
+    // because it alone may contain the separator (raw source text).
+    val PolicyFields = 6
     tagged
       .sortBy { case (_, _, line, id) => (line, -id) }
       .map { case (encoded, file, line, _) =>
-        val Array(kind, pattern, detail) = encoded.split('|').take(2) :+
-          encoded.split('|').drop(2).mkString("|")
+        val parts   = encoded.split('|')
+        val head    = parts.take(PolicyFields).padTo(PolicyFields, "")
+        val detail  = parts.drop(PolicyFields).mkString("|")
+        val nullable = (value: String) => if (value.isEmpty) ujson.Null else ujson.Str(value)
         ujson.Obj(
-          "kind"    -> kind,
-          "pattern" -> pattern,
-          "detail"  -> detail,
-          "anchor"  -> ujson.Obj("file" -> file, "line" -> line)
+          "kind"             -> head(0),
+          "pattern"          -> head(1),
+          "relation"         -> nullable(head(2)),
+          "resource_type"    -> nullable(head(3)),
+          "resource_binding" -> nullable(head(4)),
+          "authorities" -> ujson.Arr.from(head(5).split(',').filter(_.nonEmpty).map(ujson.Str(_))),
+          "detail"           -> detail,
+          "anchor"           -> ujson.Obj("file" -> file, "line" -> line)
         )
       }
       .distinctBy(obj => (obj("kind").str, obj("pattern").str, obj("detail").str))

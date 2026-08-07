@@ -425,6 +425,25 @@ class AuthCoverageSection(WadiModel):
         default_factory=dict,
         description="Enforcement points detected but not readable, counted per AuthEvidenceKind",
     )
+    relationship_scoped: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "§5.2.12: endpoints whose policy is a RELATION to a resource rather than a "
+            "role. Counted apart from `authenticated` because it answers a different "
+            "question — a system where this dominates has a role list that is empty "
+            "for a reason, not by omission"
+        ),
+    )
+    composition_unresolved: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "§5.2.12: endpoints where several guards apply and how they COMBINE was "
+            "not read. Their listed requirements may be alternatives, so this is the "
+            "counter that stops the relationship numbers being read as exact"
+        ),
+    )
     extraction_gaps: dict[str, int] = Field(
         default_factory=dict,
         description=(

@@ -57,7 +57,13 @@ export function SecurityLine({
   const authorities = endpoint.auth?.authorities ?? []
   return (
     <span className={cn("flex flex-wrap items-center gap-1.5", className)}>
-      <AccessChip state={state} roles={roles} authorities={authorities} />
+      <AccessChip
+        state={state}
+        roles={roles}
+        authorities={authorities}
+        relationships={endpoint.auth?.relationships ?? []}
+        compositionUnresolved={endpoint.auth?.composition_unresolved ?? false}
+      />
       <DependencyChip dependencies={dependencies} />
     </span>
   )

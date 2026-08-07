@@ -359,6 +359,120 @@ class TestClaimWithholding:
         )
         assert auth.authenticated is None
 
+    def test_a_read_relationship_guard_is_published_not_withheld(self) -> None:
+        # §5.2.12 M2. The guard states its policy in the annotation the
+        # developer wrote, so there is nothing unread about it — publishing
+        # `withheld` here would trade a read answer for an unread one.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/public/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}/camp/create",
+                    detail="ContestManagerAuthorizer via @ContestManager(context = Contest.class)",
+                    anchor=ExportAnchor(file="src/ContestManagerAuthorizer.java", line=59),
+                    relation="contest-manager",
+                    resource_type="Contest",
+                    authorities=["CONTEST_CREATE_SUBCONTEST"],
+                )
+            ],
+        )
+        assert auth.authenticated is True
+        assert auth.unread_enforcement == []
+        assert [r.relation for r in auth.relationships] == ["contest-manager"]
+        assert auth.relationships[0].resource_type == "Contest"
+        # Required IN ADDITION to the relation, so it appears in both places.
+        assert auth.relationships[0].authorities == ["CONTEST_CREATE_SUBCONTEST"]
+        assert auth.authorities == ["CONTEST_CREATE_SUBCONTEST"]
+        assert auth.composition_unresolved is False
+
+    def test_a_relationship_guard_beats_a_permit_all_that_matched_by_template(self) -> None:
+        # The live ICPC defect: `{contestId}` ant-matches the literal `public`
+        # in `/contest/public/**`, so seven contest-administration write routes
+        # published as `authenticated=False` — no authentication, evidenced.
+        # A read relationship guard now settles it in the restrictive direction.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/subcontest/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/public/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}/subcontest/create",
+                    detail="ContestManagerAuthorizer via @ContestManager",
+                    anchor=ExportAnchor(file="src/ContestManagerAuthorizer.java", line=59),
+                    relation="contest-manager",
+                )
+            ],
+        )
+        assert auth.authenticated is True
+
+    def test_two_relationship_guards_leave_their_composition_unresolved(self) -> None:
+        # ICPC stacks @Admin and @ContestManager on one handler and admits the
+        # caller if EITHER voted yes; Spring's layered enforcement composes the
+        # other way. Nothing read so far says which, and listing both
+        # requirements as though all were needed overstates what a caller must
+        # have — an over-restrictive answer is still a wrong one.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "authenticated()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}",
+                    detail="ContestManagerAuthorizer via @ContestManager",
+                    anchor=ExportAnchor(file="src/A.java", line=59),
+                    relation="contest-manager",
+                    resource_type="Contest",
+                ),
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}",
+                    detail="SiteManagerAuthorizer via @SiteManager",
+                    anchor=ExportAnchor(file="src/B.java", line=44),
+                    relation="site-manager",
+                    resource_type="Site",
+                ),
+            ],
+        )
+        assert auth.composition_unresolved is True
+        assert {r.relation for r in auth.relationships} == {"contest-manager", "site-manager"}
+
+    def test_a_guard_with_no_relation_still_withholds(self) -> None:
+        # The M1 behaviour must survive M2: a guard we detected but could not
+        # read is still unread, and gaining a vocabulary for the ones we CAN
+        # read must not quietly promote the ones we cannot.
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/orders",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="{?}",
+                    detail="UserAuthorizer",
+                    anchor=ExportAnchor(file="src/UserAuthorizer.java", line=15),
+                )
+            ],
+        )
+        assert auth.authenticated is None
+        assert auth.relationships == []
+
     def test_a_chain_bypass_means_nothing_runs(self) -> None:
         auth = merge_endpoint_auth(
             full_uri="/static/app.js",

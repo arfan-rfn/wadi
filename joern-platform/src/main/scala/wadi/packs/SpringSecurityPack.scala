@@ -2,6 +2,7 @@ package wadi.packs
 
 import io.shiftleft.codepropertygraph.generated.{Cpg, DiffGraphBuilder, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{
+  Annotation,
   AstNode,
   Call,
   Expression,
@@ -1031,6 +1032,15 @@ object SpringSecurityPack {
 
     private val ClassLiteral = """^([A-Za-z_][\w.]*)\.class$""".r
 
+    /** `context = Contest.class` -> `Contest`. A type-valued argument. */
+    private val ClassValued = """(?:[\w.]*\.)?(\w+)\.class\b""".r
+
+    /** `acl = ACLEnum.CONTEST_UPDATE` -> `CONTEST_UPDATE`. Screaming snake only:
+      * a permission constant is written that way by convention across every
+      * language wadi reads, and requiring it keeps ordinary identifiers out.
+      */
+    private val EnumConstant = """\b[A-Za-z_][\w.]*\.([A-Z][A-Z0-9_]{2,})\b""".r
+
     override def run(builder: DiffGraphBuilder): Unit = {
       tagAnnotationBound(builder)
       tagInterceptors(builder)
@@ -1119,12 +1129,58 @@ object SpringSecurityPack {
       */
     private def tagAnnotationBound(builder: DiffGraphBuilder): Unit =
       endpointHandlers.foreach { case (handler, uri, borne) =>
-        borne.toList.sorted.foreach { annotation =>
-          annotationBindings.getOrElse(annotation, Nil).foreach { guard =>
-            emitOn(handler, "aspect", List(uri), s"${guard.name} via @$annotation", builder)
+        borne.sortBy(_.name).foreach { annotation =>
+          annotationBindings.getOrElse(annotation.name, Nil).foreach { guard =>
+            emitOn(
+              handler,
+              "aspect",
+              List(uri),
+              s"${guard.name} via ${firstLine(annotation.code)}",
+              policyOf(annotation),
+              builder
+            )
           }
         }
       }
+
+    /** The policy an annotation STATES, read from its own arguments (§5.2.12).
+      *
+      * Read by SHAPE, never by attribute name. ICPC spells these `context` and
+      * `acl`; the next system will spell them something else, and a list of
+      * attribute names is the same closed-vocabulary mistake one level down.
+      * What is stable is what the values ARE: a `Foo.class` argument names a
+      * type, an enum constant or string names a permission.
+      *
+      * `resource_type` is emitted only when EXACTLY ONE type-valued argument
+      * appears. ICPC writes `@ContestManager(context = Contest.class, entity =
+      * Standings.class)`, where the context is the resource and the entity is
+      * how it is reached — but nothing in the shape says which is which, and
+      * "the first one is the resource" is an invention (P10). Both remain
+      * visible verbatim in `detail`, so the reader sees what we declined to
+      * interpret rather than a confident half-answer.
+      */
+    private def policyOf(annotation: Annotation): Policy = {
+      val text        = firstLine(annotation.code)
+      val typeValued  = ClassValued.findAllMatchIn(text).map(_.group(1)).toList.distinct
+      val authorities =
+        EnumConstant.findAllMatchIn(text).map(_.group(1)).toList.distinct.sorted
+      Policy(
+        relation = kebab(annotation.name),
+        resourceType = if (typeValued.sizeIs == 1) typeValued.head else "",
+        // The parameter naming the instance lives in the advice body's
+        // per-entity branches (`extractParameter(joinPoint, sig, "contestId")`).
+        // Reading it is Tier-2 work; an unread binding stays unread (P10).
+        resourceBinding = "",
+        authorities = authorities
+      )
+    }
+
+    /** `ContestManager` -> `contest-manager`. */
+    private def kebab(name: String): String =
+      name
+        .replaceAll("([a-z0-9])([A-Z])", "$1-$2")
+        .replaceAll("([A-Z]+)([A-Z][a-z])", "$1-$2")
+        .toLowerCase
 
     /** Annotation name → the gating constructs that consume it.
       *
@@ -1161,11 +1217,11 @@ object SpringSecurityPack {
       * METHOD})` by convention, and a policy declared once on the controller
       * governs every route it declares.
       */
-    private lazy val endpointHandlers: List[(Method, String, Set[String])] =
+    private lazy val endpointHandlers: List[(Method, String, List[Annotation])] =
       cpg.typeDecl.filterNot(_.isExternal).l.flatMap { typeDecl =>
-        val classLevel = typeDecl.ast.isAnnotation.filter(_.astParent == typeDecl).name.toSet
+        val classLevel = typeDecl.ast.isAnnotation.filter(_.astParent == typeDecl).l
         typeDecl.method.l.flatMap { method =>
-          val own = method.ast.isAnnotation.filter(_.astParent == method).name.toSet
+          val own = method.ast.isAnnotation.filter(_.astParent == method).l
           // EVERY route the handler serves, not just the first. One method can
           // carry several (`@RequestMapping(method = {GET, POST})`, a value
           // array), and reading only the head would leave the siblings looking
@@ -1401,9 +1457,18 @@ object SpringSecurityPack {
         patterns: List[String],
         detail: String,
         builder: DiffGraphBuilder
+    ): Unit = emit(anchor, kind, patterns, detail, Policy.Empty, builder)
+
+    private def emit(
+        anchor: Call,
+        kind: String,
+        patterns: List[String],
+        detail: String,
+        policy: Policy,
+        builder: DiffGraphBuilder
     ): Unit = patterns.foreach { pattern =>
       Iterator(anchor)
-        .newTagNodePair("auth-enforcement", s"$kind|$pattern|$detail")
+        .newTagNodePair("auth-enforcement", encode(kind, pattern, detail, policy))
         .store()(using builder)
     }
 
@@ -1413,11 +1478,53 @@ object SpringSecurityPack {
         patterns: List[String],
         detail: String,
         builder: DiffGraphBuilder
+    ): Unit = emitOn(anchor, kind, patterns, detail, Policy.Empty, builder)
+
+    private def emitOn(
+        anchor: Method,
+        kind: String,
+        patterns: List[String],
+        detail: String,
+        policy: Policy,
+        builder: DiffGraphBuilder
     ): Unit = patterns.foreach { pattern =>
       Iterator(anchor)
-        .newTagNodePair("auth-enforcement", s"$kind|$pattern|$detail")
+        .newTagNodePair("auth-enforcement", encode(kind, pattern, detail, policy))
         .store()(using builder)
     }
+
+    /** `detail` stays LAST because it is the one field that can contain the
+      * separator — a chain bypass carries raw source text. Everything the
+      * exporter needs to split on therefore precedes it, and the exporter joins
+      * the remainder back rather than assuming a field count.
+      */
+    private def encode(kind: String, pattern: String, detail: String, policy: Policy): String =
+      List(
+        kind,
+        pattern,
+        policy.relation,
+        policy.resourceType,
+        policy.resourceBinding,
+        policy.authorities.mkString(","),
+        detail
+      ).mkString("|")
+  }
+
+  /** What an annotation-bound guard states about the caller (§5.2.12).
+    *
+    * Empty strings rather than options because this is a wire encoding, and the
+    * exporter turns "" back into an absent field. Nothing here is interpreted:
+    * every value is read verbatim out of the annotation the developer wrote.
+    */
+  private[wadi] final case class Policy(
+      relation: String,
+      resourceType: String,
+      resourceBinding: String,
+      authorities: List[String]
+  )
+
+  private[wadi] object Policy {
+    val Empty: Policy = Policy("", "", "", Nil)
   }
 
   /** Token-propagation evidence on outbound call sites (§5.1):
