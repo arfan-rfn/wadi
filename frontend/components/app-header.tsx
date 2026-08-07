@@ -8,13 +8,13 @@
 // scope you are looking at, then what is in it. The panes get the height back,
 // and there is a single line to read left-to-right instead of two to correlate.
 import Link from "next/link"
-import { GitMerge } from "lucide-react"
 
 import { siteConfig } from "@/config/site"
 import { useMounted } from "@/lib/hooks/use-mounted"
 import { cn } from "@/lib/utils"
 import { DensityToggle } from "@/components/density-toggle"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { WadiMark } from "@/components/wadi-mark"
 
 export function AppHeader({
   scope,
@@ -48,8 +48,15 @@ export function AppHeader({
           "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
       >
-        <GitMerge aria-hidden className="size-4 text-primary" />
-        <span className="text-sm">{siteConfig.name}</span>
+        {/* The brand lockup, built live: the mark beside the wordmark at the
+            proportions the brand sheet specifies (Geist 600, lowercase,
+            tracking -0.04em). Rendering it from the token rather than shipping
+            a lockup image means it re-themes with the header and stays crisp
+            at any zoom. */}
+        <WadiMark className="size-4 shrink-0 text-primary" />
+        <span className="text-sm tracking-[-0.04em] lowercase">
+          {siteConfig.name}
+        </span>
       </Link>
 
       {scope && mounted ? (
