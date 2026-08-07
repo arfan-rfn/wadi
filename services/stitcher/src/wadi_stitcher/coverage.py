@@ -179,6 +179,7 @@ def build_auth_coverage(
     """
     unread_by_kind: dict[str, int] = {}
     authenticated = unauthenticated = withheld = no_evidence = 0
+    relationship_scoped = composition_unresolved = 0
     for endpoint in endpoints:
         unread = endpoint.auth.unread_enforcement
         for item in unread:
@@ -191,6 +192,14 @@ def build_auth_coverage(
             withheld += 1
         else:
             no_evidence += 1
+        # §5.2.12: counted apart from the claim counters above because it
+        # answers a different question. A system whose policy is relational
+        # has an empty role list for a reason, and without this the two are
+        # indistinguishable from a role list nobody managed to read.
+        if endpoint.auth.relationships:
+            relationship_scoped += 1
+        if endpoint.auth.composition_unresolved:
+            composition_unresolved += 1
     extraction_gaps: dict[str, int] = {}
     # §5.2.10 T6: counted apart from every claim counter — these gate REACH,
     # not principal, so they must never move an authenticated/withheld number.
@@ -211,6 +220,8 @@ def build_auth_coverage(
         "no-evidence": no_evidence > 0,
         "unread-enforcement": bool(unread_by_kind),
         "request-policy": bool(request_policies),
+        "relationships": relationship_scoped > 0,
+        "composition-unresolved": composition_unresolved > 0,
     }
     unexercised = sorted(name for name, seen in exercised.items() if not seen)
     return AuthCoverageSection(
@@ -222,6 +233,8 @@ def build_auth_coverage(
         unread_by_kind=dict(sorted(unread_by_kind.items())),
         extraction_gaps=dict(sorted(extraction_gaps.items())),
         request_policies=dict(sorted(request_policies.items())),
+        relationship_scoped=relationship_scoped,
+        composition_unresolved=composition_unresolved,
         unexercised_vocabulary=unexercised,
     )
 

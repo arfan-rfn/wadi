@@ -56,6 +56,13 @@
           "title": "Authenticated",
           "type": "integer"
         },
+        "composition_unresolved": {
+          "default": 0,
+          "description": "\u00a75.2.12: endpoints where several guards apply and how they COMBINE was not read. Their listed requirements may be alternatives, so this is the counter that stops the relationship numbers being read as exact",
+          "minimum": 0,
+          "title": "Composition Unresolved",
+          "type": "integer"
+        },
         "endpoints": {
           "default": 0,
           "minimum": 0,
@@ -75,6 +82,13 @@
           "description": "No claim because nothing that could gate was found",
           "minimum": 0,
           "title": "No Evidence",
+          "type": "integer"
+        },
+        "relationship_scoped": {
+          "default": 0,
+          "description": "\u00a75.2.12: endpoints whose policy is a RELATION to a resource rather than a role. Counted apart from `authenticated` because it answers a different question \u2014 a system where this dominates has a role list that is empty for a reason, not by omission",
+          "minimum": 0,
+          "title": "Relationship Scoped",
           "type": "integer"
         },
         "request_policies": {
@@ -651,7 +665,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.21.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.23.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What the map knows it doesn't know (\u00a75.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
@@ -752,7 +766,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.21.0",
+      "default": "1.23.0",
       "title": "Schema Version",
       "type": "string"
     },

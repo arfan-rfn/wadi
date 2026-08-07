@@ -1,6 +1,6 @@
 [project]
 name = "wadi-contracts"
-version = "0.7.4"
+version = "0.8.0"
 description = "Wadi data contracts: the Pydantic models that are the single source of truth (architecture.md §7)"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

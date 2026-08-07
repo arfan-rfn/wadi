@@ -272,6 +272,18 @@ export function EndpointPeek({
                       partly read — the role list may be incomplete
                     </p>
                   ) : null}
+                  {/* Scope, not readability (§5.2.13). A rule read perfectly
+                      can still cover part of a route: `/contest/public/**`
+                      reaches `/contest/{contestId}/camp/create` only when that
+                      id is literally `public`. Without this line the reader
+                      sees a `permitAll` sitting on a protected endpoint and
+                      has to open the code to find out why it did not win. */}
+                  {item.active !== false && item.covers_route === false ? (
+                    <p className="text-2xs text-muted-foreground">
+                      covers part of this route — it applies to some requests
+                      this endpoint serves, not all of them
+                    </p>
+                  ) : null}
                   {item.anchor ? (
                     <p className="font-mono text-2xs break-all text-muted-foreground">
                       ↳ {item.anchor.file}:{item.anchor.start_line}

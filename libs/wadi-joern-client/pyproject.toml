@@ -1,6 +1,6 @@
 [project]
 name = "wadi-joern-client"
-version = "0.7.4"
+version = "0.8.0"
 description = "Thin CPGQL-server client + the Scala<->Python bulk-export contract (architecture.md §5.1)"
 requires-python = ">=3.12"
 dependencies = [

@@ -655,7 +655,88 @@ Measured properly across 14 services — endpoint-closure versus endpoint-plus-a
 
 *The finding this section exists to prevent being lost.* 166 of 803 handlers carry no guard annotation at all; under OR-of-votes, zero failures means allowed, so those are reachable by any authenticated caller. Netting out the 58 public routes — near-certain to be the same endpoints, though the overlap is **not measured** — roughly 110 endpoints have "logged in" as their entire policy, and today they are indistinguishable from the 637 that are admin-and-manager-gated. Making that distinction visible is the single most actionable output of the tranche. One claim carried here is **derived from source and not verified in a CPG**: that `@Admin` resolves to `Role.ADMIN` via `AdminAuthorizer.validate` → `AdminRoleService.isAdmin` → `hasRole(userId, Role.ADMIN)`. `base` was absent from the probed CPG, so the 120-instance figure is plausible-not-proven — recorded as a hypothesis, per §5.2.11's standing lesson that a count is a hypothesis until one of its members is opened.
 
+**Measured after M1 (recorded 2026-08-06; analyzer rebuilt, both ICPC repos in one CPG).** M1 is the pack half — derivation, discriminator, exact scoping — and lands with **no contract change**, using `AuthEvidenceKind.ASPECT` + `AuthResolution.OPAQUE`, which already exist.
+
+| | Before | After |
+|---|---|---|
+| Derived vocabulary | 0 (name list matched nothing) | **8**, exactly the eight the system declares, with no names supplied |
+| Endpoints carrying a named, anchored guard | 0 | **643 of 804** |
+| Endpoints isolated as authenticated-and-nothing-else | indistinguishable | **161** |
+| Service-wide `{?}` blankets | n/a | **0** |
+
+**`authenticated` was never the false field, and saying otherwise overstates the fix.** It stays at 745 before and after, correctly: these endpoints do require authentication, and an unread guard adds a role requirement rather than removing an authentication one — which is exactly what §5.2.10's asymmetry rule already says. What was wrong is that `roles: []` was published with *nothing beside it*, so "no roles required" and "a role requirement exists that we could not read" shared one representation. M1 separates them by putting the guard in `unread_enforcement`; M2's contract change is what turns the second into an answer.
+
+*The `@Admin` hypothesis, settled.* §5.2.11's rule that a count is a hypothesis until a member is opened applied to this section's own claim: `@Admin → Role.ADMIN` was derived from source with `base` outside the probed CPG. With both repos in one CPG the vocabulary derives to 8 rather than 7 and `@Admin` accounts for 112 endpoint records — the cross-repo precondition is not a caution, it is measured, and a per-service CPG silently loses an eighth of the vocabulary.
+
+*One member of the 161 opened, and it is the point of the tranche.* `GlobalsController` declares seven mappings and zero role annotations. Its three POST routes — `/common/globals/video/{videoName}`, `/video/`, `/hotel/{contestId}` — are **not** covered by the chain's `permitAll`, which is `GET`-scoped, so upload endpoints are gated by authentication alone. Before M1 they were indistinguishable from the 637 admin-and-manager-gated routes; the map could not have been asked the question.
+
+*The defect M1's own acceptance run caught, which review did not.* The first run emitted **one** `{?}` blanket, from `ACLAuthorizer` — an aspect bound to `@ACL`, an annotation that is declared and applied nowhere. The vocabulary test asked whether a name was *used* as an annotation, concluded the aspect was not annotation-bound, and fell through to the `execution(...)` path. That single record withheld all 804 endpoints: a precise result turned into a wall of unknowns by one row. The test now also accepts a *declared* annotation, identified by its `@Retention`/`@Target` meta-annotations — javasrc gives an `@interface` no distinguishing TypeDecl property, and an annotation a running aspect can bind to must carry `@Retention(RUNTIME)` or the advice would never fire. **An aspect bound to an annotation nobody uses gates nothing, and the honest output is silence.** Pinned as `UnusedScope`/`UnusedScopeAuthorizer`.
+
+*Scoping is endpoint-granular in the worker too, and had to be.* `_in_scope` ant-matches every kind but `IN_HANDLER`, whose docstring already records the hazard: a `{orderId}` template segment matches any literal. An aspect record naming `/common/country/{a2}` would therefore lend its ADMIN guard to `/common/country/export` and every sibling, and the count of genuinely unguarded endpoints — the finding above — would quietly collapse. `ASPECT` joins `IN_HANDLER` as endpoint-scoped; the `{?}` blanket case never reaches the matcher, so the honest-unresolvable path is unaffected.
+
+**Known gaps, tracked rather than absorbed (`TODOS.md`).** `UserAuthorizer` — the aspect that actually throws the 403 — is still undetected, because its body neither denies visibly nor reads identity: it consults a request-scoped bean the *other* advice writes. It must not be closed by adding `AccessDeniedException` to `RejectionMarkers`: that aspect is `execution(...)`-scoped, so detecting it re-creates the 804-endpoint blanket M1 exists to prevent, and growing a name list is the anti-pattern this section records. The real shape is a **deferred-verdict consumer** — advice that adds no requirement of its own and must not withhold. Also open: enforcement scope carries no HTTP method (804 endpoints over 734 URIs, 63 URIs multi-verb), and the library-as-service modelling that made the single-CPG acceptance run necessary.
+
+**Measured end to end through the shipping pipeline (recorded 2026-08-06; snapshot `snap_5ca5301a…`, stack redeployed at 0.7.4, per-service CPGs as the worker actually builds them).** The single-CPG run above measures what the rule *can* recover; this measures what the product *does*, and the two differ in one respect that is itself a recorded gap.
+
+| | Before (`snap_de10a665…`) | After (`snap_5ca5301a…`) |
+|---|---|---|
+| Endpoints with a named, anchored guard | 0 | **566** |
+| Derived vocabulary | 0 | **7** — `@Admin` is missing, see below |
+| Service-wide `{?}` blankets | n/a | **0** |
+| Endpoints published as evidenced-**public** that are in fact guarded | 8 | **0** |
+| `withheld` | 0 (and reported as unexercised vocabulary) | **7**, and the state is now exercised |
+
+*The 8 corrected endpoints are the strongest single outcome, and they are the §5.2.9 wrong-fact class exactly.* `POST /contest/{contestId}/camp/create`, `/subcontest/create`, `/schedules`, `/teamsAttachments` and three siblings were published as `authenticated=false` — no authentication, evidenced — while carrying `@ContestManager(context = Contest.class, acl = ACLEnum.CONTEST_CREATE_SUBCONTEST)`. They read as public because a `{contestId}` template segment ant-matches the literal `public` in `/contest/public/**`, so the chain's `permitAll` appeared to cover them. That over-approximation is documented as the honest direction for a path *pattern*, and here it produced a permissive answer on seven contest-administration write routes. M1 withholds them because the annotation guard is opaque and §5.2.10's rule escalates opacity on `PERMIT_ALL`; the underlying matcher asymmetry is tracked separately, because an endpoint in that shape *without* an annotation would still read as public.
+
+*The gap between 643 and 566 is the library-as-service modelling, now measured rather than argued.* The worker builds one CPG per service, so `AdminAuthorizer` — which lives in `base` — is absent from `contest`'s graph, the vocabulary derives to 7 instead of 8, and **77 endpoints lose the guard they were shown in the single-CPG run**. Nothing about the rule changes; the input does. This is why the entry in `TODOS.md` is P1 rather than a footnote: for this shape of system, per-service CPGs silently cost an eighth of the policy.
+
+**Measured after M2 (recorded 2026-08-06; snapshot `snap_f108db04…`, contracts 1.22.0 + export 2.12.0, same corpus and pipeline).** M1 made the map honest; M2 makes it answer.
+
+| | Before M1 | After M1 | After M2 |
+|---|---|---|---|
+| Endpoints with a **read** policy, not a withheld one | 0 | 0 | **562** |
+| `authenticated` | 745 | 745 | **752** |
+| `withheld` | 0 (nothing detected) | 7 | **0** — every annotation-bound guard now reads |
+| `unread_by_kind` | `in-handler: 1` | `aspect: 826, in-handler: 9` | **`in-handler: 9`** |
+| Permissions published | 0 | 0 | **14 distinct across 282 endpoints** |
+| `composition_unresolved` | not expressible | not expressible | **185** |
+
+The relation vocabulary comes out as `contest-manager on Contest`, `site-manager on Site`, `owner on Person`, `coach on Team` — seven distinct pairs, none of them a name wadi was taught.
+
+*The endpoint that opened this whole investigation, end to end.* `POST /contest/{contestId}/camp/create` began as `authenticated=false` — *no authentication, evidenced* — on a route that creates a sub-contest. After M1 it was `withheld`. After M2 it reads `authenticated=true`, `relationships=[contest-manager on Contest]`, `authorities=[CONTEST_CREATE_SUBCONTEST]`, on `require-relationship`/`resolved` evidence anchored at `ContestManagerAuthorizer.java:59`, with the annotation quoted verbatim. Wrong → honest → answered, and the answer is a fact no role list could have carried.
+
+*`composition_unresolved` at 185 is a feature of the result, not a shortfall.* ICPC stacks guards on 185 endpoints and admits the caller if ANY vote passes, while Spring's layered enforcement composes conjunctively; nothing read so far says which applies. Publishing the union silently would overstate what a caller needs, and an over-restrictive answer is still a wrong one. The counter exists so the relationship numbers are never read as exact.
+
+*What is still unexercised:* `roles`, `denied` and `withheld` — the first two because ICPC genuinely has no route reducible to a role once `@Admin`'s authorizer is out of scope, and the third because every guard that reaches an endpoint now reads. `authorities` LEFT the unexercised list, which is the counter doing its job: a vocabulary that had never fired on this system now has 282 instances.
+
 **Validation layers.** The §5.2.9 and §5.2.10 layers, plus the one this class requires: a fixture that pins **both** polarities — an annotation-bound gating aspect that must be detected and a tracing aspect over the same handlers that must not be — because a presence-only golden cannot fail on the false positive that makes the feature unusable (the P8 amendment). Goldens assert the derived vocabulary as a *set* and the guarded-handler *count*, so a binding form that stops resolving shows up as a number rather than a quieter map. The `unexercised_vocabulary` signal already fired correctly here (`roles`, `authorities`, `denied`, `withheld` all reported unexercised on a 804-endpoint enterprise system) and was the only layer that did — **it is a working instrument that nothing was watching**, which is its own finding about where the coverage report sits in the reading order.
+
+**§5.2.13 Path-template matching is not symmetric (recorded 2026-08-06, binding; Phase 2.9.3 M3).**
+
+Surfaced by M1's end-to-end run rather than by review, and it is the last of the wrong-fact class in this area: **9 ICPC endpoints were published as `authenticated=false` — no authentication, evidenced — on routes that require it.**
+
+*The mechanism.* `_ant_match` lets an endpoint's `{id}` template segment match any literal in a rule pattern, documented as the honest over-approximation for a path *pattern*. `/help/cms/{space}/{page}` therefore "matches" `/help/cms/virtpublic/**`, and `/team/search/site/{id}` matches `/team/search/site/accepted/**`. Both are true of exactly one value of the template and false of every other — but the chain's `permitAll` was taken as covering the whole route, and `CmsPageController`'s two handlers, which carry no guard at all, published as fully public.
+
+**The rule this section states: over-approximation is honest while it ADDS restriction and wrong the moment it removes one.** That is the same asymmetry §5.2.10 found for unread scope, arriving through matching rather than through reading, and it had to be found twice because the first fix was written as a special case (`opacity escalates on PERMIT_ALL`) rather than as the principle.
+
+*Decision — matching reports its precision.* `_ant_precision` returns `exact` or `speculative`: speculative means the match needed a path template to absorb a literal pattern segment. Callers that can only be *strengthened* by a match ignore it and keep over-approximating; callers that can be *weakened* — a `permitAll`, a chain bypass — decline to act on it. A `*` wildcard over a template stays exact, because `*` really does cover every value.
+
+Three consequences, each a distinct site: a speculatively-matched rule **forks** the first-match-wins walk instead of winning it (it governs one request of many, so control passes on for the rest); a chain **bypass** is held to an exact match, because granting one on a possible value would switch the security chain off for a whole route; and a permissive rule that is the *only* thing that would establish `open` **withholds** instead, since the claim would rest entirely on a match false for every other request.
+
+*Contract — `AuthEvidence.covers_route` (contracts 1.23.0).* Partial coverage is deliberately NOT folded into `resolution`. That field means *how completely the enforcement was read*, and these rules were read perfectly — `/contest/public/** -> permitAll()`, every character. What is partial is the scope. Overloading it would tell a reader the analysis failed on a rule it understood, and would leave no way to explain why a `permitAll` sits beside a protected claim without opening the code. The UI renders it as "covers part of this route — it applies to some requests this endpoint serves, not all of them".
+
+*Measured (snapshot `snap_ca6168d9…`, same corpus and pipeline).* **9 endpoints moved from evidenced-public to protected; 0 regressed; 9 claim changes in 804.** `/help/cms/{space}/{page}`, `/help/cms/{wiki}/{space}/{page}`, `/team/search/site/{id}` and `/count`, and five `/contest/{contestId}/…` reads. Every one is a route with no guard of its own that was inheriting a `permitAll` written for a sibling literal.
+
+**Source-oracle verification (recorded 2026-08-06).** An independent comment-stripped reader over both ICPC repos, compared against the published snapshot:
+
+| | Source | Published | |
+|---|---|---|---|
+| Handler methods (method-level mappings) | 804 | **804** | exact |
+| Distinct ACL permissions in guard annotations | 14 | **14** | exact |
+| Guarded handlers | 620 | 562 | −58, all `@Admin` (library-as-service) |
+| `@StaffMember` / `@Owner` / `@Coach` / … | per-annotation | ≥ source | published counts endpoints, source counts methods |
+
+*And the oracle was wrong twice, in wadi's favour, which is the point of recording it.* Its first run reported **−110 handler methods** and **an authority published that was not in source** — both read as extraction defects, and both dissolved on inspection: the 110 were class-level `@RequestMapping` prefixes the oracle counted as handlers, and `REGISTRATION_UPLOAD` is written at `ContestController.java:108`, missed by the oracle's own line-accumulation. §5.2.11's lesson holds in the other direction too: **a naive oracle over real code manufactures phantom misses, and a delta is a hypothesis until one of its members is opened.**
 
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**
 
@@ -777,7 +858,7 @@ The contracts are the spine of the modularity story (P1): they are the *only* co
 | `System` | name, repos[{source: url \| local path, branch?, credRef?}] — local `path:` sources are first-class (required for `wadi analyze .`, §13) |
 | `Snapshot` | system_id, {repo → sha}, status, timestamps |
 | `ServiceBoundary` | name, repo, build_root, languages[], network identity (hostnames/ports/env), build system, **`kind`** (v1: `service`; reserved: `function`, `edge-worker`, `firmware` — activated Phase 10, §11) |
-| `Endpoint` | id, service, http_method, full_uri, simplified_uri (`{?}` placeholders), path/query/body params, response type, **structured auth** (`authenticated` — a claim only when every in-scope enforcement was read, §5.2.9 — plus `roles[]`, `mechanisms[]` (how authentication happens: jwt-bearer, oauth2-resource-server, custom-filter, … each with `active`), and `evidence[]`, where each record is one **enforcement point** carrying `kind`/`effect`/`resolution`/`active`/anchor), handler ref, **`trigger`** (v1: `http`; reserved: `queue`, `stream`, `schedule`) |
+| `Endpoint` | id, service, http_method, full_uri, simplified_uri (`{?}` placeholders), path/query/body params, response type, **structured auth** (`authenticated` — a claim only when every in-scope enforcement was read, §5.2.9 — plus `roles[]`, `authorities[]`, **`relationships[]`** (a relation the caller must stand in to a *resource*, §5.2.12 — a third requirement kind beside roles and authorities, not a variety of either), **`composition_unresolved`** (several guards apply and how they COMBINE was not read), `mechanisms[]` (how authentication happens: jwt-bearer, oauth2-resource-server, custom-filter, … each with `active`), and `evidence[]`, where each record is one **enforcement point** carrying `kind`/`effect`/`resolution`/`active`/anchor, plus **`covers_route`** (false when it governs only SOME requests the endpoint serves, §5.2.13 — distinct from `resolution`, which says how completely it was READ)), handler ref, **`trigger`** (v1: `http`; reserved: `queue`, `stream`, `schedule`) |
 | `ICFG` | endpoint_id, nodes[] (kind: entry/exit/statement/branch/loop/call/return), edges[] (incl. true/false branch labels), sink + remote-call markers, exception flow. **Branch nodes carry their condition** (expression text + structured operand refs where recoverable, esp. payload-derived operands) — nearly free at extraction time; enables payload simulation (Phase 9, §11). **Every node carries a source anchor** (file, start/end line) **+ its one-line source text** (graph labels are real code) **+ its owning-method ref** — the roll-up key for progressive disclosure (statement ↔ method ↔ service views from one artifact). **Method entry nodes carry** signature, params/return type, doc-comment (Javadoc/docstring), and derived behavior badges from tags (touches-DB / calls-service-X / publishes-topic / throws). Full source bodies are **never duplicated into artifacts** — served on demand (§5.3) |
 | `RemoteCall` | site ref, mechanism (http client), verb, url (sliced) + confidence, raw evidence, auth-propagation marker (§5.1 token-propagation evidence) |
 | `MQInteraction` | direction (publish/consume), broker type, topic (sliced) + confidence, site ref |

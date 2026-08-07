@@ -55,7 +55,7 @@ folklore.
 
 ## Coverage — vocabulary exercised only by fixtures
 
-### Five vocabularies have never run against a real corpus
+### Four vocabularies have never run against a real corpus
 **Priority:** P2
 **Opened:** v0.7.0
 
@@ -63,10 +63,14 @@ Each is fixture-proven and reads zero on `train-ticket-aitest` because that
 corpus does not contain the idiom. By the `unexercised_vocabulary` logic wadi
 itself ships, a zero here proves nothing about whether the path works:
 
-- `authorities` — the corpus uses only `hasAnyRole`; the role/authority split
-  shipped in 0.6.0 has never been exercised outside the matrix fixture.
-- `denied` — no `denyAll()` route survives in the corpus.
-- `withheld` — every auth idiom in the corpus is now readable.
+- ~~`authorities`~~ — **exercised in 0.8.0**: the ICPC corpus publishes 14
+  distinct permission constants across 282 endpoints, read from the arguments of
+  a project-defined annotation (§5.2.12).
+- `denied` — no `denyAll()` route survives in either corpus.
+- ~~`withheld`~~ — **exercised in 0.8.0**: fired on 7 ICPC endpoints before the
+  relationship model landed, and the state left `unexercised_vocabulary`. It
+  reads 0 again now because every annotation-bound guard resolves — which is the
+  counter working, not the path going untested.
 - `async-root` reachability — measured 0 across 14 services; no HTTP sink is
   reachable only from a startup root there.
 - `declared-not-bound` — 585 → 0 after the T7 fix, so the code path that emits
@@ -94,6 +98,60 @@ become a standing check rather than a claim in a document.
 
 ---
 
+## Auth — project-defined vocabularies (§5.2.12)
+
+### The aspect that actually answers 403 is not detected
+**Priority:** P1
+**Opened:** v0.8.0
+
+ICPC's `UserAuthorizer` is the construct that throws `AccessDeniedException` for
+every controller method in the system, and M1 does not see it. Its own body
+neither denies visibly nor reads identity: it calls `permissionChecker.isAllowed()`
+on a request-scoped bean that the *other* advice writes, and the identity access
+lives in an inherited `AbstractAuthorizer.validate()`.
+
+**Do not close this by adding `AccessDeniedException` to `RejectionMarkers`.**
+That was tried on paper and is worse than the gap: `UserAuthorizer` is
+`execution(...)`-scoped, so detecting it emits one `{?}` and withholds all 804
+endpoints — re-creating the wall of unknowns M1 exists to avoid, and destroying
+the ~157 genuinely-unguarded finding. Growing a name list is also the exact
+anti-pattern §5.2.12 records.
+
+The real shape is a **deferred-verdict consumer**: advice whose decision derives
+entirely from state other advice wrote, which adds no requirement of its own and
+must not withhold. Recognising it is the prerequisite for detecting this class
+safely.
+
+### Enforcement scope is URI-granular, with no HTTP method
+**Priority:** P2
+**Opened:** v0.8.0
+
+`ExportAuthEnforcement` carries `pattern` and no verb, so an annotation-bound
+guard on `GET /x` also covers `POST /x`. The direction is safe — it withholds
+more, never publishes an endpoint as open — but it costs precision in exactly
+the number the tranche exists to surface. **Measured on ICPC: 804 endpoints over
+734 distinct URIs, with 63 URIs served by more than one verb (133 endpoints).**
+133 is the upper bound on endpoints that could be over-withheld; how many of
+those 63 URIs actually carry *differing* guards across verbs is **not measured**,
+so the real cost is somewhere in [0, 133]. Closing it is an export-schema field,
+not a `wadi-contracts` change.
+
+### A library compiled into a service is modelled as a peer service
+**Priority:** P1
+**Opened:** v0.8.0
+
+`global.icpc:base` is a jar inside `contest`, and the snapshot pipeline gives it
+its own service. The annotations and two of the authorizers live there, so in a
+per-service CPG the `Admin` typeDecl is external and its binding is invisible —
+cause (3) in §5.2.12, and the reason the M1 acceptance run had to build one CPG
+across both repos rather than go through the worker. Until this is modelled,
+this class of system must be analyzed with the library in scope or the
+vocabulary silently shrinks. **Measured end to end: 8 annotations derived with
+both repos in one CPG versus 7 through the shipping pipeline, and 643 guarded
+endpoints versus 566 — the per-service CPG costs 77 endpoints their guard.**
+
+---
+
 ## Analysis surfaces not yet consumed
 
 ### CORS/CSRF policy is published but not scoped to endpoints
@@ -108,6 +166,16 @@ which origin may call, not which principal — but a scoped read is still useful
 ---
 
 ## Completed
+
+### A path template could match a literal into a `permitAll`
+**Closed:** v0.8.0 (§5.2.13)
+
+`_ant_match` let an endpoint's `{id}` absorb a literal pattern segment, so
+`/help/cms/{space}/{page}` inherited the `permitAll` written for
+`/help/cms/virtpublic/**`. Matching now reports whether it was exact or
+speculative, and only callers that can be *weakened* by a match — a
+`permitAll`, a chain bypass — refuse to act on speculation. **Measured: 9
+endpoints moved from evidenced-public to protected, 0 regressions.**
 
 ### Response payload depth — envelopes resolved past `T`
 **Completed:** v0.7.0 (2026-08-06)

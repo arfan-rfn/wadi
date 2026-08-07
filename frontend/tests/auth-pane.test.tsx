@@ -14,8 +14,8 @@ import { renderWithQuery } from "./utils"
 
 const view = {
   totals: {
-    endpoints: 5,
-    authenticated: 1,
+    endpoints: 6,
+    authenticated: 2,
     denied: 1,
     unauthenticated: 1,
     withheld: 1,
@@ -31,6 +31,27 @@ const view = {
       authenticated: true,
       roles: ["ADMIN"],
       mechanism_kinds: ["jwt-bearer"],
+      unread_kinds: [],
+    },
+    {
+      endpoint_id: "ep_relational",
+      service_id: "svc_a",
+      service_name: "ts-order-service",
+      http_method: "POST",
+      full_uri: "/contest/{contestId}/camp/create",
+      authenticated: true,
+      roles: [],
+      authorities: ["CONTEST_CREATE_SUBCONTEST"],
+      relationships: [
+        {
+          relation: "contest-manager",
+          resource_type: "Contest",
+          authorities: ["CONTEST_CREATE_SUBCONTEST"],
+        },
+        { relation: "site-manager", resource_type: "Site", authorities: [] },
+      ],
+      composition_unresolved: true,
+      mechanism_kinds: [],
       unread_kinds: [],
     },
     {
@@ -113,7 +134,7 @@ const uris = (v: ReturnType<typeof renderPane>["view"]) =>
 describe("AuthPane", () => {
   it("shows every endpoint, grouped by service, before any filter", () => {
     const { view: v } = renderPane()
-    expect(v.getAllByRole("link")).toHaveLength(5)
+    expect(v.getAllByRole("link")).toHaveLength(6)
     expect(v.getByText("ts-order-service")).toBeInTheDocument()
     expect(v.getByText("ts-travel-service")).toBeInTheDocument()
   })
@@ -123,8 +144,8 @@ describe("AuthPane", () => {
     // pane must not quietly disagree with the API it is displaying.
     const { container } = renderPane()
     expect(statsOf(container)).toEqual({
-      endpoints: "5",
-      protected: "1",
+      endpoints: "6",
+      protected: "2",
       unprotected: "1",
       denied: "1",
       withheld: "1",
@@ -168,7 +189,7 @@ describe("AuthPane", () => {
   it("filters to the protected endpoints and keeps their roles", () => {
     const { view: v } = renderPane()
     fireEvent.click(v.getByRole("button", { name: "protected" }))
-    expect(v.getAllByRole("link")).toHaveLength(1)
+    expect(v.getAllByRole("link")).toHaveLength(2)
     expect(v.getByText("ADMIN")).toBeInTheDocument()
     expect(v.getByText("jwt-bearer")).toBeInTheDocument()
   })
@@ -183,5 +204,40 @@ describe("AuthPane", () => {
       "aria-pressed",
       "false"
     )
+  })
+
+  it("names the RELATION on a relationally-guarded row, not a bare 'protected'", () => {
+    // §5.2.12. This row is `authenticated: true` with an empty role list, and
+    // without the relation it renders identically to an endpoint any logged-in
+    // caller may hit. On ICPC that shape is 562 of 804 rows — the exact
+    // misreading the tranche exists to remove.
+    const { view: v } = renderPane()
+    fireEvent.click(v.getByRole("button", { name: "protected" }))
+    expect(v.getByText("contest-manager")).toBeInTheDocument()
+    expect(v.getByText("site-manager")).toBeInTheDocument()
+    // The resource it is required ON — a relation with no object is half a fact.
+    expect(v.getByText("·Contest")).toBeInTheDocument()
+    expect(v.getByText("·Site")).toBeInTheDocument()
+  })
+
+  it("says when several guards apply and their combination was not read", () => {
+    // Two relations are listed; whether the caller needs BOTH or EITHER is
+    // unread. Rendering them silently would overstate what a caller must have,
+    // and an over-restrictive answer is still a wrong one.
+    const { view: v } = renderPane()
+    fireEvent.click(v.getByRole("button", { name: "protected" }))
+    expect(v.getByText("combination unread")).toBeInTheDocument()
+  })
+
+  it("keeps a role-guarded row free of relationship chrome", () => {
+    // The counterweight: the ADMIN row has no relationships, so it must not
+    // grow a combination warning or an empty relation chip.
+    const { view: v } = renderPane()
+    fireEvent.click(v.getByRole("button", { name: "protected" }))
+    const adminRow = v.getByText("ADMIN").closest("a")
+    expect(adminRow).not.toBeNull()
+    expect(
+      within(adminRow as HTMLElement).queryByText("combination unread")
+    ).toBeNull()
   })
 })

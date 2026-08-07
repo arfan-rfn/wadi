@@ -9,6 +9,7 @@ from wadi_contracts.endpoint import (
     AuthEvidenceKind,
     AuthMechanism,
     AuthMechanismKind,
+    AuthRelationship,
     AuthResolution,
     Endpoint,
     EndpointAuth,
@@ -251,6 +252,65 @@ class TestActiveFlagged:
     def test_inactive_requires_a_reason(self) -> None:
         with pytest.raises(ValidationError, match="inactive_reason"):
             AuthEvidence(kind=AuthEvidenceKind.ANNOTATION, detail="@Secured", active=False)
+
+    def test_a_relationship_effect_without_its_relationship_is_rejected(self) -> None:
+        # §5.2.12. The effect and the payload cannot disagree about what an
+        # enforcement requires: `require-relationship` with nothing attached is
+        # a claim with its content missing, and a reader would render an empty
+        # requirement as no requirement.
+        with pytest.raises(ValidationError, match="requires a relationship"):
+            AuthEvidence(
+                kind=AuthEvidenceKind.ASPECT,
+                detail="ContestManagerAuthorizer via @ContestManager",
+                effect=AuthEffect.REQUIRE_RELATIONSHIP,
+            )
+
+    def test_a_relationship_filed_under_another_effect_is_rejected(self) -> None:
+        # The mirror image: content no consumer will look for. The claim rule
+        # reads relationships off `requiring` by effect, so one attached to
+        # REQUIRE_ROLES would be silently dropped rather than published.
+        with pytest.raises(ValidationError, match="only meaningful"):
+            AuthEvidence(
+                kind=AuthEvidenceKind.ASPECT,
+                detail="@ContestManager",
+                effect=AuthEffect.REQUIRE_ROLES,
+                relationship=AuthRelationship(relation="contest-manager"),
+            )
+
+    def test_a_relationship_carries_its_own_authorities(self) -> None:
+        # `@ContestManager(context = Contest.class, acl = CONTEST_UPDATE)`
+        # demands BOTH. They live on the relationship so the conjunction
+        # survives — pooled into a flat list they read as a menu.
+        evidence = AuthEvidence(
+            kind=AuthEvidenceKind.ASPECT,
+            detail="ContestManagerAuthorizer via @ContestManager",
+            effect=AuthEffect.REQUIRE_RELATIONSHIP,
+            relationship=AuthRelationship(
+                relation="contest-manager",
+                resource_type="Contest",
+                authorities=["CONTEST_UPDATE"],
+            ),
+        )
+        assert evidence.relationship is not None
+        assert evidence.relationship.authorities == ["CONTEST_UPDATE"]
+        # Best-effort and never invented: the advice body names the parameter,
+        # and reading it is Tier-2 work.
+        assert evidence.relationship.resource_binding is None
+
+    def test_covers_route_defaults_true_and_is_not_a_reading_failure(self) -> None:
+        # §5.2.13. Scope and readability are different facts: a rule read
+        # perfectly can still govern part of a route.
+        partial = AuthEvidence(
+            kind=AuthEvidenceKind.SECURITY_DSL,
+            detail="/contest/public/** -> permitAll()",
+            effect=AuthEffect.PERMIT_ALL,
+            covers_route=False,
+        )
+        assert partial.resolution is AuthResolution.RESOLVED
+        assert partial.covers_route is False
+        assert (
+            AuthEvidence(kind=AuthEvidenceKind.ANNOTATION, detail="@Secured").covers_route is True
+        )
 
     def test_reason_without_inactive_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="inactive_reason"):

@@ -7,6 +7,7 @@
 // makes the honest state meaningless.
 import { useMemo, useState } from "react"
 import Link from "next/link"
+import { UserCheck } from "lucide-react"
 
 import type { AuthEndpointRow } from "@/lib/generated/system_auth.schema"
 import { cn } from "@/lib/utils"
@@ -208,6 +209,41 @@ export function AuthPane({
                             {authority}
                           </span>
                         ))}
+                        {/* §5.2.12. Without these the whole table reads
+                            `protected` with nothing beside it on any system
+                            whose policy is relational — 562 of 804 rows on
+                            ICPC — which is the exact misreading the tranche
+                            exists to remove. */}
+                        {(row.relationships ?? []).map((relationship) => (
+                          <span
+                            key={`${relationship.relation}:${relationship.resource_type ?? ""}`}
+                            title={
+                              relationship.resource_type
+                                ? `Must be ${relationship.relation} of the ${relationship.resource_type} this request names — a relation, not a role the caller holds everywhere`
+                                : `Must be ${relationship.relation} for the resource this request names`
+                            }
+                            className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-2xs"
+                          >
+                            <UserCheck
+                              aria-hidden
+                              className="size-2.5 opacity-70"
+                            />
+                            {relationship.relation}
+                            {relationship.resource_type ? (
+                              <span className="opacity-60">
+                                ·{relationship.resource_type}
+                              </span>
+                            ) : null}
+                          </span>
+                        ))}
+                        {row.composition_unresolved ? (
+                          <span
+                            title="Several guards apply and how they combine was not read — these may be alternatives rather than all required"
+                            className="rounded-full border border-dashed px-2 py-0.5 font-mono text-2xs text-warn"
+                          >
+                            combination unread
+                          </span>
+                        ) : null}
                         {(row.mechanism_kinds ?? []).map((kind) => (
                           <span
                             key={kind}

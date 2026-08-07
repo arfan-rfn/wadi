@@ -373,6 +373,174 @@ class SpringAuthMatrixConformanceTest extends AnyFunSuite with Matchers with Fix
       "/api/v1/orders/export"
   }
 
+  // ---- §5.2.12: a project-defined authorization vocabulary ----
+
+  /** Every enforcement row with its §5.2.12 policy fields. */
+  private lazy val policies: List[(String, String, String, String, List[String])] =
+    exportJson("auth_enforcements").arr.toList.map { e =>
+      def opt(key: String) = e(key) match {
+        case ujson.Null => ""
+        case other      => other.str
+      }
+      (
+        e("detail").str,
+        e("pattern").str,
+        opt("relation"),
+        opt("resource_type"),
+        e("authorities").arr.toList.map(_.str)
+      )
+    }
+
+  private def policyFor(uri: String) =
+    policies
+      .find { case (detail, pattern, _, _, _) => pattern == uri && detail.contains(" via ") }
+      .getOrElse(fail(s"no annotation-bound enforcement for $uri; have ${policies.map(_._2)}"))
+
+  test("M2: the guard's own arguments become the policy it states") {
+    // Nothing here is interpreted — relation from the annotation's name,
+    // resource from its type-valued argument, permission from its constant.
+    // Read by SHAPE, never by attribute name: this fixture deliberately spells
+    // them `resource`/`permissions` where ICPC spells them `context`/`acl`.
+    val (_, _, relation, resource, authorities) = policyFor("/api/v1/tenant/settings")
+    relation shouldBe "tenant-admin"
+    resource shouldBe "Tenant"
+    authorities shouldBe List("BILLING_WRITE")
+  }
+
+  test("M2: two type-valued arguments leave the resource unclaimed, not guessed") {
+    // ICPC's `@ContestManager(context = Contest.class, entity = Standings.class)`:
+    // the context is the resource and the entity is how it is reached, but
+    // nothing in the shape says which, and "the first is the resource" is an
+    // invention (P10). The relation and permission still publish; both types
+    // stay legible in `detail`.
+    val (detail, _, relation, resource, authorities) = policyFor("/api/v1/tenant/members")
+    relation shouldBe "tenant-admin"
+    resource shouldBe ""
+    authorities shouldBe List("TENANT_DELETE")
+    detail should include("Tenant.class")
+    detail should include("Membership.class")
+  }
+
+  test("an interceptor that READS the annotation binds by the same rule") {
+    // The third derivation route, and the one with no AspectJ in it at all:
+    // `getMethodAnnotation(RequiresLogin.class)` inside a HandlerInterceptor.
+    // This is the commonest hand-rolled auth idiom in Spring, and a rule that
+    // only understood pointcuts would miss every codebase that uses it.
+    enforcements should contain(
+      ("interceptor", "/api/v1/tenant/audit", "RequiresLoginInterceptor via @RequiresLogin")
+    )
+  }
+
+  test("an annotation-bound interceptor does not ALSO report its registered scope") {
+    // It is registered on `/**` with no addPathPatterns, so emitting the
+    // registration would withhold every endpoint in the service and undo the
+    // exact scoping. Its real scope is the handlers carrying the annotation.
+    enforcements.filter { case (kind, _, detail) =>
+      kind == "interceptor" && detail == "RequiresLoginInterceptor"
+    } shouldBe empty
+    enforcements.map(_._2) should not contain "/**"
+  }
+
+  test("the record names what the construct IS, aspect or interceptor") {
+    // Both routes produce an exactly-scoped guard, but calling a
+    // HandlerInterceptor an aspect sends a reader looking for a pointcut that
+    // does not exist.
+    val bound = enforcements.filter(_._3.contains(" via @"))
+    bound.filter(_._3.startsWith("TenantAdminAuthorizer")).map(_._1).distinct shouldBe
+      List("aspect")
+    bound.filter(_._3.startsWith("RequiresLoginInterceptor")).map(_._1).distinct shouldBe
+      List("interceptor")
+  }
+
+  test("M2: a guard that states no policy carries no policy fields") {
+    // The in-handler check is still an unread guard, and gaining a vocabulary
+    // for the guards we CAN read must not quietly dress up the ones we cannot.
+    val inHandler = policies.filter { case (_, pattern, _, _, _) =>
+      pattern == "/api/v1/orders/export"
+    }
+    inHandler.map(_._3) should contain only ""
+  }
+
+  test("a project-defined annotation is derived from its BINDING, not a name list") {
+    // @TenantAdmin is neither a Spring name nor composed from one, so the
+    // annotation pass sees nothing. What makes it readable is that an advice
+    // parameter is typed with it. Measured on ICPC: this rule run cold, with
+    // no vocabulary list at all, recovers all 8 of that system's annotations
+    // and scopes 637 of 803 handlers.
+    // `detail` carries the annotation VERBATIM since M2, so match its shape
+    // rather than a fixed string — the point is which guard bound which
+    // annotation, not how many arguments that annotation happened to have.
+    enforcements.filter { case (kind, pattern, _) =>
+      kind == "aspect" && pattern == "/api/v1/tenant/settings"
+    }.map(_._3) should contain(
+      "TenantAdminAuthorizer via @TenantAdmin(resource = Tenant.class, "
+        + "permissions = Permission.BILLING_WRITE)"
+    )
+  }
+
+  test("a non-gating aspect with the SAME binding shape is not a guard") {
+    // The counterweight, and the one that decides whether the feature is
+    // usable. TracingAspect is byte-for-byte the same shape — @Around,
+    // @annotation(...), a bound parameter, a branch — and differs only in
+    // never asking who the caller is. Treating "an aspect reads it" as "it
+    // guards" would withhold every endpoint of every system that traces by
+    // annotation; train-ticket's ms-monitoring-core alone (@NewSpan,
+    // @ContinueSpan) would take that whole corpus down.
+    enforcements.map(_._3) should not contain "TracingAspect via @Traced"
+    enforcements.map(_._2) should not contain "/api/v1/tenant/activity"
+  }
+
+  test("annotation-bound scope is per-endpoint, never a blanket over the service") {
+    // The scope of @annotation(X) is exactly the methods bearing X — as
+    // readable as @PreAuthorize, and nothing like the pointcut-expression
+    // problem that makes execution(...) honestly unresolvable. An aspect-wide
+    // `{?}` here would withhold all three handlers and pass a presence-only
+    // golden while making the state meaningless.
+    enforcements.map(_._2) should not contain "/api/v1/tenant/status"
+    enforcements.filter(_._3.startsWith("TenantAdminAuthorizer")).map(_._2).distinct should
+      contain theSameElementsAs List("/api/v1/tenant/settings", "/api/v1/tenant/members")
+  }
+
+  test("an annotation-bound aspect emits no unresolvable blanket alongside it") {
+    // Emitting both would undo the precision: the `{?}` pattern is in scope for
+    // every endpoint in the service, so one blanket record withholds all of
+    // them regardless of how exactly the per-endpoint records were scoped.
+    enforcements.filter(_._1 == "aspect").map(_._2) should not contain "{?}"
+  }
+
+  test("an aspect bound to an UNUSED annotation gates nothing, and says nothing") {
+    // Caught by the first ICPC acceptance run, not by review. @ACL is declared
+    // with an authorizer and applied to zero handlers; a vocabulary test
+    // written against annotation USAGE concluded the aspect was not
+    // annotation-bound, fell back to the execution(...) path, and emitted one
+    // `{?}` that withheld all 804 endpoints — a precise result turned into a
+    // wall of unknowns by a single record.
+    enforcements.map(_._3) should not contain "UnusedScopeAuthorizer"
+    enforcements.filter(_._3.contains("UnusedScope")) shouldBe empty
+  }
+
+  test("an annotation declared in a JAR still scopes its aspect, rather than blanketing") {
+    // The same failure from the opposite direction, and the one the end-to-end
+    // run caught after the fixture above was already green: in a per-service
+    // CPG the annotation's declaration is external, so it is neither used nor
+    // internally declared. Deciding boundness by "can I confirm this is an
+    // annotation?" answered no and withheld all 803 endpoints of the service.
+    // The `@annotation(...)` designator settles it without resolving anything.
+    enforcements.map(_._3) should not contain "UnusedScopeAuthorizer"
+    enforcements.filter(_._1 == "aspect").map(_._2) should not contain "{?}"
+  }
+
+  test("the derived vocabulary does not leak non-annotation advice parameters") {
+    // AspectJ binds plain types too (`args(order)` binds an Order), so a rule
+    // reading parameter types alone would enrol a DTO in the security
+    // vocabulary. Only names that are ACTUALLY annotations in the graph survive.
+    enforcements.map(_._3).filter(_.contains(" via @")).map(_.takeWhile(_ != '(')).distinct should
+      contain theSameElementsAs List(
+        "TenantAdminAuthorizer via @TenantAdmin",
+        "RequiresLoginInterceptor via @RequiresLogin"
+      )
+  }
+
   // ---- D5: the policy lives in config, not in the Java ----
 
   test("D5: a config-bound matcher names its binding instead of vanishing") {

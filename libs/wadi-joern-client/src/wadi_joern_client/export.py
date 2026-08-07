@@ -12,7 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.11.0"
+EXPORT_SCHEMA_VERSION = "2.12.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -108,7 +108,17 @@ statuses the handler's own code NAMES, each with how it was read
 Deliberately not "the statuses this endpoint returns": a 500 from an uncaught
 exception, a 403 from the security layer and a 404 from the dispatcher appear
 in no handler source, so a reader must not take this list as proof an endpoint
-cannot fail. Empty on pre-2.11.0 exports."""
+cannot fail. Empty on pre-2.11.0 exports.
+
+2.12.0 (additive, §5.2.12): an ``auth_enforcements`` record can carry
+``relation``, ``resource_type``, ``resource_binding`` and ``authorities`` —
+the policy an annotation-bound guard states, read out of the annotation's own
+arguments rather than interpreted. A guard that says
+``@ContestManager(context = Contest.class, acl = ACLEnum.CONTEST_UPDATE)`` has
+already told us what it requires; before this the transport had nowhere to put
+that and the worker could only record "something unreadable guards this". All
+four default to empty/None, so pre-2.12.0 exports parse unchanged and continue
+to mean exactly what they meant."""
 
 
 class ExportModelBase(BaseModel):
@@ -576,6 +586,21 @@ class ExportAuthEnforcement(ExportModelBase):
     pattern: str = Field(description="Path scope; '{?}' = read but unresolvable")
     detail: str = Field(description="Source text or the implementing class")
     anchor: ExportAnchor
+    relation: str | None = Field(
+        default=None,
+        description="2.12.0 (§5.2.12): the relation the caller must stand in, "
+        "e.g. 'contest-manager'",
+    )
+    resource_type: str | None = Field(
+        default=None, description="2.12.0: the resource the relation is required ON, e.g. 'Contest'"
+    )
+    resource_binding: str | None = Field(
+        default=None, description="2.12.0: request parameter naming the instance, e.g. 'contestId'"
+    )
+    authorities: list[str] = Field(
+        default_factory=list[str],
+        description="2.12.0: permissions required IN ADDITION to the relation",
+    )
 
 
 class ExportAuthMechanism(ExportModelBase):

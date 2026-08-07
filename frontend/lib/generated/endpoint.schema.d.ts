@@ -11,6 +11,10 @@ export type Authenticated = boolean | null
  */
 export type Authorities = string[]
 /**
+ * Several guards apply and how they COMBINE was not read — the listed requirements may be alternatives rather than all required
+ */
+export type CompositionUnresolved = boolean
+/**
  * A read rule denies EVERY caller (denyAll); the endpoint is unreachable
  */
 export type Denied = boolean
@@ -36,6 +40,10 @@ export type SourceVariant = "original" | "generated"
  */
 export type Authorities1 = string[]
 /**
+ * False when this enforcement governs only SOME requests the endpoint serves (§5.2.13). Distinct from `resolution`, which says how completely the enforcement was READ: a rule can be read perfectly and still cover part of a route, and conflating the two hides why a `permitAll` sits beside a protected claim
+ */
+export type CoversRoute = boolean
+/**
  * e.g. '@PreAuthorize("hasRole('ADMIN')")'
  */
 export type Detail = string
@@ -46,6 +54,7 @@ export type AuthEffect =
   | "require-authenticated"
   | "require-roles"
   | "require-authorities"
+  | "require-relationship"
   | "permit-all"
   | "deny-all"
   | "unknown"
@@ -82,6 +91,22 @@ export type AuthEvidenceKind =
  * Path pattern this is scoped to; '{?}' means read but unresolvable
  */
 export type Pattern = string | null
+/**
+ * Permissions required IN ADDITION to the relation
+ */
+export type Authorities2 = string[]
+/**
+ * The relation required, e.g. 'contest-manager', 'owner'
+ */
+export type Relation = string
+/**
+ * Which request parameter names the instance, e.g. 'contestId'; None when the binding could not be read — best-effort, never invented
+ */
+export type ResourceBinding = string | null
+/**
+ * The resource it is required ON, e.g. 'Contest'
+ */
+export type ResourceType = string | null
 /**
  * How completely it was read
  */
@@ -129,6 +154,10 @@ export type AuthMechanismKind =
  * How authentication is performed on this endpoint's service
  */
 export type Mechanisms = AuthMechanism[]
+/**
+ * Relations the caller must stand in to a resource (§5.2.12) — a third requirement kind beside roles and authorities, not a variety of either
+ */
+export type Relationships = AuthRelationship[]
 export type Roles1 = string[]
 export type CreatedAt = string
 export type Code = number
@@ -252,10 +281,12 @@ export interface Endpoint {
 export interface EndpointAuth {
   authenticated?: Authenticated
   authorities?: Authorities
+  composition_unresolved?: CompositionUnresolved
   denied?: Denied
   evidence?: Evidence
   mechanism?: Mechanism
   mechanisms?: Mechanisms
+  relationships?: Relationships
   roles?: Roles1
 }
 /**
@@ -275,6 +306,7 @@ export interface AuthEvidence {
   active?: Active
   anchor?: SourceAnchor | null
   authorities?: Authorities1
+  covers_route?: CoversRoute
   detail: Detail
   effect?: AuthEffect
   expression?: Expression
@@ -285,6 +317,10 @@ export interface AuthEvidence {
   inactive_reason?: InactiveReason
   kind: AuthEvidenceKind
   pattern?: Pattern
+  /**
+   * Set when effect is require-relationship (§5.2.12); the relation this enforcement demands between caller and resource
+   */
+  relationship?: AuthRelationship | null
   resolution?: AuthResolution
   roles?: Roles
 }
@@ -300,6 +336,29 @@ export interface SourceAnchor {
   file: File
   start_line: StartLine
   variant?: SourceVariant
+}
+/**
+ * A required relation between the caller and a resource (§5.2.12).
+ *
+ * **Kinds are closed, content is open.** ``relation`` and ``resource_type``
+ * are free strings read from the application, never a vocabulary this model
+ * enumerates. That asymmetry is the whole design: the defect §5.2.12 records
+ * is wadi encoding open-ended content — annotation names, decision-call names
+ * — in closed lists, and a fixed set of relations or entity types would
+ * reproduce it exactly one field over. A system wadi has never seen, with
+ * entities it has never heard of, needs no schema change to be expressed here.
+ *
+ * ``authorities`` are permissions required *in addition to* the relation, not
+ * alternatives to it: `@ContestManager(context = Contest.class, acl =
+ * ACLEnum.CONTEST_UPDATE)` demands both. They live on the relationship rather
+ * than beside it so the conjunction survives; two guards' worth of
+ * requirements pooled into one flat list would read as a menu.
+ */
+export interface AuthRelationship {
+  authorities?: Authorities2
+  relation: Relation
+  resource_binding?: ResourceBinding
+  resource_type?: ResourceType
 }
 /**
  * One authentication mechanism configured on the service that serves this endpoint.

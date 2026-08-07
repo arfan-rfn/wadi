@@ -3,7 +3,7 @@
 
 name := "wadi-joern-platform"
 organization := "com.trywadi"
-version := "0.7.4"
+version := "0.8.0"
 
 // Must track the Scala minor Joern publishes with (Scala 3 artifacts).
 scalaVersion := "3.8.3"

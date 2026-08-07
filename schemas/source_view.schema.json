@@ -10,7 +10,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.21.0/source_view.schema.json",
+  "$id": "https://trywadi.com/schemas/1.23.0/source_view.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Source-on-demand response (\u00a75.3): the exact analyzed text at the pinned\nSHA \u2014 the delombok'd variant when preprocessing rewrote the file, flagged\nso consumers can say so.\n\n1.9.0 (\u00a711 Phase 2.7): ``total_lines`` (whole-file length, so clients can\nrender \"showing 1-2000 of 4200\" and fetch the next window) and\n``truncated`` (the served window hit the server's line cap \u2014 an honest\npartial, never a silent one).",

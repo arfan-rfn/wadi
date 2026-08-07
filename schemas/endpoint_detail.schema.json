@@ -6,6 +6,7 @@
         "require-authenticated",
         "require-roles",
         "require-authorities",
+        "require-relationship",
         "permit-all",
         "deny-all",
         "unknown"
@@ -41,6 +42,12 @@
           },
           "title": "Authorities",
           "type": "array"
+        },
+        "covers_route": {
+          "default": true,
+          "description": "False when this enforcement governs only SOME requests the endpoint serves (\u00a75.2.13). Distinct from `resolution`, which says how completely the enforcement was READ: a rule can be read perfectly and still cover part of a route, and conflating the two hides why a `permitAll` sits beside a protected claim",
+          "title": "Covers Route",
+          "type": "boolean"
         },
         "detail": {
           "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
@@ -106,6 +113,18 @@
           "default": null,
           "description": "Path pattern this is scoped to; '{?}' means read but unresolvable",
           "title": "Pattern"
+        },
+        "relationship": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthRelationship"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set when effect is require-relationship (\u00a75.2.12); the relation this enforcement demands between caller and resource"
         },
         "resolution": {
           "$ref": "#/$defs/AuthResolution",
@@ -213,6 +232,57 @@
       ],
       "title": "AuthMechanismKind",
       "type": "string"
+    },
+    "AuthRelationship": {
+      "additionalProperties": false,
+      "description": "A required relation between the caller and a resource (\u00a75.2.12).\n\n**Kinds are closed, content is open.** ``relation`` and ``resource_type``\nare free strings read from the application, never a vocabulary this model\nenumerates. That asymmetry is the whole design: the defect \u00a75.2.12 records\nis wadi encoding open-ended content \u2014 annotation names, decision-call names\n\u2014 in closed lists, and a fixed set of relations or entity types would\nreproduce it exactly one field over. A system wadi has never seen, with\nentities it has never heard of, needs no schema change to be expressed here.\n\n``authorities`` are permissions required *in addition to* the relation, not\nalternatives to it: `@ContestManager(context = Contest.class, acl =\nACLEnum.CONTEST_UPDATE)` demands both. They live on the relationship rather\nthan beside it so the conjunction survives; two guards' worth of\nrequirements pooled into one flat list would read as a menu.",
+      "properties": {
+        "authorities": {
+          "description": "Permissions required IN ADDITION to the relation",
+          "items": {
+            "type": "string"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "relation": {
+          "description": "The relation required, e.g. 'contest-manager', 'owner'",
+          "minLength": 1,
+          "title": "Relation",
+          "type": "string"
+        },
+        "resource_binding": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which request parameter names the instance, e.g. 'contestId'; None when the binding could not be read \u2014 best-effort, never invented",
+          "title": "Resource Binding"
+        },
+        "resource_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The resource it is required ON, e.g. 'Contest'",
+          "title": "Resource Type"
+        }
+      },
+      "required": [
+        "relation"
+      ],
+      "title": "AuthRelationship",
+      "type": "object"
     },
     "AuthResolution": {
       "description": "How completely an enforcement point was read.\n\n``OPAQUE`` is what withholds an endpoint's claim (\u00a75.2.9): the construct\nwas detected but its effect or scope could not be determined.",
@@ -332,7 +402,7 @@
           "title": "Response Type"
         },
         "schema_version": {
-          "default": "1.21.0",
+          "default": "1.23.0",
           "title": "Schema Version",
           "type": "string"
         },
@@ -391,6 +461,12 @@
           "title": "Authorities",
           "type": "array"
         },
+        "composition_unresolved": {
+          "default": false,
+          "description": "Several guards apply and how they COMBINE was not read \u2014 the listed requirements may be alternatives rather than all required",
+          "title": "Composition Unresolved",
+          "type": "boolean"
+        },
         "denied": {
           "default": false,
           "description": "A read rule denies EVERY caller (denyAll); the endpoint is unreachable",
@@ -424,6 +500,14 @@
             "$ref": "#/$defs/AuthMechanism"
           },
           "title": "Mechanisms",
+          "type": "array"
+        },
+        "relationships": {
+          "description": "Relations the caller must stand in to a resource (\u00a75.2.12) \u2014 a third requirement kind beside roles and authorities, not a variety of either",
+          "items": {
+            "$ref": "#/$defs/AuthRelationship"
+          },
+          "title": "Relationships",
           "type": "array"
         },
         "roles": {
@@ -982,7 +1066,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.21.0/endpoint_detail.schema.json",
+  "$id": "https://trywadi.com/schemas/1.23.0/endpoint_detail.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Everything the endpoint workspace needs in one read (\u00a711 Phase 2.8).\n\n1.11.0 (additive): replaces the client-side compose of endpoint +\nservice-wide remote edges. The ICFG stays its own fetch (it is large) and\nsource stays on demand (\u00a75.3) \u2014 ``touched_files`` carries names, never\ncontent.\n\n**Reading the empty lists.** Each one has a flag that says whether empty\nmeans 'none' or 'not known', because on their own they cannot be told\napart (P10):\n\n* ``outbound`` \u2014 ``stitched=False`` means the stitcher has not run, so\n  empty is 'not yet'.\n* ``touched_files`` and ``unopenable_calls`` \u2014 both are DERIVED from the\n  ICFG, so ``icfg_available=False`` makes empty 'not known'. Without that\n  reading, an endpoint with no flow graph reports the same shape as one\n  whose every call opens cleanly.",

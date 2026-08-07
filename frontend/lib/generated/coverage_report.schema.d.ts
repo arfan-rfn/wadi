@@ -34,11 +34,19 @@ export type Services = ServiceCoverageEntry[]
  */
 export type AppliedHintIds = string[]
 export type Authenticated = number
+/**
+ * §5.2.12: endpoints where several guards apply and how they COMBINE was not read. Their listed requirements may be alternatives, so this is the counter that stops the relationship numbers being read as exact
+ */
+export type CompositionUnresolved = number
 export type Endpoints = number
 /**
  * No claim because nothing that could gate was found
  */
 export type NoEvidence = number
+/**
+ * §5.2.12: endpoints whose policy is a RELATION to a resource rather than a role. Counted apart from `authenticated` because it answers a different question — a system where this dominates has a role list that is empty for a reason, not by omission
+ */
+export type RelationshipScoped = number
 export type Unauthenticated = number
 /**
  * Auth vocabulary this snapshot contains ZERO instances of (§5.2.11 T6). A zero counter is otherwise ambiguous: it may mean wadi looked and the system genuinely has none, or that this corpus never exercises the idiom and the zero is evidence of nothing. Naming the second case stops a reader taking `denied: 0` as proof the denial path works
@@ -315,9 +323,11 @@ export interface ServiceCoverageEntry {
  */
 export interface AuthCoverageSection {
   authenticated?: Authenticated
+  composition_unresolved?: CompositionUnresolved
   endpoints?: Endpoints
   extraction_gaps?: ExtractionGaps
   no_evidence?: NoEvidence
+  relationship_scoped?: RelationshipScoped
   request_policies?: RequestPolicies
   unauthenticated?: Unauthenticated
   unexercised_vocabulary?: UnexercisedVocabulary

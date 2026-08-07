@@ -289,6 +289,343 @@ class TestClaimWithholding:
         )
         assert auth.authenticated is False
 
+    def test_an_annotation_bound_aspect_withholds_the_endpoint_it_names(self) -> None:
+        # §5.2.12. The chain says permitAll and the project's own vocabulary
+        # says ADMIN; without the aspect record the endpoint publishes an
+        # evidenced-open claim, which is the ICPC defect exactly (637 of 803).
+        auth = merge_endpoint_auth(
+            full_uri="/common/country/export",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/common/country/export",
+                    detail="AdminAuthorizer via @Admin",
+                    anchor=ExportAnchor(file="src/AdminAuthorizer.java", line=26),
+                )
+            ],
+        )
+        assert auth.authenticated is None
+        assert auth.unread_enforcement[0].kind is AuthEvidenceKind.ASPECT
+
+    def test_an_annotation_bound_aspect_does_not_leak_across_a_template_sibling(self) -> None:
+        # The hazard that makes this kind endpoint-scoped rather than
+        # pattern-scoped: `{a2}` ant-matches the literal `export`, so a guard
+        # on the template route would lend itself to every sibling and the
+        # count of genuinely unguarded endpoints — the finding the tranche
+        # exists to surface — would quietly collapse to zero.
+        auth = merge_endpoint_auth(
+            full_uri="/common/country/export",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/common/country/{a2}",
+                    detail="AdminAuthorizer via @Admin",
+                    anchor=ExportAnchor(file="src/AdminAuthorizer.java", line=26),
+                )
+            ],
+        )
+        assert auth.authenticated is False
+
+    def test_an_aspect_of_unresolvable_scope_still_withholds_everything(self) -> None:
+        # Exact matching must not cost the blanket case: an `execution(...)`
+        # pointcut is honestly unreadable and has to withhold service-wide, or
+        # the §5.2.9 rule that an unread guard withholds becomes conditional on
+        # the guard happening to be annotation-bound.
+        auth = merge_endpoint_auth(
+            full_uri="/anything/at/all",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="{?}",
+                    detail="UserAuthorizer",
+                    anchor=ExportAnchor(file="src/UserAuthorizer.java", line=15),
+                )
+            ],
+        )
+        assert auth.authenticated is None
+
+    def test_a_read_relationship_guard_is_published_not_withheld(self) -> None:
+        # §5.2.12 M2. The guard states its policy in the annotation the
+        # developer wrote, so there is nothing unread about it — publishing
+        # `withheld` here would trade a read answer for an unread one.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/public/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}/camp/create",
+                    detail="ContestManagerAuthorizer via @ContestManager(context = Contest.class)",
+                    anchor=ExportAnchor(file="src/ContestManagerAuthorizer.java", line=59),
+                    relation="contest-manager",
+                    resource_type="Contest",
+                    authorities=["CONTEST_CREATE_SUBCONTEST"],
+                )
+            ],
+        )
+        assert auth.authenticated is True
+        assert auth.unread_enforcement == []
+        assert [r.relation for r in auth.relationships] == ["contest-manager"]
+        assert auth.relationships[0].resource_type == "Contest"
+        # Required IN ADDITION to the relation, so it appears in both places.
+        assert auth.relationships[0].authorities == ["CONTEST_CREATE_SUBCONTEST"]
+        assert auth.authorities == ["CONTEST_CREATE_SUBCONTEST"]
+        assert auth.composition_unresolved is False
+
+    def test_a_relationship_guard_beats_a_permit_all_that_matched_by_template(self) -> None:
+        # The live ICPC defect: `{contestId}` ant-matches the literal `public`
+        # in `/contest/public/**`, so seven contest-administration write routes
+        # published as `authenticated=False` — no authentication, evidenced.
+        # A read relationship guard now settles it in the restrictive direction.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/subcontest/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/public/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}/subcontest/create",
+                    detail="ContestManagerAuthorizer via @ContestManager",
+                    anchor=ExportAnchor(file="src/ContestManagerAuthorizer.java", line=59),
+                    relation="contest-manager",
+                )
+            ],
+        )
+        assert auth.authenticated is True
+
+    def test_two_relationship_guards_leave_their_composition_unresolved(self) -> None:
+        # ICPC stacks @Admin and @ContestManager on one handler and admits the
+        # caller if EITHER voted yes; Spring's layered enforcement composes the
+        # other way. Nothing read so far says which, and listing both
+        # requirements as though all were needed overstates what a caller must
+        # have — an over-restrictive answer is still a wrong one.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "authenticated()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}",
+                    detail="ContestManagerAuthorizer via @ContestManager",
+                    anchor=ExportAnchor(file="src/A.java", line=59),
+                    relation="contest-manager",
+                    resource_type="Contest",
+                ),
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="/contest/{contestId}",
+                    detail="SiteManagerAuthorizer via @SiteManager",
+                    anchor=ExportAnchor(file="src/B.java", line=44),
+                    relation="site-manager",
+                    resource_type="Site",
+                ),
+            ],
+        )
+        assert auth.composition_unresolved is True
+        assert {r.relation for r in auth.relationships} == {"contest-manager", "site-manager"}
+
+    def test_a_guard_with_no_relation_still_withholds(self) -> None:
+        # The M1 behaviour must survive M2: a guard we detected but could not
+        # read is still unread, and gaining a vocabulary for the ones we CAN
+        # read must not quietly promote the ones we cannot.
+        auth = merge_endpoint_auth(
+            full_uri="/api/v1/orders",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="aspect",
+                    pattern="{?}",
+                    detail="UserAuthorizer",
+                    anchor=ExportAnchor(file="src/UserAuthorizer.java", line=15),
+                )
+            ],
+        )
+        assert auth.authenticated is None
+        assert auth.relationships == []
+
+    def test_a_permit_all_reached_by_template_absorption_does_not_open_a_route(self) -> None:
+        # §5.2.13, the live ICPC defect with the annotation guard removed so the
+        # matcher alone decides. `/contest/{contestId}/camp/create` "matches"
+        # `/contest/public/**` only for the single request whose contestId is
+        # the string `public`; a later rule requires auth for every other. The
+        # answer is protected, and it used to be `authenticated=false` —
+        # no authentication, evidenced, on a sub-contest creation route.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/**", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is True
+
+    def test_partial_coverage_is_its_own_fact_not_a_reading_failure(self) -> None:
+        # `resolution` says how completely the enforcement was READ, and this
+        # rule was read perfectly — `/contest/public/** -> permitAll()`, every
+        # character of it. What is partial is its SCOPE. Overloading resolution
+        # would tell a reader the analysis failed on a rule it understood, and
+        # would leave no way to explain why a permitAll sits on a protected
+        # endpoint without opening the code.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/**", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        permit = next(item for item in auth.evidence if item.effect is AuthEffect.PERMIT_ALL)
+        assert permit.covers_route is False
+        assert permit.resolution is AuthResolution.RESOLVED
+        catch_all = next(
+            item for item in auth.evidence if item.effect is AuthEffect.REQUIRE_AUTHENTICATED
+        )
+        assert catch_all.covers_route is True
+
+    def test_a_literal_permit_all_still_opens_the_route_it_names(self) -> None:
+        # The control. Narrowing the matcher must not cost real answers: this
+        # endpoint's path is literal all the way, so the rule covers every
+        # request it serves and `open` is the correct, evidenced claim.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/public/list",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/**", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is False
+
+    def test_a_wildcard_permit_all_over_a_template_is_still_exact(self) -> None:
+        # `*` genuinely covers a template segment — every value of `{id}` — so
+        # this is not speculation and must keep answering. Conflating the two
+        # would withhold every public templated route in every system.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/public/{contestId}",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("/contest/public/*", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is False
+
+    def test_a_templated_permit_all_covers_the_whole_route_it_names(self) -> None:
+        # Caught by adversarial review of §5.2.13's own change, and it is the
+        # trap a prior learning named: a rule written WITH a template covers the
+        # whole parameterised route, and its variable name need not match the
+        # handler's — `/orders/{orderId}` and `/orders/{id}` are one route.
+        # Reading that as speculative would stop a real permitAll establishing
+        # `open`, publishing an over-restrictive claim. Over-restriction is
+        # still a wrong fact.
+        auth = merge_endpoint_auth(
+            full_uri="/team/wf/{teamId}/published",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[
+                _rule("/team/wf/{id}/published", "permitAll()"),
+                _rule("/**", "authenticated()"),
+            ],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is False
+
+    def test_a_speculative_permit_all_with_nothing_else_withholds(self) -> None:
+        # No later rule requires auth, so "open" would rest entirely on a match
+        # that is false for every request but one. That is the same shape as an
+        # unread permit, and it withholds the same way rather than claiming.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/public/**", "permitAll()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is None
+
+    def test_a_speculative_match_still_restricts_where_that_is_the_safe_direction(self) -> None:
+        # The asymmetry stated plainly: over-approximating a template into a
+        # literal adds restriction here, so it stands. Only the permissive
+        # direction is narrowed — withdrawing enforcement on a guess is what
+        # publishes wrong facts.
+        auth = merge_endpoint_auth(
+            full_uri="/contest/{contestId}/camp/create",
+            http_method=HttpMethod.POST,
+            auth_tags=[],
+            security_rules=[_rule("/contest/admin/**", "hasRole('ADMIN')")],
+            handler_anchor=ANCHOR,
+            config_env={},
+        )
+        assert auth.authenticated is True
+        assert auth.roles == ["ADMIN"]
+
+    def test_a_chain_bypass_reached_by_template_absorption_is_ignored(self) -> None:
+        # A bypass switches the chain off entirely, so it is held to an exact
+        # match: granting it on one possible value of a template would take the
+        # security chain off a whole route.
+        auth = merge_endpoint_auth(
+            full_uri="/api/{resource}/data",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[_rule("/**", "authenticated()")],
+            handler_anchor=ANCHOR,
+            config_env={},
+            auth_enforcements=[
+                ExportAuthEnforcement(
+                    kind="chain-bypass",
+                    pattern="/api/static/**",
+                    detail="ignoring()",
+                    anchor=ExportAnchor(file="src/SecurityConfig.java", line=40),
+                )
+            ],
+        )
+        assert auth.authenticated is True
+
     def test_a_chain_bypass_means_nothing_runs(self) -> None:
         auth = merge_endpoint_auth(
             full_uri="/static/app.js",

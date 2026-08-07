@@ -162,6 +162,22 @@ class AuthEffect(StrEnum):
     REQUIRE_AUTHENTICATED = "require-authenticated"
     REQUIRE_ROLES = "require-roles"
     REQUIRE_AUTHORITIES = "require-authorities"
+    REQUIRE_RELATIONSHIP = "require-relationship"
+    """The caller must stand in a named relation to a RESOURCE (§5.2.12).
+
+    Not a role and not an authority: `@ContestManager(context = Contest.class)`
+    requires that this caller manage *the contest this request names*, which is
+    a fact about a pair, not about the principal alone. It is the commonest
+    authorization model there is — ownership (`is this your own record?`),
+    tenancy, and every resource-scoped role from repository admin down — and
+    until this member existed the vocabulary's only honest answer was
+    ``UNKNOWN``, which withheld a guard we had in fact read completely. On ICPC
+    it is 744 of 878 guard instances; roles are 120.
+
+    It earns a member rather than a label because it changes how a consumer
+    must reason: a resolved relationship stops withholding, and it composes
+    differently from a role — two roles are alternatives over one principal,
+    two relationships may concern two different resources."""
     PERMIT_ALL = "permit-all"
     DENY_ALL = "deny-all"
     UNKNOWN = "unknown"
@@ -203,6 +219,41 @@ class _ActiveFlagged(WadiModel):
         return self
 
 
+class AuthRelationship(WadiModel):
+    """A required relation between the caller and a resource (§5.2.12).
+
+    **Kinds are closed, content is open.** ``relation`` and ``resource_type``
+    are free strings read from the application, never a vocabulary this model
+    enumerates. That asymmetry is the whole design: the defect §5.2.12 records
+    is wadi encoding open-ended content — annotation names, decision-call names
+    — in closed lists, and a fixed set of relations or entity types would
+    reproduce it exactly one field over. A system wadi has never seen, with
+    entities it has never heard of, needs no schema change to be expressed here.
+
+    ``authorities`` are permissions required *in addition to* the relation, not
+    alternatives to it: `@ContestManager(context = Contest.class, acl =
+    ACLEnum.CONTEST_UPDATE)` demands both. They live on the relationship rather
+    than beside it so the conjunction survives; two guards' worth of
+    requirements pooled into one flat list would read as a menu.
+    """
+
+    relation: str = Field(
+        min_length=1, description="The relation required, e.g. 'contest-manager', 'owner'"
+    )
+    resource_type: str | None = Field(
+        default=None, description="The resource it is required ON, e.g. 'Contest'"
+    )
+    resource_binding: str | None = Field(
+        default=None,
+        description="Which request parameter names the instance, e.g. 'contestId'; "
+        "None when the binding could not be read — best-effort, never invented",
+    )
+    authorities: list[str] = Field(
+        default_factory=list[str],
+        description="Permissions required IN ADDITION to the relation",
+    )
+
+
 class AuthEvidence(_ActiveFlagged):
     """One enforcement point that gates — or could gate — this endpoint (§5.2.9).
 
@@ -242,6 +293,40 @@ class AuthEvidence(_ActiveFlagged):
     http_method: HttpMethod | None = Field(
         default=None, description="Verb restriction; None means the rule applies to every verb"
     )
+    relationship: AuthRelationship | None = Field(
+        default=None,
+        description="Set when effect is require-relationship (§5.2.12); the relation this "
+        "enforcement demands between caller and resource",
+    )
+    covers_route: bool = Field(
+        default=True,
+        description=(
+            "False when this enforcement governs only SOME requests the endpoint serves "
+            "(§5.2.13). Distinct from `resolution`, which says how completely the "
+            "enforcement was READ: a rule can be read perfectly and still cover part of "
+            "a route, and conflating the two hides why a `permitAll` sits beside a "
+            "protected claim"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _relationship_matches_effect(self) -> Self:
+        """The effect and the payload cannot disagree about what this requires.
+
+        A ``require-relationship`` with no relationship is a claim with its
+        content missing, and a relationship filed under any other effect is
+        content no consumer will look for. Both are the silent-drift class the
+        contract exists to catch at the door rather than in a reader.
+        """
+        expects = self.effect is AuthEffect.REQUIRE_RELATIONSHIP
+        if expects and self.relationship is None:
+            raise ValueError("effect=require-relationship requires a relationship")
+        if not expects and self.relationship is not None:
+            raise ValueError(
+                "relationship is only meaningful with effect=require-relationship, "
+                f"got {self.effect}"
+            )
+        return self
 
 
 class AuthMechanismKind(StrEnum):
@@ -308,6 +393,16 @@ class EndpointAuth(WadiModel):
     mechanisms: list[AuthMechanism] = Field(
         default_factory=list[AuthMechanism],
         description="How authentication is performed on this endpoint's service",
+    )
+    relationships: list[AuthRelationship] = Field(
+        default_factory=list[AuthRelationship],
+        description="Relations the caller must stand in to a resource (§5.2.12) — a third "
+        "requirement kind beside roles and authorities, not a variety of either",
+    )
+    composition_unresolved: bool = Field(
+        default=False,
+        description="Several guards apply and how they COMBINE was not read — the listed "
+        "requirements may be alternatives rather than all required",
     )
     evidence: list[AuthEvidence] = Field(
         default_factory=list[AuthEvidence],

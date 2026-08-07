@@ -5,6 +5,7 @@ from wadi_contracts import (
     AuthEffect,
     AuthEvidence,
     AuthEvidenceKind,
+    AuthRelationship,
     AuthResolution,
     CfgAnomaly,
     CfgAnomalyCode,
@@ -406,6 +407,54 @@ class TestAuthCoverage:
         section = build_auth_coverage([])
         assert section.unread_by_kind == {}
         assert section.endpoints == 0
+
+    def test_relationship_scoped_endpoints_are_counted_apart_from_roles(self) -> None:
+        # §5.2.12. A system whose policy is relational reports every endpoint
+        # `authenticated` with an empty role list, and without this counter that
+        # is indistinguishable from a role list nobody managed to read. On ICPC
+        # it is 562 of 804 — the difference between "no roles required" and
+        # "the requirement is not a role".
+        relational = AuthEvidence(
+            kind=AuthEvidenceKind.ASPECT,
+            detail="ContestManagerAuthorizer via @ContestManager",
+            effect=AuthEffect.REQUIRE_RELATIONSHIP,
+            relationship=AuthRelationship(relation="contest-manager", resource_type="Contest"),
+            pattern="/a",
+        )
+        section = build_auth_coverage(
+            [
+                self._endpoint(
+                    "/a",
+                    EndpointAuth(
+                        authenticated=True,
+                        evidence=[relational],
+                        relationships=[
+                            AuthRelationship(relation="contest-manager", resource_type="Contest")
+                        ],
+                    ),
+                ),
+                self._endpoint(
+                    "/b",
+                    EndpointAuth(
+                        authenticated=True,
+                        evidence=[relational],
+                        relationships=[
+                            AuthRelationship(relation="contest-manager"),
+                            AuthRelationship(relation="site-manager"),
+                        ],
+                        composition_unresolved=True,
+                    ),
+                ),
+                self._endpoint("/c", EndpointAuth(authenticated=True, evidence=[relational])),
+            ]
+        )
+        assert section.relationship_scoped == 2
+        # The counter that stops the relationship numbers being read as exact.
+        assert section.composition_unresolved == 1
+        assert "relationships" not in section.unexercised_vocabulary
+        # `roles` never fired on this snapshot, and the report says so rather
+        # than letting a zero read as a measured absence.
+        assert "roles" in section.unexercised_vocabulary
 
 
 def test_async_rooted_sites_are_split_out_of_the_unreachable_count() -> None:
