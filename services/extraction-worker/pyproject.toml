@@ -1,6 +1,6 @@
 [project]
 name = "wadi-extraction-worker"
-version = "0.8.0"
+version = "0.8.1"
 description = "Wadi extraction worker: the pipeline owner (architecture.md §5.2)"
 requires-python = ">=3.12"
 dependencies = [
