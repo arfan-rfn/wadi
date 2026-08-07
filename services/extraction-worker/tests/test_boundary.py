@@ -1,6 +1,9 @@
 """Boundary-analyzer unit tests (real files, no network)."""
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from wadi_worker.boundary import discover_services, discover_system_services
 
@@ -326,6 +329,36 @@ class TestCrossRepoLibraries:
         lib = tmp_path / "lib"
         write_pom(lib, "base", java_source="@RestController class Fragment {}")
         assert discover_services(lib)[0].kind == "service"
+
+    def test_a_transitive_chain_crosses_repos(self, tmp_path: Path) -> None:
+        # app -> mid -> core, spread across three repositories. Every hop has
+        # to be staged or the app parses against types it cannot see, which is
+        # the failure this whole change is about.
+        app, mid, core = tmp_path / "app", tmp_path / "mid", tmp_path / "core"
+        write_pom(
+            app, "app", dependencies=["mid"], java_source="@SpringBootApplication class App {}"
+        )
+        write_pom(mid, "mid", dependencies=["core"], java_source="class Mid {}")
+        write_pom(core, "core", java_source="class Core {}")
+
+        by_repo = discover_system_services({"app": app, "mid": mid, "core": core})
+
+        assert by_repo["mid"][0].kind == "library"
+        assert by_repo["core"][0].kind == "library"
+        assert by_repo["app"][0].library_roots == ["core::.", "mid::."]
+
+    def test_a_duplicate_artifact_across_repos_is_named_not_guessed(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Two repos declaring the same artifactId make a dependency ambiguous.
+        # Picking one silently would invent a build graph; the collision is
+        # logged so a wrong source union is visible rather than mysterious.
+        a, b = tmp_path / "a", tmp_path / "b"
+        write_pom(a, "shared", java_source="class One {}")
+        write_pom(b, "shared", java_source="class Two {}")
+        with caplog.at_level(logging.WARNING):
+            discover_system_services({"a": a, "b": b})
+        assert any("declared in two repos" in r.getMessage() for r in caplog.records)
 
     def test_a_same_repo_library_keeps_its_bare_root(self, tmp_path: Path) -> None:
         # No qualifier when there is nothing to qualify: single-repo staging is
