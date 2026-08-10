@@ -47,7 +47,33 @@ that were hiding behind it.
   mid-run and the e2e fails intermittently. Bounded to 4 GB against a measured
   peak of 807 MiB. CI never saw this — a fresh runner has no competing stack.
 
+### Added
+
+- **`endpoint_detail` on the MCP server.** Moving the wire shapes off the list
+  row left `list_endpoints` — an agent's only route to a request or response
+  shape — without them, and no detail tool existed. The surface whose whole
+  purpose is agent-readable ground truth could not say what an endpoint accepts
+  or returns. It resolves type references by default, or hands back the shared
+  form for a caller that would rather resolve them itself.
+
 ### Changed
+
+- **A wire shape is emitted as a graph of types, not a tree.** Expanding it as
+  a tree writes the same definition once per path that reaches it: one real
+  response emitted **2,365 object definitions of which 113 were distinct** —
+  one type spelled out 79 times — for 3 MB, roughly 772,000 tokens, which no
+  reader could hold. Each type is now written once under the endpoint's
+  `type_defs` and referenced wherever it occurs. On the fixture that reproduces
+  it: **8.27 MB → 7,926 bytes, complete, with nothing truncated.**
+  - **Recursion is now exact.** A type that reaches itself references its own
+    definition, where the `cycle` terminal could say a loop existed but not
+    what was in it.
+  - **A definition no longer depends on where it was discovered**, so the same
+    type cannot come out complete on one path and truncated on another.
+  - The node budget stops being load-bearing and goes back to being a backstop;
+    it is deliberately not retuned.
+  - Shapes written before this release are fully inline, contain no references,
+    and read exactly as they did.
 
 - **Recovered shapes are bounded by size, not only by depth.** Cycle detection
   is per walk path, which leaves sibling branches free to re-expand the same
@@ -70,8 +96,11 @@ that were hiding behind it.
 
 ### Contracts
 
-- `wadi-contracts` **1.24.0** — adds `EndpointSummary`, the list-row projection
-  of an endpoint. Additive: no stored artifact changes shape.
+- `wadi-contracts` **1.25.0** — adds `EndpointSummary` (the list-row projection
+  of an endpoint), `Endpoint.type_defs`, the `ref` shape kind, and
+  `resolve_type_shape` for consumers that want a tree. Additive: no stored
+  artifact loses a field, and shapes without references are unaffected.
+- Export schema **2.13.0** — endpoints carry `type_defs`.
 
 ## 0.8.1 — 2026-08-07 (a library is not a service)
 
