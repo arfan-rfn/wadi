@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from wadi_contracts import AuthEvidenceKind, Confidence, HttpMethod
+from wadi_contracts import AuthEvidenceKind, Confidence, HttpMethod, resolve_type_shape
 from wadi_joern_client.export import ServiceExport
 from wadi_worker.assembler import Assembler
 
@@ -238,11 +238,15 @@ class TestProviderContracts:
         by_uri = {(e.http_method.value, e.full_uri): e for e in result.endpoints}
         details = by_uri[("GET", "/catalog/pets/{id}")]
         assert details.response_schema is not None
-        assert details.response_schema.kind.value == "object"
-        names = [f.name for f in details.response_schema.fields]
+        # Shapes travel as a graph since §5.2.16; the assertions here are about
+        # the CONTRACT, so they resolve first. That they are otherwise
+        # unchanged is the evidence the shared form loses nothing.
+        shape = resolve_type_shape(details.response_schema, details.type_defs)
+        assert shape.kind.value == "object"
+        names = [f.name for f in shape.fields]
         assert "display_name" in names  # @JsonProperty rename
         assert "internalNote" not in names  # @JsonIgnore omitted
-        renamed = next(f for f in details.response_schema.fields if f.name == "display_name")
+        renamed = next(f for f in shape.fields if f.name == "display_name")
         assert renamed.java_name == "name"
 
     def test_request_schema_and_cycle_and_unresolved(self, petstore: ServiceExport) -> None:
@@ -250,13 +254,20 @@ class TestProviderContracts:
         by_uri = {(e.http_method.value, e.full_uri): e for e in result.endpoints}
         create = by_uri[("POST", "/catalog/pets")]
         assert create.request_schema is not None
-        assert {f.name for f in create.request_schema.fields} == {"name", "breed"}
+        request = resolve_type_shape(create.request_schema, create.type_defs)
+        assert {f.name for f in request.fields} == {"name", "breed"}
         tree = by_uri[("GET", "/catalog/tree")]
         assert tree.response_schema is not None
-        children = next(f for f in tree.response_schema.fields if f.name == "children")
+        resolved_tree = resolve_type_shape(tree.response_schema, tree.type_defs)
+        children = next(f for f in resolved_tree.fields if f.name == "children")
         assert children.shape.kind.value == "array"
         assert children.shape.element is not None
-        assert children.shape.element.kind.value == "cycle"
+        # A recursive type now points back at its own definition instead of
+        # terminating in `cycle`: the resolver stops, but the reader can follow
+        # `type_defs["Category"]` and see what is in the loop.
+        assert children.shape.element.kind.value == "ref"
+        assert children.shape.element.type_name == "Category"
+        assert "Category" in tree.type_defs
         vendor = by_uri[("GET", "/catalog/vendor")]
         assert vendor.response_schema is not None
         assert vendor.response_schema.kind.value == "unresolved"

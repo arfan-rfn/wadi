@@ -12,7 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.12.0"
+EXPORT_SCHEMA_VERSION = "2.13.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -285,7 +285,7 @@ class ExportEndpointParam(ExportModelBase):
 class ExportTypeShape(ExportModelBase):
     """A recovered wire shape (§5.2.7) — mirrors the contract TypeShape."""
 
-    kind: str = Field(description="object|scalar|array|map|cycle|truncated|unresolved")
+    kind: str = Field(description="object|scalar|array|map|ref|cycle|truncated|unresolved")
     origin: str = Field(
         default="declared",
         description="declared|return-expression (§5.2.7); absent on pre-2.9.0 exports",
@@ -325,6 +325,13 @@ class ExportEndpoint(ExportModelBase):
     params: list[ExportEndpointParam] = Field(default_factory=list[ExportEndpointParam])
     request_schema: ExportTypeShape | None = None
     response_schema: ExportTypeShape | None = None
+    type_defs: dict[str, ExportTypeShape] = Field(
+        default_factory=dict[str, "ExportTypeShape"],
+        description=(
+            "Types referenced by `kind=ref` nodes above, each written once "
+            "(§5.2.16); empty on pre-2.13.0 exports, whose shapes are inline"
+        ),
+    )
 
 
 class SinkValueConfidence(StrEnum):

@@ -118,7 +118,7 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers with Fixtu
       .get
 
   test("response shape walks nested DTOs with Jackson wire semantics (M5)") {
-    val shape = endpointByUri(petstore, "GET", "/catalog/pets/{id}")("response_schema")
+    val shape = resolvedShape(endpointByUri(petstore, "GET", "/catalog/pets/{id}"))
     shape("kind").str shouldBe "object"
     shape("type_name").str shouldBe "PetDetails"
     val fields = shape("fields").arr.map(f => f("name").str)
@@ -136,25 +136,31 @@ class PetstoreSystemConformanceTest extends AnyFunSuite with Matchers with Fixtu
   }
 
   test("generic wrappers unwrap: ResponseEntity<List<PetDetails>> (M5)") {
-    val shape = endpointByUri(petstore, "GET", "/catalog/pets")("response_schema")
+    val shape = resolvedShape(endpointByUri(petstore, "GET", "/catalog/pets"))
     shape("kind").str shouldBe "array"
     shape("element")("kind").str shouldBe "object"
     shape("element")("type_name").str shouldBe "PetDetails"
   }
 
   test("request body carries its own shape (M5)") {
-    val shape = endpointByUri(petstore, "POST", "/catalog/pets")("request_schema")
+    val shape = resolvedShape(endpointByUri(petstore, "POST", "/catalog/pets"), "request_schema")
     shape("kind").str shouldBe "object"
     shape("type_name").str shouldBe "NewPetRequest"
     shape("fields").arr.map(_("name").str).toSet shouldBe Set("name", "breed")
   }
 
-  test("self-referencing DTOs terminate in an explicit cycle node (M5)") {
-    val shape = endpointByUri(petstore, "GET", "/catalog/tree")("response_schema")
+  test("self-referencing DTOs reference their own definition (M5)") {
+    // Was an explicit `cycle` terminal, which could say a loop existed but not
+    // what was in it. Since §5.2.16 a recursive type points back at its own
+    // definition, which is what the code declares — strictly more, and the
+    // resolver leaves it as a ref precisely because inlining cannot terminate.
+    val endpoint = endpointByUri(petstore, "GET", "/catalog/tree")
+    val shape    = resolvedShape(endpoint)
     val children = shape("fields").arr.find(_("name").str == "children").get("shape")
     children("kind").str shouldBe "array"
-    children("element")("kind").str shouldBe "cycle"
+    children("element")("kind").str shouldBe "ref"
     children("element")("type_name").str shouldBe "Category"
+    endpoint("type_defs").obj.keySet should contain("Category")
   }
 
   test("off-CPG types are an honest unresolved name, never fabricated fields (M5)") {

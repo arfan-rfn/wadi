@@ -14,7 +14,11 @@ from wadi_contracts.endpoint import (
     Endpoint,
     EndpointAuth,
     EndpointParam,
+    FieldShape,
     ParamLocation,
+    ShapeKind,
+    TypeShape,
+    resolve_type_shape,
 )
 from wadi_contracts.enums import HttpMethod, TriggerKind
 from wadi_contracts.ids import endpoint_id
@@ -364,3 +368,91 @@ class TestEndpointParams:
             ],
         )
         assert {p.location for p in ep.params} == {ParamLocation.BODY, ParamLocation.QUERY}
+
+
+class TestResolveTypeShape:
+    """Reading a shape means resolving its refs (§5.2.16).
+
+    Shapes travel as a graph — each type defined once, referenced wherever it
+    occurs — because inline expansion of an entity model is exponentially
+    redundant: one real response wrote 2,365 object definitions of which 113
+    were distinct. A consumer that does not resolve is reading an incomplete
+    shape while believing it is complete, which is why this lives in the
+    contract rather than in each reader.
+    """
+
+    @staticmethod
+    def _obj(type_name: str, fields: dict[str, TypeShape]) -> TypeShape:
+        # Fields passed as a dict, not kwargs: a field really can be called
+        # `name`, and this helper must not shadow it.
+        return TypeShape(
+            kind=ShapeKind.OBJECT,
+            type_name=type_name,
+            fields=[FieldShape(name=k, shape=v) for k, v in fields.items()],
+        )
+
+    def test_a_ref_is_replaced_by_its_definition(self) -> None:
+        defs = {
+            "Site": self._obj(
+                "Site", {"city": TypeShape(kind=ShapeKind.SCALAR, type_name="String")}
+            )
+        }
+        shape = self._obj("Contest", {"site": TypeShape(kind=ShapeKind.REF, type_name="Site")})
+        resolved = resolve_type_shape(shape, defs)
+        site = resolved.fields[0].shape
+        assert site.kind is ShapeKind.OBJECT
+        assert [f.name for f in site.fields] == ["city"]
+
+    def test_the_same_type_resolves_everywhere_it_appears(self) -> None:
+        """The point of sharing: one definition, many uses, all complete."""
+        defs = {
+            "Site": self._obj(
+                "Site", {"city": TypeShape(kind=ShapeKind.SCALAR, type_name="String")}
+            )
+        }
+        shape = self._obj(
+            "Contest",
+            {
+                "a": TypeShape(kind=ShapeKind.REF, type_name="Site"),
+                "b": TypeShape(kind=ShapeKind.REF, type_name="Site"),
+            },
+        )
+        resolved = resolve_type_shape(shape, defs)
+        assert all(f.shape.kind is ShapeKind.OBJECT for f in resolved.fields)
+
+    def test_recursion_stops_and_stays_a_ref(self) -> None:
+        """A genuine cycle cannot be inlined, and must not loop forever.
+
+        The ref is left in place rather than replaced by a terminal: unlike the
+        old `cycle` node, the reader can follow `type_defs` and see what is in
+        the loop.
+        """
+        defs = {
+            "Node": self._obj("Node", {"next": TypeShape(kind=ShapeKind.REF, type_name="Node")})
+        }
+        resolved = resolve_type_shape(TypeShape(kind=ShapeKind.REF, type_name="Node"), defs)
+        assert resolved.kind is ShapeKind.OBJECT
+        assert resolved.fields[0].shape.kind is ShapeKind.REF
+
+    def test_a_ref_with_no_definition_is_left_alone(self) -> None:
+        """Never fabricate: an unresolvable ref stays visible as one (P10)."""
+        shape = TypeShape(kind=ShapeKind.REF, type_name="Missing")
+        assert resolve_type_shape(shape, {}) == shape
+
+    def test_shapes_without_refs_pass_through_unchanged(self) -> None:
+        """Snapshots written before 1.25.0 are fully inline."""
+        shape = self._obj("Pet", {"name": TypeShape(kind=ShapeKind.SCALAR, type_name="String")})
+        assert resolve_type_shape(shape, {}) == shape
+
+    def test_refs_inside_collections_resolve(self) -> None:
+        defs = {
+            "Tag": self._obj("Tag", {"v": TypeShape(kind=ShapeKind.SCALAR, type_name="String")})
+        }
+        shape = TypeShape(
+            kind=ShapeKind.ARRAY,
+            type_name="List",
+            element=TypeShape(kind=ShapeKind.REF, type_name="Tag"),
+        )
+        resolved = resolve_type_shape(shape, defs)
+        assert resolved.element is not None
+        assert resolved.element.kind is ShapeKind.OBJECT

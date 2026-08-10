@@ -558,7 +558,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.24.0/endpoint_summary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.25.0/endpoint_summary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One endpoint as a LIST row \u2014 everything but the wire shapes (\u00a75.2.15).\n\nThe list route serves this instead of :class:`Endpoint` because the two\nshape fields dominate the payload once their types resolve: on ICPC's\n`contest`, `response_schema` and `request_schema` are 124 MB of a 126 MB\nresponse, and every other field of all 804 endpoints together is 2.65 MB.\n\n**Absence is structural here, and that is the point.** Serving `Endpoint`\nwith both fields set to `None` would have been a smaller change and a\ndishonest one: `None` already *means* something on both. `request_schema`\nis None on 673 of those 804 endpoints because the handler takes no body,\nand `response_schema` has an `unresolved` terminal for \"we looked and could\nnot recover it\". Nulling them for transport makes \"no body\", \"nothing\nrecovered\" and \"too big to send\" one value nobody can tell apart \u2014 the\ncollapse P10 forbids, on the surface every consumer meets first. Omitting\nthe fields from the *type* cannot be misread as an answer.\n\nBoth shapes live on :class:`EndpointDetailView`, which the workspace and\nthe row peek already fetch per endpoint.\n\nIt carries :class:`ArtifactEnvelope` because the stored document does, and\na row is READ FROM that document by a Mongo projection \u2014 dropping the two\nshape fields, nothing else. `schema_version` therefore reports the contract\nthat WROTE the endpoint rather than the one reading it, exactly as the full\nartifact does.",
@@ -613,7 +613,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.24.0",
+      "default": "1.25.0",
       "title": "Schema Version",
       "type": "string"
     },

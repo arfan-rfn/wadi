@@ -33,6 +33,15 @@ class ShapeKind(StrEnum):
     SCALAR = "scalar"
     ARRAY = "array"
     MAP = "map"
+    REF = "ref"
+    """A type defined once in ``Endpoint.type_defs`` (§5.2.16).
+
+    Not a terminal — the opposite of one. ``truncated`` says the walk stopped
+    and fields are missing; ``ref`` says the fields are all present, under
+    ``type_name`` in the definitions map. A reader that does not resolve refs
+    is reading an incomplete shape and must not report it as complete.
+    """
+
     CYCLE = "cycle"
     TRUNCATED = "truncated"
     UNRESOLVED = "unresolved"
@@ -115,6 +124,52 @@ class TypeShape(WadiModel):
     )
     element: "TypeShape | None" = Field(
         default=None, description="Element shape for kind=array; value shape for kind=map"
+    )
+
+
+def resolve_type_shape(
+    shape: TypeShape,
+    type_defs: "dict[str, TypeShape]",
+    _path: frozenset[str] = frozenset(),
+) -> TypeShape:
+    """Inline a shape's ``kind=ref`` nodes from ``type_defs`` (§5.2.16).
+
+    Shapes travel as a graph — each type defined once, referenced wherever it
+    occurs — because inline expansion of an entity model is exponentially
+    redundant. Consumers that want a tree call this; it is here rather than in
+    each consumer because "resolve a ref" is part of reading the contract, and
+    a reader that skips it is looking at an incomplete shape while believing
+    it is complete.
+
+    A ref already on the resolution path is returned unresolved: that is a real
+    cycle in the type, and inlining it would not terminate. So the result is a
+    tree everywhere the type is one, and keeps refs exactly where the type is
+    genuinely recursive — which is more than the old ``cycle`` terminal said,
+    because the definition it names is right there in ``type_defs``.
+
+    Shapes from before 1.25.0 contain no refs and pass through unchanged.
+    """
+    if shape.kind is ShapeKind.REF:
+        if shape.type_name in _path:
+            return shape
+        target = type_defs.get(shape.type_name)
+        if target is None:
+            return shape
+        return resolve_type_shape(target, type_defs, _path | {shape.type_name})
+    return shape.model_copy(
+        update={
+            "fields": [
+                field.model_copy(
+                    update={"shape": resolve_type_shape(field.shape, type_defs, _path)}
+                )
+                for field in shape.fields
+            ],
+            "element": (
+                resolve_type_shape(shape.element, type_defs, _path)
+                if shape.element is not None
+                else None
+            ),
+        }
     )
 
 
@@ -504,6 +559,19 @@ class Endpoint(ArtifactEnvelope):
         default=None,
         description="Field-level response shape, wrappers unwrapped (§5.2.7)",
     )
+    type_defs: dict[str, TypeShape] = Field(
+        default_factory=dict[str, TypeShape],
+        description=(
+            "Types named by `kind=ref` nodes in this endpoint's shapes (§5.2.16), "
+            "keyed by `type_name`. Each type is written ONCE here and referenced "
+            "wherever it appears, because inline expansion of an entity graph is "
+            "exponentially redundant — one real response wrote 2,365 object "
+            "definitions of which 113 were distinct, 3 MB that no context window "
+            "could hold. Shared by `request_schema` and `response_schema`, which "
+            "routinely name the same types. Empty on snapshots written before "
+            "1.25.0, whose shapes are fully inline and contain no refs"
+        ),
+    )
     auth: EndpointAuth = Field(default_factory=EndpointAuth)
     handler: MethodRef
     trigger: TriggerKind = TriggerKind.HTTP
@@ -565,6 +633,7 @@ class Endpoint(ArtifactEnvelope):
         declared_statuses: list[EndpointStatus] | None = None,
         request_schema: TypeShape | None = None,
         response_schema: TypeShape | None = None,
+        type_defs: dict[str, TypeShape] | None = None,
         auth: EndpointAuth | None = None,
         trigger: TriggerKind = TriggerKind.HTTP,
     ) -> "Endpoint":
@@ -581,6 +650,7 @@ class Endpoint(ArtifactEnvelope):
             declared_statuses=declared_statuses or [],
             request_schema=request_schema,
             response_schema=response_schema,
+            type_defs=type_defs or {},
             auth=auth or EndpointAuth(),
             handler=handler,
             trigger=trigger,

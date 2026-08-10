@@ -534,6 +534,7 @@
         "scalar",
         "array",
         "map",
+        "ref",
         "cycle",
         "truncated",
         "unresolved",
@@ -662,7 +663,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.24.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.25.0/endpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One REST endpoint of one service within a snapshot.",
@@ -744,7 +745,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.24.0",
+      "default": "1.25.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -765,6 +766,14 @@
     "trigger": {
       "$ref": "#/$defs/TriggerKind",
       "default": "http"
+    },
+    "type_defs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/TypeShape"
+      },
+      "description": "Types named by `kind=ref` nodes in this endpoint's shapes (\u00a75.2.16), keyed by `type_name`. Each type is written ONCE here and referenced wherever it appears, because inline expansion of an entity graph is exponentially redundant \u2014 one real response wrote 2,365 object definitions of which 113 were distinct, 3 MB that no context window could hold. Shared by `request_schema` and `response_schema`, which routinely name the same types. Empty on snapshots written before 1.25.0, whose shapes are fully inline and contain no refs",
+      "title": "Type Defs",
+      "type": "object"
     }
   },
   "required": [

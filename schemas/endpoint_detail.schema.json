@@ -402,7 +402,7 @@
           "title": "Response Type"
         },
         "schema_version": {
-          "default": "1.24.0",
+          "default": "1.25.0",
           "title": "Schema Version",
           "type": "string"
         },
@@ -423,6 +423,14 @@
         "trigger": {
           "$ref": "#/$defs/TriggerKind",
           "default": "http"
+        },
+        "type_defs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/TypeShape"
+          },
+          "description": "Types named by `kind=ref` nodes in this endpoint's shapes (\u00a75.2.16), keyed by `type_name`. Each type is written ONCE here and referenced wherever it appears, because inline expansion of an entity graph is exponentially redundant \u2014 one real response wrote 2,365 object definitions of which 113 were distinct, 3 MB that no context window could hold. Shared by `request_schema` and `response_schema`, which routinely name the same types. Empty on snapshots written before 1.25.0, whose shapes are fully inline and contain no refs",
+          "title": "Type Defs",
+          "type": "object"
         }
       },
       "required": [
@@ -896,6 +904,7 @@
         "scalar",
         "array",
         "map",
+        "ref",
         "cycle",
         "truncated",
         "unresolved",
@@ -1066,7 +1075,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.24.0/endpoint_detail.schema.json",
+  "$id": "https://trywadi.com/schemas/1.25.0/endpoint_detail.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Everything the endpoint workspace needs in one read (\u00a711 Phase 2.8).\n\n1.11.0 (additive): replaces the client-side compose of endpoint +\nservice-wide remote edges. The ICFG stays its own fetch (it is large) and\nsource stays on demand (\u00a75.3) \u2014 ``touched_files`` carries names, never\ncontent.\n\n**Reading the empty lists.** Each one has a flag that says whether empty\nmeans 'none' or 'not known', because on their own they cannot be told\napart (P10):\n\n* ``outbound`` \u2014 ``stitched=False`` means the stitcher has not run, so\n  empty is 'not yet'.\n* ``touched_files`` and ``unopenable_calls`` \u2014 both are DERIVED from the\n  ICFG, so ``icfg_available=False`` makes empty 'not known'. Without that\n  reading, an endpoint with no flow graph reports the same shape as one\n  whose every call opens cleanly.",

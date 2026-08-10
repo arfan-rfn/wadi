@@ -31,14 +31,24 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
         )
       )
 
-  private def shape(httpMethod: String, uri: String): ujson.Value =
+  private def rawShape(httpMethod: String, uri: String): ujson.Value =
     endpoint(httpMethod, uri).obj.getOrElse(
       "response_schema",
       fail(s"$httpMethod $uri carries no response_schema")
     )
 
+  private def typeDefs(httpMethod: String, uri: String): ujson.Obj =
+    endpoint(httpMethod, uri).obj.get("type_defs").map(_.obj).map(ujson.Obj.from).getOrElse(ujson.Obj())
+
+  private def shape(httpMethod: String, uri: String): ujson.Value =
+    resolveRefs(rawShape(httpMethod, uri), typeDefs(httpMethod, uri))
+
   private def kindOf(httpMethod: String, uri: String): String   = shape(httpMethod, uri)("kind").str
-  private def originOf(httpMethod: String, uri: String): String = shape(httpMethod, uri)("origin").str
+  // Read from the RAW shape: `origin` records which evidence the shape came
+  // from and lives on the root node, which resolution replaces with the
+  // definition it points at.
+  private def originOf(httpMethod: String, uri: String): String =
+    rawShape(httpMethod, uri)("origin").str
 
   // ---- T0: the route is published root-anchored -------------------------
 
@@ -230,20 +240,40 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
     case _ => Nil
   }
 
-  test("a mutually recursive entity graph is clipped, and says so") {
-    // Node -> Edge -> Node and Node -> Group -> Node never repeat a type along
-    // one root-to-leaf path, so `path` (cycle detection) cannot fire. Before
-    // the node budget this expanded exponentially in MaxDepth — the real
-    // equivalent reached 3 MB for one endpoint and 114 MB for one service.
-    val all = kinds(shape("GET", "/shapes/graph"))
-    all should contain("truncated")
+  test("a mutually recursive entity graph is defined once, not expanded") {
+    // Eight types each referencing four others: no path repeats a type within
+    // the depth cap, so the old per-path cycle guard never fired and the walk
+    // fanned out exponentially — 8.27 MB for this one shape before §5.2.15
+    // capped it, and a clipped shape after. Shared definitions make it whole
+    // AND small: each type written once, every occurrence a ref.
+    val defs = typeDefs("GET", "/shapes/graph")
+    defs.obj.keySet should contain allOf ("Contest", "Team", "Person", "Site")
+    defs.obj.size should be <= 12
+
+    val raw = rawShape("GET", "/shapes/graph")
+    kinds(raw) should contain("ref")
+    // Nothing is dropped any more: no terminal stands in for a type we own.
+    kinds(raw) should not contain "truncated"
   }
 
-  test("clipping is bounded by the budget, not by luck") {
-    // The assertion that matters is a CEILING. `truncated` appearing proves
-    // the walk stopped somewhere; only a bound proves it stopped in time.
-    val expandedObjects = kinds(shape("GET", "/shapes/graph")).count(_ == "object")
-    expandedObjects should be <= 200
+  test("recursion is a reference back, not a terminal") {
+    // `cycle` could only say a loop existed; a ref back at the definition says
+    // what is in it, which is what the type actually declares.
+    val defs = typeDefs("GET", "/shapes/graph")
+    val contest = defs("Contest")
+    val edgeField = contest("fields").arr
+      .find(f => f("name").str.startsWith("team"))
+      .getOrElse(fail(s"Contest has no team field; saw ${contest("fields").arr.map(_("name").str)}"))
+    // Team -> ... -> Contest resolves through the map rather than terminating.
+    kinds(edgeField("shape")) should contain("ref")
+  }
+
+  test("the shared form is a fraction of the inline one") {
+    // The reason this section exists: the inline form of this shape does not
+    // fit in a context window, and the consumer that matters is an LLM.
+    val raw = rawShape("GET", "/shapes/graph")
+    val whole = ujson.Obj("root" -> raw, "defs" -> typeDefs("GET", "/shapes/graph"))
+    ujson.write(whole).length should be < 60000
   }
 
   test("the budget is per shape, so a small neighbour is untouched") {
