@@ -172,6 +172,93 @@ which origin may call, not which principal — but a scoped read is still useful
 
 ## Completed
 
+### The e2e killed a live local stack (and flaked doing it)
+**Closed:** v0.8.2
+
+The e2e's analyzer container ran with no `--memory` at all, which is not "no
+limit" — the JVM sizes its heap against the entire Docker VM. Run beside a
+live stack, whose own analyzer reserves 10 GB of a 15.6 GB VM, the two
+overcommit and Docker kills containers. Locally that presented as the stack's
+five non-database services disappearing during heavy test runs, and as e2e
+errors that passed on a re-run; it was misread twice as an unexplained
+environment fault before the arithmetic was checked. CI never saw it because a
+fresh runner has no competing stack.
+
+Bounded to 4 GB against a **measured peak of 807 MiB** on these fixtures.
+Verified the way it should have been from the start: 7 containers up, full e2e
+run, 7 containers still up and the API healthy.
+
+
+### `wadi up` could not converge onto a running stack
+**Closed:** v0.8.2
+
+`compose.check_port_free` bound a bare socket and read any `OSError` as a
+conflict, which caught two things that are not one. Its own stack: with wadi
+up, the orchestrator holds the API port, so `wadi up --expose-db` refused to
+run and the only route to changing a flag was `wadi down` first — §13 records
+converging re-runs as the intent, and this is what stopped them. And a socket
+a dead client left behind: a stopped dev server that had been talking to 9234
+kept it unbindable with no LISTEN anywhere, so the port read as taken with
+nothing on it.
+
+`SO_REUSEADDR` settles the second (the probe never accepts a connection — it
+only asks whether a listener could exist). For the first, ownership is now a
+question for docker rather than the socket: a bind failure on a port published
+by a container labelled with our own compose project is a converging re-run,
+not a collision. A stranger on the port still fails, loudly, and a machine
+with no docker still reads as contested.
+
+
+### `endpoint-dependencies` took ~4.4 s to return 125 bytes
+**Closed:** v0.8.2 (§5.2.15)
+
+The view needs one set of remote-call ids per endpoint and nothing else, but
+the only way to get them was `get_icfg` per endpoint — on ICPC `contest`, 804
+graphs reassembled from their chunks and validated into Pydantic models, to
+answer in 125 bytes. The same defect as the endpoint list one route over, found
+while profiling it: read everything to produce almost nothing.
+
+The union is computed in a Mongo aggregation instead, with a second pass over
+`icfg_parts` merged in — a chunked graph leaves no nodes on its manifest, so a
+single aggregation would have returned an empty set for exactly the largest
+graphs in a snapshot, silently. **Measured: 4.4 s -> 0.07 s, byte-identical
+payload**, and diffed against the old route across all 22 train-ticket services
+plus ICPC with 0 mismatches.
+
+
+### One service's endpoint list was 114 MB and took 12 s
+**Closed:** v0.8.2 (§5.2.15)
+
+§5.2.14 made ICPC's library types resolvable, so §5.2.7 expanded them —
+correctly, and without a ceiling. `TypeShapes` guards cycles per *path*, which
+leaves sibling branches free to re-expand the same entity subgraph, so a
+bidirectional JPA graph goes exponential in the depth cap: one endpoint's
+response shape reached 3 MB at depth 25 with `label` repeated 520 times. The
+browser parsed 114 MB on the main thread before rendering a row, which is what
+made the endpoint workspace look frozen.
+
+Fixed in two places, because they fix different populations. The list route
+serves a distinct **`EndpointSummary`** — the wire shapes are absent from the
+type, not nulled, since `None` already means "no request body" on 673 of those
+804 endpoints — projected in the Mongo query rather than in Python, which is
+where the latency actually was. That repairs every snapshot that already
+exists. **`TypeShapes` gained a node budget** (`MaxNodes = 200`, emitting the
+existing `truncated` terminal), which bounds the defect at the source for
+snapshots analyzed from here on.
+
+**Measured on ICPC `contest`, 804 endpoints: 114,546,092 B / 10.7–14.5 s ->
+2,479,867 B / 0.09 s.** Trimming the response alone was tried first and moved
+the payload 47x while leaving the clock at ~11 s — recorded in §5.2.15 as the
+standing lesson that a payload measurement is not a latency measurement.
+
+Landing with it: MCP's `list_endpoints` (same defect, into an agent's context
+window), the frontend reading both shapes from the detail it already fetched,
+`staleTime: Infinity` on every snapshot-scoped read since artifacts are never
+rewritten in place, and a visible loading affordance — the skeleton was
+`--muted`, a 3% step against `--card`, and lived only in section bodies, which
+a collapsed section does not render.
+
+
 ### A library compiled into a service was modelled as a peer service
 **Closed:** v0.8.1 (§5.2.14)
 
