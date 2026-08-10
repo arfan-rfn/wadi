@@ -1,37 +1,17 @@
 """Orchestrator API test fixtures: real Mongo + real local git repo + ASGI client."""
 
-import subprocess
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from orchestrator_support import make_settings
+from orchestrator_support import make_settings, run_git
 
 from wadi_orchestrator.app import create_app
 from wadi_orchestrator.state import AppState
 from wadi_storage import WadiDatabase
 
-
-def _git(*args: str, cwd: Path) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=True,
-        env={
-            "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.com",
-            "GIT_CONFIG_GLOBAL": "/dev/null",
-            "GIT_CONFIG_SYSTEM": "/dev/null",
-            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
-            "HOME": str(cwd),
-        },
-    )
-    return result.stdout
+_git = run_git
 
 
 @pytest.fixture
