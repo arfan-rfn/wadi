@@ -59,6 +59,12 @@ class TestListingTools:
         endpoints = await service.list_endpoints(seeded["snapshot_id"], seeded["service_id"])
         assert endpoints[0]["id"] == seeded["endpoint_id"]
         assert endpoints[0]["auth"]["authenticated"] is None  # honest unknown (P10)
+        # List rows, not whole endpoints (§5.2.15). This tool answers into an
+        # agent's context window, where the wire shapes cost most: on ICPC they
+        # were 124 MB of a 126 MB response. `endpoint_detail` carries them for
+        # one endpoint, which is the granularity an agent asks at anyway.
+        assert "response_schema" not in endpoints[0]
+        assert "request_schema" not in endpoints[0]
 
     async def test_not_found_errors_guide_the_agent(self, database: WadiDatabase) -> None:
         service = _service(database)

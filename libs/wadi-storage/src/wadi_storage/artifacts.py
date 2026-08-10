@@ -17,6 +17,7 @@ from pymongo import ReplaceOne
 from wadi_contracts import (
     DataModel,
     Endpoint,
+    EndpointSummary,
     Icfg,
     MqInteraction,
     RemoteCall,
@@ -108,6 +109,28 @@ class ArtifactRepository:
             .sort([("simplified_uri", 1), ("http_method", 1)])
         )
         return [from_doc(Endpoint, doc) async for doc in cursor]
+
+    async def list_endpoint_summaries(
+        self, snapshot_id: str, service_id: str
+    ) -> list[EndpointSummary]:
+        """List rows, projected in the QUERY rather than after it (§5.2.15).
+
+        Projecting in Python still pays for the thing being dropped: the wire
+        shapes are 124 MB of ICPC `contest`'s 126 MB, and reading plus
+        validating them took ~11 s before anything was discarded — the reason
+        trimming the response alone moved the payload 47x and the clock barely
+        at all. Excluding them server-side is what makes the route fast, not
+        just small.
+        """
+        cursor = (
+            self._db.collection(ENDPOINTS)
+            .find(
+                {"snapshot_id": snapshot_id, "service_id": service_id},
+                projection={"request_schema": 0, "response_schema": 0},
+            )
+            .sort([("simplified_uri", 1), ("http_method", 1)])
+        )
+        return [from_doc(EndpointSummary, doc) async for doc in cursor]
 
     async def list_endpoints_for_snapshot(self, snapshot_id: str) -> list[Endpoint]:
         """Every endpoint in the snapshot, all services — the matcher's index input."""
@@ -211,11 +234,65 @@ class ArtifactRepository:
         manifest["edges"] = edges
         return from_doc(Icfg, manifest)
 
-    async def list_icfg_endpoint_ids(self, snapshot_id: str, service_id: str) -> list[str]:
-        cursor = self._db.collection(ICFGS).find(
-            {"snapshot_id": snapshot_id, "service_id": service_id}, {"endpoint_id": 1}
-        )
-        return [cast(str, doc["endpoint_id"]) async for doc in cursor]
+    async def remote_call_ids_by_endpoint(
+        self, snapshot_id: str, service_id: str
+    ) -> dict[str, set[str]]:
+        """Which remote calls each endpoint's flow reaches — WITHOUT the ICFGs.
+
+        The endpoint-dependencies view needs one set of ids per endpoint and
+        nothing else, but the only way to get them used to be `get_icfg` per
+        endpoint: 804 graphs on ICPC `contest`, reassembled from their chunks
+        and validated into Pydantic models, to answer in 125 bytes. It took
+        ~3 s against 5-8 ms for every other read on that page.
+
+        The union is computed in the aggregation instead, so the wire carries
+        one small row per endpoint. Same lesson as the endpoint list (§5.2.15):
+        the cost was never the response, it was reading everything to build it.
+
+        Chunked graphs keep their nodes in ``icfg_parts`` and leave none on the
+        manifest, so they contribute an empty set from the first pass and are
+        picked up by the second — the two are merged, never one or the other.
+        """
+        # An array-of-arrays (`nodes.remote_call_ids`) flattened, then deduped.
+        union_stage: MongoDocument = {
+            "$setUnion": [
+                {
+                    "$reduce": {
+                        "input": {"$ifNull": ["$nodes.remote_call_ids", []]},
+                        "initialValue": [],
+                        "in": {"$concatArrays": ["$$value", {"$ifNull": ["$$this", []]}]},
+                    }
+                },
+                [],
+            ]
+        }
+
+        by_endpoint: dict[str, set[str]] = {}
+        chunked: list[str] = []
+        manifest_pipeline: list[MongoDocument] = [
+            {"$match": {"snapshot_id": snapshot_id, "service_id": service_id}},
+            {"$project": {"endpoint_id": 1, "chunked": 1, "call_ids": union_stage}},
+        ]
+        async for row in await self._db.collection(ICFGS).aggregate(manifest_pipeline):
+            endpoint_id = str(row["endpoint_id"])  # type: ignore[index]
+            ids = {str(call) for call in cast(list[object], row.get("call_ids") or [])}
+            if ids:
+                by_endpoint[endpoint_id] = ids
+            if row.get("chunked"):
+                chunked.append(endpoint_id)
+
+        if chunked:
+            parts_pipeline: list[MongoDocument] = [
+                {"$match": {"snapshot_id": snapshot_id, "endpoint_id": {"$in": chunked}}},
+                {"$project": {"endpoint_id": 1, "call_ids": union_stage}},
+                {"$unwind": "$call_ids"},
+                {"$group": {"_id": "$endpoint_id", "call_ids": {"$addToSet": "$call_ids"}}},
+            ]
+            async for row in await self._db.collection(ICFG_PARTS).aggregate(parts_pipeline):
+                ids = {str(call) for call in cast(list[object], row.get("call_ids") or [])}
+                if ids:
+                    by_endpoint.setdefault(str(row["_id"]), set()).update(ids)  # type: ignore[index]
+        return by_endpoint
 
     # --- remote calls / MQ / data models ---------------------------------------------
 

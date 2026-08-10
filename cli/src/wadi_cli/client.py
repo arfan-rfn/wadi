@@ -14,7 +14,7 @@ import httpx
 
 from wadi_contracts import (
     CoverageReport,
-    Endpoint,
+    EndpointSummary,
     ExtractionJob,
     RemoteEdgesView,
     RepoSource,
@@ -158,11 +158,13 @@ class WadiApiClient:
         response = self._request("GET", f"/api/v1/snapshots/{snapshot_id}/services")
         return [ServiceSummary.model_validate(item) for item in response.json()]
 
-    def list_endpoints(self, snapshot_id: str, service_id: str) -> list[Endpoint]:
+    def list_endpoints(self, snapshot_id: str, service_id: str) -> list[EndpointSummary]:
+        # List rows carry no wire shapes (§5.2.15); `wadi endpoints` prints
+        # none of them. Fetch one endpoint's detail for a request/response shape.
         response = self._request(
             "GET", f"/api/v1/snapshots/{snapshot_id}/services/{service_id}/endpoints"
         )
-        return [Endpoint.model_validate(item) for item in response.json()]
+        return [EndpointSummary.model_validate(item) for item in response.json()]
 
     def get_coverage(self, snapshot_id: str) -> CoverageReport:
         response = self._request("GET", f"/api/v1/snapshots/{snapshot_id}/coverage")

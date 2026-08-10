@@ -36,16 +36,6 @@ class TestSmallIcfg:
         artifacts = ArtifactRepository(database)
         assert await artifacts.get_icfg("snap_none", "ep_" + "0" * 16) is None
 
-    async def test_list_icfg_endpoint_ids(self, database: WadiDatabase) -> None:
-        artifacts = ArtifactRepository(database)
-        snapshot = make_snapshot(make_system())
-        boundary = make_service(snapshot)
-        endpoints = [make_endpoint(snapshot, boundary, uri=f"/r{i}") for i in range(3)]
-        for endpoint in endpoints:
-            await artifacts.write_icfg(make_icfg(snapshot, boundary, endpoint))
-        ids = await artifacts.list_icfg_endpoint_ids(snapshot.id, boundary.service_id)
-        assert set(ids) == {e.id for e in endpoints}
-
 
 class TestChunkedIcfg:
     @pytest.fixture

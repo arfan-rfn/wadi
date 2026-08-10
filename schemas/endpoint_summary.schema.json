@@ -445,40 +445,6 @@
       "title": "EndpointStatus",
       "type": "object"
     },
-    "FieldShape": {
-      "additionalProperties": false,
-      "description": "One serialized field: the WIRE name (Jackson renames applied).",
-      "properties": {
-        "java_name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The Java field name, when it differs from the wire name",
-          "title": "Java Name"
-        },
-        "name": {
-          "description": "Serialized name (@JsonProperty applied)",
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "shape": {
-          "$ref": "#/$defs/TypeShape"
-        }
-      },
-      "required": [
-        "name",
-        "shape"
-      ],
-      "title": "FieldShape",
-      "type": "object"
-    },
     "HttpMethod": {
       "enum": [
         "GET",
@@ -525,30 +491,6 @@
         "header"
       ],
       "title": "ParamLocation",
-      "type": "string"
-    },
-    "ShapeKind": {
-      "description": "The recovered wire-shape node kinds (\u00a75.2.7). ``unresolved``/``cycle``/\n``truncated`` are honest terminals \u2014 never fabricated fields (P10).",
-      "enum": [
-        "object",
-        "scalar",
-        "array",
-        "map",
-        "cycle",
-        "truncated",
-        "unresolved",
-        "always-null"
-      ],
-      "title": "ShapeKind",
-      "type": "string"
-    },
-    "ShapeOrigin": {
-      "description": "Which evidence the shape was read from (\u00a75.2.7, amended 2026-08-05).\n\n``declared`` is the signature \u2014 the strongest evidence, and the only one\nused until a raw wrapper (`public HttpEntity query(...)`) leaves nothing to\nunwrap. ``return_expression`` means the payload came from what the handler\nreturns, which is still symbolic truth but rests on a weaker premise: one\nreturn path standing for the whole contract. P7 keeps the two legible\nrather than blending them.",
-      "enum": [
-        "declared",
-        "return-expression"
-      ],
-      "title": "ShapeOrigin",
       "type": "string"
     },
     "SourceAnchor": {
@@ -614,58 +556,12 @@
       ],
       "title": "TriggerKind",
       "type": "string"
-    },
-    "TypeShape": {
-      "additionalProperties": false,
-      "description": "A recovered request/response shape (\u00a75.2.7): the wire contract, walked\nfrom in-CPG type structure with honest terminals.",
-      "properties": {
-        "element": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TypeShape"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Element shape for kind=array; value shape for kind=map"
-        },
-        "fields": {
-          "description": "kind=object only; @JsonIgnore omitted",
-          "items": {
-            "$ref": "#/$defs/FieldShape"
-          },
-          "title": "Fields",
-          "type": "array"
-        },
-        "kind": {
-          "$ref": "#/$defs/ShapeKind"
-        },
-        "origin": {
-          "$ref": "#/$defs/ShapeOrigin",
-          "default": "declared",
-          "description": "Evidence the shape was read from; nested shapes are always declared"
-        },
-        "type_name": {
-          "description": "Declared type, e.g. 'com.acme.Pet'",
-          "minLength": 1,
-          "title": "Type Name",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "type_name"
-      ],
-      "title": "TypeShape",
-      "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.24.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.24.0/endpoint_summary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "One REST endpoint of one service within a snapshot.",
+  "description": "One endpoint as a LIST row \u2014 everything but the wire shapes (\u00a75.2.15).\n\nThe list route serves this instead of :class:`Endpoint` because the two\nshape fields dominate the payload once their types resolve: on ICPC's\n`contest`, `response_schema` and `request_schema` are 124 MB of a 126 MB\nresponse, and every other field of all 804 endpoints together is 2.65 MB.\n\n**Absence is structural here, and that is the point.** Serving `Endpoint`\nwith both fields set to `None` would have been a smaller change and a\ndishonest one: `None` already *means* something on both. `request_schema`\nis None on 673 of those 804 endpoints because the handler takes no body,\nand `response_schema` has an `unresolved` terminal for \"we looked and could\nnot recover it\". Nulling them for transport makes \"no body\", \"nothing\nrecovered\" and \"too big to send\" one value nobody can tell apart \u2014 the\ncollapse P10 forbids, on the surface every consumer meets first. Omitting\nthe fields from the *type* cannot be misread as an answer.\n\nBoth shapes live on :class:`EndpointDetailView`, which the workspace and\nthe row peek already fetch per endpoint.\n\nIt carries :class:`ArtifactEnvelope` because the stored document does, and\na row is READ FROM that document by a Mongo projection \u2014 dropping the two\nshape fields, nothing else. `schema_version` therefore reports the contract\nthat WROTE the endpoint rather than the one reading it, exactly as the full\nartifact does.",
   "properties": {
     "auth": {
       "$ref": "#/$defs/EndpointAuth"
@@ -676,7 +572,6 @@
       "type": "string"
     },
     "declared_statuses": {
-      "description": "HTTP statuses the handler's own code NAMES (\u00a75.2.7 T9). Named `declared_` because it is not the set this endpoint can answer with: a 500 from an uncaught exception, a 403 from the security layer and a 404 from the dispatcher appear in no handler source. An empty list means nothing was named, never that the endpoint cannot fail (P10)",
       "items": {
         "$ref": "#/$defs/EndpointStatus"
       },
@@ -684,8 +579,6 @@
       "type": "array"
     },
     "full_uri": {
-      "description": "Route as written, e.g. /orders/{orderId}",
-      "minLength": 1,
       "title": "Full Uri",
       "type": "string"
     },
@@ -706,30 +599,6 @@
       },
       "title": "Params",
       "type": "array"
-    },
-    "request_schema": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TypeShape"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Field-level @RequestBody shape (\u00a75.2.7); None = no body or pre-1.6"
-    },
-    "response_schema": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TypeShape"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Field-level response shape, wrappers unwrapped (\u00a75.2.7)"
     },
     "response_type": {
       "anyOf": [
@@ -753,8 +622,6 @@
       "type": "string"
     },
     "simplified_uri": {
-      "description": "Identity form, e.g. /orders/{?}",
-      "minLength": 1,
       "title": "Simplified Uri",
       "type": "string"
     },
@@ -776,6 +643,6 @@
     "simplified_uri",
     "handler"
   ],
-  "title": "Endpoint",
+  "title": "EndpointSummary",
   "type": "object"
 }

@@ -59,9 +59,13 @@ class WadiMcpService:
                 f"service {service_id!r} not found in snapshot {snapshot_id!r}; "
                 "use list_services first"
             )
+        # List rows, not whole endpoints (§5.2.15). The wire shapes are 124 MB
+        # of a 126 MB response on ICPC's `contest`, and this tool answers into
+        # an agent's context window — the one consumer that can least afford
+        # it. `endpoint_detail` carries both shapes for a single endpoint.
         return [
-            endpoint.model_dump(mode="json")
-            for endpoint in await self._artifacts.list_endpoints(snapshot_id, service_id)
+            row.model_dump(mode="json")
+            for row in await self._artifacts.list_endpoint_summaries(snapshot_id, service_id)
         ]
 
     async def coverage_report(self, snapshot_id: str) -> dict[str, Any]:
