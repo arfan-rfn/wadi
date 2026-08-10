@@ -59,6 +59,12 @@ class TestListingTools:
         endpoints = await service.list_endpoints(seeded["snapshot_id"], seeded["service_id"])
         assert endpoints[0]["id"] == seeded["endpoint_id"]
         assert endpoints[0]["auth"]["authenticated"] is None  # honest unknown (P10)
+        # List rows, not whole endpoints (§5.2.15). This tool answers into an
+        # agent's context window, where the wire shapes cost most: on ICPC they
+        # were 124 MB of a 126 MB response. `endpoint_detail` carries them for
+        # one endpoint, which is the granularity an agent asks at anyway.
+        assert "response_schema" not in endpoints[0]
+        assert "request_schema" not in endpoints[0]
 
     async def test_not_found_errors_guide_the_agent(self, database: WadiDatabase) -> None:
         service = _service(database)
@@ -66,6 +72,35 @@ class TestListingTools:
             await service.list_snapshots("sys_" + "0" * 16)
         with pytest.raises(NotFoundError, match="list_snapshots"):
             await service.list_services("snap_" + "0" * 16)
+
+
+class TestEndpointDetailTool:
+    """The contract an agent needs, and the hole that made this necessary.
+
+    §5.2.15 moved the wire shapes off the list row for size. `list_endpoints`
+    had been the ONLY tool exposing them, and no detail tool existed — so the
+    surface whose entire purpose is agent-readable ground truth silently lost
+    the ability to say what an endpoint accepts or returns. It was verified end
+    to end in the UI, which fetches detail over HTTP, and never opened here.
+    """
+
+    async def test_the_shapes_a_list_row_does_not_carry(
+        self, database: WadiDatabase, seeded: dict[str, str]
+    ) -> None:
+        service = _service(database)
+        detail = await service.endpoint_detail(seeded["snapshot_id"], seeded["endpoint_id"])
+        assert detail["id"] == seeded["endpoint_id"]
+        # Present as KEYS even when null — the list omits them entirely, and an
+        # agent must be able to tell "no request body" from "not carried here".
+        assert "request_schema" in detail
+        assert "response_schema" in detail
+
+    async def test_unknown_endpoint_points_at_the_tool_that_lists_them(
+        self, database: WadiDatabase, seeded: dict[str, str]
+    ) -> None:
+        service = _service(database)
+        with pytest.raises(NotFoundError, match="list_endpoints"):
+            await service.endpoint_detail(seeded["snapshot_id"], "ep_" + "0" * 16)
 
 
 class TestEndpointIcfgTool:
@@ -119,6 +154,7 @@ class TestServerRegistration:
             "list_snapshots",
             "list_services",
             "list_endpoints",
+            "endpoint_detail",
             "endpoint_icfg",
             "coverage_report",
             "remote_edges",

@@ -75,7 +75,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.23.0/data_model.schema.json",
+  "$id": "https://trywadi.com/schemas/1.25.0/data_model.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One persisted entity of one service.",
@@ -117,7 +117,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.23.0",
+      "default": "1.25.0",
       "title": "Schema Version",
       "type": "string"
     },

@@ -10,7 +10,7 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
-from wadi_contracts.base import WadiModel
+from wadi_contracts.base import ArtifactEnvelope, WadiModel
 from wadi_contracts.boundary import ServiceBoundary
 from wadi_contracts.comms import TokenPropagation
 from wadi_contracts.endpoint import (
@@ -18,6 +18,9 @@ from wadi_contracts.endpoint import (
     AuthMechanismKind,
     AuthRelationship,
     Endpoint,
+    EndpointAuth,
+    EndpointParam,
+    EndpointStatus,
 )
 from wadi_contracts.enums import (
     CalleeUnboundReason,
@@ -27,7 +30,9 @@ from wadi_contracts.enums import (
     ServiceKind,
     SourceVariant,
     TargetKind,
+    TriggerKind,
 )
+from wadi_contracts.source import MethodRef
 
 
 class ServiceSummary(ServiceBoundary):
@@ -267,6 +272,46 @@ class UnopenableCallCount(WadiModel):
 
     reason: CalleeUnboundReason
     call_count: int = Field(ge=1, description="Call sites in this endpoint's flow with this reason")
+
+
+class EndpointSummary(ArtifactEnvelope):
+    """One endpoint as a LIST row — everything but the wire shapes (§5.2.15).
+
+    The list route serves this instead of :class:`Endpoint` because the two
+    shape fields dominate the payload once their types resolve: on ICPC's
+    `contest`, `response_schema` and `request_schema` are 124 MB of a 126 MB
+    response, and every other field of all 804 endpoints together is 2.65 MB.
+
+    **Absence is structural here, and that is the point.** Serving `Endpoint`
+    with both fields set to `None` would have been a smaller change and a
+    dishonest one: `None` already *means* something on both. `request_schema`
+    is None on 673 of those 804 endpoints because the handler takes no body,
+    and `response_schema` has an `unresolved` terminal for "we looked and could
+    not recover it". Nulling them for transport makes "no body", "nothing
+    recovered" and "too big to send" one value nobody can tell apart — the
+    collapse P10 forbids, on the surface every consumer meets first. Omitting
+    the fields from the *type* cannot be misread as an answer.
+
+    Both shapes live on :class:`EndpointDetailView`, which the workspace and
+    the row peek already fetch per endpoint.
+
+    It carries :class:`ArtifactEnvelope` because the stored document does, and
+    a row is READ FROM that document by a Mongo projection — dropping the two
+    shape fields, nothing else. `schema_version` therefore reports the contract
+    that WROTE the endpoint rather than the one reading it, exactly as the full
+    artifact does.
+    """
+
+    id: str = Field(pattern=r"^ep_[0-9a-f]{16}$")
+    http_method: HttpMethod
+    full_uri: str
+    simplified_uri: str
+    params: list[EndpointParam] = Field(default_factory=list[EndpointParam])
+    response_type: str | None = None
+    declared_statuses: list[EndpointStatus] = Field(default_factory=list[EndpointStatus])
+    auth: EndpointAuth = Field(default_factory=EndpointAuth)
+    handler: MethodRef
+    trigger: TriggerKind = TriggerKind.HTTP
 
 
 class EndpointDetailView(WadiModel):

@@ -1,0 +1,648 @@
+{
+  "$defs": {
+    "AuthEffect": {
+      "description": "What an enforcement point does to a request that reaches it.\n\n``UNKNOWN`` is a first-class answer, not a placeholder: an enforcement we\ncan see but cannot interpret must say so, because the alternative is\nleaving the endpoint reading as unprotected (\u00a75.2.9).",
+      "enum": [
+        "require-authenticated",
+        "require-roles",
+        "require-authorities",
+        "require-relationship",
+        "permit-all",
+        "deny-all",
+        "unknown"
+      ],
+      "title": "AuthEffect",
+      "type": "string"
+    },
+    "AuthEvidence": {
+      "additionalProperties": false,
+      "description": "One enforcement point that gates \u2014 or could gate \u2014 this endpoint (\u00a75.2.9).\n\nEvery claim carries its source, and every construct that *could* gate a\nrequest is recorded here whether or not its effect could be determined.\nThat is what makes the claim rule on :class:`EndpointAuth` safe: a rule we\nfailed to read is present as ``resolution=opaque`` rather than absent.\n\n**Reader migration (pre-1.13.0 artifacts):** records written before the\nenforcement model carry no ``effect``/``resolution``, so they default to\n``unknown``/``resolved`` \u2014 honest about what was recorded (the effect was\nnever stored) while preserving the claim those artifacts were written with.",
+      "properties": {
+        "active": {
+          "default": true,
+          "description": "False when present in source but not in effect",
+          "title": "Active",
+          "type": "boolean"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "authorities": {
+          "description": "Authorities required, when distinct from roles",
+          "items": {
+            "type": "string"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "covers_route": {
+          "default": true,
+          "description": "False when this enforcement governs only SOME requests the endpoint serves (\u00a75.2.13). Distinct from `resolution`, which says how completely the enforcement was READ: a rule can be read perfectly and still cover part of a route, and conflating the two hides why a `permitAll` sits beside a protected claim",
+          "title": "Covers Route",
+          "type": "boolean"
+        },
+        "detail": {
+          "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "effect": {
+          "$ref": "#/$defs/AuthEffect",
+          "default": "unknown",
+          "description": "What this does to a request that reaches it"
+        },
+        "expression": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Raw access expression / SpEL, preserved verbatim",
+          "title": "Expression"
+        },
+        "http_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verb restriction; None means the rule applies to every verb"
+        },
+        "inactive_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it is not in effect, e.g. 'disabled in chain' \u2014 required when inactive",
+          "title": "Inactive Reason"
+        },
+        "kind": {
+          "$ref": "#/$defs/AuthEvidenceKind"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path pattern this is scoped to; '{?}' means read but unresolvable",
+          "title": "Pattern"
+        },
+        "relationship": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthRelationship"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set when effect is require-relationship (\u00a75.2.12); the relation this enforcement demands between caller and resource"
+        },
+        "resolution": {
+          "$ref": "#/$defs/AuthResolution",
+          "default": "resolved",
+          "description": "How completely it was read"
+        },
+        "roles": {
+          "description": "Roles required, ROLE_ prefix stripped",
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "title": "AuthEvidence",
+      "type": "object"
+    },
+    "AuthEvidenceKind": {
+      "description": "What kind of construct enforces (or could enforce) access (\u00a75.2.9).\n\nThe first three are declarative sources; the rest are enforcement points\nthat gate requests without a security-framework rule behind them. All are\nframework-neutral by construction \u2014 a FastAPI ``Security(...)`` dependency\nor an Express middleware maps onto the same vocabulary (goal 9).",
+      "enum": [
+        "annotation",
+        "security-dsl",
+        "config",
+        "chain-bypass",
+        "interceptor",
+        "servlet-filter",
+        "aspect",
+        "in-handler",
+        "gateway",
+        "authority-model"
+      ],
+      "title": "AuthEvidenceKind",
+      "type": "string"
+    },
+    "AuthMechanism": {
+      "additionalProperties": false,
+      "description": "One authentication mechanism configured on the service that serves this endpoint.\n\nA custom filter is only ever promoted past ``CUSTOM_FILTER`` on evidence\ninside the filter itself \u2014 naming a mechanism from a class name would be\nexactly the fabricated security fact \u00a712 forbids.",
+      "properties": {
+        "active": {
+          "default": true,
+          "description": "False when present in source but not in effect",
+          "title": "Active",
+          "type": "boolean"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detail": {
+          "description": "Raw source text or filter class name",
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "inactive_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it is not in effect, e.g. 'disabled in chain' \u2014 required when inactive",
+          "title": "Inactive Reason"
+        },
+        "kind": {
+          "$ref": "#/$defs/AuthMechanismKind"
+        }
+      },
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "title": "AuthMechanism",
+      "type": "object"
+    },
+    "AuthMechanismKind": {
+      "description": "How a caller proves identity \u2014 distinct from what it is then allowed to do.",
+      "enum": [
+        "jwt-bearer",
+        "opaque-token",
+        "http-basic",
+        "form-login",
+        "oauth2-login",
+        "oauth2-resource-server",
+        "saml2",
+        "x509",
+        "remember-me",
+        "custom-filter",
+        "stateless-session"
+      ],
+      "title": "AuthMechanismKind",
+      "type": "string"
+    },
+    "AuthRelationship": {
+      "additionalProperties": false,
+      "description": "A required relation between the caller and a resource (\u00a75.2.12).\n\n**Kinds are closed, content is open.** ``relation`` and ``resource_type``\nare free strings read from the application, never a vocabulary this model\nenumerates. That asymmetry is the whole design: the defect \u00a75.2.12 records\nis wadi encoding open-ended content \u2014 annotation names, decision-call names\n\u2014 in closed lists, and a fixed set of relations or entity types would\nreproduce it exactly one field over. A system wadi has never seen, with\nentities it has never heard of, needs no schema change to be expressed here.\n\n``authorities`` are permissions required *in addition to* the relation, not\nalternatives to it: `@ContestManager(context = Contest.class, acl =\nACLEnum.CONTEST_UPDATE)` demands both. They live on the relationship rather\nthan beside it so the conjunction survives; two guards' worth of\nrequirements pooled into one flat list would read as a menu.",
+      "properties": {
+        "authorities": {
+          "description": "Permissions required IN ADDITION to the relation",
+          "items": {
+            "type": "string"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "relation": {
+          "description": "The relation required, e.g. 'contest-manager', 'owner'",
+          "minLength": 1,
+          "title": "Relation",
+          "type": "string"
+        },
+        "resource_binding": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which request parameter names the instance, e.g. 'contestId'; None when the binding could not be read \u2014 best-effort, never invented",
+          "title": "Resource Binding"
+        },
+        "resource_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The resource it is required ON, e.g. 'Contest'",
+          "title": "Resource Type"
+        }
+      },
+      "required": [
+        "relation"
+      ],
+      "title": "AuthRelationship",
+      "type": "object"
+    },
+    "AuthResolution": {
+      "description": "How completely an enforcement point was read.\n\n``OPAQUE`` is what withholds an endpoint's claim (\u00a75.2.9): the construct\nwas detected but its effect or scope could not be determined.",
+      "enum": [
+        "resolved",
+        "partial",
+        "opaque"
+      ],
+      "title": "AuthResolution",
+      "type": "string"
+    },
+    "EndpointAuth": {
+      "additionalProperties": false,
+      "description": "Structured authorization state of an endpoint (\u00a75.2.9).\n\n``authenticated`` is tri-state (P10): True/False are *claims backed by\nfully-read enforcement*; None means honestly unknown \u2014 never defaulted to\nFalse. The distinction between None and False is load-bearing: None says\n\"we did not read everything that guards this\", False says \"we read it all\nand nothing guards this\". Collapsing them is the failure mode this model\nexists to prevent.\n\n``denied`` refines the True case rather than replacing it. ``denyAll()``\nadmits nobody, so \"a request must be authenticated to pass\" is still true\nof it \u2014 but a route no caller can reach is not the same fact as a working\nprotected route, and rendering the two identically tells an auditor a dead\nendpoint is live. It is a separate boolean, not a fourth value of\n``authenticated``, so every existing reader of the tri-state keeps working.",
+      "properties": {
+        "authenticated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Authenticated"
+        },
+        "authorities": {
+          "description": "Authorities required, when the rule names authorities rather than roles",
+          "items": {
+            "type": "string"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "composition_unresolved": {
+          "default": false,
+          "description": "Several guards apply and how they COMBINE was not read \u2014 the listed requirements may be alternatives rather than all required",
+          "title": "Composition Unresolved",
+          "type": "boolean"
+        },
+        "denied": {
+          "default": false,
+          "description": "A read rule denies EVERY caller (denyAll); the endpoint is unreachable",
+          "title": "Denied",
+          "type": "boolean"
+        },
+        "evidence": {
+          "description": "Every enforcement point in scope \u2014 read or not (\u00a75.2.9)",
+          "items": {
+            "$ref": "#/$defs/AuthEvidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "mechanism": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Framework family, e.g. 'spring-security'; see mechanisms[] for how auth works",
+          "title": "Mechanism"
+        },
+        "mechanisms": {
+          "description": "How authentication is performed on this endpoint's service",
+          "items": {
+            "$ref": "#/$defs/AuthMechanism"
+          },
+          "title": "Mechanisms",
+          "type": "array"
+        },
+        "relationships": {
+          "description": "Relations the caller must stand in to a resource (\u00a75.2.12) \u2014 a third requirement kind beside roles and authorities, not a variety of either",
+          "items": {
+            "$ref": "#/$defs/AuthRelationship"
+          },
+          "title": "Relationships",
+          "type": "array"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "title": "EndpointAuth",
+      "type": "object"
+    },
+    "EndpointParam": {
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/ParamLocation"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "type_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Name"
+        }
+      },
+      "required": [
+        "name",
+        "location"
+      ],
+      "title": "EndpointParam",
+      "type": "object"
+    },
+    "EndpointStatus": {
+      "additionalProperties": false,
+      "description": "One HTTP status a handler's own code names (\u00a75.2.7 T9).",
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "code": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Code",
+          "type": "integer"
+        },
+        "detail": {
+          "description": "The source text that named it",
+          "title": "Detail",
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/StatusOrigin"
+        }
+      },
+      "required": [
+        "code",
+        "origin",
+        "detail",
+        "anchor"
+      ],
+      "title": "EndpointStatus",
+      "type": "object"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
+      ],
+      "title": "HttpMethod",
+      "type": "string"
+    },
+    "MethodRef": {
+      "additionalProperties": false,
+      "description": "Reference to a method: stable content-derived id + human-readable signature.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^m_[0-9a-f]{16}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "signature": {
+          "description": "Fully-qualified method signature",
+          "minLength": 1,
+          "title": "Signature",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "signature"
+      ],
+      "title": "MethodRef",
+      "type": "object"
+    },
+    "ParamLocation": {
+      "enum": [
+        "path",
+        "query",
+        "body",
+        "header"
+      ],
+      "title": "ParamLocation",
+      "type": "string"
+    },
+    "SourceAnchor": {
+      "additionalProperties": false,
+      "description": "A file + line range in the text that was actually analyzed.\n\nFor preprocessed files (delombok) the anchor refers to the generated\nvariant \u2014 source-on-demand serves that same text, so anchors and served\nsource stay aligned by construction (\u00a75.3).",
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "file": {
+          "description": "Path relative to the service build root",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "variant": {
+          "$ref": "#/$defs/SourceVariant",
+          "default": "original"
+        }
+      },
+      "required": [
+        "file",
+        "start_line",
+        "end_line"
+      ],
+      "title": "SourceAnchor",
+      "type": "object"
+    },
+    "SourceVariant": {
+      "description": "Whether an anchor refers to original repo text or a generated variant (\u00a75.3).\n\n``GENERATED`` marks preprocessor output (e.g. delombok'ed Java) \u2014 the text\nthat was actually analyzed, served by source-on-demand with a badge.",
+      "enum": [
+        "original",
+        "generated"
+      ],
+      "title": "SourceVariant",
+      "type": "string"
+    },
+    "StatusOrigin": {
+      "description": "How a declared status was read (\u00a75.2.7 T9).",
+      "enum": [
+        "builder",
+        "explicit",
+        "annotation",
+        "default"
+      ],
+      "title": "StatusOrigin",
+      "type": "string"
+    },
+    "TriggerKind": {
+      "description": "v1: http. Reserved (\u00a77): queue, stream, schedule.",
+      "enum": [
+        "http",
+        "queue",
+        "stream",
+        "schedule"
+      ],
+      "title": "TriggerKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.25.0/endpoint_summary.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One endpoint as a LIST row \u2014 everything but the wire shapes (\u00a75.2.15).\n\nThe list route serves this instead of :class:`Endpoint` because the two\nshape fields dominate the payload once their types resolve: on ICPC's\n`contest`, `response_schema` and `request_schema` are 124 MB of a 126 MB\nresponse, and every other field of all 804 endpoints together is 2.65 MB.\n\n**Absence is structural here, and that is the point.** Serving `Endpoint`\nwith both fields set to `None` would have been a smaller change and a\ndishonest one: `None` already *means* something on both. `request_schema`\nis None on 673 of those 804 endpoints because the handler takes no body,\nand `response_schema` has an `unresolved` terminal for \"we looked and could\nnot recover it\". Nulling them for transport makes \"no body\", \"nothing\nrecovered\" and \"too big to send\" one value nobody can tell apart \u2014 the\ncollapse P10 forbids, on the surface every consumer meets first. Omitting\nthe fields from the *type* cannot be misread as an answer.\n\nBoth shapes live on :class:`EndpointDetailView`, which the workspace and\nthe row peek already fetch per endpoint.\n\nIt carries :class:`ArtifactEnvelope` because the stored document does, and\na row is READ FROM that document by a Mongo projection \u2014 dropping the two\nshape fields, nothing else. `schema_version` therefore reports the contract\nthat WROTE the endpoint rather than the one reading it, exactly as the full\nartifact does.",
+  "properties": {
+    "auth": {
+      "$ref": "#/$defs/EndpointAuth"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "declared_statuses": {
+      "items": {
+        "$ref": "#/$defs/EndpointStatus"
+      },
+      "title": "Declared Statuses",
+      "type": "array"
+    },
+    "full_uri": {
+      "title": "Full Uri",
+      "type": "string"
+    },
+    "handler": {
+      "$ref": "#/$defs/MethodRef"
+    },
+    "http_method": {
+      "$ref": "#/$defs/HttpMethod"
+    },
+    "id": {
+      "pattern": "^ep_[0-9a-f]{16}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "params": {
+      "items": {
+        "$ref": "#/$defs/EndpointParam"
+      },
+      "title": "Params",
+      "type": "array"
+    },
+    "response_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Response Type"
+    },
+    "schema_version": {
+      "default": "1.25.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "service_id": {
+      "title": "Service Id",
+      "type": "string"
+    },
+    "simplified_uri": {
+      "title": "Simplified Uri",
+      "type": "string"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "trigger": {
+      "$ref": "#/$defs/TriggerKind",
+      "default": "http"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "service_id",
+    "id",
+    "http_method",
+    "full_uri",
+    "simplified_uri",
+    "handler"
+  ],
+  "title": "EndpointSummary",
+  "type": "object"
+}

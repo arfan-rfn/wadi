@@ -164,8 +164,23 @@ export function AccessChip({
   // authority ADMIN, and rendering the same name twice reads as two grants —
   // besides colliding on the React key.
   const granted = [...new Set([...roles, ...authorities])]
-  const named =
-    state === "required" && (granted.length > 0 || relationships.length > 0)
+  // Relationships get the same treatment, for the same two reasons. Both the
+  // chip and the tooltip render a relationship as `relation` + `resource_type`
+  // and nothing else, so two guards differing only in their `authorities` — a
+  // class-level `@ContestManager` beside a method-level
+  // `@ContestManager(acl = ...)`, which is 60 of ICPC's 804 endpoints — paint
+  // the identical string twice and collide on the React key. Deduping on what
+  // is actually rendered drops no displayed fact; the conjunction the contract
+  // keeps (§5.2.12) lives on the record, and the workspace is where it shows.
+  const shown = [
+    ...new Map(
+      relationships.map((relationship) => [
+        `${relationship.relation}:${relationship.resource_type ?? ""}`,
+        relationship,
+      ])
+    ).values(),
+  ]
+  const named = state === "required" && (granted.length > 0 || shown.length > 0)
   return (
     <Tooltip>
       {/* Base UI composes with `render` where Radix used `asChild`: the
@@ -179,7 +194,7 @@ export function AccessChip({
               named
                 ? `${title}: ${[
                     ...granted,
-                    ...relationships.map((relationship) =>
+                    ...shown.map((relationship) =>
                       relationship.resource_type
                         ? `${relationship.relation} on ${relationship.resource_type}`
                         : relationship.relation
@@ -201,7 +216,7 @@ export function AccessChip({
             {granted.map((name) => (
               <RoleName key={name} role={name} />
             ))}
-            {relationships.map((relationship) => (
+            {shown.map((relationship) => (
               <RelationName
                 key={`${relationship.relation}:${relationship.resource_type ?? ""}`}
                 relation={relationship.relation}
@@ -224,11 +239,11 @@ export function AccessChip({
             Authorities: {authorities.join(", ")}
           </p>
         ) : null}
-        {relationships.length > 0 ? (
+        {shown.length > 0 ? (
           <>
             <p className="mt-1 font-mono text-2xs">
               Relationships:{" "}
-              {relationships
+              {shown
                 .map((relationship) =>
                   relationship.resource_type
                     ? `${relationship.relation} on ${relationship.resource_type}`

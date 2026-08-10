@@ -4,6 +4,7 @@
 import type { CoverageReport } from "@/lib/generated/coverage_report.schema"
 import type { EndpointDependenciesView } from "@/lib/generated/endpoint_dependencies.schema"
 import type { EndpointDetailView } from "@/lib/generated/endpoint_detail.schema"
+import type { EndpointSummary } from "@/lib/generated/endpoint_summary.schema"
 import type { Endpoint } from "@/lib/generated/endpoint.schema"
 import type { Icfg } from "@/lib/generated/icfg.schema"
 import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
@@ -49,7 +50,7 @@ export const wadiApi = {
   services: (snapshotId: string) =>
     get<ServiceSummary[]>(`/api/v1/snapshots/${seg(snapshotId)}/services`),
   endpoints: (snapshotId: string, serviceId: string) =>
-    get<Endpoint[]>(
+    get<EndpointSummary[]>(
       `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/endpoints`
     ),
   icfg: (snapshotId: string, endpointId: string) =>
@@ -109,6 +110,7 @@ export const wadiApi = {
 export type {
   CoverageReport,
   Endpoint,
+  EndpointSummary,
   EndpointDetailView,
   Icfg,
   RemoteEdgesView,

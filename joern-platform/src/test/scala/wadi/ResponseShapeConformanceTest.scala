@@ -31,14 +31,24 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
         )
       )
 
-  private def shape(httpMethod: String, uri: String): ujson.Value =
+  private def rawShape(httpMethod: String, uri: String): ujson.Value =
     endpoint(httpMethod, uri).obj.getOrElse(
       "response_schema",
       fail(s"$httpMethod $uri carries no response_schema")
     )
 
+  private def typeDefs(httpMethod: String, uri: String): ujson.Obj =
+    endpoint(httpMethod, uri).obj.get("type_defs").map(_.obj).map(ujson.Obj.from).getOrElse(ujson.Obj())
+
+  private def shape(httpMethod: String, uri: String): ujson.Value =
+    resolveRefs(rawShape(httpMethod, uri), typeDefs(httpMethod, uri))
+
   private def kindOf(httpMethod: String, uri: String): String   = shape(httpMethod, uri)("kind").str
-  private def originOf(httpMethod: String, uri: String): String = shape(httpMethod, uri)("origin").str
+  // Read from the RAW shape: `origin` records which evidence the shape came
+  // from and lives on the root node, which resolution replaces with the
+  // definition it points at.
+  private def originOf(httpMethod: String, uri: String): String =
+    rawShape(httpMethod, uri)("origin").str
 
   // ---- T0: the route is published root-anchored -------------------------
 
@@ -216,5 +226,61 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
     originOf("GET", "/declared/list") shouldBe "declared"
     kindOf("GET", "/declared/one") shouldBe "object"
     originOf("GET", "/declared/one") shouldBe "declared"
+  }
+
+  // ---- §5.2.15: the walk is bounded by SIZE, not only by depth -----------
+
+  /** Every `kind` in the shape, depth-first. */
+  private def kinds(shape: ujson.Value): List[String] = shape match {
+    case o: ujson.Obj =>
+      val here     = o.obj.get("kind").map(_.str).toList
+      val fields   = o.obj.get("fields").map(_.arr.toList).getOrElse(Nil).flatMap(f => kinds(f("shape")))
+      val element  = o.obj.get("element").toList.flatMap(kinds)
+      here ::: fields ::: element
+    case _ => Nil
+  }
+
+  test("a mutually recursive entity graph is defined once, not expanded") {
+    // Eight types each referencing four others: no path repeats a type within
+    // the depth cap, so the old per-path cycle guard never fired and the walk
+    // fanned out exponentially — 8.27 MB for this one shape before §5.2.15
+    // capped it, and a clipped shape after. Shared definitions make it whole
+    // AND small: each type written once, every occurrence a ref.
+    val defs = typeDefs("GET", "/shapes/graph")
+    defs.obj.keySet should contain allOf ("Contest", "Team", "Person", "Site")
+    defs.obj.size should be <= 12
+
+    val raw = rawShape("GET", "/shapes/graph")
+    kinds(raw) should contain("ref")
+    // Nothing is dropped any more: no terminal stands in for a type we own.
+    kinds(raw) should not contain "truncated"
+  }
+
+  test("recursion is a reference back, not a terminal") {
+    // `cycle` could only say a loop existed; a ref back at the definition says
+    // what is in it, which is what the type actually declares.
+    val defs = typeDefs("GET", "/shapes/graph")
+    val contest = defs("Contest")
+    val edgeField = contest("fields").arr
+      .find(f => f("name").str.startsWith("team"))
+      .getOrElse(fail(s"Contest has no team field; saw ${contest("fields").arr.map(_("name").str)}"))
+    // Team -> ... -> Contest resolves through the map rather than terminating.
+    kinds(edgeField("shape")) should contain("ref")
+  }
+
+  test("the shared form is a fraction of the inline one") {
+    // The reason this section exists: the inline form of this shape does not
+    // fit in a context window, and the consumer that matters is an LLM.
+    val raw = rawShape("GET", "/shapes/graph")
+    val whole = ujson.Obj("root" -> raw, "defs" -> typeDefs("GET", "/shapes/graph"))
+    ujson.write(whole).length should be < 60000
+  }
+
+  test("the budget is per shape, so a small neighbour is untouched") {
+    // A cap implemented as a global counter would starve whichever endpoint
+    // happened to be exported after the graph. 87% of real shapes are 10
+    // objects or fewer and none of them may lose a field to someone else's.
+    kinds(shape("GET", "/declared/one")) should not contain "truncated"
+    kindOf("GET", "/declared/one") shouldBe "object"
   }
 }

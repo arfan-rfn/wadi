@@ -512,6 +512,34 @@ def status() -> None:
             )
             raise typer.Exit(EXIT_UNREACHABLE) from None
         console.print(f"API: [green]{health['status']}[/green] (v{health['version']})")
+        warn_on_version_skew(health["version"])
+
+
+def warn_on_version_skew(api_version: str) -> None:
+    """Say when the CLI and the running stack are different releases.
+
+    Each CLI renders a compose file pinning *its own* version's images under
+    one project name, so two CLIs on a machine quietly fight over one stack:
+    whichever ran last recreates every container on its own release. Nothing
+    said so. `wadi status` even printed the NEW version's images, because
+    `compose ps` reports what the compose file pins rather than what the
+    containers are actually running.
+
+    That is how a 0.8.1 stack came to be serving data a 0.8.2 stack had
+    written, and 500ing on it — a forward-compatibility break that read to
+    everyone involved as a wadi bug. The API's own reported version is the one
+    fact here that cannot lie, so it is what this compares against.
+    """
+    if api_version == CLI_VERSION:
+        return
+    error_console.print(
+        f"[yellow]⚠ this CLI is {CLI_VERSION} but the stack is running {api_version}.[/yellow]"
+    )
+    error_console.print(
+        "  [dim]Each release pins its own images, so `wadi up` from this CLI will "
+        "recreate the stack on " + CLI_VERSION + ". Artifacts written by a NEWER "
+        "stack may not be readable by an older one.[/dim]"
+    )
 
 
 # --- analyze --------------------------------------------------------------------
@@ -607,7 +635,7 @@ def analyze(
                 console.print_json(snapshot.model_dump_json())
             return
 
-        final = _wait_for_snapshot(client, snapshot.id)
+        final = wait_for_snapshot(client, snapshot.id)
         if output_json:
             console.print_json(final.model_dump_json())
         if final.status is not SnapshotStatus.SUCCEEDED:
@@ -625,17 +653,58 @@ def analyze(
         console.print("[green]analysis succeeded[/green]")
 
 
-def _wait_for_snapshot(
-    client: WadiApiClient, snapshot_id: str, poll_seconds: float = 2.0
+"""How long polling tolerates a server it cannot reach before giving up.
+
+A single failed poll is not a verdict on the run. The analysis proceeds in the
+orchestrator whether or not this process managed to ask about it, and on a
+real 4.5-minute analysis one dropped keep-alive connection 64 seconds in ended
+the wait with "the wadi API is not answering — try: wadi up", against a stack
+that was up and a snapshot that went on to succeed. Reporting a healthy run as
+a failure is worse than waiting a little longer to be sure.
+"""
+UNREACHABLE_GRACE_SECONDS = 60.0
+
+
+def wait_for_snapshot(
+    client: WadiApiClient,
+    snapshot_id: str,
+    poll_seconds: float = 2.0,
+    grace_seconds: float = UNREACHABLE_GRACE_SECONDS,
 ) -> Snapshot:
-    with console.status("analyzing…"):
+    """Block until the run reaches a terminal state, surviving a flaky link.
+
+    Transport failures and client timeouts are both retried within the grace
+    window and reported while it lasts, so a reader sees that contact was lost
+    rather than watching a spinner that means two different things. Only a
+    server that stays unreachable for the whole window ends the wait, and it
+    says the run may still be going — because it may well be.
+    """
+    lost_contact_at: float | None = None
+    with console.status("analyzing…") as status:
         while True:
             try:
                 snapshot = client.get_snapshot(snapshot_id)
-            except ApiTimeoutError as exc:
-                raise _fail_timeout(exc) from exc
-            except ApiUnreachableError as exc:
-                raise _fail_unreachable(exc) from exc
+            except (ApiTimeoutError, ApiUnreachableError) as exc:
+                now = time.monotonic()
+                if lost_contact_at is None:
+                    lost_contact_at = now
+                waited = now - lost_contact_at
+                if waited >= grace_seconds:
+                    problem(
+                        "lost contact with the wadi API while the run was in progress",
+                        detail=f"{exc} (no response for {waited:.0f}s)",
+                        recover=[
+                            "wadi status",
+                            f"wadi snapshots {snapshot_id}   # the run may still be going",
+                        ],
+                    )
+                    raise typer.Exit(EXIT_UNREACHABLE) from exc
+                status.update(f"analyzing… (reconnecting, {waited:.0f}s without a reply)")
+                time.sleep(poll_seconds)
+                continue
+            if lost_contact_at is not None:
+                lost_contact_at = None
+                status.update("analyzing…")
             if snapshot.status in (SnapshotStatus.SUCCEEDED, SnapshotStatus.FAILED):
                 return snapshot
             time.sleep(poll_seconds)
@@ -879,7 +948,7 @@ def restitch(
         except ApiError as exc:
             raise _fail_api(exc) from exc
         if wait:
-            snapshot = _wait_for_snapshot(client, snapshot_id)
+            snapshot = wait_for_snapshot(client, snapshot_id)
     if output_json:
         console.print_json(snapshot.model_dump_json())
     else:

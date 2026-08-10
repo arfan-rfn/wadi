@@ -35,6 +35,18 @@ def joern_url(shared_dir: Path) -> Iterator[str]:
             container,
             "--publish",
             "127.0.0.1:0:8080",
+            # Bounded, because unbounded is not "no limit" — it is "size the
+            # JVM heap against the WHOLE Docker VM". Run beside a live wadi
+            # stack, whose own analyzer reserves 10g of a 15.6g VM, the two
+            # overcommit and Docker kills containers: locally that shows up as
+            # the stack's non-database services disappearing mid-run, and as
+            # intermittent e2e errors that pass on a re-run. CI never saw it —
+            # a fresh runner has no competing stack.
+            #
+            # 4g against a measured peak of 807 MiB on these fixtures: five
+            # times headroom, and small enough that both can coexist.
+            "--memory",
+            "4g",
             "--volume",
             f"{shared_dir}:{shared_dir}",
             JOERN_IMAGE,

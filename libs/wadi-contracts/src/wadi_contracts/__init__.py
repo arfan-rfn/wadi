@@ -42,6 +42,7 @@ from wadi_contracts.endpoint import (
     ShapeOrigin,
     StatusOrigin,
     TypeShape,
+    resolve_type_shape,
 )
 from wadi_contracts.enums import (
     AuthGapCode,
@@ -123,6 +124,7 @@ from wadi_contracts.views import (
     EndpointDependenciesView,
     EndpointDependency,
     EndpointDetailView,
+    EndpointSummary,
     EndpointTouchedFile,
     RemoteEdgeItem,
     RemoteEdgesView,
@@ -179,6 +181,7 @@ __all__ = [
     "EndpointDetailView",
     "EndpointParam",
     "EndpointStatus",
+    "EndpointSummary",
     "EndpointTouchedFile",
     "ExportManifest",
     "ExternalApiEntry",
@@ -256,6 +259,7 @@ __all__ = [
     "registered_namespaces",
     "remote_call_id",
     "remote_edge_id",
+    "resolve_type_shape",
     "service_id",
     "simplify_uri",
     "utc_now",

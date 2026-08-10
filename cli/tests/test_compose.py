@@ -125,13 +125,71 @@ class TestRenderComposeFile:
         )
 
 
+def _never_ours(port: int) -> bool:
+    return False
+
+
+def _always_ours(port: int) -> bool:
+    return True
+
+
 class TestPortCheck:
     def test_free_port_passes(self) -> None:
         compose.check_port_free(0, "WADI_API_PORT")  # port 0 = ephemeral, always free
 
-    def test_taken_port_names_override_variable(self) -> None:
+    def test_taken_port_names_override_variable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(compose, "port_published_by_wadi", _never_ours)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
             blocker.bind(("127.0.0.1", 0))
             taken_port = blocker.getsockname()[1]
             with pytest.raises(compose.PortInUseError, match="WADI_API_PORT"):
                 compose.check_port_free(taken_port, "WADI_API_PORT")
+
+    def test_our_own_running_stack_is_not_a_conflict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """§13 makes re-runs converging, and this check used to break that.
+
+        With the stack up, wadi's own orchestrator holds the API port, so a
+        bare bind test rejected `wadi up` outright — the only way to change a
+        flag was to tear the stack down first.
+        """
+        monkeypatch.setattr(compose, "port_published_by_wadi", _always_ours)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
+            blocker.bind(("127.0.0.1", 0))
+            taken_port = blocker.getsockname()[1]
+            compose.check_port_free(taken_port, "WADI_API_PORT")  # must not raise
+
+    def test_a_stranger_on_the_port_is_still_a_conflict(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The converging path must not become "ignore every bind failure"."""
+        monkeypatch.setattr(compose, "port_published_by_wadi", _never_ours)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
+            blocker.bind(("127.0.0.1", 0))
+            taken_port = blocker.getsockname()[1]
+            with pytest.raises(compose.PortInUseError):
+                compose.check_port_free(taken_port, "WADI_API_PORT")
+
+    def test_ownership_is_read_from_the_compose_project_label(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Matching on the port alone would claim any container's port."""
+        seen: dict[str, list[str]] = {}
+
+        def fake_docker(args: list[str], *, timeout: float = 120) -> str:
+            seen["args"] = args
+            return "127.0.0.1:9234->9234/tcp, 127.0.0.1:9235->3000/tcp"
+
+        monkeypatch.setattr(compose, "_docker", fake_docker)
+        assert compose.port_published_by_wadi(9234) is True
+        assert compose.port_published_by_wadi(9235) is True
+        assert compose.port_published_by_wadi(9240) is False
+        assert f"label=com.docker.compose.project={compose.PROJECT_NAME}" in seen["args"]
+
+    def test_no_container_runtime_reads_as_contested(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without docker there is no answer, and the safe answer is "not ours"."""
+
+        def explode(args: list[str], *, timeout: float = 120) -> str:
+            raise compose.ComposeError("docker not found")
+
+        monkeypatch.setattr(compose, "_docker", explode)
+        assert compose.port_published_by_wadi(9234) is False

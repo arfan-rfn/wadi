@@ -8,7 +8,7 @@ dicts at the boundary.
 
 from typing import Any, Literal
 
-from wadi_contracts import Icfg
+from wadi_contracts import Icfg, resolve_type_shape
 from wadi_mcp.rollup import method_rollup, statement_detail
 from wadi_storage import (
     ArtifactRepository,
@@ -59,10 +59,56 @@ class WadiMcpService:
                 f"service {service_id!r} not found in snapshot {snapshot_id!r}; "
                 "use list_services first"
             )
+        # List rows, not whole endpoints (§5.2.15). The wire shapes are 124 MB
+        # of a 126 MB response on ICPC's `contest`, and this tool answers into
+        # an agent's context window — the one consumer that can least afford
+        # it. `endpoint_detail` carries both shapes for a single endpoint.
         return [
-            endpoint.model_dump(mode="json")
-            for endpoint in await self._artifacts.list_endpoints(snapshot_id, service_id)
+            row.model_dump(mode="json")
+            for row in await self._artifacts.list_endpoint_summaries(snapshot_id, service_id)
         ]
+
+    async def endpoint_detail(
+        self, snapshot_id: str, endpoint_id: str, *, resolve_shapes: bool = True
+    ) -> dict[str, Any]:
+        """One endpoint's full contract — the shapes a list row does not carry.
+
+        §5.2.15 moved the wire shapes off the list row for size, and this tool
+        did not exist, so `list_endpoints` had been an agent's ONLY route to a
+        request or response shape. That left the MCP surface — the one that
+        exists so agents can read ground truth rather than grep — unable to
+        answer what an endpoint accepts or returns.
+
+        `resolve_shapes` inlines the `type_defs` refs (§5.2.16) so a caller
+        reads a tree without implementing resolution. Pass False to get the
+        shared form plus `type_defs`, which is far smaller when a shape names
+        the same type repeatedly and is what a large entity model needs.
+        """
+        endpoint = await self._artifacts.get_endpoint(snapshot_id, endpoint_id)
+        if endpoint is None:
+            raise NotFoundError(
+                f"endpoint {endpoint_id!r} not found in snapshot {snapshot_id!r}; "
+                "use list_endpoints to find endpoint ids"
+            )
+        if resolve_shapes and endpoint.type_defs:
+            endpoint = endpoint.model_copy(
+                update={
+                    "request_schema": (
+                        resolve_type_shape(endpoint.request_schema, endpoint.type_defs)
+                        if endpoint.request_schema is not None
+                        else None
+                    ),
+                    "response_schema": (
+                        resolve_type_shape(endpoint.response_schema, endpoint.type_defs)
+                        if endpoint.response_schema is not None
+                        else None
+                    ),
+                    # Dropped once inlined: keeping them would ship every
+                    # definition twice, which is the cost this avoids.
+                    "type_defs": {},
+                }
+            )
+        return endpoint.model_dump(mode="json")
 
     async def coverage_report(self, snapshot_id: str) -> dict[str, Any]:
         if await self._snapshots.get(snapshot_id) is None:

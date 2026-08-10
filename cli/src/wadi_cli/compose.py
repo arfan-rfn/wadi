@@ -228,12 +228,54 @@ def stale_compose_files() -> list[Path]:
     )
 
 
+def port_published_by_wadi(port: int) -> bool:
+    """Is this port published by a container of OUR compose project?
+
+    Asks docker rather than probing the socket: something else answering on
+    9234 is a conflict, and wadi's own orchestrator answering on it is not,
+    and nothing observable at the TCP layer separates those two.
+    """
+    try:
+        listing = _docker(
+            [
+                "ps",
+                "--filter",
+                f"label=com.docker.compose.project={PROJECT_NAME}",
+                "--format",
+                "{{.Ports}}",
+            ],
+            timeout=20,
+        )
+    except (ComposeError, subprocess.SubprocessError, OSError):
+        # No docker, no answer — fall back to treating the port as contested,
+        # which is the safe direction: it fails loudly instead of colliding.
+        return False
+    return f":{port}->" in listing
+
+
 def check_port_free(port: int, override_var: str) -> None:
-    """Pre-check a port so failure names the WADI_* override, not a raw bind error."""
+    """Pre-check a port so failure names the WADI_* override, not a raw bind error.
+
+    Two things this must NOT call a conflict, both hit in practice:
+
+    * **Our own running stack.** §13 makes re-runs converging, and a bare bind
+      test broke that for every command that pre-checks: with the stack up, its
+      orchestrator holds the API port, so `wadi up` refused to run at all and
+      the only route to changing a flag was `wadi down` first.
+    * **A socket a dead client left behind.** A stopped dev server that had
+      been talking to the API kept the port unbindable after the listener was
+      gone — `lsof` showed ESTABLISHED/CLOSED entries and no LISTEN, while the
+      bind still returned EADDRINUSE. ``SO_REUSEADDR`` is the remedy, and it is
+      correct here regardless: this socket never accepts a connection, it only
+      asks whether a listener could exist.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
         except OSError as exc:
+            if port_published_by_wadi(port):
+                return
             raise PortInUseError(
                 f"port {port} is already in use — set {override_var} to use a different port"
             ) from exc

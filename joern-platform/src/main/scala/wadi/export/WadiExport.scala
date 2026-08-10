@@ -129,12 +129,17 @@ object WadiExport {
               // §5.2.7: field-level wire shapes, honest terminals. The response
               // shape falls back to the return expression when the signature
               // declares a raw wrapper (§5.2.7 amendment) and marks which it read.
+              // One definition map per endpoint, shared by both shapes: a
+              // request and its response routinely name the same types, and a
+              // type written twice is the defect this replaces (§5.2.16).
+              val typeDefs = new TypeShapes.Defs()
               TypeShapes
-                .responseShapeOf(cpg, method)
+                .responseShapeOf(cpg, method, typeDefs)
                 .foreach(shape => obj("response_schema") = shape)
               requestBodyTypeText(method)
-                .flatMap(TypeShapes.shapeOf(cpg, _))
+                .flatMap(TypeShapes.shapeOf(cpg, _, typeDefs))
                 .foreach(shape => obj("request_schema") = shape)
+              if (typeDefs.nonEmpty) obj("type_defs") = typeDefs.toJson
               obj
             }
           case _ => None
@@ -186,12 +191,16 @@ object WadiExport {
 
     val target: Path = Paths.get(outDir)
     Files.createDirectories(target)
-    Files.write(
-      target.resolve("export.json"),
-      ujson.write(document, indent = 2).getBytes("UTF-8"),
-      StandardOpenOption.CREATE,
-      StandardOpenOption.TRUNCATE_EXISTING
+    val out = new java.io.BufferedOutputStream(
+      Files.newOutputStream(
+        target.resolve("export.json"),
+        StandardOpenOption.CREATE,
+        StandardOpenOption.TRUNCATE_EXISTING
+      ),
+      1 << 16
     )
+    try ujson.writeToOutputStream(document, out, indent = 2)
+    finally out.close()
     s"wadi export: ${closure.size} methods, ${endpointObjs.size} endpoints, " +
       s"${asyncRootObjs.size} async roots, " +
       s"${sinkRows.size} sinks, ${unreachableObjs.size} unreachable sinks, " +

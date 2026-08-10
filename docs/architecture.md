@@ -785,6 +785,71 @@ Three consequences, each a distinct site: a speculatively-matched rule **forks**
 
 *A capacity consequence, found by running it.* A source union is the sum of its parts, not the larger of them: 563 service files plus 840 library files OOM-killed the frontend at the old 6 GB limit (exit 137). Raised to 10 GB. The failure is worth recording because of how it *presents* — the killed container surfaces on the next service as `CPGQL server unreachable: Name or service not known`, which names neither memory nor the container that died. Diagnosing an OOM from that message is guesswork, and it is tracked separately.
 
+**§5.2.15 A list route serves a list shape; absence is structural, never a null (recorded 2026-08-09, binding; Phase 2.9.5).**
+
+§5.2.14's payoff arrived with a bill nobody costed. Once `base` was in scope its types resolved, and §5.2.7's recovery — correctly — expanded them. `GET /snapshots/{id}/services/{sid}/endpoints` for ICPC's `contest` went from **1.9 MB to 114.5 MB**, and from 90 ms to **11.8 s**, on consecutive snapshots of the same service:
+
+| snapshot | date | payload | server time |
+|---|---|---|---|
+| `snap_7ba9611a…` | 08-05 | 1.73 MB | 0.08 s |
+| `snap_de10a665…` | 08-06 | 1.92 MB | 0.09 s |
+| `snap_6934558c…` | **08-07** | **114.5 MB** | **11.8 s** |
+
+The browser then parses that on the main thread before React sees a row, which is what the UI defect reduced to: the page painted and nothing on it responded. `response_schema` is 97 MB of the total and `request_schema` 27 MB; every other field of all 804 endpoints together is 2.65 MB.
+
+*Cause — inline expansion has no sharing and no ceiling.* `TypeShapes.build` guards cycles with `path.contains(typeDecl.fullName)` and caps depth at `MaxDepth = 6`. Both work. Neither bounds *output*, because `path` is per-branch: it stops a type recurring along one root-to-leaf chain while every sibling branch re-expands the same subgraph. Against a bidirectional JPA graph that is exponential — one endpoint's response shape is **3 MB nested 25 deep, with `label` repeated 520 times and `contest` 363 times** on the walk `List → ParticipantGroup → Contest → Set → ContestParticipant → PersonInfoAbstract → PassportInfo → CountryCityForVisa`. This is a real defect independent of transport: an on-demand read pays it too.
+
+*Decision 1 — the list route returns `EndpointSummary`, not `Endpoint` with two fields nulled.* The bytes come out either way; what differs is whether the payload stays honest. **`None` on both fields already carries meaning**: `request_schema` is null on **673 of 804** ICPC endpoints because those handlers take no body, and `response_schema` has an explicit `unresolved` terminal for "we looked and could not recover it". A route that nulls them for size makes "no request body", "nothing recovered" and "omitted for transport" one indistinguishable value — the exact collapse P10 exists to forbid, on the surface every consumer meets first. A distinct model puts absence in the *type*: the fields are not there to misread. It also makes the next heavy field's arrival a deliberate act rather than a silent one.
+
+*Decision 2 — `TypeShapes` gains a total node budget, emitting the existing `truncated` terminal.* The vocabulary already has the honest word for "the shape continues and we stopped" (§5.2.7), so a budget needs no contract change and no new reader semantics — `truncated` means the same thing whether depth or size stopped the walk. Depth alone cannot express "this type is wide"; a budget can.
+
+*Why both, and in which order.* They fix different populations. The route split repairs **every snapshot that already exists**, immediately, because it is a read-time projection. The budget only changes snapshots analyzed after it lands, and until re-analysis the detail route still serves 2.8 MB for the worst endpoint. Shipping only the budget would leave every stored snapshot unusable; shipping only the split would leave the defect intact one route over.
+
+*Consequence — MCP is the same defect by another path.* `wadi_mcp.service.list_endpoints` reads storage directly rather than through the HTTP route, and dumps the full model, so an agent asking for one service's endpoints receives 114 MB into its context. It moves to the same summary. The CLI's `wadi endpoints` reads only `id`/`http_method`/`full_uri`/`auth.authenticated`/`handler.signature` and is unaffected in substance.
+
+*Rejected.* **Null the two fields on `Endpoint`** — smallest diff, and it is the one option that trades a size problem for a correctness problem, per Decision 1. **`?fields=` projection** — makes response shape depend on a query parameter, a convention no other wadi route uses, and leaves the default answer to "what does this route return?" ambiguous. **Lower `MaxDepth`** — treats the symptom as depth when the driver is width; it would flatten narrow deep types that are perfectly cheap and still blow up on wide shallow ones.
+
+*The projection belongs in the QUERY, and that was found by measuring, not by design.* Trimming the response alone was implemented first and looked like a success: the payload fell 114.5 MB → 2.4 MB, a 47× win. **The clock went 14.1 s → 11.4 s.** Reading and validating 124 MB of wire shapes out of Mongo is the cost; sending them was almost free by comparison, and a projection applied in Python pays it in full before discarding the result. Excluding the two fields in the `find()` took the same route to **0.09 s**. Both numbers are on ICPC `contest`, 804 endpoints, against the live snapshot:
+
+| | payload | server time |
+|---|---|---|
+| as shipped (0.8.1) | 114,546,092 B | 10.7–14.5 s |
+| response trimmed only | 2,420,371 B | 11.4 s |
+| **projected in the query** | **2,479,867 B** | **0.09 s** |
+
+The lesson generalizes the one §5.2.11 already records. *A payload measurement is not a latency measurement*, and "smaller" was assumed to mean "faster" until the second number was read. A refactor that moves the projection back into Python would restore the size win and silently drop the speed-up, so the exclusion is pinned at the repository, not only at the route.
+
+*Immutability is a caching fact, not a tuning knob.* Everything keyed by a `snapshot_id` is immutable and SHA-pinned, so those reads can never go stale; only the system and snapshot *lists* change as runs are added. The frontend's blanket 60 s `staleTime` therefore expires data that is provably still correct. Snapshot-scoped queries hold indefinitely; the two mutable lists keep a finite window.
+
+*A consequence for the row peek.* The shapes now arrive with the per-endpoint detail rather than riding in on the list row, which introduces a state the panel did not have: *pending*. Its empty branches state results — "No request body on this endpoint", "Response shape unknown" — and those were safe only because the shapes were always present by render time. They are now behind a fetch, so pending renders as pending; otherwise the panel asserts "no request body" about an endpoint it has not read yet.
+
+*Staged library source had no way home.* §5.2.14 stages each library's `src/main/java` into the dependent's parse root under `wadi-libs/`, which is what makes the union analyzable — and it means every ICFG anchor in library code names a path that exists in the analyzed tree and **in no repository's git history**. The source route resolved against the service's repo, so it 404'd on all of them: on ICPC, every method the shared jar declares, which is most of what a reader following a call actually lands on. A staged path now resolves against the *library's* own repo at *its* pinned SHA. Two details are load-bearing: the staged segment is `Path(root).name`, which is **empty when the library root is the repository itself** (`wadi-libs/src/main/java/…` with nothing between — ICPC's shape), so the match is on the `src/main/java` marker rather than a fixed segment count; and a path no library claims returns a 404 that says so, instead of falling back to the service's repo and blaming it for a file that was never meant to be there.
+
+*A failed read is not an empty one.* The peek's sections state results when they have no shape — "No request body on this endpoint", "Response shape unknown". With the shapes behind a fetch, a **failed** fetch fell straight through to that copy, so a request that never completed rendered as a finding about the endpoint, after a spinner that ran the length of the retry backoff. Failure is now its own branch, with a retry, because one fetch backs three sections and re-opening the panel was otherwise the only way to reissue it. Found the honest way: a misconfigured local orchestrator could not resolve `neo4j:7687`, and the UI reported it as an endpoint with no request body.
+
+That exposed two defects in how loading was shown, both of which made the new state effectively invisible. **The skeleton was `--muted`, which is `oklch(0.968)` against a `--card` of `1.0` — a 3% step, on the one panel where most of this app's loading happens** (4% in dark). A placeholder whose entire job is to be seen was quieter than the border beside it. It now has its own `--skeleton` token, pitched near `--border-strong`; this is the `--subtle-foreground` lesson one token over, that an already-quiet colour reused one context too far stops being a signal. **And the indicator lived only in the section body**, which is the one thing a collapsed `CollapsibleSection` does not render — so a closed section still fetching looked exactly like a closed section holding nothing. The signal moved to the header, into the count slot (the count is unknown until the fetch lands, so the two never compete), and is a spinner *plus the word* "loading", because a bare spinner says something is happening without saying which of the three sections a reader is waiting for.
+
+**§5.2.16 A wire shape is a graph of types, not a tree (recorded 2026-08-09, binding; Phase 2.9.6).**
+
+§5.2.15 capped shape expansion at 200 expanded objects because it had to: without a ceiling one endpoint's response reached 3 MB. The cap was the right emergency stop and the wrong permanent mechanism, and the reason only became clear once the consumer was named. **Product goal 10's harder question is whether the extracted model is sufficient for an LLM to generate tests from** — the MCP server exists for exactly that — and a *clipped* contract is one a generator cannot use: it cannot construct a body whose fields it was not shown.
+
+*The measurement.* Inline expansion is not merely large, it is **redundant**. One ICPC response shape writes **2,365 object definitions of which 113 are distinct** — `Site` spelled out 79 separate times, `Country` 78. Across all 99 shapes the cap clips, the average is ~111 distinct types per shape. Emitting each type once and referencing it thereafter, on that same worst shape:
+
+| | bytes | ≈ tokens |
+|---|---|---|
+| inline (as emitted) | 3,087,604 | ~772,000 |
+| shared definitions | **83,414** | **~21,000** |
+
+37× smaller with **nothing dropped**. The pre-cap artifact was never usable by the consumer that matters — 772k tokens exceeds every context window — so the choice was never "complete vs. clipped", it was "unusable vs. clipped". Sharing makes complete affordable.
+
+*Decision — `TypeShape` gains a reference form, and the endpoint carries the definitions.* A nested field whose type is already defined emits `{kind: "ref", type_name: "Site"}`; `Endpoint.type_defs` holds each definition once, shared by the request and response shapes because they routinely name the same types. **Recursion stops being approximated**: `Contest → Label → Contest` is a cycle *in the type*, and a ref pointing back at `Contest` states it exactly, where the `cycle` terminal could only say "a loop exists here" without saying what is in it. `cycle` remains for the case it still describes — a self-reference discovered on a walk with no definition to point at — and old snapshots, which contain no refs at all, read exactly as before.
+
+*Consequence for the budget.* `MaxNodes` stops being load-bearing. The shapes it clips today come out around 113 definitions, well under it, so it reverts to a backstop for a genuinely pathological type graph rather than the thing that makes ordinary output affordable. It is deliberately **not** retuned: a limit that fires routinely is a mechanism, and one that never fires is a guard. If it fires after this, that is a finding.
+
+*Rejected.* **Raise `MaxNodes`/`MaxDepth`** — buys more copies of what the reader already has, and cannot reach "complete" at any setting that also fits a context window. **Truncate more cleverly** (breadth-first, or by field importance) — every variant still drops fields, and which fields a test generator needs is not knowable from the shape. **Leave it to the consumer to deduplicate** — the redundancy is already on the wire by then; the cost is paid in transport and context before anything can collapse it.
+
+*The MCP hole this surfaced, recorded because the sequence is the lesson.* §5.2.15 moved the wire shapes off the list row, and `wadi_mcp.list_endpoints` was the **only** tool through which an agent could read a contract at all — there is no endpoint-detail tool. The change was verified end to end in the UI, where the peek fetches detail over HTTP, and the MCP surface was never opened. A tranche whose stated purpose is agent-facing ground truth regressed the agent-facing surface, invisibly, because the human-facing one was the one under test. `endpoint_detail` lands with this section.
+
 **§5.4.2 Outbound-call coverage matrix (recorded 2026-08-01; audit of the full stitching pipeline against real-world Java/Spring idioms).**
 
 The frontier of what stitching handles is recorded here — every scenario is *handled*, *planned* (tranche-tagged, tracked as a GitHub issue), or *honestly undecidable* (permanent, surfaced via reason codes). A scenario absent from this matrix is a gap in the matrix, not an accepted limitation. Wherever the pipeline can perceive an unhandled shape it must emit a reason code (the audit's core lesson: the difference between a gap and a blind spot is whether you can count it); shapes it cannot perceive at all are exactly why this matrix exists.

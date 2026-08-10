@@ -13,6 +13,12 @@ from wadi_cli.main import app
 runner = CliRunner()
 
 
+def _no_stragglers() -> tuple[list[str], list[str]]:
+    """`wadi down`'s third teardown step shells out to docker; stub it like the
+    other two so this stays a unit test (see cli/tests/conftest.py)."""
+    return ([], [])
+
+
 @pytest.fixture
 def compose_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
@@ -88,6 +94,7 @@ class TestDownIncludesProfiles:
     ) -> None:
         # Reaping shells out to docker; stub it so this stays a unit test.
         monkeypatch.setattr(compose, "reap_managed_containers", list)
+        monkeypatch.setattr(compose, "finish_network_teardown", _no_stragglers)
         result = runner.invoke(app, ["down"])
         assert result.exit_code == 0
         assert compose_calls == [
@@ -97,3 +104,36 @@ class TestDownIncludesProfiles:
                 "expose_db": False,
             }
         ]
+
+
+class TestVersionSkewIsVisible:
+    """Two CLIs on one machine quietly fight over one stack.
+
+    Each release renders a compose file pinning ITS OWN images under the same
+    project name, so whichever CLI ran last recreates every container on its
+    own version — silently. `wadi status` made it worse by printing the images
+    the compose file pins rather than the ones the containers run, so a stack
+    on 0.8.1 reported 0.8.2.
+
+    What that cost: a 0.8.2 stack wrote artifacts at schema 1.25.0, a 0.8.1 CLI
+    recreated the stack on 0.8.1 images, and the older orchestrator 500'd on
+    its own data — `ref` is not one of its shape kinds and `type_defs` is not
+    one of its fields. It read as a wadi bug from every angle.
+
+    The API's reported version is the one fact here that cannot lie.
+    """
+
+    def test_a_mismatch_is_called_out_with_its_consequence(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cli_main.warn_on_version_skew("0.8.1")
+        printed = " ".join(plain(capsys.readouterr().err).split())
+        assert cli_main.CLI_VERSION in printed
+        assert "0.8.1" in printed
+        # Not just "they differ" — what it will DO, and what it risks.
+        assert "recreate the stack" in printed
+        assert "may not be readable" in printed
+
+    def test_a_matching_stack_says_nothing(self, capsys: pytest.CaptureFixture[str]) -> None:
+        cli_main.warn_on_version_skew(cli_main.CLI_VERSION)
+        assert plain(capsys.readouterr().err).strip() == ""

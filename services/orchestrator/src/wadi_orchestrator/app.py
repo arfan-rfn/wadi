@@ -30,6 +30,7 @@ from wadi_contracts import (
     EndpointDependenciesView,
     EndpointDependency,
     EndpointDetailView,
+    EndpointSummary,
     EndpointTouchedFile,
     ExtractionJob,
     Icfg,
@@ -39,6 +40,7 @@ from wadi_contracts import (
     RemoteEdgeItem,
     RemoteEdgesView,
     RepoSource,
+    ServiceKind,
     ServiceSummary,
     Snapshot,
     SnapshotStatus,
@@ -67,6 +69,62 @@ SOURCE_MAX_LINES = 2000
 # Single source: the installed package's own version (pyproject.toml, kept in
 # lockstep with the release tag) — surfaced via /healthz and the OpenAPI spec.
 ORCHESTRATOR_VERSION = metadata_version("wadi-orchestrator")
+
+
+# Mirrors `wadi_worker.pipeline._parse_root`, which stages each library's
+# `src/main/java` into the dependent's parse root under this directory. The two
+# must agree; they are in different services, so P1 forbids importing one from
+# the other and the shared constant is the path segment itself.
+STAGED_LIBRARY_DIR = "wadi-libs"
+_LIBRARY_SOURCE_ROOT = "src/main/java"
+
+
+async def _resolve_staged_library(
+    state: AppState, snapshot_id: str, file: str
+) -> tuple[str, str, str] | None:
+    """Map a staged library path back to (repo, build_root, in-repo path).
+
+    Staging writes `wadi-libs/<Path(root).name>/src/main/java/...`, and a
+    library whose root is the repository itself contributes an EMPTY name — so
+    ICPC's `base` stages to `wadi-libs/src/main/java/...` with no segment
+    between. Both spellings have to resolve, which is why this matches on the
+    `src/main/java` marker rather than assuming a fixed segment count.
+
+    Ambiguity is settled by asking git, not by guessing: every library boundary
+    in the snapshot is a candidate, and the first whose repo actually holds the
+    path at its pinned SHA wins. A miss returns None and the caller says so —
+    it never falls back to the service's own repo, which would report "not
+    found at pinned commit" about a file that was never meant to be there.
+    """
+    remainder = file[len(STAGED_LIBRARY_DIR) + 1 :]
+    marker = f"{_LIBRARY_SOURCE_ROOT}/"
+    index = remainder.find(marker)
+    if index < 0:
+        return None
+    in_library = remainder[index:]  # `src/main/java/...`, the library-relative path
+
+    boundaries = await state.artifacts.list_service_boundaries(snapshot_id)
+    snapshot = await state.snapshots.get(snapshot_id)
+    if snapshot is None:
+        return None
+    for candidate in boundaries:
+        if candidate.kind is not ServiceKind.LIBRARY:
+            continue
+        sha = snapshot.commits.get(candidate.repo)
+        if sha is None:
+            continue
+        repo_path = (
+            in_library if candidate.build_root == "." else f"{candidate.build_root}/{in_library}"
+        )
+        try:
+            kind = await asyncio.to_thread(
+                state.repo_cache.object_kind, candidate.repo, sha, repo_path
+            )
+        except GitError:
+            continue
+        if kind == "blob":
+            return candidate.repo, candidate.build_root, in_library
+    return None
 
 
 def source_lines(content: str) -> list[str]:
@@ -401,17 +459,26 @@ def create_app(
 
     @app.get(
         f"{API_PREFIX}/snapshots/{{snapshot_id}}/services/{{service_id}}/endpoints",
-        response_model=list[Endpoint],
+        response_model=list[EndpointSummary],
         dependencies=[Depends(_require_auth)],
     )
-    async def list_endpoints(snapshot_id: str, service_id: str, state: StateDep) -> list[Endpoint]:
+    async def list_endpoints(
+        snapshot_id: str, service_id: str, state: StateDep
+    ) -> list[EndpointSummary]:
+        """List rows WITHOUT the wire shapes (§5.2.15).
+
+        `request_schema`/`response_schema` are 124 MB of a 126 MB response on
+        ICPC's `contest` once library types resolve. They are omitted from the
+        type rather than nulled, so a row cannot be misread as "no request
+        body" — fetch one endpoint's `/detail` for either shape.
+        """
         boundary = await state.artifacts.get_service_boundary(snapshot_id, service_id)
         if boundary is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"service {service_id} not found in snapshot {snapshot_id}",
             )
-        return await state.artifacts.list_endpoints(snapshot_id, service_id)
+        return await state.artifacts.list_endpoint_summaries(snapshot_id, service_id)
 
     @app.get(
         f"{API_PREFIX}/snapshots/{{snapshot_id}}/endpoints/{{endpoint_id}}",
@@ -560,17 +627,12 @@ def create_app(
                 snapshot_id=snapshot_id, service_id=service_id, stitched=False
             )
 
-        endpoint_ids = await state.artifacts.list_icfg_endpoint_ids(snapshot_id, service_id)
-        icfgs = await asyncio.gather(
-            *(state.artifacts.get_icfg(snapshot_id, eid) for eid in endpoint_ids)
+        # The union is computed in the aggregation, not by loading every graph:
+        # this used to be one `get_icfg` per endpoint — 804 on ICPC `contest`,
+        # reassembled and validated — to produce 125 bytes (§5.2.15).
+        calls_by_endpoint = await state.artifacts.remote_call_ids_by_endpoint(
+            snapshot_id, service_id
         )
-        calls_by_endpoint: dict[str, set[str]] = {}
-        for endpoint_id_, icfg in zip(endpoint_ids, icfgs, strict=True):
-            if icfg is None:
-                continue
-            ids = {call_id for node in icfg.nodes for call_id in node.remote_call_ids}
-            if ids:
-                calls_by_endpoint[endpoint_id_] = ids
 
         every_call = sorted({call for ids in calls_by_endpoint.values() for call in ids})
         edges = await state.graph.resolve_call_targets(snapshot_id, every_call)
@@ -767,15 +829,33 @@ def create_app(
                 status_code=404,
                 detail=f"service {service_id} not found in snapshot {snapshot_id}",
             )
-        sha = snapshot.commits.get(boundary.repo)
+        # A staged library path resolves against the LIBRARY's repo (§5.2.14).
+        # Staging copies each library's `src/main/java` into the dependent's
+        # parse root under `wadi-libs/<root name>/`, so every anchor in library
+        # code names a path that exists in the analyzed tree and in no repo's
+        # git history — source-on-demand 404'd on every one of them, which on
+        # ICPC is every method the shared jar declares.
+        origin_repo, origin_root = boundary.repo, boundary.build_root
+        lookup = file
+        if file.startswith(f"{STAGED_LIBRARY_DIR}/"):
+            resolved = await _resolve_staged_library(state, snapshot_id, file)
+            if resolved is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"file {file!r} is staged library source and no library in this "
+                        "snapshot claims it"
+                    ),
+                )
+            origin_repo, origin_root, lookup = resolved
+
+        sha = snapshot.commits.get(origin_repo)
         if sha is None:
-            raise HTTPException(
-                status_code=404, detail=f"no pinned commit for repo {boundary.repo}"
-            )
-        repo_path = file if boundary.build_root == "." else f"{boundary.build_root}/{file}"
+            raise HTTPException(status_code=404, detail=f"no pinned commit for repo {origin_repo}")
+        repo_path = lookup if origin_root == "." else f"{origin_root}/{lookup}"
         try:
             kind = await asyncio.to_thread(
-                state.repo_cache.object_kind, boundary.repo, sha, repo_path
+                state.repo_cache.object_kind, origin_repo, sha, repo_path
             )
         except GitError as exc:
             raise HTTPException(
@@ -785,7 +865,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=f"{file!r} is a {kind}, not a file")
         try:
             content = await asyncio.to_thread(
-                state.repo_cache.read_file, boundary.repo, sha, repo_path
+                state.repo_cache.read_file, origin_repo, sha, repo_path
             )
         except GitError as exc:
             raise HTTPException(

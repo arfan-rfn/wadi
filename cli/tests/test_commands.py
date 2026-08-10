@@ -2,15 +2,16 @@
 
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
+import typer
 from support import plain
 from typer.testing import CliRunner
 
 import wadi_cli.main as cli_main
-from wadi_cli.client import WadiApiClient
+from wadi_cli.client import ApiTimeoutError, ApiUnreachableError, WadiApiClient
 from wadi_cli.main import app
 from wadi_contracts import RepoSource, Snapshot, SnapshotStatus
 from wadi_testing.builders import make_snapshot, make_system
@@ -128,7 +129,7 @@ class TestAnalyzeCommand:
         tmp_path_factory: pytest.TempPathFactory,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(cli_main, "_wait_for_snapshot", _poll_now)
+        monkeypatch.setattr(cli_main, "wait_for_snapshot", _poll_now)
         target = tmp_path_factory.mktemp("proj")
         mock_api(self._transport([SnapshotStatus.RUNNING, SnapshotStatus.SUCCEEDED]))
         result = runner.invoke(app, ["analyze", str(target), "--wait"])
@@ -141,7 +142,7 @@ class TestAnalyzeCommand:
         tmp_path_factory: pytest.TempPathFactory,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(cli_main, "_wait_for_snapshot", _poll_now)
+        monkeypatch.setattr(cli_main, "wait_for_snapshot", _poll_now)
         target = tmp_path_factory.mktemp("proj")
         mock_api(self._transport([SnapshotStatus.FAILED]))
         result = runner.invoke(app, ["analyze", str(target), "--wait"])
@@ -316,3 +317,99 @@ class TestMcpInstall:
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["mcpServers"]["wadi"]["command"] == "wadi"
+
+
+def _no_sleep(seconds: float) -> None:
+    """Collapse the poll interval so these run instantly."""
+    return
+
+
+class TestWaitSurvivesAFlakyLink:
+    """A failed poll is not a verdict on the run (§13 CLI honesty).
+
+    Measured on a real 4.5-minute analysis: the connection dropped 64 seconds
+    in, and `--wait` ended with "the wadi API is not answering — try: wadi up"
+    against a stack that was up and a snapshot that went on to SUCCEED. The
+    orchestrator neither saw an error nor restarted; the run finished fine.
+    Telling a user their analysis died when it did not is worse than waiting
+    longer to be certain.
+    """
+
+    @staticmethod
+    def _snapshot(status: SnapshotStatus) -> Snapshot:
+        return Snapshot(
+            id="snap_" + "0" * 16,
+            system_id="sys_" + "0" * 16,
+            commits={"repo": "a" * 40},
+            status=status,
+        )
+
+    def test_a_transient_drop_does_not_end_the_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[int] = []
+
+        class Flaky:
+            def get_snapshot(self, snapshot_id: str) -> Snapshot:
+                calls.append(1)
+                if len(calls) < 3:  # two dropped connections, then a reply
+                    raise ApiUnreachableError("Server disconnected without sending a response.")
+                return TestWaitSurvivesAFlakyLink._snapshot(SnapshotStatus.SUCCEEDED)
+
+        monkeypatch.setattr(cli_main.time, "sleep", _no_sleep)
+        final = cli_main.wait_for_snapshot(cast(WadiApiClient, Flaky()), "snap_x")
+        assert final.status is SnapshotStatus.SUCCEEDED
+        assert len(calls) == 3
+
+    def test_a_timeout_is_retried_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A busy server is slow, not gone — same reasoning, same treatment."""
+        calls: list[int] = []
+
+        class Slow:
+            def get_snapshot(self, snapshot_id: str) -> Snapshot:
+                calls.append(1)
+                if len(calls) < 2:
+                    raise ApiTimeoutError("http://127.0.0.1:9234", 30.0, "/snapshots/x")
+                return TestWaitSurvivesAFlakyLink._snapshot(SnapshotStatus.SUCCEEDED)
+
+        monkeypatch.setattr(cli_main.time, "sleep", _no_sleep)
+        final = cli_main.wait_for_snapshot(cast(WadiApiClient, Slow()), "snap_x")
+        assert final.status is SnapshotStatus.SUCCEEDED
+
+    def test_a_server_that_stays_gone_still_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Tolerance is bounded — a genuinely dead stack must still be said."""
+
+        class Dead:
+            def get_snapshot(self, snapshot_id: str) -> Snapshot:
+                raise ApiUnreachableError("connection refused")
+
+        clock = iter([0.0] + [float(i) for i in range(1, 500)])
+        monkeypatch.setattr(cli_main.time, "sleep", _no_sleep)
+        monkeypatch.setattr(cli_main.time, "monotonic", lambda: next(clock))
+        with pytest.raises(typer.Exit) as exit_info:
+            cli_main.wait_for_snapshot(cast(WadiApiClient, Dead()), "snap_x", grace_seconds=5.0)
+        assert exit_info.value.exit_code == cli_main.EXIT_UNREACHABLE
+
+    def test_the_giving_up_message_does_not_claim_the_run_died(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The run may still be going, and the old advice was wrong.
+
+        "the wadi API is not answering / try: wadi up" against a healthy stack
+        sends a reader to restart the very thing that is working.
+        """
+
+        class Dead:
+            def get_snapshot(self, snapshot_id: str) -> Snapshot:
+                raise ApiUnreachableError("connection refused")
+
+        clock = iter([0.0] + [float(i) for i in range(1, 500)])
+        monkeypatch.setattr(cli_main.time, "sleep", _no_sleep)
+        monkeypatch.setattr(cli_main.time, "monotonic", lambda: next(clock))
+        with pytest.raises(typer.Exit):
+            cli_main.wait_for_snapshot(cast(WadiApiClient, Dead()), "snap_x", grace_seconds=5.0)
+        # `problem()` writes to stderr through rich, which wraps: normalise
+        # whitespace before asserting on prose.
+        printed = " ".join(plain(capsys.readouterr().err).split())
+        assert "may still be going" in printed
+        assert "wadi status" in printed
+        # The old advice restarted the very thing that was working.
+        assert "wadi up" not in printed

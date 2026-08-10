@@ -43,6 +43,71 @@ const TARGET_NOTE: Record<string, string> = {
     "The target could not be resolved; the coverage report says why",
 }
 
+/** Placeholder rows shaped like the thing being fetched.
+ *
+ * One full-width bar said "something is coming" and nothing else, so the panel
+ * visibly jumped when a 40-field shape landed where a 3-field one had been
+ * implied. Varying widths and indenting reserves roughly the right space and
+ * reads as a tree, which is what a schema is. The per-row animation delay
+ * makes the block pulse as a list filling in rather than one slab blinking.
+ */
+function LoadingRows({
+  rows = 3,
+  tree = false,
+}: {
+  rows?: number
+  tree?: boolean
+}) {
+  const widths = ["w-2/3", "w-5/6", "w-1/2", "w-3/4", "w-2/5"]
+  return (
+    <div className="space-y-1.5" aria-hidden>
+      {Array.from({ length: rows }).map((_, index) => (
+        <div
+          key={index}
+          className="flex items-center gap-2"
+          style={{
+            paddingLeft:
+              tree && index > 0 ? `${(index % 3) * 10}px` : undefined,
+          }}
+        >
+          {tree ? <Skeleton className="size-2.5 shrink-0 rounded-sm" /> : null}
+          <Skeleton
+            className={cn("h-3.5", widths[index % widths.length])}
+            style={{ animationDelay: `${index * 120}ms` }}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** The detail fetch failed — say so, and offer the way out.
+ *
+ * Without this the sections fell through to their empty-result copy, so a
+ * request that never completed rendered as "No request body on this endpoint"
+ * — a claim about the analysis, made about an endpoint nothing had read. The
+ * retry matters as much as the message: this is one fetch behind three
+ * sections, and re-opening the panel was previously the only way to retry it.
+ */
+function FetchFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-2xs text-warn">
+        Could not load this endpoint&apos;s detail — nothing here is a result.
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-6 px-2 text-2xs"
+        onClick={onRetry}
+      >
+        Retry
+      </Button>
+    </div>
+  )
+}
+
 function ParamRow({
   name,
   location,
@@ -95,6 +160,26 @@ export function EndpointPeek({
       </div>
     )
 
+  // The wire shapes are NOT on a list row (§5.2.15) — they arrive with the
+  // per-endpoint detail this component already fetches. `undefined` here means
+  // the detail is still in flight; `null` on the detail means the analysis
+  // recovered no shape, which is a different answer and reads as one below.
+  const requestSchema = detail.data?.endpoint.request_schema
+  const responseSchema = detail.data?.endpoint.response_schema
+  // The types those shapes reference, defined once each (§5.2.16).
+  const typeDefs = detail.data?.endpoint.type_defs
+  // Both sections below state a RESULT when they have no shape ("no request
+  // body", "response shape unknown"). Those are claims about the analysis, and
+  // they were safe while the shapes rode in on the list row — they were always
+  // present by then. Now they arrive with this fetch, so the pending state has
+  // to be told apart from the answer, or the panel asserts "no request body"
+  // about an endpoint it has not read yet (P10).
+  const shapesPending = detail.isPending
+  // A failed fetch is NOT an empty result. Both sections below state one when
+  // they have no shape, so the error has to be its own branch or the panel
+  // reports "no request body" about an endpoint it never read (P10).
+  const shapesFailed = detail.isError
+  const retryDetail = () => void detail.refetch()
   const params = endpoint.params ?? []
   const allEvidence = endpoint.auth?.evidence ?? []
   // Split by whether the record GATES. An authority-model says what a grant
@@ -131,9 +216,12 @@ export function EndpointPeek({
         <CollapsibleSection
           title="Calls out"
           count={detail.isPending ? null : outbound.length}
+          pending={detail.isPending}
         >
           {detail.isPending ? (
-            <Skeleton className="h-10 w-full" />
+            <LoadingRows rows={2} />
+          ) : shapesFailed ? (
+            <FetchFailed onRetry={retryDetail} />
           ) : outbound.length === 0 ? (
             <p className="text-2xs text-muted-foreground">
               {detail.data?.stitched === false
@@ -366,10 +454,15 @@ export function EndpointPeek({
 
         <CollapsibleSection
           title="Request body"
-          count={endpoint.request_schema?.fields?.length ?? null}
+          count={requestSchema?.fields?.length ?? null}
+          pending={shapesPending}
         >
-          {endpoint.request_schema ? (
-            <SchemaTree shape={endpoint.request_schema} />
+          {shapesPending ? (
+            <LoadingRows rows={3} tree />
+          ) : shapesFailed ? (
+            <FetchFailed onRetry={retryDetail} />
+          ) : requestSchema ? (
+            <SchemaTree shape={requestSchema} defs={typeDefs} />
           ) : (
             <p className="text-2xs text-muted-foreground">
               No request body on this endpoint.
@@ -377,7 +470,7 @@ export function EndpointPeek({
           )}
         </CollapsibleSection>
 
-        <CollapsibleSection title="Response">
+        <CollapsibleSection title="Response" pending={shapesPending}>
           {(endpoint.declared_statuses ?? []).length > 0 && (
             <div className="mb-2.5">
               <div className="flex flex-wrap gap-1">
@@ -405,8 +498,12 @@ export function EndpointPeek({
               </p>
             </div>
           )}
-          {endpoint.response_schema ? (
-            <SchemaTree shape={endpoint.response_schema} />
+          {shapesPending ? (
+            <LoadingRows rows={4} tree />
+          ) : shapesFailed ? (
+            <FetchFailed onRetry={retryDetail} />
+          ) : responseSchema ? (
+            <SchemaTree shape={responseSchema} defs={typeDefs} />
           ) : (
             <p className="text-2xs text-muted-foreground">
               Response shape unknown — analyzed before contract recovery, or no

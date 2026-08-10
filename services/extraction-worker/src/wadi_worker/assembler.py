@@ -261,6 +261,10 @@ class Assembler:
                 ],
                 request_schema=_shape(export_endpoint.request_schema),
                 response_schema=_shape(export_endpoint.response_schema),
+                type_defs={
+                    name: _shape_required(shape)
+                    for name, shape in export_endpoint.type_defs.items()
+                },
                 auth=merge_endpoint_auth(
                     full_uri=export_endpoint.uri,
                     http_method=http_method,

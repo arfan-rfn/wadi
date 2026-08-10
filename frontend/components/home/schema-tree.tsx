@@ -27,6 +27,9 @@ function shortType(typeName: string): string {
 
 const TERMINAL_NOTE: Record<string, string> = {
   unresolved: "type is not in the analyzed code — named, never fabricated",
+  // Only reachable when the definition is missing from `type_defs`; a resolved
+  // ref never renders as a row of its own.
+  ref: "referenced type was not included with this endpoint",
   cycle: "self-referencing type, not expanded again",
   truncated: "depth limit reached",
   // Deliberately NOT phrased as a limit. `unresolved` says analysis could not
@@ -62,14 +65,33 @@ function Row({
 
 export function SchemaTree({
   shape,
+  defs,
   name = null,
   depth = 0,
 }: {
   shape: TypeShape
+  /** The endpoint's `type_defs` — the definitions its `ref` nodes name
+   *  (§5.2.16). Omit for shapes from snapshots written before 1.25.0, which
+   *  are fully inline and contain no refs. */
+  defs?: Record<string, TypeShape>
   name?: string | null
   depth?: number
 }) {
   const [expanded, setExpanded] = useState(false)
+
+  // A ref is not a terminal — it is the same type, written once elsewhere. It
+  // resolves HERE rather than before render on purpose: an entity model
+  // inlined up front is the 3 MB tree §5.2.16 exists to avoid, while resolving
+  // during the walk means only what MAX_DEPTH and the field threshold actually
+  // draw ever gets built.
+  if (shape.kind === "ref") {
+    const target = defs?.[shape.type_name]
+    if (target)
+      return <SchemaTree shape={target} defs={defs} name={name} depth={depth} />
+    // No definition to point at: fall through to the terminal rendering below,
+    // which states the gap. Never silently draw a type with no fields.
+  }
+
   const note = TERMINAL_NOTE[shape.kind]
 
   if (note) {
@@ -92,7 +114,7 @@ export function SchemaTree({
       <>
         <Row name={name} shape={shape} depth={depth} />
         {shape.element ? (
-          <SchemaTree shape={shape.element} depth={depth + 1} />
+          <SchemaTree shape={shape.element} defs={defs} depth={depth + 1} />
         ) : (
           <p
             className="text-2xs text-muted-foreground"
@@ -134,6 +156,7 @@ export function SchemaTree({
           key={field.name}
           name={field.name}
           shape={field.shape}
+          defs={defs}
           depth={depth + 1}
         />
       ))}

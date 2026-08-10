@@ -181,21 +181,34 @@ class TestBaselineSnapshot:
                 return f"[{_shape_summary(shape.get('element') or {}, depth + 1)}]"
             return f"{shape.get('type_name')}<{kind}>"
 
+        # The shapes are NOT on a list row since §5.2.15 — they arrive with the
+        # per-endpoint detail. Reading them off the list still "worked" here:
+        # `next(..., None)` found nothing and the spot-check printed nothing,
+        # silently, which is the failure mode this repo treats as worse than a
+        # red test. Walk a bounded prefix of each service's endpoints instead.
+        found_shape = False
         for service in boundaries:
-            if service["kind"] != "service":
+            if service["kind"] != "service" or found_shape:
                 continue
             endpoints = (
                 await http.get(
                     f"/api/v1/snapshots/{snapshot_id}/services/{service['service_id']}/endpoints"
                 )
             ).json()
-            sample = next(
-                (e for e in endpoints if (e.get("response_schema") or {}).get("kind") == "object"),
-                None,
-            )
-            if sample is not None:
+            for row in endpoints[:25]:
+                detail = (
+                    await http.get(f"/api/v1/snapshots/{snapshot_id}/endpoints/{row['id']}/detail")
+                ).json()
+                shape = detail["endpoint"].get("response_schema") or {}
+                if shape.get("kind") != "object":
+                    continue
                 print(
-                    f"schema spot-check: {service['name']} {sample['http_method']} "
-                    f"{sample['full_uri']} -> {_shape_summary(sample['response_schema'])}"
+                    f"schema spot-check: {service['name']} {row['http_method']} "
+                    f"{row['full_uri']} -> {_shape_summary(shape)}"
                 )
+                found_shape = True
                 break
+        if not found_shape:
+            # A baseline that stops reporting a fact must say so, or the next
+            # reader takes silence for "this corpus has no object shapes".
+            print("schema spot-check: no object response shape in the sampled prefix")

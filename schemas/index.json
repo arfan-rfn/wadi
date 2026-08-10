@@ -1,11 +1,12 @@
 {
-  "schema_version": "1.23.0",
+  "schema_version": "1.25.0",
   "schemas": {
     "coverage_report": "coverage_report.schema.json",
     "data_model": "data_model.schema.json",
     "endpoint": "endpoint.schema.json",
     "endpoint_dependencies": "endpoint_dependencies.schema.json",
     "endpoint_detail": "endpoint_detail.schema.json",
+    "endpoint_summary": "endpoint_summary.schema.json",
     "export_manifest": "export_manifest.schema.json",
     "extraction_job": "extraction_job.schema.json",
     "icfg": "icfg.schema.json",

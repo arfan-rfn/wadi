@@ -14,6 +14,7 @@ from wadi_contracts.system import Snapshot, System
 from wadi_contracts.views import (
     EndpointDependenciesView,
     EndpointDetailView,
+    EndpointSummary,
     RemoteEdgesView,
     ServiceSummary,
     SourceView,
@@ -35,6 +36,7 @@ CONTRACT_MODELS: dict[str, type[BaseModel]] = {
     "coverage_report": CoverageReport,
     # API views (derived at read time, never stored — §7 note in views.py):
     "service_summary": ServiceSummary,
+    "endpoint_summary": EndpointSummary,
     "endpoint_detail": EndpointDetailView,
     "endpoint_dependencies": EndpointDependenciesView,
     "remote_edges_view": RemoteEdgesView,

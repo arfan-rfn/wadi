@@ -209,6 +209,7 @@ export type ShapeKind =
   | "scalar"
   | "array"
   | "map"
+  | "ref"
   | "cycle"
   | "truncated"
   | "unresolved"
@@ -260,6 +261,7 @@ export interface Endpoint {
   simplified_uri: SimplifiedUri
   snapshot_id: SnapshotId
   trigger?: TriggerKind
+  type_defs?: TypeDefs
 }
 /**
  * Structured authorization state of an endpoint (§5.2.9).
@@ -417,4 +419,10 @@ export interface FieldShape {
   java_name?: JavaName
   name: Name1
   shape: TypeShape
+}
+/**
+ * Types named by `kind=ref` nodes in this endpoint's shapes (§5.2.16), keyed by `type_name`. Each type is written ONCE here and referenced wherever it appears, because inline expansion of an entity graph is exponentially redundant — one real response wrote 2,365 object definitions of which 113 were distinct, 3 MB that no context window could hold. Shared by `request_schema` and `response_schema`, which routinely name the same types. Empty on snapshots written before 1.25.0, whose shapes are fully inline and contain no refs
+ */
+export interface TypeDefs {
+  [k: string]: TypeShape
 }

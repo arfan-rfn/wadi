@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from orchestrator_support import run_git
 
 from wadi_contracts import (
     CalleeUnboundReason,
@@ -13,7 +14,10 @@ from wadi_contracts import (
     IcfgNodeKind,
     MethodRef,
     ServiceBoundary,
+    ServiceKind,
+    ShapeKind,
     Snapshot,
+    TypeShape,
 )
 from wadi_orchestrator.state import AppState
 from wadi_storage import GraphRepository
@@ -173,6 +177,192 @@ class TestReadApi:
         assert (
             await client.get(f"/api/v1/snapshots/{missing_snap}/endpoints/ep_{'0' * 16}/detail")
         ).status_code == 404
+
+
+class TestEndpointListIsASummary:
+    """The list route serves list rows, not whole endpoints (§5.2.15).
+
+    ICPC's `contest` made the cost concrete: the two wire-shape fields were
+    124 MB of a 126 MB response, and the browser parsed all of it before
+    rendering a row. They are omitted from the *type* rather than nulled,
+    because `None` already means "no request body" on 673 of those 804
+    endpoints — a list that nulls them cannot be told from one reporting a
+    fact, which is the P10 collapse this route is not allowed to make.
+    """
+
+    @staticmethod
+    def _shape(type_name: str) -> TypeShape:
+        return TypeShape(kind=ShapeKind.OBJECT, type_name=type_name)
+
+    async def _seed(self, app_state: AppState) -> tuple[Snapshot, ServiceBoundary, Endpoint]:
+        system = make_system("summary-seeded")
+        await app_state.systems.insert(system)
+        snapshot = make_snapshot(system)
+        await app_state.snapshots.insert(snapshot)
+        boundary = make_service(snapshot)
+        endpoint = make_endpoint(snapshot, boundary).model_copy(
+            update={
+                "request_schema": self._shape("com.acme.OrderRequest"),
+                "response_schema": self._shape("com.acme.Order"),
+            }
+        )
+        await app_state.artifacts.write_service_boundaries([boundary])
+        await app_state.artifacts.write_endpoints([endpoint])
+        return snapshot, boundary, endpoint
+
+    async def test_rows_omit_the_wire_shapes_entirely(
+        self, client: AsyncClient, app_state: AppState
+    ) -> None:
+        snapshot, boundary, endpoint = await self._seed(app_state)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/services/{boundary.service_id}/endpoints"
+        )
+        assert response.status_code == 200, response.text
+        row = response.json()[0]
+        assert row["id"] == endpoint.id
+        # Absent, not null: a null would be indistinguishable from "no body".
+        assert "request_schema" not in row
+        assert "response_schema" not in row
+
+    async def test_rows_keep_everything_a_list_actually_renders(
+        self, client: AsyncClient, app_state: AppState
+    ) -> None:
+        """The trim is the two shapes and nothing else.
+
+        The UI's row reads auth, handler, params, declared_statuses and the
+        URIs; `wadi endpoints` reads id/method/uri/auth/handler. Dropping any
+        of those would trade one round trip for a fan-out per visible row.
+        """
+        snapshot, boundary, _ = await self._seed(app_state)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/services/{boundary.service_id}/endpoints"
+        )
+        row = response.json()[0]
+        for field in (
+            "id",
+            "snapshot_id",
+            "service_id",
+            "http_method",
+            "full_uri",
+            "simplified_uri",
+            "params",
+            "response_type",
+            "declared_statuses",
+            "auth",
+            "handler",
+            "trigger",
+        ):
+            assert field in row, f"list row lost {field}"
+
+    async def test_the_shapes_are_still_reachable_per_endpoint(
+        self, client: AsyncClient, app_state: AppState
+    ) -> None:
+        """Trimming the list is only honest if the detail still carries them."""
+        snapshot, _, endpoint = await self._seed(app_state)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/endpoints/{endpoint.id}/detail"
+        )
+        assert response.status_code == 200, response.text
+        detail = response.json()["endpoint"]
+        assert detail["request_schema"]["type_name"] == "com.acme.OrderRequest"
+        assert detail["response_schema"]["type_name"] == "com.acme.Order"
+
+
+class TestStagedLibrarySource:
+    """Source-on-demand for code the analyzed tree STAGED (§5.2.14, §5.2.15).
+
+    Staging copies each library's `src/main/java` into the dependent's parse
+    root under `wadi-libs/`, so every ICFG anchor in library code names a path
+    that exists in the analyzed tree and in no repository's git history. The
+    source route resolved against the SERVICE's repo and 404'd every one of
+    them — on ICPC, every method the shared jar declares, which is most of what
+    a reader following a call actually lands on.
+    """
+
+    @staticmethod
+    def _library_repo(tmp_path: Path) -> tuple[Path, str]:
+        repo = tmp_path / "lib-repo"
+        (repo / "src" / "main" / "java" / "acme").mkdir(parents=True)
+        run_git("init", "--initial-branch=main", cwd=repo)
+        (repo / "src" / "main" / "java" / "acme" / "Base.java").write_text(
+            "package acme;\nclass Base {\n  int shared;\n}\n"
+        )
+        run_git("add", ".", cwd=repo)
+        run_git("commit", "-m", "library", cwd=repo)
+        sha = run_git("rev-parse", "HEAD", cwd=repo).strip()
+        return repo, sha
+
+    async def _seed(
+        self, app_state: AppState, tmp_path: Path
+    ) -> tuple[Snapshot, ServiceBoundary, Path]:
+        lib_repo, lib_sha = self._library_repo(tmp_path)
+        system = make_system("staged-lib")
+        await app_state.systems.insert(system)
+        snapshot = make_snapshot(system)
+        # The library root IS the repository, so staging contributes an empty
+        # name segment — `wadi-libs/src/main/java/...` with nothing between.
+        # That is ICPC's shape and the one a fixed-segment parse gets wrong.
+        snapshot = snapshot.model_copy(
+            update={"commits": {**snapshot.commits, str(lib_repo): lib_sha}}
+        )
+        await app_state.snapshots.insert(snapshot)
+
+        service = make_service(snapshot)
+        library = service.model_copy(
+            update={
+                "service_id": "svc_" + "b" * 16,
+                "name": "base",
+                "kind": ServiceKind.LIBRARY,
+                "repo": str(lib_repo),
+                "build_root": ".",
+            }
+        )
+        await app_state.artifacts.write_service_boundaries([service, library])
+        # The route reads through the mirror the analysis would have created.
+        app_state.repo_cache.ensure_mirror(str(lib_repo))
+        return snapshot, service, lib_repo
+
+    async def test_a_staged_path_resolves_against_the_librarys_own_repo(
+        self, client: AsyncClient, app_state: AppState, tmp_path: Path
+    ) -> None:
+        snapshot, service, _ = await self._seed(app_state, tmp_path)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/services/{service.service_id}/source",
+            params={"file": "wadi-libs/src/main/java/acme/Base.java"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert "class Base" in body["content"]
+        assert body["total_lines"] == 4
+
+    async def test_an_unclaimed_staged_path_says_so(
+        self, client: AsyncClient, app_state: AppState, tmp_path: Path
+    ) -> None:
+        """It must not fall back to the service's repo (P10).
+
+        Reporting "not found at pinned commit" against the SERVICE would blame
+        the wrong repository for a file that was never meant to be in it.
+        """
+        snapshot, service, _ = await self._seed(app_state, tmp_path)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/services/{service.service_id}/source",
+            params={"file": "wadi-libs/src/main/java/acme/Missing.java"},
+        )
+        assert response.status_code == 404
+        assert "no library in this snapshot claims it" in response.json()["detail"]
+
+    async def test_the_services_own_files_are_untouched_by_the_staging_branch(
+        self, client: AsyncClient, app_state: AppState, tmp_path: Path
+    ) -> None:
+        """A path that merely CONTAINS the segment is not a staged path."""
+        snapshot, service, _ = await self._seed(app_state, tmp_path)
+        response = await client.get(
+            f"/api/v1/snapshots/{snapshot.id}/services/{service.service_id}/source",
+            params={"file": "src/main/java/acme/wadi-libs-helper/Thing.java"},
+        )
+        # Resolved against the service repo (and absent there), NOT diverted.
+        assert response.status_code == 404
+        assert "not found at pinned commit" in response.json()["detail"]
 
 
 class TestEndpointDetail:

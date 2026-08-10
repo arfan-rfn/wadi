@@ -17,7 +17,14 @@ from e2e_support import REPO_ROOT, make_fixture_repo, requires_joern_image
 from httpx import ASGITransport, AsyncClient
 
 from wadi_config import WadiSettings
-from wadi_contracts import CONTRACT_MODELS, ExportManifest, JobType
+from wadi_contracts import (
+    CONTRACT_MODELS,
+    Endpoint,
+    ExportManifest,
+    JobType,
+    TypeShape,
+    resolve_type_shape,
+)
 from wadi_joern_client import JoernClient
 from wadi_orchestrator.app import create_app
 from wadi_orchestrator.monitor import SnapshotMonitor
@@ -408,30 +415,53 @@ class TestTwoServiceSystem:
         # Jackson semantics, wrapper unwrapping, cycle + unresolved terminals —
         # and the staged-union payoff: the shared-library Lombok DTO resolves
         # to a real object shape here (module-only conformance sees unresolved).
-        petstore_eps = (
-            await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/endpoints")
-        ).json()
-        by_route = {(e["http_method"], e["full_uri"]): e for e in petstore_eps}
-        details_schema = by_route[("GET", "/catalog/pets/{id}")]["response_schema"]
-        assert details_schema["kind"] == "object"
-        field_names = [f["name"] for f in details_schema["fields"]]
+        # §5.2.15: the wire shapes are NOT on a list row — they live on the
+        # per-endpoint detail. This fixture has a handful of routes, so fetch
+        # each one; `petstore_endpoints` above is the same list, re-used rather
+        # than re-requested.
+        # §5.2.16: shapes travel as a graph — each type defined once in the
+        # endpoint's `type_defs`, referenced wherever it occurs. Validating
+        # into the contract and resolving through its own helper checks two
+        # things at once: that the shapes survive the API round trip, and that
+        # the assertions below hold unchanged through the shared form.
+        by_route: dict[tuple[str, str], Endpoint] = {}
+        for row in petstore_endpoints:
+            detail = (
+                await http.get(f"/api/v1/snapshots/{snapshot_id}/endpoints/{row['id']}/detail")
+            ).json()
+            endpoint = Endpoint.model_validate(detail["endpoint"])
+            by_route[(row["http_method"], row["full_uri"])] = endpoint
+
+        def response_of(method: str, uri: str) -> TypeShape:
+            endpoint = by_route[(method, uri)]
+            assert endpoint.response_schema is not None
+            return resolve_type_shape(endpoint.response_schema, endpoint.type_defs)
+
+        details_schema = response_of("GET", "/catalog/pets/{id}")
+        assert details_schema.kind.value == "object"
+        field_names = [f.name for f in details_schema.fields]
         assert "display_name" in field_names
         assert "internalNote" not in field_names
-        listing = by_route[("GET", "/catalog/pets")]["response_schema"]
-        assert listing["kind"] == "array"
-        assert listing["element"]["type_name"] == "PetDetails"
-        create_schema = by_route[("POST", "/catalog/pets")]["request_schema"]
-        assert {f["name"] for f in create_schema["fields"]} == {"name", "breed"}
+        listing = response_of("GET", "/catalog/pets")
+        assert listing.kind.value == "array"
+        assert listing.element is not None
+        assert listing.element.type_name == "PetDetails"
+        create = by_route[("POST", "/catalog/pets")]
+        assert create.request_schema is not None
+        create_schema = resolve_type_shape(create.request_schema, create.type_defs)
+        assert {f.name for f in create_schema.fields} == {"name", "breed"}
         tree_children = next(
-            f
-            for f in by_route[("GET", "/catalog/tree")]["response_schema"]["fields"]
-            if f["name"] == "children"
+            f for f in response_of("GET", "/catalog/tree").fields if f.name == "children"
         )
-        assert tree_children["shape"]["element"]["kind"] == "cycle"
-        assert by_route[("GET", "/catalog/vendor")]["response_schema"]["kind"] == "unresolved"
-        union_shape = by_route[("GET", "/catalog/query-shape")]["response_schema"]
-        assert union_shape["kind"] == "object"  # staged union resolves StockQuery
-        assert [f["name"] for f in union_shape["fields"]] == ["id"]
+        # A recursive type points back at its own definition now, rather than
+        # terminating in `cycle` — the reader can follow it into `type_defs`.
+        assert tree_children.shape.element is not None
+        assert tree_children.shape.element.kind.value == "ref"
+        assert "Category" in by_route[("GET", "/catalog/tree")].type_defs
+        assert response_of("GET", "/catalog/vendor").kind.value == "unresolved"
+        union_shape = response_of("GET", "/catalog/query-shape")
+        assert union_shape.kind.value == "object"  # staged union resolves StockQuery
+        assert [f.name for f in union_shape.fields] == ["id"]
 
         # 8. Recovery: restitch converges to the identical edge set.
         edges_before = sorted(e["edge_id"] for e in outbound)
