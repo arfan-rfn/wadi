@@ -186,12 +186,16 @@ object WadiExport {
 
     val target: Path = Paths.get(outDir)
     Files.createDirectories(target)
-    Files.write(
-      target.resolve("export.json"),
-      ujson.write(document, indent = 2).getBytes("UTF-8"),
-      StandardOpenOption.CREATE,
-      StandardOpenOption.TRUNCATE_EXISTING
+    val out = new java.io.BufferedOutputStream(
+      Files.newOutputStream(
+        target.resolve("export.json"),
+        StandardOpenOption.CREATE,
+        StandardOpenOption.TRUNCATE_EXISTING
+      ),
+      1 << 16
     )
+    try ujson.writeToOutputStream(document, out, indent = 2)
+    finally out.close()
     s"wadi export: ${closure.size} methods, ${endpointObjs.size} endpoints, " +
       s"${asyncRootObjs.size} async roots, " +
       s"${sinkRows.size} sinks, ${unreachableObjs.size} unreachable sinks, " +
