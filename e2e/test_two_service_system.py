@@ -408,10 +408,16 @@ class TestTwoServiceSystem:
         # Jackson semantics, wrapper unwrapping, cycle + unresolved terminals —
         # and the staged-union payoff: the shared-library Lombok DTO resolves
         # to a real object shape here (module-only conformance sees unresolved).
-        petstore_eps = (
-            await http.get(f"/api/v1/snapshots/{snapshot_id}/services/{petstore_id}/endpoints")
-        ).json()
-        by_route = {(e["http_method"], e["full_uri"]): e for e in petstore_eps}
+        # §5.2.15: the wire shapes are NOT on a list row — they live on the
+        # per-endpoint detail. This fixture has a handful of routes, so fetch
+        # each one; `petstore_endpoints` above is the same list, re-used rather
+        # than re-requested.
+        by_route: dict[tuple[str, str], dict[str, object]] = {}
+        for row in petstore_endpoints:
+            detail = (
+                await http.get(f"/api/v1/snapshots/{snapshot_id}/endpoints/{row['id']}/detail")
+            ).json()
+            by_route[(row["http_method"], row["full_uri"])] = detail["endpoint"]
         details_schema = by_route[("GET", "/catalog/pets/{id}")]["response_schema"]
         assert details_schema["kind"] == "object"
         field_names = [f["name"] for f in details_schema["fields"]]
