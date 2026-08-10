@@ -512,6 +512,34 @@ def status() -> None:
             )
             raise typer.Exit(EXIT_UNREACHABLE) from None
         console.print(f"API: [green]{health['status']}[/green] (v{health['version']})")
+        _warn_on_version_skew(health["version"])
+
+
+def _warn_on_version_skew(api_version: str) -> None:
+    """Say when the CLI and the running stack are different releases.
+
+    Each CLI renders a compose file pinning *its own* version's images under
+    one project name, so two CLIs on a machine quietly fight over one stack:
+    whichever ran last recreates every container on its own release. Nothing
+    said so. `wadi status` even printed the NEW version's images, because
+    `compose ps` reports what the compose file pins rather than what the
+    containers are actually running.
+
+    That is how a 0.8.1 stack came to be serving data a 0.8.2 stack had
+    written, and 500ing on it — a forward-compatibility break that read to
+    everyone involved as a wadi bug. The API's own reported version is the one
+    fact here that cannot lie, so it is what this compares against.
+    """
+    if api_version == CLI_VERSION:
+        return
+    error_console.print(
+        f"[yellow]⚠ this CLI is {CLI_VERSION} but the stack is running {api_version}.[/yellow]"
+    )
+    error_console.print(
+        "  [dim]Each release pins its own images, so `wadi up` from this CLI will "
+        "recreate the stack on " + CLI_VERSION + ". Artifacts written by a NEWER "
+        "stack may not be readable by an older one.[/dim]"
+    )
 
 
 # --- analyze --------------------------------------------------------------------

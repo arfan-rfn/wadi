@@ -155,6 +155,44 @@ resolve", and say which. Checking container liveness on a connection failure,
 or surfacing the exit code, would turn a misleading error into an actionable
 one.
 
+### A minor schema bump is not readable by the previous release
+**Priority:** P1
+**Opened:** v0.8.2
+
+§7 says additive change → bump minor, which implies an older reader tolerates
+it. None does. Every contract model is `extra="forbid"` and every vocabulary is
+a closed enum, so **any** additive field or enum member makes the previous
+release fail hard on the new release's artifacts — and `schema_version` is
+stamped on every document but consulted by no reader.
+
+Observed, not theorised: a 0.8.2 stack wrote endpoints at 1.25.0, an older
+stack came back up against the same Mongo, and the list route 500'd with
+`Extra inputs are not permitted: type_defs` and `Input should be 'object',
+'scalar', … input_value='ref'`. From the UI it read as a wadi bug.
+
+`extra="forbid"` is deliberate and worth keeping — it is what caught the
+`type_defs` projection leak the same day. The gap is that nothing decides what
+an older reader should DO with a newer artifact. Options: refuse at the door
+with a message naming both versions, or add a read-side compatibility mode for
+minor-newer documents. Either is a decision, and it belongs in §7 before it is
+implemented.
+
+### `wadi status` reported the compose file, not the containers
+**Priority:** P2
+**Opened:** v0.8.2
+
+Two CLI releases on one machine share the compose project name `wadi`, and each
+renders a compose file pinning ITS OWN images, so whichever ran last silently
+recreates every container on its own version. `wadi status` printed the images
+the compose file pins rather than the ones the containers actually run, so a
+stack running 0.8.1 reported 0.8.2 for hours.
+
+Partly closed in 0.8.2: `status` now compares its own version against the API's
+reported version — the one fact in that output that cannot lie — and says what
+`wadi up` will do about it. Two things remain. The warning only exists in the
+NEW CLI, so an older one still downgrades a stack silently; and `compose ps`
+output is still the compose file's view, which is the misleading half.
+
 ---
 
 ## Analysis surfaces not yet consumed

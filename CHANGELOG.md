@@ -47,6 +47,12 @@ that were hiding behind it.
   restart the thing that was working. Transport failures and timeouts are now
   retried within a bounded window and shown while they last, and giving up says
   the run may still be going and how to check it.
+- **`wadi status` says when the CLI and the running stack are different
+  releases.** Each release pins its own images under one compose project, so
+  two CLIs on a machine quietly fight over one stack and whichever ran last
+  wins — while `status` printed the images the compose file pins rather than
+  the ones actually running, so a 0.8.1 stack reported 0.8.2. It now compares
+  against the API's own reported version and names the consequence.
 - **`make test` no longer deletes your running stack.** Three CLI tests invoked
   `wadi down` while stubbing two of its three teardown steps; the third shells
   out to docker and removes every container on the wadi network in the release
