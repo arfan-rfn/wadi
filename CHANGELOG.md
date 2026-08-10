@@ -47,7 +47,14 @@ that were hiding behind it.
   restart the thing that was working. Transport failures and timeouts are now
   retried within a bounded window and shown while they last, and giving up says
   the run may still be going and how to check it.
-- **Running the e2e no longer kills a live local stack.** Its analyzer
+- **`make test` no longer deletes your running stack.** Three CLI tests invoked
+  `wadi down` while stubbing two of its three teardown steps; the third shells
+  out to docker and removes every container on the wadi network in the release
+  image namespace — which is why exactly the five `ghcr.io/wadi-sh/*`
+  containers vanished on every run and `mongo`/`neo4j` never did. The CLI test
+  suite now refuses any real subprocess and fails the test that attempts one,
+  because stubbing the three known cases would have left the trap armed.
+- **The e2e analyzer container is memory-bounded.** Its analyzer
   container carried no memory limit, which does not mean "no limit" — it means
   the JVM sizes its heap against the whole Docker VM. Beside a running stack,
   whose own analyzer reserves 10 GB of a 15.6 GB VM, the two overcommit and

@@ -190,21 +190,44 @@ while they last; giving up now says the run may still be going and points at
 `wadi status` / `wadi snapshots` rather than at restarting a healthy stack.
 
 
-### The e2e killed a live local stack (and flaked doing it)
+### `make test` deleted the developer's running stack
 **Closed:** v0.8.2
 
-The e2e's analyzer container ran with no `--memory` at all, which is not "no
-limit" — the JVM sizes its heap against the entire Docker VM. Run beside a
-live stack, whose own analyzer reserves 10 GB of a 15.6 GB VM, the two
-overcommit and Docker kills containers. Locally that presented as the stack's
-five non-database services disappearing during heavy test runs, and as e2e
-errors that passed on a re-run; it was misread twice as an unexplained
-environment fault before the arithmetic was checked. CI never saw it because a
-fresh runner has no competing stack.
+Every run, all session — misread first as memory pressure, then as an
+unexplained environment fault, and "fixed" once by capping the e2e analyzer's
+memory, which was a real improvement and not this. Settled by recording
+`docker events` live across a run instead of reasoning about it: five
+containers `kill` -> `die exit=137` -> `destroy` inside one second, which is a
+deliberate `docker rm -f`, not an OOM.
 
-Bounded to 4 GB against a **measured peak of 807 MiB** on these fixtures.
-Verified the way it should have been from the start: 7 containers up, full e2e
-run, 7 containers still up and the API healthy.
+`wadi down` tears the stack down in three steps and the tests stubbed two:
+
+    reap_managed_containers()   # stubbed
+    run_compose(["down", ...])  # stubbed
+    finish_network_teardown()   # NOT stubbed -- shells out to docker
+
+That third call removes every container on the wadi network whose image is in
+the release namespace, which is exactly the signature observed: the five
+`ghcr.io/wadi-sh/*` containers destroyed, `mongo` and `neo4j` — public images,
+"foreign" by that function's own rule — untouched. Three tests hit it.
+
+Stubbing those three would have fixed the instance and left the trap armed, so
+`cli/tests/conftest.py` now refuses any real subprocess from `compose` and
+fails the test that tries. It caught all three immediately. A CLI whose job is
+driving Docker should not be unit-tested against the live daemon.
+
+*The standing lesson:* two confident explanations preceded the right one, and
+both were built from correlation. The event stream answered it in one run.
+
+
+### The e2e analyzer container had no memory limit
+**Closed:** v0.8.2
+
+Not the cause of the disappearing stack — that was the entry above — but a real
+defect found looking for it. The e2e ran its analyzer with no `--memory`, which
+does not mean "no limit": the JVM sizes its heap against the whole Docker VM.
+Beside a live stack whose own analyzer reserves 10 GB of 15.6 GB, the two
+overcommit. Bounded to 4 GB against a **measured peak of 807 MiB**.
 
 
 ### `wadi up` could not converge onto a running stack

@@ -88,6 +88,7 @@ class TestDownIncludesProfiles:
     ) -> None:
         # Reaping shells out to docker; stub it so this stays a unit test.
         monkeypatch.setattr(compose, "reap_managed_containers", list)
+        monkeypatch.setattr(compose, "finish_network_teardown", lambda: ([], []))
         result = runner.invoke(app, ["down"])
         assert result.exit_code == 0
         assert compose_calls == [

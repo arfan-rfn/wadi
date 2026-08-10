@@ -84,6 +84,7 @@ class TestDownReapsManagedContainers:
 
         monkeypatch.setattr(compose, "reap_managed_containers", fake_reap)
         monkeypatch.setattr(compose, "run_compose", fake_run_compose)
+        monkeypatch.setattr(compose, "finish_network_teardown", lambda: ([], []))
         result = runner.invoke(app, ["down"])
 
         assert result.exit_code == 0, result.output
@@ -98,6 +99,7 @@ class TestDownReapsManagedContainers:
             return []
 
         monkeypatch.setattr(compose, "reap_managed_containers", reap_nothing)
+        monkeypatch.setattr(compose, "finish_network_teardown", lambda: ([], []))
         result = runner.invoke(app, ["down"])
 
         assert result.exit_code == 0, result.output
