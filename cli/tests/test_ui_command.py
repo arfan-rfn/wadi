@@ -126,7 +126,7 @@ class TestVersionSkewIsVisible:
     def test_a_mismatch_is_called_out_with_its_consequence(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        cli_main._warn_on_version_skew("0.8.1")
+        cli_main.warn_on_version_skew("0.8.1")
         printed = " ".join(plain(capsys.readouterr().err).split())
         assert cli_main.CLI_VERSION in printed
         assert "0.8.1" in printed
@@ -135,5 +135,5 @@ class TestVersionSkewIsVisible:
         assert "may not be readable" in printed
 
     def test_a_matching_stack_says_nothing(self, capsys: pytest.CaptureFixture[str]) -> None:
-        cli_main._warn_on_version_skew(cli_main.CLI_VERSION)
+        cli_main.warn_on_version_skew(cli_main.CLI_VERSION)
         assert plain(capsys.readouterr().err).strip() == ""

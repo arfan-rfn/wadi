@@ -512,10 +512,10 @@ def status() -> None:
             )
             raise typer.Exit(EXIT_UNREACHABLE) from None
         console.print(f"API: [green]{health['status']}[/green] (v{health['version']})")
-        _warn_on_version_skew(health["version"])
+        warn_on_version_skew(health["version"])
 
 
-def _warn_on_version_skew(api_version: str) -> None:
+def warn_on_version_skew(api_version: str) -> None:
     """Say when the CLI and the running stack are different releases.
 
     Each CLI renders a compose file pinning *its own* version's images under
