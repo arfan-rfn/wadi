@@ -3,6 +3,76 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.8.2 — 2026-08-09 (a list route serves a list shape)
+
+0.8.1 made a shared jar's types resolvable, and shape recovery did exactly what
+it should with them — without a ceiling. One service's endpoint list went from
+1.9 MB to **114 MB**, and the browser parsed all of it before drawing a row, so
+the endpoint workspace looked frozen. Fixing it turned up three more things
+that were hiding behind it.
+
+### Fixed
+
+- **A service's endpoint list is a list, not 804 whole endpoints.** The two
+  wire-shape fields were 124 MB of a 126 MB response; every other field of
+  every endpoint together is 2.5 MB. The list route now serves an
+  `EndpointSummary` and the shapes come with the per-endpoint detail the peek
+  already fetches. **114,546,092 → 2,479,867 bytes, 10.7–14.5 s → 0.09 s.**
+  They are absent from the type rather than set to null: `null` already means
+  "no request body" on 673 of those 804 endpoints, and a list that nulls them
+  for size cannot be told from one reporting a fact.
+- **Source for library code resolves.** A library's sources are staged into the
+  application's parse, so every anchor in library code named a path that exists
+  in the analyzed tree and in no repository's history — source-on-demand 404'd
+  on all of them, which on a real system is most of what you land on when
+  following a call. Staged paths now resolve against the library's own
+  repository at its own pinned commit.
+- **Switching project or snapshot works.** Both rows in the scope switcher were
+  wired to a callback the menu never calls, so clicking one did nothing at all.
+- **An endpoint's contract no longer renders as a result while it is loading,
+  or after it fails.** A pending fetch shows as pending and a failed one says
+  so with a retry, instead of falling through to "No request body on this
+  endpoint" — a claim about an endpoint nothing had read.
+- **Two guards that differ only in fields the chip does not draw collapse to
+  one chip** instead of painting the same relation twice and colliding on the
+  React key (60 of 804 endpoints on a real system).
+- **`wadi up` converges onto a running stack** instead of refusing because its
+  own orchestrator holds the API port, and no longer reads a socket left by a
+  dead client as a conflict.
+- **Running the e2e no longer kills a live local stack.** Its analyzer
+  container carried no memory limit, which does not mean "no limit" — it means
+  the JVM sizes its heap against the whole Docker VM. Beside a running stack,
+  whose own analyzer reserves 10 GB of a 15.6 GB VM, the two overcommit and
+  Docker starts killing containers: the stack's non-database services vanish
+  mid-run and the e2e fails intermittently. Bounded to 4 GB against a measured
+  peak of 807 MiB. CI never saw this — a fresh runner has no competing stack.
+
+### Changed
+
+- **Recovered shapes are bounded by size, not only by depth.** Cycle detection
+  is per walk path, which leaves sibling branches free to re-expand the same
+  entity subgraph — exponential against a bidirectional model, and one endpoint
+  reached 3 MB nested 25 deep. A shape that hits the ceiling says `truncated`,
+  the terminal that already meant exactly that. Existing snapshots keep the
+  shapes they were written with; this changes what new analyses record.
+- **What each endpoint calls downstream is one database aggregation** rather
+  than reading every flow graph in the service to union a handful of ids:
+  **804 round trips and 104,985 nodes materialised → one aggregation**, 4.4 s →
+  0.08 s.
+- **A snapshot's artifacts never expire from the client cache.** Snapshots are
+  immutable and pinned, so re-opening a service you have already looked at
+  costs nothing. The system and snapshot lists still refresh, because new runs
+  appear there.
+- **Loading is visible.** Placeholders had 3% contrast against the panel they
+  sit on and lived only in section bodies, which a collapsed section does not
+  draw. They have their own colour token now, and the section header carries a
+  spinner and the word `loading` whether the section is open or shut.
+
+### Contracts
+
+- `wadi-contracts` **1.24.0** — adds `EndpointSummary`, the list-row projection
+  of an endpoint. Additive: no stored artifact changes shape.
+
 ## 0.8.1 — 2026-08-07 (a library is not a service)
 
 A shared internal jar that lives in its own repository was being analyzed as if
