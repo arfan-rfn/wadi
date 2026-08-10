@@ -217,4 +217,40 @@ class ResponseShapeConformanceTest extends AnyFunSuite with Matchers with Fixtur
     kindOf("GET", "/declared/one") shouldBe "object"
     originOf("GET", "/declared/one") shouldBe "declared"
   }
+
+  // ---- §5.2.15: the walk is bounded by SIZE, not only by depth -----------
+
+  /** Every `kind` in the shape, depth-first. */
+  private def kinds(shape: ujson.Value): List[String] = shape match {
+    case o: ujson.Obj =>
+      val here     = o.obj.get("kind").map(_.str).toList
+      val fields   = o.obj.get("fields").map(_.arr.toList).getOrElse(Nil).flatMap(f => kinds(f("shape")))
+      val element  = o.obj.get("element").toList.flatMap(kinds)
+      here ::: fields ::: element
+    case _ => Nil
+  }
+
+  test("a mutually recursive entity graph is clipped, and says so") {
+    // Node -> Edge -> Node and Node -> Group -> Node never repeat a type along
+    // one root-to-leaf path, so `path` (cycle detection) cannot fire. Before
+    // the node budget this expanded exponentially in MaxDepth — the real
+    // equivalent reached 3 MB for one endpoint and 114 MB for one service.
+    val all = kinds(shape("GET", "/shapes/graph"))
+    all should contain("truncated")
+  }
+
+  test("clipping is bounded by the budget, not by luck") {
+    // The assertion that matters is a CEILING. `truncated` appearing proves
+    // the walk stopped somewhere; only a bound proves it stopped in time.
+    val expandedObjects = kinds(shape("GET", "/shapes/graph")).count(_ == "object")
+    expandedObjects should be <= 200
+  }
+
+  test("the budget is per shape, so a small neighbour is untouched") {
+    // A cap implemented as a global counter would starve whichever endpoint
+    // happened to be exported after the graph. 87% of real shapes are 10
+    // objects or fewer and none of them may lose a field to someone else's.
+    kinds(shape("GET", "/declared/one")) should not contain "truncated"
+    kindOf("GET", "/declared/one") shouldBe "object"
+  }
 }

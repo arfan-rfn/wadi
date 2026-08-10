@@ -145,4 +145,18 @@ public class ShapeController {
     public HttpEntity offCpg() {
         return ok(new AtomicInteger(1));
     }
+
+    /**
+     * A bidirectional entity graph — bounded by the node budget (§5.2.15).
+     *
+     * Eight entity types each referencing four others: no path repeats a
+     * type within the depth cap, so the cycle guard never fires and the
+     * expansion is exponential in it.
+     * The walk must stop and SAY it stopped, via `truncated`, rather than
+     * emitting a shape the size of the graph.
+     */
+    @GetMapping("/graph")
+    public HttpEntity graph() {
+        return ok(service.graphRoot());
+    }
 }

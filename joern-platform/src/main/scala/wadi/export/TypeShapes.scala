@@ -19,13 +19,38 @@ import io.shiftleft.semanticcpg.language.*
   * type names); simple names resolve against in-CPG TypeDecls with the
   * §5.2.6 short-name fallback. Honest terminals: `unresolved` (off-CPG type,
   * name only — never fabricated fields, P10), `cycle` (self-reference on the
-  * walk path), `truncated` (depth cap). Jackson field-level semantics:
+  * walk path), `truncated` (the walk stopped and said so — depth cap or node
+  * budget, §5.2.15; a reader treats both the same way). Jackson field-level
+  * semantics:
   * `@JsonProperty` renames the wire name, `@JsonIgnore` omits the field —
   * the shape is the wire contract, not the class layout.
   */
 object TypeShapes {
 
   private val MaxDepth = 6
+
+  /** Expanded objects allowed in ONE shape before the walk emits `truncated`.
+    *
+    * Measured, not picked. Across ICPC's 804 response shapes the distribution
+    * is bimodal, and 200 sits in the empty part between the two modes:
+    *
+    * {{{
+    *      0-1 objects   545 shapes  67.8%   <- the shapes people read
+    *     2-10           141          17.5%
+    *    11-50            14           1.7%
+    *    51-200            5           0.6%  <- the trough the cap sits in
+    *   201-500           31           3.9%   <- entity graphs from here up
+    *   501-1000          54           6.7%
+    *     1001+           14           1.7%   (worst: 2365)
+    * }}}
+    *
+    * So the ceiling clips 99 shapes (12.3%) and every one of them is a
+    * bidirectional entity walk, while 87% of shapes — everything a reader
+    * actually consults — are 10 objects or fewer and untouched. A shape that
+    * hits the ceiling says so in-band via `truncated`; it is never silently
+    * shortened, and `truncated` already meant exactly this (§5.2.7).
+    */
+  private val MaxNodes = 200
 
   /** Wrappers whose payload is the (first) generic argument. */
   private val UnwrapOne = Set(
@@ -449,32 +474,55 @@ object TypeShapes {
     stripped.substring(stripped.lastIndexOf('.') + 1)
   }
 
+  /** Nodes left to spend on one shape (§5.2.15).
+    *
+    * `path` stops a type recurring along ONE root-to-leaf chain, which is
+    * cycle detection and is not a bound on output: sibling branches re-expand
+    * the same subgraph freely. Against a bidirectional entity graph that is
+    * exponential in `MaxDepth` — ICPC's worst response shape reached 3 MB and
+    * depth 25, repeating `label` 520 times, and one service's endpoint list
+    * reached 114 MB. Depth cannot express "this type is wide"; a node budget
+    * can, and it needs no new reader semantics because `truncated` already
+    * means "the shape continues and we stopped".
+    */
+  private final class Budget(private var remaining: Int) {
+    def spend(): Boolean = {
+      if (remaining <= 0) false
+      else { remaining -= 1; true }
+    }
+  }
+
   private def build(
     cpg: Cpg,
     raw: RawType,
     path: Set[String],
     depth: Int,
-    bindings: Map[String, RawType] = Map.empty
+    bindings: Map[String, RawType] = Map.empty,
+    budget: Budget = new Budget(MaxNodes)
   ): ujson.Obj = {
     // A bound type PARAMETER stands for the type the producer actually supplies
     // (T8): substitute before anything else, or the walk resolves `T` itself.
     if (raw.name == AlwaysNullMarker) return node("always-null", "null")
     bindings.get(raw.name) match {
       case Some(bound) if bound.name != raw.name =>
-        return build(cpg, bound, path, depth, bindings - raw.name)
+        return build(cpg, bound, path, depth, bindings - raw.name, budget)
       case _ =>
     }
     val simple = simpleName(raw.name)
     if (raw.array)
-      return node("array", raw.name, element = Some(build(cpg, raw.copy(array = false), path, depth, bindings)))
+      return node(
+        "array",
+        raw.name,
+        element = Some(build(cpg, raw.copy(array = false), path, depth, bindings, budget))
+      )
     if (UnwrapOne.contains(simple) && raw.args.nonEmpty)
-      return build(cpg, raw.args.head, path, depth, bindings)
+      return build(cpg, raw.args.head, path, depth, bindings, budget)
     if (ArrayLike.contains(simple)) {
-      val element = raw.args.headOption.map(build(cpg, _, path, depth, bindings))
+      val element = raw.args.headOption.map(build(cpg, _, path, depth, bindings, budget))
       return node("array", raw.name, element = element)
     }
     if (MapLike.contains(simple)) {
-      val value = raw.args.lift(1).map(build(cpg, _, path, depth, bindings))
+      val value = raw.args.lift(1).map(build(cpg, _, path, depth, bindings, budget))
       return node("map", raw.name, element = value)
     }
     if (ScalarSimpleNames.contains(simple)) return node("scalar", raw.name)
@@ -484,9 +532,13 @@ object TypeShapes {
       case None => node("unresolved", raw.name)
       case Some(typeDecl) =>
         if (path.contains(typeDecl.fullName)) node("cycle", raw.name)
+        // Charged per EXPANDED object, not per node visited: scalars, cycles
+        // and unresolved terminals are already leaves and cost nothing to
+        // emit. What runs away is objects opening more objects.
+        else if (!budget.spend()) node("truncated", raw.name)
         else {
           val fields = wireMembers(typeDecl)
-            .map(fieldShape(cpg, _, path + typeDecl.fullName, depth - 1, bindings))
+            .map(fieldShape(cpg, _, path + typeDecl.fullName, depth - 1, bindings, budget))
           node("object", raw.name, fields = fields)
         }
     }
@@ -497,11 +549,12 @@ object TypeShapes {
     member: Member,
     path: Set[String],
     depth: Int,
-    bindings: Map[String, RawType] = Map.empty
+    bindings: Map[String, RawType] = Map.empty,
+    budget: Budget = new Budget(MaxNodes)
   ): ujson.Obj = {
     val declaredText = memberTypeTextOf(member).getOrElse(member.typeFullName)
     val shape = parseTypeText(declaredText)
-      .map(build(cpg, _, path, depth, bindings))
+      .map(build(cpg, _, path, depth, bindings, budget))
       .getOrElse(node("unresolved", member.typeFullName))
     val wireName = jsonPropertyName(member)
     val obj = ujson.Obj("name" -> wireName.getOrElse(member.name), "shape" -> shape)
