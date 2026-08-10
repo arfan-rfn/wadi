@@ -112,7 +112,7 @@ export function ScopeBar(props: ScopeBarProps) {
             {props.systems.map((s) => (
               <DropdownMenuItem
                 key={s.id}
-                onSelect={() => props.onSystem(s.id)}
+                onClick={() => props.onSystem(s.id)}
                 selected={s.id === props.systemId}
                 className="gap-3"
               >
@@ -166,7 +166,7 @@ export function ScopeBar(props: ScopeBarProps) {
             {props.snapshots.map((s) => (
               <DropdownMenuItem
                 key={s.id}
-                onSelect={() => props.onSnapshot(s.id)}
+                onClick={() => props.onSnapshot(s.id)}
                 selected={s.id === props.snapshotId}
                 title={`${s.id} — ${s.status ?? "pending"}`}
                 className="gap-3"

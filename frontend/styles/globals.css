@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -56,19 +56,19 @@
    decision baked into every component.
    ============================================================================ */
 :root {
-  --row-h: 1.875rem;   /* 30px */
-  --pad-x: 0.75rem;    /* 12px */
-  --pad-y: 0.5rem;     /* 8px  */
+  --row-h: 1.875rem; /* 30px */
+  --pad-x: 0.75rem; /* 12px */
+  --pad-y: 0.5rem; /* 8px  */
   --gap-dense: 0.5rem; /* 8px  */
-  --ctl-h: 1.875rem;   /* 30px */
+  --ctl-h: 1.875rem; /* 30px */
 }
 
 :root[data-density="compact"] {
-  --row-h: 1.5rem;      /* 24px */
-  --pad-x: 0.5625rem;   /* 9px  */
-  --pad-y: 0.3125rem;   /* 5px  */
+  --row-h: 1.5rem; /* 24px */
+  --pad-x: 0.5625rem; /* 9px  */
+  --pad-y: 0.3125rem; /* 5px  */
   --gap-dense: 0.3125rem;
-  --ctl-h: 1.625rem;    /* 26px */
+  --ctl-h: 1.625rem; /* 26px */
 }
 
 @theme inline {
@@ -125,6 +125,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-skeleton: var(--skeleton);
 
   /* The third foreground step. This exists so the 34 `text-muted-foreground/60`
      dilutions have somewhere legitimate to go: an already-low-contrast token
@@ -237,6 +238,13 @@
   --secondary: oklch(0.968 0.003 285);
   --secondary-foreground: var(--foreground);
   --muted: oklch(0.968 0.003 285);
+  /* Loading placeholders, and why they are not `--muted`. A skeleton has one
+     job — be seen — and `--muted` is 0.968 against a `--card` of 1.0, a 3%
+     step that vanishes on the panel where most of this app's loading happens.
+     Sibling of the `--muted-foreground` note above: an already-quiet token
+     reused one context too far is what makes a state invisible. Pitched near
+     `--border-strong`, i.e. clearly a surface, still obviously not content. */
+  --skeleton: oklch(0.9 0.005 285);
   --accent: oklch(0.955 0.004 285);
   --accent-foreground: var(--foreground);
 
@@ -333,6 +341,9 @@
   --secondary: oklch(0.262 0.007 285);
   --secondary-foreground: var(--foreground);
   --muted: oklch(0.262 0.007 285);
+  /* Dark has the same defect for the same reason: 0.262 on a 0.218 card is a
+     4% step. Lifted well clear of both card and background. */
+  --skeleton: oklch(0.32 0.008 285);
   --accent: oklch(0.285 0.008 285);
   --accent-foreground: var(--foreground);
 
@@ -399,7 +410,6 @@
    BASE
    ============================================================================ */
 @layer base {
-
   /* Tailwind v4 defaults the border colour to `currentcolor`. The template's
      compat shim pinned it to a hardcoded `--color-gray-200`, which ignored the
      theme entirely and painted light-grey hairlines onto the dark ground. It
@@ -418,7 +428,9 @@
 
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
     text-rendering: optimizeLegibility;
   }
 

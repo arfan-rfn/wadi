@@ -1,7 +1,7 @@
 "use client"
 
 import { useId, useState } from "react"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Loader2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -17,6 +17,7 @@ export function CollapsibleSection({
   count,
   defaultOpen = true,
   hint,
+  pending = false,
   children,
 }: {
   title: string
@@ -25,6 +26,17 @@ export function CollapsibleSection({
   defaultOpen?: boolean
   /** Short qualifier after the title, e.g. a shape's type name. */
   hint?: string
+  /**
+   * This section's content is still being fetched.
+   *
+   * The header carries the signal, not just the body, because the body is the
+   * one thing a collapsed section does not render: a closed section that was
+   * loading looked identical to one that had finished and held nothing. The
+   * spinner sits in the count slot — the count is unknown until the fetch
+   * lands, so the two never compete for the space, and it is where the eye
+   * already goes to size a section up.
+   */
+  pending?: boolean
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -57,14 +69,31 @@ export function CollapsibleSection({
               {hint}
             </span>
           ) : null}
-          {count != null ? (
+          {pending ? (
+            <span className="ml-auto inline-flex items-center gap-1.5 text-2xs text-muted-foreground">
+              <Loader2
+                aria-hidden
+                className="size-3 animate-spin motion-reduce:animate-none"
+              />
+              {/* Named, not just spun. A bare spinner beside a title says
+                  "something is happening"; the word says which of the two
+                  things a reader is waiting for, and it is what a screen
+                  reader announces when the section is collapsed. */}
+              loading
+            </span>
+          ) : count != null ? (
             <span className="ml-auto font-mono text-2xs tabular-nums text-muted-foreground">
               {count}
             </span>
           ) : null}
         </button>
       </h3>
-      <div id={bodyId} hidden={!open} className="px-3.5 pb-3.5">
+      <div
+        id={bodyId}
+        hidden={!open}
+        aria-busy={pending || undefined}
+        className="px-3.5 pb-3.5"
+      >
         {children}
       </div>
     </section>

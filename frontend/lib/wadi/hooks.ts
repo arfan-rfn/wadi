@@ -7,6 +7,23 @@ import { QUERY_KEYS } from "@/config/query-keys"
 import { wadiApi } from "@/lib/wadi/api"
 import { newestSucceeded } from "@/lib/wadi/routes"
 
+/**
+ * A snapshot's ARTIFACTS never change, so they never go stale (§5.2.15).
+ *
+ * Snapshots are immutable and SHA-pinned, and §7's storage rule is that
+ * artifacts are never rewritten in place — a re-analysis writes a new
+ * snapshot. The blanket 60s default therefore expired data that is provably
+ * still correct and refetched it, which on a service's endpoint list meant
+ * paying for the whole list again just for standing still.
+ *
+ * This covers the DERIVED reads only. The snapshot record itself keeps the
+ * default window because its `status` moves while a run is in flight, and the
+ * two list queries do because new runs and systems appear. The one caveat: an
+ * artifact read taken WHILE a snapshot is still running caches whatever
+ * existed then — the status chip is what refreshes and says to look again.
+ */
+const IMMUTABLE = { staleTime: Number.POSITIVE_INFINITY } as const
+
 export function useSystems() {
   return useQuery({ queryKey: QUERY_KEYS.systems, queryFn: wadiApi.systems })
 }
@@ -69,6 +86,7 @@ export function useServices(snapshotId: string | null) {
     queryKey: QUERY_KEYS.services(snapshotId ?? ""),
     queryFn: () => wadiApi.services(snapshotId as string),
     enabled: snapshotId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -80,6 +98,7 @@ export function useEndpoints(
     queryKey: QUERY_KEYS.endpoints(snapshotId ?? "", serviceId ?? ""),
     queryFn: () => wadiApi.endpoints(snapshotId as string, serviceId as string),
     enabled: snapshotId !== null && serviceId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -88,6 +107,7 @@ export function useIcfg(snapshotId: string | null, endpointId: string | null) {
     queryKey: QUERY_KEYS.icfg(snapshotId ?? "", endpointId ?? ""),
     queryFn: () => wadiApi.icfg(snapshotId as string, endpointId as string),
     enabled: snapshotId !== null && endpointId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -101,6 +121,7 @@ export function useEndpointDetail(
     queryFn: () =>
       wadiApi.endpointDetail(snapshotId as string, endpointId as string),
     enabled: snapshotId !== null && endpointId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -109,6 +130,7 @@ export function useCoverage(snapshotId: string | null) {
     queryKey: QUERY_KEYS.coverage(snapshotId ?? ""),
     queryFn: () => wadiApi.coverage(snapshotId as string),
     enabled: snapshotId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -121,6 +143,7 @@ export function useRemoteEdges(
     queryFn: () =>
       wadiApi.remoteEdges(snapshotId as string, serviceId as string),
     enabled: snapshotId !== null && serviceId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -130,6 +153,7 @@ export function useSystemGraph(enabled: boolean, snapshotId: string | null) {
     queryKey: QUERY_KEYS.systemGraph(snapshotId ?? "none"),
     queryFn: () => wadiApi.systemGraph(snapshotId as string),
     enabled: enabled && snapshotId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -147,6 +171,7 @@ export function useEndpointDependencies(
     queryFn: () =>
       wadiApi.endpointDependencies(snapshotId as string, serviceId as string),
     enabled: snapshotId !== null && serviceId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -158,6 +183,7 @@ export function useSystemAuth(enabled: boolean, snapshotId: string | null) {
     queryKey: QUERY_KEYS.systemAuth(snapshotId ?? "none"),
     queryFn: () => wadiApi.systemAuth(snapshotId as string),
     enabled: enabled && snapshotId !== null,
+    ...IMMUTABLE,
   })
 }
 
@@ -174,7 +200,7 @@ export function useSourceFile(
     queryKey: QUERY_KEYS.sourceFile(snapshotId, serviceId, file, startLine),
     queryFn: () => wadiApi.sourceFile(snapshotId, serviceId, file, startLine),
     enabled,
-    staleTime: Infinity, // pinned-SHA content never changes
+    ...IMMUTABLE, // pinned-SHA content never changes
   })
 }
 
@@ -198,6 +224,6 @@ export function useSource(
     queryFn: () =>
       wadiApi.source(snapshotId, serviceId, file, startLine, endLine),
     enabled,
-    staleTime: Infinity, // pinned-SHA content never changes
+    ...IMMUTABLE, // pinned-SHA content never changes
   })
 }

@@ -145,6 +145,59 @@ describe("AccessChip — the endpoint row's one auth fact", () => {
     expect(view.queryByText("Authenticated")).toBeNull()
   })
 
+  it("shows one chip when two guards differ only in fields it never renders", () => {
+    // A class-level `@ContestManager` beside a method-level
+    // `@ContestManager(acl = ...)` are two records by design — `authorities`
+    // are conjunctive, and the contract keeps them apart so the conjunction
+    // survives (§5.2.12). But the chip renders `relation` + `resource_type`
+    // and nothing else, so both painted the identical string twice and
+    // collided on the React key. 60 of ICPC's 804 endpoints hit this.
+    const view = within(
+      renderWithQuery(
+        <AccessChip
+          state="required"
+          roles={[]}
+          relationships={[
+            {
+              relation: "contest-manager",
+              resource_type: "Contest",
+              authorities: ["CONTEST_GRANT_PERMISSIONS"],
+            },
+            {
+              relation: "contest-manager",
+              resource_type: "Contest",
+              authorities: [],
+            },
+          ]}
+        />
+      ).container
+    )
+    expect(view.getAllByText("contest-manager")).toHaveLength(1)
+    expect(view.getAllByText("·Contest")).toHaveLength(1)
+  })
+
+  it("keeps relations that differ in what it DOES render", () => {
+    // The dedupe must key on the rendered pair, not collapse to one chip: a
+    // second relation, or the same relation on another resource, is a
+    // different policy and has to stay visible.
+    const view = within(
+      renderWithQuery(
+        <AccessChip
+          state="required"
+          roles={[]}
+          relationships={[
+            { relation: "contest-manager", resource_type: "Contest" },
+            { relation: "contest-manager", resource_type: "Problem" },
+            { relation: "owner", resource_type: "Contest" },
+          ]}
+        />
+      ).container
+    )
+    expect(view.getAllByText("contest-manager")).toHaveLength(2)
+    expect(view.getByText("owner")).toBeInTheDocument()
+    expect(view.getByText("·Problem")).toBeInTheDocument()
+  })
+
   it("labels a relational endpoint for assistive tech, not only visually", () => {
     const view = within(
       renderWithQuery(
