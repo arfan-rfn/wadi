@@ -13,6 +13,12 @@ from wadi_cli.main import app
 runner = CliRunner()
 
 
+def _no_stragglers() -> tuple[list[str], list[str]]:
+    """`wadi down`'s third teardown step shells out to docker; stub it like the
+    other two so this stays a unit test (see cli/tests/conftest.py)."""
+    return ([], [])
+
+
 @pytest.fixture
 def compose_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
@@ -88,7 +94,7 @@ class TestDownIncludesProfiles:
     ) -> None:
         # Reaping shells out to docker; stub it so this stays a unit test.
         monkeypatch.setattr(compose, "reap_managed_containers", list)
-        monkeypatch.setattr(compose, "finish_network_teardown", lambda: ([], []))
+        monkeypatch.setattr(compose, "finish_network_teardown", _no_stragglers)
         result = runner.invoke(app, ["down"])
         assert result.exit_code == 0
         assert compose_calls == [

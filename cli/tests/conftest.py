@@ -23,7 +23,7 @@ that forgets fails loudly here instead of quietly on the machine.
 """
 
 import subprocess
-from typing import Any
+from typing import cast
 
 import pytest
 
@@ -39,8 +39,11 @@ def no_real_docker(monkeypatch: pytest.MonkeyPatch) -> None:
     after this one. Nothing needs to opt in — only to be honest about it.
     """
 
-    def refuse(args: Any = None, *rest: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        command = " ".join(args) if isinstance(args, list) else str(args)
+    def refuse(
+        args: object = None, *rest: object, **kwargs: object
+    ) -> "subprocess.CompletedProcess[str]":
+        parts = cast(list[object], args) if isinstance(args, list) else [args]
+        command = " ".join(str(part) for part in parts)
         raise AssertionError(
             "a CLI test tried to run a real command: "
             f"{command!r}. Stub the compose call it comes from — this suite "

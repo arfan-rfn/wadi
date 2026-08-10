@@ -46,6 +46,12 @@ def _no_compose_files() -> list[Path]:
     return []
 
 
+def _no_stragglers() -> tuple[list[str], list[str]]:
+    """`wadi down`'s third teardown step shells out to docker; stub it like the
+    other two so this stays a unit test (see cli/tests/conftest.py)."""
+    return ([], [])
+
+
 @pytest.fixture
 def compose_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
@@ -84,7 +90,7 @@ class TestDownReapsManagedContainers:
 
         monkeypatch.setattr(compose, "reap_managed_containers", fake_reap)
         monkeypatch.setattr(compose, "run_compose", fake_run_compose)
-        monkeypatch.setattr(compose, "finish_network_teardown", lambda: ([], []))
+        monkeypatch.setattr(compose, "finish_network_teardown", _no_stragglers)
         result = runner.invoke(app, ["down"])
 
         assert result.exit_code == 0, result.output
@@ -99,7 +105,7 @@ class TestDownReapsManagedContainers:
             return []
 
         monkeypatch.setattr(compose, "reap_managed_containers", reap_nothing)
-        monkeypatch.setattr(compose, "finish_network_teardown", lambda: ([], []))
+        monkeypatch.setattr(compose, "finish_network_teardown", _no_stragglers)
         result = runner.invoke(app, ["down"])
 
         assert result.exit_code == 0, result.output
@@ -485,10 +491,6 @@ def _no_reap() -> list[str]:
 
 def _quiet_compose(action: list[str], **_kwargs: object) -> None:
     return None
-
-
-def _no_stragglers() -> tuple[list[str], list[str]]:
-    return [], []
 
 
 def _release(version: str) -> Callable[..., str]:
