@@ -146,6 +146,8 @@ class TestArtifactRepository:
         assert [row.id for row in rows] == [endpoint.id]
         assert not hasattr(rows[0], "response_schema")
         assert not hasattr(rows[0], "request_schema")
+        # And the definitions that exist only to serve them (§5.2.16).
+        assert not hasattr(rows[0], "type_defs")
         # The envelope survives: a row reports the contract that WROTE it.
         assert rows[0].schema_version == endpoint.schema_version
         assert rows[0].auth == endpoint.auth

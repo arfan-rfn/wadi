@@ -74,6 +74,35 @@ class TestListingTools:
             await service.list_services("snap_" + "0" * 16)
 
 
+class TestEndpointDetailTool:
+    """The contract an agent needs, and the hole that made this necessary.
+
+    §5.2.15 moved the wire shapes off the list row for size. `list_endpoints`
+    had been the ONLY tool exposing them, and no detail tool existed — so the
+    surface whose entire purpose is agent-readable ground truth silently lost
+    the ability to say what an endpoint accepts or returns. It was verified end
+    to end in the UI, which fetches detail over HTTP, and never opened here.
+    """
+
+    async def test_the_shapes_a_list_row_does_not_carry(
+        self, database: WadiDatabase, seeded: dict[str, str]
+    ) -> None:
+        service = _service(database)
+        detail = await service.endpoint_detail(seeded["snapshot_id"], seeded["endpoint_id"])
+        assert detail["id"] == seeded["endpoint_id"]
+        # Present as KEYS even when null — the list omits them entirely, and an
+        # agent must be able to tell "no request body" from "not carried here".
+        assert "request_schema" in detail
+        assert "response_schema" in detail
+
+    async def test_unknown_endpoint_points_at_the_tool_that_lists_them(
+        self, database: WadiDatabase, seeded: dict[str, str]
+    ) -> None:
+        service = _service(database)
+        with pytest.raises(NotFoundError, match="list_endpoints"):
+            await service.endpoint_detail(seeded["snapshot_id"], "ep_" + "0" * 16)
+
+
 class TestEndpointIcfgTool:
     async def test_method_rollup_default(
         self, database: WadiDatabase, seeded: dict[str, str]
@@ -125,6 +154,7 @@ class TestServerRegistration:
             "list_snapshots",
             "list_services",
             "list_endpoints",
+            "endpoint_detail",
             "endpoint_icfg",
             "coverage_report",
             "remote_edges",

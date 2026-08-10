@@ -121,12 +121,16 @@ class ArtifactRepository:
         trimming the response alone moved the payload 47x and the clock barely
         at all. Excluding them server-side is what makes the route fast, not
         just small.
+
+        `type_defs` goes with them (§5.2.16): it exists to hold the types the
+        shapes reference, so without the shapes it is dead weight, and
+        `EndpointSummary` has no field for it.
         """
         cursor = (
             self._db.collection(ENDPOINTS)
             .find(
                 {"snapshot_id": snapshot_id, "service_id": service_id},
-                projection={"request_schema": 0, "response_schema": 0},
+                projection={"request_schema": 0, "response_schema": 0, "type_defs": 0},
             )
             .sort([("simplified_uri", 1), ("http_method", 1)])
         )

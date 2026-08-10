@@ -20,7 +20,8 @@ SERVER_INSTRUCTIONS = (
     "services, REST endpoints (with structured auth), per-endpoint control-flow "
     "graphs down to database/HTTP/message-queue calls, and the stitched "
     "cross-service graph. Navigate top-down: "
-    "list_systems -> list_snapshots -> list_services -> list_endpoints -> endpoint_icfg. "
+    "list_systems -> list_snapshots -> list_services -> list_endpoints -> "
+    "endpoint_detail | endpoint_icfg. "
     "Before trusting cross-service answers, call coverage_report for the snapshot "
     "first: it lists what the map knows it doesn't know — placeholder services, "
     "external APIs, unresolved/low-confidence calls. Use remote_edges for a "
@@ -54,6 +55,25 @@ def create_server(service: WadiMcpService) -> MCPServer:
     async def list_endpoints(snapshot_id: str, service_id: str) -> list[dict[str, Any]]:
         """List a service's REST endpoints: method, URI, params, structured auth, handler."""
         return await service.list_endpoints(snapshot_id, service_id)
+
+    @mcp.tool()
+    async def endpoint_detail(
+        snapshot_id: str, endpoint_id: str, resolve_shapes: bool = True
+    ) -> dict[str, Any]:
+        """One endpoint's full contract: request/response shapes, declared
+        statuses, params, structured auth, handler.
+
+        The shapes are NOT on `list_endpoints` rows — that list is deliberately
+        light — so this is where you read what an endpoint accepts and returns.
+
+        `resolve_shapes=True` (default) gives a plain tree. Pass False for the
+        shared form: each type defined once in `type_defs` and referenced
+        wherever it occurs, which is dramatically smaller when a response names
+        the same types repeatedly, as entity models do.
+        """
+        return await service.endpoint_detail(
+            snapshot_id, endpoint_id, resolve_shapes=resolve_shapes
+        )
 
     @mcp.tool()
     async def coverage_report(snapshot_id: str) -> dict[str, Any]:
