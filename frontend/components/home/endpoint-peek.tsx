@@ -166,6 +166,8 @@ export function EndpointPeek({
   // recovered no shape, which is a different answer and reads as one below.
   const requestSchema = detail.data?.endpoint.request_schema
   const responseSchema = detail.data?.endpoint.response_schema
+  // The types those shapes reference, defined once each (§5.2.16).
+  const typeDefs = detail.data?.endpoint.type_defs
   // Both sections below state a RESULT when they have no shape ("no request
   // body", "response shape unknown"). Those are claims about the analysis, and
   // they were safe while the shapes rode in on the list row — they were always
@@ -460,7 +462,7 @@ export function EndpointPeek({
           ) : shapesFailed ? (
             <FetchFailed onRetry={retryDetail} />
           ) : requestSchema ? (
-            <SchemaTree shape={requestSchema} />
+            <SchemaTree shape={requestSchema} defs={typeDefs} />
           ) : (
             <p className="text-2xs text-muted-foreground">
               No request body on this endpoint.
@@ -501,7 +503,7 @@ export function EndpointPeek({
           ) : shapesFailed ? (
             <FetchFailed onRetry={retryDetail} />
           ) : responseSchema ? (
-            <SchemaTree shape={responseSchema} />
+            <SchemaTree shape={responseSchema} defs={typeDefs} />
           ) : (
             <p className="text-2xs text-muted-foreground">
               Response shape unknown — analyzed before contract recovery, or no
