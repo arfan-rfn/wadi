@@ -172,6 +172,24 @@ which origin may call, not which principal — but a scoped read is still useful
 
 ## Completed
 
+### `--wait` reported a healthy run as a dead API
+**Closed:** v0.8.2
+
+`wait_for_snapshot` polled every 2 s on a keep-alive connection and treated the
+first transport failure as fatal. On a real ICPC analysis the connection
+dropped 64 seconds into a 270-second run — 32 polls reached the server, then
+nothing — and the CLI printed "the wadi API is not answering" with "try:
+`wadi up`", against a stack that was up. The orchestrator logged no error, did
+not restart, and the snapshot **succeeded**.
+
+The trigger is environmental (this Docker VM drops connections under analysis
+load, same pressure as the entry below) and the CLI behaviour was wrong
+regardless: a failed poll says nothing about the run, which proceeds in the
+orchestrator either way. Failures are retried within a 60 s window and shown
+while they last; giving up now says the run may still be going and points at
+`wadi status` / `wadi snapshots` rather than at restarting a healthy stack.
+
+
 ### The e2e killed a live local stack (and flaked doing it)
 **Closed:** v0.8.2
 

@@ -39,6 +39,14 @@ that were hiding behind it.
 - **`wadi up` converges onto a running stack** instead of refusing because its
   own orchestrator holds the API port, and no longer reads a socket left by a
   dead client as a conflict.
+- **`wadi analyze --wait` survives a flaky connection.** A single dropped poll
+  ended the wait with "the wadi API is not answering — try: `wadi up`". Seen on
+  a real 4.5-minute run: the connection dropped 64 seconds in, the orchestrator
+  logged nothing and never restarted, and the snapshot went on to **succeed** —
+  so the CLI reported a healthy analysis as a dead API and sent the reader to
+  restart the thing that was working. Transport failures and timeouts are now
+  retried within a bounded window and shown while they last, and giving up says
+  the run may still be going and how to check it.
 - **Running the e2e no longer kills a live local stack.** Its analyzer
   container carried no memory limit, which does not mean "no limit" — it means
   the JVM sizes its heap against the whole Docker VM. Beside a running stack,
