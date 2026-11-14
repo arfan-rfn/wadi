@@ -208,6 +208,87 @@ which origin may call, not which principal — but a scoped read is still useful
 
 ---
 
+## Entity access (§5.2.17, Phase 2.10)
+
+Opened with the decision record on 2026-11-13, before any code. If milestone M8 (cross-service
+composition) is cut, it gets an entry here at that point.
+
+### Three decisions the gate needs are open
+**Priority:** P1 (blocks milestone M5, not M0 to M4)
+**Opened:** v0.8.2
+
+The precision bar for a single `create` or `update` claim: the number, whether it is a point
+estimate or a lower confidence bound, and the minimum labeled members per basis. The scope of
+a verdict: a release gate across labeled corpora (proposed) or per corpus. Who labels the
+saves. The bar has to be written before any save is labeled.
+
+### Dirty-checking updates are unclaimed
+**Priority:** P2
+**Opened:** v0.8.2
+
+A setter on a managed entity inside `@Transactional` updates a row with no `save` call. v1 does
+not detect it and the coverage section names it as unmeasured. Train-ticket has none (0 of 37
+update handlers). ICPC is unmeasured: 165 of its 187 `@Transactional` files contain no save
+call. Milestone M7 opens twenty ICPC update endpoints before any ICPC entity number is
+published, and that result decides whether detection is built.
+
+### "No repository call found" is not withheld when another mechanism is reachable
+**Priority:** P2
+**Opened:** v0.8.2
+
+An endpoint whose only write is `entityManager.persist` reads "no repository call found" with
+the v1 limits beside it. The stronger form withholds the negative when the endpoint's closure
+reaches an unmodelled persistence type. Decide at the ICPC milestone, which has 12
+`EntityManager` calls.
+
+### Database calls inside lambda bodies reach no endpoint flow
+**Priority:** P2
+**Opened:** v0.8.2
+
+They are counted in the per-service accounting as "in no endpoint flow" and are in no
+endpoint's entity summary. The fix is finding A1 in `docs/foundation-hardening-plan.md`.
+Three such writes exist across the three corpora, all in ICPC.
+
+### Cascaded operations are not followed
+**Priority:** P3
+**Opened:** v0.8.2
+
+`delete(order)` reports `Order` only. Following a cascade needs `DataModel.relations`, which
+nothing populates. ICPC has 86 `cascade =` declarations and yas has 9.
+
+### Other persistence mechanisms are unmarked
+**Priority:** P3
+**Opened:** v0.8.2
+
+`EntityManager` (12 calls in ICPC), `JdbcTemplate` (1 class in yas), Elasticsearch (yas),
+MyBatis, `MongoTemplate`. Each needs its own sink detection, its own way to name the entity and
+its own fixture.
+
+### An existence check with an early return stays "create or update"
+**Priority:** P3
+**Opened:** v0.8.2
+
+The existence-guard basis reads a `save` that sits directly inside the `if` or `else` of the
+check. `if (!found) return ...; repo.save(x)` needs dominance reasoning and is left two-valued.
+Measure how many train-ticket saves land there before building it.
+
+### Entity nodes in Neo4j
+**Priority:** P3
+**Opened:** v0.8.2
+
+§6 promises "every DB it touches" as a Neo4j traversal. Phase 2.10 answers from Mongo and
+composes one cross-service hop at read time.
+
+### Outside ground truth for entity access on TrainTicket
+**Priority:** P3
+**Opened:** v0.8.2
+
+Abdelfattah et al. (CLOSER 2023) built a hand-validated set of 1,364 CRUD operations on
+TrainTicket. Ask the authors for it. It is a different revision from `train-ticket-aitest`, so
+check how much of it maps before relying on it.
+
+---
+
 ## Completed
 
 ### `--wait` reported a healthy run as a dead API

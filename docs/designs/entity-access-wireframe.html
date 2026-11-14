@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Entity access wireframe</title>
+<style>
+  /* Rough on purpose: system font, grey lines, no colour. This checks layout, not style. */
+  * { box-sizing: border-box; }
+  body { font: 13px/1.4 -apple-system, "Segoe UI", sans-serif; color: #222; background: #fff; margin: 24px; }
+  h1 { font-size: 16px; margin: 0 0 2px; }
+  h2 { font-size: 13px; margin: 28px 0 8px; text-transform: none; }
+  .note { color: #666; font-size: 12px; margin: 0 0 10px; }
+  .frame { border: 1.5px solid #555; border-radius: 3px; }
+  .bar { border-bottom: 1px solid #999; padding: 6px 10px; display: flex; gap: 10px; align-items: center; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .cols { display: grid; grid-template-columns: 300px 1fr 300px; min-height: 330px; }
+  .cols > div { border-right: 1px solid #999; padding: 8px; }
+  .cols > div:last-child { border-right: 0; }
+  .seg { display: inline-flex; border: 1px solid #555; border-radius: 3px; overflow: hidden; }
+  .seg span { padding: 2px 12px; }
+  .seg .on { background: #ddd; font-weight: 600; }
+  .row { border: 1px solid #bbb; border-radius: 3px; padding: 6px 8px; margin-top: 6px; }
+  /* Selection is an inset fill plus a full ring. Never a one-sided accent bar. */
+  .row.sel { background: #eee; outline: 2px solid #333; }
+  .verb { display: inline-block; border: 1px solid #555; border-radius: 2px; padding: 0 5px; font-size: 11px; margin-right: 3px; }
+  .verb.two { border-style: dashed; }
+  .sub { margin: 4px 0 0 10px; color: #444; font-size: 12px; }
+  .sub div { margin-top: 2px; }
+  .dim { color: #777; }
+  .hop { border: 1px dashed #999; border-radius: 3px; padding: 6px 8px; margin-top: 6px; }
+  .foot { border-top: 1px solid #bbb; margin-top: 10px; padding-top: 6px; font-size: 11px; color: #555; }
+  .node { border: 1px solid #999; border-radius: 3px; padding: 4px 8px; margin: 6px 0; width: 78%; }
+  .node.hit { background: #eee; outline: 2px solid #333; }
+  .states { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .states .frame { padding: 8px; min-height: 96px; }
+  .states b { display: block; font-size: 11px; color: #666; margin-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #bbb; padding: 4px 8px; text-align: left; }
+  th { background: #f3f3f3; font-weight: 600; }
+  td.n, th.n { text-align: center; width: 64px; }
+  td.zero { color: #999; }
+  td.flag { font-size: 11px; color: #444; }
+  .strip { display: flex; gap: 18px; padding: 6px 10px; border-bottom: 1px solid #999; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Entity access: wireframe</h1>
+<p class="note">Rough layout sketch. Names come from train-ticket. Every number on this page is illustrative, not measured.</p>
+
+<h2>1. Endpoint workspace, left pane switched to Data</h2>
+<p class="note">Q7: the left pane gains a Calls / Data switch. The flow canvas and the source pane stay where they are.</p>
+
+<div class="frame">
+  <div class="bar">
+    <span class="mono"><b>PUT</b> /api/v1/consignservice/consigns</span>
+    <span class="dim">ts-consign-service</span>
+  </div>
+  <div class="cols">
+    <div>
+      <!-- The switch replaces nothing: Calls is today's call tree, unchanged. -->
+      <div class="seg"><span>Calls</span><span class="on">Data</span></div>
+
+      <!-- First thing read: the entity and its verbs. Second: which calls. Third: why. -->
+      <div class="row sel">
+        <b>ConsignRecord</b> <span class="dim">consign_record</span><br>
+        <span class="verb">read</span><span class="verb">update</span>
+        <span class="dim">3 calls</span>
+        <div class="sub mono">
+          <div>findById &nbsp;<span class="dim">read · method name</span></div>
+          <div>findById &nbsp;<span class="dim">read · method name</span></div>
+          <div>save &nbsp;<span class="dim">update · saved object was read here</span></div>
+        </div>
+      </div>
+
+      <!-- A save that cannot be split shows both letters with a dashed outline and says why. -->
+      <div class="row">
+        <b>ConsignPrice</b> <span class="dim">consign_price</span><br>
+        <span class="verb two">create or update</span>
+        <span class="dim">1 call</span>
+        <div class="sub mono">
+          <div>save &nbsp;<span class="dim">object is read or new, by branch</span></div>
+        </div>
+      </div>
+
+      <!-- Q5: other services' entities are composed at read time and labelled with the hop. -->
+      <div class="hop">
+        <span class="dim">Through 1 call to ts-consign-price-service</span><br>
+        <b>ConsignPrice</b> <span class="verb">read</span>
+        <div class="sub mono dim">GET /consignprice/{weight}/{isWithinRegion}</div>
+      </div>
+
+      <div class="foot">
+        4 of 4 database calls bound to an entity and a verb.<br>
+        Not measured: cascades, updates through setters.
+      </div>
+    </div>
+
+    <div>
+      <span class="dim">Flow canvas (unchanged)</span>
+      <!-- Selecting an entity reuses the existing trace highlight on its database calls. -->
+      <div class="node mono">updateConsignRecord(request, headers)</div>
+      <div class="node mono hit">repository.findById(id) &nbsp;<span class="dim">db</span></div>
+      <div class="node mono">if weight changed</div>
+      <div class="node mono">restTemplate.exchange(GET …) &nbsp;<span class="dim">remote</span></div>
+      <div class="node mono hit">repository.save(originalRecord) &nbsp;<span class="dim">db</span></div>
+      <div class="node mono">return Response</div>
+    </div>
+
+    <div>
+      <span class="dim">Source (unchanged)</span>
+      <div class="mono" style="margin-top:8px; color:#444">
+        ConsignServiceImpl.java:79<br><br>
+        ConsignRecord originalRecord =<br>&nbsp;&nbsp;repository.findById(…).get();<br>
+        originalRecord.setPhone(…);<br>
+        …<br>
+        repository.save(originalRecord);
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>2. The Data list in its other states</h2>
+<p class="note">A failed fetch must not read as a finding, and an endpoint that only forwards must not read as empty (Q26).</p>
+<div class="states">
+  <div class="frame">
+    <b>Forwards only</b>
+    No local entities.<br>
+    Forwards to <span class="mono">PUT ts-station-service /stations</span>
+    <div class="hop" style="margin-top:6px"><b>Station</b> <span class="verb">read</span><span class="verb">update</span> <span class="dim">1 hop</span></div>
+  </div>
+  <div class="frame">
+    <b>No database call</b>
+    This endpoint makes no database call and calls no other service.
+  </div>
+  <div class="frame">
+    <b>Verb not read</b>
+    <b>Topic</b> <span class="verb two">unknown</span>
+    <div class="sub mono dim">@Query(name = …) not resolved</div>
+  </div>
+  <div class="frame">
+    <b>Fetch failed</b>
+    Could not load entity access for this endpoint. <u>Retry</u>
+    <div class="dim" style="margin-top:4px">No claim is shown.</div>
+  </div>
+</div>
+
+<h2>3. Home page, system Data view</h2>
+<p class="note">Q6: the entity by operation matrix. Each cell is the number of endpoints that may perform that operation. Clicking a cell lists them.</p>
+
+<div class="frame">
+  <div class="strip">
+    <span><b>Database calls</b> 612</span>
+    <span>bound to entity and verb 598</span>
+    <span>create or update 61</span>
+    <span>verb unknown 9</span>
+    <span>inside lambdas, not in any flow 5</span>
+    <span class="dim">Not measured: cascades, setter updates</span>
+  </div>
+  <div style="padding:8px">
+    <span class="dim">Filter entities…</span>
+    <table style="margin-top:6px">
+      <tr><th>Entity</th><th>Service</th><th class="n">Create</th><th class="n">Read</th><th class="n">Update</th><th class="n">Delete</th><th>Notes</th></tr>
+      <tr><td><b>Order</b></td><td>ts-order-service</td><td class="n">2</td><td class="n">9</td><td class="n">4</td><td class="n">1</td><td class="flag"></td></tr>
+      <tr><td><b>ConsignRecord</b></td><td>ts-consign-service</td><td class="n">1</td><td class="n">4</td><td class="n">1</td><td class="n zero">0</td><td class="flag">no endpoint deletes it</td></tr>
+      <tr><td><b>Config</b></td><td>ts-config-service</td><td class="n" colspan="1">1</td><td class="n">3</td><td class="n">0 <span class="dim">+1?</span></td><td class="n">1</td><td class="flag">1 save is create or update</td></tr>
+      <tr><td><b>User</b></td><td>ts-user-service</td><td class="n">1</td><td class="n">3</td><td class="n zero">0</td><td class="n">2</td><td class="flag">update is delete then save</td></tr>
+      <tr><td><b>NotifyInfo</b></td><td>ts-notification-service</td><td class="n zero">0</td><td class="n zero">0</td><td class="n zero">0</td><td class="n zero">0</td><td class="flag">declared, no endpoint reaches it</td></tr>
+    </table>
+    <!-- A grey zero is measured. The Notes column carries what a bare number would hide. -->
+    <div class="foot">A zero is measured for Spring Data repositories only. Other mechanisms are listed under unexercised vocabulary.</div>
+  </div>
+</div>
+
+</body>
+</html>
