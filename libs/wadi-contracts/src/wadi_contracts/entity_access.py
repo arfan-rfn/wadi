@@ -360,7 +360,11 @@ class EntityCoverageSection(WadiModel):
 
     services_reporting: int = Field(ge=0, description="Boundaries that carry accounting")
     services_predating: int = Field(
-        ge=0, description="Boundaries whose accounting is None (written before the phase)"
+        ge=0,
+        description=(
+            "Service boundaries whose accounting is None: written before the phase, or "
+            "extraction failed (the boundary's extraction_error tells them apart)"
+        ),
     )
     call_sites: int = Field(ge=0)
     in_endpoint_flow: int = Field(ge=0)

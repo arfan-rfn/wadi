@@ -499,7 +499,7 @@
           "type": "integer"
         },
         "services_predating": {
-          "description": "Boundaries whose accounting is None (written before the phase)",
+          "description": "Service boundaries whose accounting is None: written before the phase, or extraction failed (the boundary's extraction_error tells them apart)",
           "minimum": 0,
           "title": "Services Predating",
           "type": "integer"

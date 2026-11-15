@@ -216,7 +216,7 @@ export type ImplementedInProject1 = number
 export type InEndpointFlow1 = number
 export type InNoEndpointFlow1 = number
 /**
- * Boundaries whose accounting is None (written before the phase)
+ * Service boundaries whose accounting is None: written before the phase, or extraction failed (the boundary's extraction_error tells them apart)
  */
 export type ServicesPredating = number
 /**
