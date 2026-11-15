@@ -384,5 +384,14 @@ describe("withheld columns (C6)", () => {
     expect(withheldColumns({ entity_coverage: before127 })).toEqual({
       kind: "unread",
     })
+    // The API serializes a pre-1.27.0 report's missing field as null.
+    expect(
+      withheldColumns({
+        entity_coverage: {
+          ...CRUD_MATRIX_ENTITY_COVERAGE,
+          gated_operations: null,
+        },
+      })
+    ).toEqual({ kind: "unread" })
   })
 })

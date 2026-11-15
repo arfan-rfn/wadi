@@ -394,7 +394,9 @@ export function withheldColumns(
   report: Pick<CoverageReport, "entity_coverage"> | undefined
 ): WithheldColumns {
   const gated = report?.entity_coverage?.gated_operations
-  if (gated === undefined) return { kind: "unread" }
+  // `undefined` when the section lacks the key, `null` when the API sends a
+  // pre-1.27.0 report: both mean the report never computed it.
+  if (gated === undefined || gated === null) return { kind: "unread" }
   const set = new Set<EntityOperation>(gated)
   return {
     kind: "read",
