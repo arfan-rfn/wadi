@@ -57,6 +57,15 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
   private val Repo = "com.acme.crud.repo."
   private val Dom  = "com.acme.crud.domain."
 
+  // Annotations as `method_annotations` writes them: qualified (export 2.15.0).
+  private val JpaQuery     = "org.springframework.data.jpa.repository.Query"
+  private val JpaModifying = "org.springframework.data.jpa.repository.Modifying"
+  private val MongoQuery   = "org.springframework.data.mongodb.repository.Query"
+
+  // Spring Data's own interfaces, as a receiver declared by one names them.
+  private val CrudRepositoryMarker = "org.springframework.data.repository.CrudRepository"
+  private val JpaRepositoryMarker  = "org.springframework.data.jpa.repository.JpaRepository"
+
   /** A `query` object as the export writes it (A1). */
   private case class Q(
     text: Option[String],
@@ -79,18 +88,21 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     origin: String,
     lookup: Boolean,
     arm: String = "none",
-    callers: List[String] = Nil
+    callers: List[String] = Nil,
+    guardLookup: Option[String] = None
   ) {
     def json: ujson.Value = ujson.Obj(
       "argument_origin"        -> origin,
       "lookup_same_repository" -> lookup,
       "guard_arm"              -> arm,
+      "guard_lookup_method"    -> guardLookup.map(ujson.Str(_)).getOrElse(ujson.Null),
       "caller_origins"         -> ujson.Arr.from(callers.map(ujson.Str(_)))
     )
   }
 
   /** One site's expected `db` raw facts. `save` is null on every row whose
-    * method is not save-family, and that null is asserted too.
+    * method is not save-family, and that null is asserted too. `annotations`
+    * are the resolved declaration's, in source order (export 2.15.0).
     */
   private case class Db(
     repository: String,
@@ -100,7 +112,9 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     kind: String = "jpa",
     implemented: Boolean = false,
     query: Option[Q] = None,
-    save: Option[Save] = None
+    save: Option[Save] = None,
+    annotations: List[String] = Nil,
+    declarationResolved: Boolean = true
   ) {
     def json: ujson.Value = ujson.Obj(
       "repository"             -> repository,
@@ -110,12 +124,27 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
       "repository_kind"        -> kind,
       "implemented_in_project" -> implemented,
       "query"                  -> query.map(_.json).getOrElse(ujson.Null),
-      "save"                   -> save.map(_.json).getOrElse(ujson.Null)
+      "save"                   -> save.map(_.json).getOrElse(ujson.Null),
+      "method_annotations"     -> ujson.Arr.from(annotations.map(ujson.Str(_))),
+      "declaration_resolved"   -> declarationResolved
     )
   }
 
-  private def order(method: String, query: Option[Q] = None, implemented: Boolean = false): Db =
-    Db(Repo + "OrderRepository", method, Some("Order"), Some(Dom + "Order"), implemented = implemented, query = query)
+  private def order(
+    method: String,
+    query: Option[Q] = None,
+    implemented: Boolean = false,
+    annotations: List[String] = Nil
+  ): Db =
+    Db(
+      Repo + "OrderRepository",
+      method,
+      Some("Order"),
+      Some(Dom + "Order"),
+      implemented = implemented,
+      query = query,
+      annotations = annotations
+    )
 
   /** An OrderRepository save-family site with its `save` facts. */
   private def orderSave(save: Save, method: String = "save"): Db = order(method).copy(save = Some(save))
@@ -186,8 +215,14 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     "inherited-save-read-origin" -> List(order("findById"), orderSave(Save("read", lookup = true))),
     "save-constructed-no-lookup" -> List(orderSave(Save("constructed", lookup = false))),
     // Q23: the save sits directly in an arm of the same-repository check.
-    "save-guard-not-found-arm" -> List(order("existsById"), orderSave(Save("constructed", lookup = true, "not-found"))),
-    "save-guard-found-arm"     -> List(order("existsById"), orderSave(Save("constructed", lookup = true, "found"))),
+    "save-guard-not-found-arm" -> List(
+      order("existsById"),
+      orderSave(Save("constructed", lookup = true, "not-found", guardLookup = Some("existsById")))
+    ),
+    "save-guard-found-arm" -> List(
+      order("existsById"),
+      orderSave(Save("constructed", lookup = true, "found", guardLookup = Some("existsById")))
+    ),
     // The check returns early; the save follows it and is in no arm.
     "save-guard-early-return" -> List(order("existsById"), orderSave(Save("constructed", lookup = true))),
     // `new` on one branch, a read on the other: both definitions reach the save.
@@ -258,29 +293,44 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
         "findBySkuText",
         Some("OrderLine"),
         Some(Dom + "OrderLine"),
-        query = Some(Q(Some("select l from OrderLine l where l.sku = ?1")))
+        query = Some(Q(Some("select l from OrderLine l where l.sku = ?1"))),
+        annotations = List(JpaQuery)
       )
     ),
     "query-jpql-update-modifying" -> List(
-      order("updateStatus", Some(Q(Some("update Order o set o.status = ?2 where o.id = ?1"), modifying = true)))
+      order(
+        "updateStatus",
+        Some(Q(Some("update Order o set o.status = ?2 where o.id = ?1"), modifying = true)),
+        annotations = List(JpaModifying, JpaQuery)
+      )
     ),
     "query-jpql-join-association" -> List(
-      order("findContainingSku", Some(Q(Some("select o from Order o join o.lines l where l.sku = ?1"))))
+      order(
+        "findContainingSku",
+        Some(Q(Some("select o from Order o join o.lines l where l.sku = ?1"))),
+        annotations = List(JpaQuery)
+      )
     ),
     "query-jpql-keyword-entity" -> List(
-      order("findInStatus", Some(Q(Some("select o from Order o where o.status = ?1"))))
+      order("findInStatus", Some(Q(Some("select o from Order o where o.status = ?1"))), annotations = List(JpaQuery))
     ),
     "query-native-table" -> List(
-      order("findNativeByStatus", Some(Q(Some("select * from orders where status = ?1"), native = true))),
+      order(
+        "findNativeByStatus",
+        Some(Q(Some("select * from orders where status = ?1"), native = true)),
+        annotations = List(JpaQuery)
+      ),
       order(
         "findNativeConcatenated",
-        Some(Q(Some("select * from orders where status = ?1 and id = ?2"), native = true))
+        Some(Q(Some("select * from orders where status = ?1 and id = ?2"), native = true)),
+        annotations = List(JpaQuery)
       )
     ),
     "query-named" -> List(
       order(
         "shipped",
-        Some(Q(Some("select o from Order o where o.status = 'SHIPPED'"), namedRef = Some("Order.findShipped")))
+        Some(Q(Some("select o from Order o where o.status = 'SHIPPED'"), namedRef = Some("Order.findShipped"))),
+        annotations = List(JpaQuery)
       ),
       // Through a @NamedQueries container, on a base-interface repository.
       Db(
@@ -288,7 +338,8 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
         "findOpen",
         Some("Issue"),
         Some(Dom + "Issue"),
-        query = Some(Q(Some("select i from Issue i where i.closed = false"), namedRef = Some("Issue.findOpen")))
+        query = Some(Q(Some("select i from Issue i where i.closed = false"), namedRef = Some("Issue.findOpen"))),
+        annotations = List(JpaQuery)
       ),
       // Implicit key `<entity name>.<method>`: the JPQL name, not the class.
       Db(
@@ -308,7 +359,7 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
         )
       ),
       // A name nothing declares keeps the name and no text (P10).
-      order("undeclaredNamed", Some(Q(None, namedRef = Some("Order.notDeclaredAnywhere"))))
+      order("undeclaredNamed", Some(Q(None, namedRef = Some("Order.notDeclaredAnywhere"))), annotations = List(JpaQuery))
     ),
     "query-mongo-json" -> List(
       Db(
@@ -317,7 +368,8 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
         Some("Pet"),
         Some(Dom + "Pet"),
         kind = "mongo",
-        query = Some(Q(Some("{ 'status': ?0 }")))
+        query = Some(Q(Some("{ 'status': ?0 }"))),
+        annotations = List(MongoQuery)
       )
     ),
     // C1's shape: one site; the text names Invoice and Client.
@@ -329,7 +381,8 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
         Some(Dom + "Invoice"),
         query = Some(
           Q(Some("delete from Invoice i where i.customer in (select c from Client c where c.vip = false)"), modifying = true)
-        )
+        ),
+        annotations = List(JpaModifying, JpaQuery)
       )
     ),
     // C3: a `default` body is in the project, so its name proves nothing. The
@@ -349,6 +402,145 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     )
   )
 
+  /** The shapes the rigor review found misread or uncounted (§5.2.17,
+    * "Hardening after the rigor review"), one handler each in
+    * `HardeningController`. Served at `/crud/<shape>` like the plan's.
+    */
+  private val hardeningGoldens: List[String] = List(
+    "marker-typed-receiver",
+    "marker-receiver-unbound-entity",
+    "type-variable-receiver",
+    "marker-named-project-base",
+    "marker-named-mongo-base",
+    "redeclared-query-override",
+    "arity-mismatch",
+    "annotation-mongo-update",
+    "annotation-procedure",
+    "annotation-aggregation",
+    "annotation-native-query",
+    "annotation-neutral",
+    "annotation-project-meta-query",
+    "query-native-schema-table",
+    "soft-delete-entity"
+  )
+
+  private val hardening: Map[String, List[Db]] = Map(
+    // Review A2: receivers declared as Spring Data's own interface, a field
+    // and a parameter. Each is a repository call; the entity is the declared
+    // type argument, resolved through the declaring file's imports.
+    "marker-typed-receiver" -> List(
+      Db(CrudRepositoryMarker, "count", Some("Order"), Some(Dom + "Order"), kind = "other"),
+      Db(CrudRepositoryMarker, "existsById", Some("Order"), Some(Dom + "Order"), kind = "other")
+    ),
+    // The declared argument is the class's own `E`: kept as written, unbound.
+    "marker-receiver-unbound-entity" -> List(Db(JpaRepositoryMarker, "findAll", Some("E"), None)),
+    // `R extends JpaRepository<Order, String>`: the bound is the repository.
+    "type-variable-receiver" -> List(Db(JpaRepositoryMarker, "findAll", Some("Order"), Some(Dom + "Order"))),
+    // Review A4: a project base whose name contains a marker's is not one.
+    // `KeyedJpaRepository<TripId, Trip>` binds Trip by position; by the old
+    // substring rule it was the marker and its first argument, TripId, won.
+    "marker-named-project-base" -> List(Db(Repo + "TripRepository", "findById", Some("Trip"), Some(Dom + "Trip"))),
+    // `BaseCrudRepository<E> extends MongoRepository<E, String>`: the kind is
+    // the marker's, mongo, not the project name's.
+    "marker-named-mongo-base" -> List(
+      Db(Repo + "PetLogRepository", "findAll", Some("PetLog"), Some(Dom + "PetLog"), kind = "mongo")
+    ),
+    // Review A3: the sub-interface redeclares the base method with @Query,
+    // and that nearest declaration is the one read.
+    "redeclared-query-override" -> List(
+      Db(
+        Repo + "NoteRepository",
+        "search",
+        Some("Note"),
+        Some(Dom + "Note"),
+        query = Some(Q(Some("select n from Note n where n.body like ?1"))),
+        annotations = List(JpaQuery, "java.lang.Override")
+      )
+    ),
+    // Two arguments, and the chain declares `findTagged` only with one
+    // (varargs): no declaration is chosen, and none is read.
+    "arity-mismatch" -> List(
+      Db(Repo + "NoteRepository", "findTagged", Some("Note"), Some(Dom + "Note"), declarationResolved = false)
+    ),
+    // Review B1: annotations the worker reads to withhold a name's verb.
+    "annotation-mongo-update" -> List(
+      Db(
+        Repo + "PetRepository",
+        "findAndIncrementVisitsByStatus",
+        Some("Pet"),
+        Some(Dom + "Pet"),
+        kind = "mongo",
+        annotations = List("org.springframework.data.mongodb.repository.Update")
+      )
+    ),
+    "annotation-procedure" -> List(
+      order("getArchivedCount", annotations = List("org.springframework.data.jpa.repository.query.Procedure"))
+    ),
+    "annotation-aggregation" -> List(
+      Db(
+        Repo + "PetRepository",
+        "findStatusSummary",
+        Some("Pet"),
+        Some(Dom + "Pet"),
+        kind = "mongo",
+        annotations = List("org.springframework.data.mongodb.repository.Aggregation")
+      )
+    ),
+    // `@NativeQuery` reads exactly as `@Query(nativeQuery = true)`.
+    "annotation-native-query" -> List(
+      order(
+        "findNativeAnnotated",
+        Some(Q(Some("select * from orders where status = ?1"), native = true)),
+        annotations = List("org.springframework.data.jpa.repository.NativeQuery")
+      )
+    ),
+    "annotation-neutral" -> List(
+      order(
+        "findFirstByStatus",
+        annotations = List(
+          "org.springframework.transaction.annotation.Transactional",
+          "org.springframework.data.jpa.repository.Lock"
+        )
+      )
+    ),
+    // A project annotation's own annotations follow it, one level, as
+    // `<annotation>><meta-annotation>`. The export reads no query from them.
+    "annotation-project-meta-query" -> List(
+      order(
+        "openOrders",
+        annotations = List(
+          Repo + "OpenOrdersQuery",
+          Repo + "OpenOrdersQuery>java.lang.annotation.Target",
+          Repo + "OpenOrdersQuery>java.lang.annotation.Retention",
+          Repo + "OpenOrdersQuery>" + JpaQuery
+        )
+      )
+    ),
+    // Review B2: the text keeps its schema; `storage_schema` says which
+    // entity declares it (asserted with the data models below).
+    "query-native-schema-table" -> List(
+      Db(
+        Repo + "AuditedOrderRepository",
+        "findAuditedByStatus",
+        Some("AuditedOrder"),
+        Some(Dom + "AuditedOrder"),
+        query = Some(Q(Some("select * from audit.orders where status = ?1"), native = true)),
+        annotations = List(JpaQuery)
+      )
+    ),
+    // Review B1: an ordinary inherited delete; `delete_rewritten_by` on the
+    // entity's record is what says it deletes no row.
+    "soft-delete-entity" -> List(Db(Repo + "CouponRepository", "deleteById", Some("Coupon"), Some(Dom + "Coupon")))
+  )
+
+  hardeningGoldens.foreach { golden =>
+    val expected = hardening.getOrElse(golden, Nil)
+    test(s"hardening $golden: ${expected.size} site(s) with their db raw facts") {
+      hardening.contains(golden) shouldBe true
+      sitesOf(golden).map(factsOf).map(_.render()).sorted shouldBe expected.map(_.json.render()).sorted
+    }
+  }
+
   /** A site's whole `db` object, `save` included; facts compare order-free. */
   private def factsOf(site: ujson.Value): ujson.Value =
     site.obj.getOrElse("db", fail(s"db sink row without a db object: $site"))
@@ -367,8 +559,10 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
   test("every golden in the plan's list has exactly one handler and one table entry (R1-18)") {
     val served = exportJson("endpoints").arr.map(_("uri").str).filter(_.startsWith("/crud/")).map(_.stripPrefix("/crud/"))
     planGoldens should have size 36
-    served.sorted shouldBe planGoldens.sorted
+    // The plan's 36 and the hardening shapes, and nothing else.
+    served.sorted shouldBe (planGoldens ++ hardeningGoldens).sorted
     goldens.keySet shouldBe planGoldens.toSet
+    hardening.keySet shouldBe hardeningGoldens.toSet
   }
 
   test("golden 26 save-in-lambda: the lambda's save is a db row outside the endpoint's flow (R1-1)") {
@@ -409,7 +603,8 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
       if (!saveFamily.contains(db("method_name").str)) db("save") shouldBe ujson.Null
       else {
         val save = db("save")
-        save.obj.keySet shouldBe Set("argument_origin", "lookup_same_repository", "guard_arm", "caller_origins")
+        save.obj.keySet shouldBe
+          Set("argument_origin", "lookup_same_repository", "guard_arm", "guard_lookup_method", "caller_origins")
         origins should contain(save("argument_origin").str)
         Set("found", "not-found", "none") should contain(save("guard_arm").str)
         save("caller_origins").arr.foreach(o => origins should contain(o.str))
@@ -417,6 +612,8 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
         if (save("argument_origin").str != "parameter") save("caller_origins").arr shouldBe empty
         // An arm is read only off a same-repository check, which is a lookup.
         if (save("guard_arm").str != "none") save("lookup_same_repository").bool shouldBe true
+        // The lookup a guard tests is named exactly when an arm is read.
+        (save("guard_lookup_method") != ujson.Null) shouldBe (save("guard_arm").str != "none")
       }
     }
   }
@@ -444,9 +641,16 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
       Dom + "Pet",
       Dom + "Shipment",
       "com.acme.crud.billing.Account",
-      "com.acme.crud.crm.Account"
+      "com.acme.crud.crm.Account",
+      // The hardening shapes' entities. TripId is not one: it is the key
+      // `KeyedJpaRepository<TripId, Trip>` binds second (review A4).
+      Dom + "Trip",
+      Dom + "PetLog",
+      Dom + "Note",
+      Dom + "AuditedOrder",
+      Dom + "Coupon"
     )
-    exportJson("data_models").arr should have size 11
+    exportJson("data_models").arr should have size 16
   }
 
   test("data_models: how each entity was declared") {
@@ -474,6 +678,33 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     model(Dom + "Pet")("storage_name").str shouldBe "pets"
     model(Dom + "Shipment")("storage_name").str shouldBe "shipments"
     model(Dom + "OrderLine")("storage_name") shouldBe ujson.Null
+  }
+
+  test("data_models: the schema from @Table(schema=), null where none is declared (export 2.15.0, review B2)") {
+    model(Dom + "AuditedOrder")("storage_name").str shouldBe "orders"
+    model(Dom + "AuditedOrder")("storage_schema").str shouldBe "audit"
+    model(Dom + "Order")("storage_schema") shouldBe ujson.Null
+    exportJson("data_models").arr.count(_("storage_schema") != ujson.Null) shouldBe 1
+  }
+
+  test("data_models: a Hibernate @SQLDelete names what rewrites the delete (export 2.15.0, review B1)") {
+    model(Dom + "Coupon")("delete_rewritten_by").str shouldBe "org.hibernate.annotations.SQLDelete"
+    exportJson("data_models").arr.count(_("delete_rewritten_by") != ujson.Null) shouldBe 1
+  }
+
+  test("export 2.15.0: every new field is on every row, with its default where nothing was read") {
+    exportJson("export_schema_version").str shouldBe "2.15.0"
+    dbRows.foreach { row =>
+      row("db")("method_annotations").arr.foreach(_.str)
+      row("db")("declaration_resolved").bool
+    }
+    exportJson("data_models").arr.foreach { m =>
+      m.obj.keySet should contain allOf ("storage_schema", "delete_rewritten_by")
+    }
+  }
+
+  test("save_origin_rules: the build's hash of the save-fact sources, on the export (review B4)") {
+    exportJson("save_origin_rules").str should fullyMatch regex "[0-9a-f]{16}"
   }
 
   test("data_models: a field's declared type keeps its generics; type_name stays erased (R1-3)") {

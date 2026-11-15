@@ -92,11 +92,14 @@ class RepositoryDetectionRegressionTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("E7 spring-data-crud-matrix: transitive detection adds exactly the base-interface repositories' calls") {
+  test("E7 spring-data-crud-matrix: the shipped rule adds exactly the base-interface and Spring-typed receivers' calls") {
     // The nine fixtures above hold three db calls between them, so they show
-    // the rule did not MOVE; this shows what it ADDS. IssueRepository and
-    // TicketRepository are the types here that reach their marker only
-    // through a project interface.
+    // the rule did not MOVE; this shows what it ADDS. IssueRepository,
+    // NoteRepository and TicketRepository reach their marker only through a
+    // project interface (TripRepository and PetLogRepository did too, but
+    // the old rule's substring match took their bases' names for markers).
+    // The last four are on receivers declared as a Spring Data interface or
+    // a type variable bounded by one (review A2), which no rule saw before.
     withFixtureCpg("spring-data-crud-matrix") { cpg =>
       val (before, after) = bothRules(cpg)
       val added           = cpg.call.id(after.diff(before).toSeq*).l
@@ -106,7 +109,14 @@ class RepositoryDetectionRegressionTest extends AnyFunSuite with Matchers {
         "com.acme.crud.repo.IssueRepository.findAllByIdIn",
         "com.acme.crud.repo.IssueRepository.findById",
         "com.acme.crud.repo.IssueRepository.findOpen",
-        "com.acme.crud.repo.TicketRepository.findById"
+        "com.acme.crud.repo.NoteRepository.findTagged",
+        "com.acme.crud.repo.NoteRepository.search",
+        "com.acme.crud.repo.TicketRepository.findById",
+        // BoundedStore's `R repository`: javasrc2cpg erases R to Object.
+        "java.lang.Object.findAll",
+        "org.springframework.data.jpa.repository.JpaRepository.findAll",
+        "org.springframework.data.repository.CrudRepository.count",
+        "org.springframework.data.repository.CrudRepository.existsById"
       )
     }
   }

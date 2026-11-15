@@ -670,92 +670,17 @@ class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
   }
 }
 
-/** Which types are Spring Data repositories (§5.2.17, Q10).
-  *
-  * One definition for the two readers that need it: the sink pass tags calls
-  * on these types `sink=db`, and the export binds each call's entity through
-  * the same chain. Two copies of the rule would drift into two answers to
-  * "is this a repository call".
+/** Tags spring-data repository call sites: `sink=db`, by the one rule in
+  * `SpringDataRepositories` the export binds entities with.
   */
-object SpringDataRepositories {
-
-  /** Substrings of a parent's rendered name that mark a Spring Data repository.
-    * Unchanged from the pre-2.10 rule, so the direct case tags exactly what it
-    * always tagged (E7). Bare names are the jar-less spelling (§5.2.6).
-    */
-  val Markers: List[String] = List(
-    "org.springframework.data.repository",
-    "org.springframework.data.mongodb.repository",
-    "org.springframework.data.jpa.repository",
-    "MongoRepository",
-    "CrudRepository",
-    "JpaRepository",
-    "PagingAndSortingRepository"
-  )
-
-  def isMarker(parentFullName: String): Boolean = Markers.exists(parentFullName.contains)
-
-  /** Full names of every repository type in the CPG.
-    *
-    * Direct: a type with a marker among its parents, exactly the pre-2.10 rule.
-    * Transitive (Q10): an INTERFACE whose in-project parent is a repository,
-    * so `IssueRepository extends BaseRepository<Issue>` qualifies through
-    * `BaseRepository<E> extends JpaRepository<E, Long>`. ICPC writes all 111 of
-    * its repositories that way and the direct rule saw none of them.
-    *
-    * Only interfaces inherit membership. Spring Data proxies interfaces; a
-    * class that implements a repository interface is a hand-written type
-    * (a fake, an adapter), and its own methods are not repository calls. A
-    * class that extends a marker class directly (`SimpleJpaRepository`) is
-    * still caught by the direct rule, as before.
-    */
-  def repositoryTypes(cpg: Cpg): Set[String] = {
-    val members = scala.collection.mutable.Set.from(
-      cpg.typeDecl.filter(_.inheritsFromTypeFullName.exists(isMarker)).fullName
-    )
-    if (members.isEmpty) return Set.empty
-    val project    = cpg.typeDecl.filterNot(_.isExternal).l
-    val byFullName = project.groupBy(_.fullName)
-    val byName     = project.groupBy(_.name)
-    // The in-project parents, with the short-name fallback every sibling pass
-    // carries for jar-less parses (§5.2.6).
-    def parentsOf(td: TypeDecl): List[TypeDecl] =
-      td.inheritsFromTypeFullName.l.flatMap { parent =>
-        byFullName.getOrElse(parent, byName.getOrElse(parent.split('.').last, Nil))
-      }
-    val candidates = project.filter(isInterface).map(td => td -> parentsOf(td))
-    var grew       = true
-    while (grew) {
-      grew = false
-      candidates.filterNot { case (td, _) => members.contains(td.fullName) }.foreach { case (td, parents) =>
-        if (parents.exists(parent => members.contains(parent.fullName))) {
-          members += td.fullName
-          grew = true
-        }
-      }
-    }
-    members.toSet
-  }
-
-  /** javasrc2cpg renders an interface's `code` as `public interface Name<E>`;
-    * an annotation type is `@interface`, which declares no repository.
-    */
-  def isInterface(td: TypeDecl): Boolean =
-    td.code.split("\\s+").contains("interface")
-}
-
-/** Tags spring-data repository call sites: `sink=db`. */
 class SpringDataSinkPass(cpg: Cpg) extends CpgPass(cpg) {
 
   override def run(builder: DiffGraphBuilder): Unit = {
-    val repositoryTypes = SpringDataRepositories.repositoryTypes(cpg)
-
-    if (repositoryTypes.isEmpty) return
-
+    val index = new SpringDataRepositories.Index(cpg)
+    // No repository type and no Spring Data type named anywhere: no call to tag.
+    if (index.repositoryTypes.isEmpty && cpg.typeDecl.fullNameExact(SpringDataRepositories.Markers.toSeq*).isEmpty) return
     cpg.call.l.foreach { call =>
-      val declaring = call.methodFullName.split(':').head
-      val owner     = declaring.substring(0, math.max(declaring.lastIndexOf('.'), 0))
-      if (repositoryTypes.contains(owner)) {
+      if (index.isRepositoryCall(call)) {
         Iterator(call).newTagNodePair("sink", "db").store()(using builder)
       }
     }

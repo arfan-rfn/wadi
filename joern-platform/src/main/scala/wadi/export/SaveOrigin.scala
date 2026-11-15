@@ -34,8 +34,17 @@ import scala.collection.mutable
   * save count: two branches assigning two origins reach it as `mixed`
   * (golden `save-upsert-by-branch`), and an assignment after the save does
   * not reach it at all.
+  *
+  * A walk that stops at a bound (`MaxDepth`, `walkBudget`) has not seen every
+  * path, so what it found is not the answer: the origin is `other` (review
+  * A5). `walkBudget` is a parameter so a test can reach it; the export uses
+  * `WalkBudget`.
   */
-private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositories: SaveOrigin.Repositories) {
+private[`export`] final class SaveOrigin(
+  exportedMethodIds: Set[Long],
+  repositories: SaveOrigin.Repositories,
+  walkBudget: Int = SaveOrigin.WalkBudget
+) {
 
   import SaveOrigin.*
 
@@ -54,10 +63,14 @@ private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositor
       val method = call.method
       val atoms  = argumentAtoms(call, 1, target)
       val origin = classify(atoms)
+      val guard  = guardOf(call, target)
       ujson.Obj(
         "argument_origin"        -> origin,
         "lookup_same_repository" -> looksUp(method, call, target),
-        "guard_arm"              -> guardArm(call, target),
+        "guard_arm"              -> guard.map(g => if (g.found) Found else NotFound).getOrElse(NoArm),
+        // Export 2.15.0: the method the guard tests, so the worker can tell
+        // a lookup by identity from a match on some other field (review A1).
+        "guard_lookup_method" -> guard.map(g => ujson.Str(g.lookup)).getOrElse(ujson.Null),
         "caller_origins" -> ujson.Arr.from(
           if (origin == Parameter) callerOrigins(method, atoms, target).map(ujson.Str(_)) else Nil
         )
@@ -74,7 +87,7 @@ private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositor
     * alternative entity (`findById(id).orElse(null)` is a read).
     */
   private def atomsOf(node: AstNode, target: Target, depth: Int): Set[Atom] =
-    if (depth > MaxDepth) Set(OtherAtom)
+    if (depth > MaxDepth) Set(TruncatedAtom)
     else
       node match {
         case literal: Literal if literal.code == "null" => Set.empty
@@ -105,7 +118,7 @@ private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositor
     val fromEntry: Set[Atom] =
       if (!reach.reachesEntry) Set.empty
       else Set(use._refOut.collectFirst { case p: MethodParameterIn => ParamAtom(p.index) }.getOrElse(OtherAtom))
-    fromDefinitions ++ fromEntry ++ (if (reach.exhausted) Set(OtherAtom) else Set.empty)
+    fromDefinitions ++ fromEntry ++ (if (reach.exhausted) Set(TruncatedAtom) else Set.empty)
   }
 
   private def callAtoms(call: Call, target: Target, depth: Int): Set[Atom] =
@@ -118,39 +131,57 @@ private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositor
       case _ if isReadOn(call, target) => Set(ReadAtom)
       // `Optional` unwrapping, only where the Optional is itself a read: the
       // name alone would take `supplier.get()` for one (an unresolved jar-less
-      // parse types neither `findById` nor `orElseThrow`, so names it is).
-      case "get" | "orElseThrow" if receiverIsRead(call, target, depth) => Set(ReadAtom)
-      case "orElse" if receiverIsRead(call, target, depth) =>
-        Set[Atom](ReadAtom) ++ argumentNodes(call, 1).flatMap(atomsOf(_, target, depth + 1))
-      case "orElseGet" if receiverIsRead(call, target, depth) => Set(ReadAtom, OtherAtom)
-      case _ if constructsEntity(call, target) => Set(ConstructedAtom)
-      // A cast, a helper's return, a getter on a wrapper (golden 23): what it
-      // returns is another method's business.
-      case _ => Set(OtherAtom)
+      // parse types neither `findById` nor `orElseThrow`, so names it is). A
+      // receiver whose walk stopped leaves the unwrapped value unknown too.
+      case "get" | "orElseThrow" | "orElse" | "orElseGet" =>
+        val receiver = argumentNodes(call, 0).headOption.map(atomsOf(_, target, depth + 1)).getOrElse(Set(OtherAtom))
+        if (receiver.contains(TruncatedAtom)) Set(TruncatedAtom)
+        else if (receiver != Set(ReadAtom)) constructionAtoms(call, target)
+        else
+          call.name match {
+            case "orElse"    => Set[Atom](ReadAtom) ++ argumentNodes(call, 1).flatMap(atomsOf(_, target, depth + 1))
+            case "orElseGet" => Set(ReadAtom, OtherAtom)
+            case _           => Set(ReadAtom)
+          }
+      case _ => constructionAtoms(call, target)
     }
-
-  private def receiverIsRead(call: Call, target: Target, depth: Int): Boolean =
-    argumentNodes(call, 0).headOption.exists(atomsOf(_, target, depth + 1) == Set(ReadAtom))
 
   /** A read (rule 2's read names) on a repository of the save's entity. */
   private def isReadOn(call: Call, target: Target): Boolean =
     hasPrefix(call.name, ReadPrefixes) && repositories.repositoryOf(call).exists(sameEntity(_, target))
 
-  private def sameEntity(repository: String, target: Target): Boolean =
-    repository == target.repository || target.entity.exists(entity => repositories.entityOf(repository).contains(entity))
+  private def sameEntity(repository: RepositoryRef, target: Target): Boolean =
+    sameRepository(repository, target) || target.entity.exists(entity => repository.entity.contains(entity))
+
+  /** The row's repository. A Spring Data interface names no entity by itself
+    * (`CrudRepository<Order, String>` and `CrudRepository<Customer, Long>`
+    * are one name), so on one the entity must be bound and equal too
+    * (review A2).
+    */
+  private def sameRepository(repository: RepositoryRef, target: Target): Boolean =
+    repository.name == target.repository &&
+      (repositories.isProjectType(repository.name) || (repository.entity.nonEmpty && repository.entity == target.entity))
 
   /** A static factory or a builder rooted at the entity type: the call yields
     * the entity, and the chain of receivers it is called on starts at a
     * static method the entity declares (`Order.withId(id)`,
     * `Pet.builder().status(s).build()`). `existing.toBuilder()..build()`
     * starts at an instance, which may be a read, so it is not a construction.
+    * A chain longer than the bound is not followed to its root.
     */
-  private def constructsEntity(call: Call, target: Target): Boolean =
-    isEntityType(call.typeFullName, target) && chainRoot(call, 0).exists { root =>
-      root.dispatchType == DispatchTypes.STATIC_DISPATCH &&
-      !root.name.startsWith("<operator") &&
-      isEntityType(EntityAccessFacts.declaringTypeOf(root), target)
-    }
+  private def constructionAtoms(call: Call, target: Target): Set[Atom] =
+    if (!isEntityType(call.typeFullName, target)) Set(OtherAtom)
+    else
+      chainRoot(call, 0) match {
+        case None => Set(TruncatedAtom)
+        case Some(root)
+            if root.dispatchType == DispatchTypes.STATIC_DISPATCH && !root.name.startsWith("<operator") &&
+              isEntityType(EntityAccessFacts.declaringTypeOf(root), target) =>
+          Set(ConstructedAtom)
+        // A cast, a helper's return, a getter on a wrapper (golden 23): what
+        // it returns is another method's business.
+        case Some(_) => Set(OtherAtom)
+      }
 
   /** The first call of a receiver chain; None past the depth bound. */
   @tailrec private def chainRoot(call: Call, steps: Int): Option[Call] =
@@ -185,7 +216,7 @@ private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositor
     val seen        = mutable.Set.empty[Long]
     val pending     = mutable.Stack.from(use.cfgPrev.l)
     var entry       = false
-    while (pending.nonEmpty && seen.size < WalkBudget) {
+    while (pending.nonEmpty && seen.size < walkBudget) {
       val node = pending.pop()
       if (seen.add(node.id)) node match {
         case _: Method                              => entry = true
@@ -209,8 +240,8 @@ private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositor
     */
   private def looksUp(method: Method, save: Call, target: Target): Boolean =
     method.call.exists(call =>
-      call.id != save.id && hasPrefix(call.name, LookupPrefixes) &&
-        repositories.repositoryOf(call).contains(target.repository)
+      call.id != save.id && hasPrefix(call.name, ReadPrefixes) &&
+        repositories.repositoryOf(call).exists(sameRepository(_, target))
     )
 
   // --- guard arm (Q23) ---------------------------------------------------------
@@ -222,91 +253,119 @@ private[`export`] final class SaveOrigin(exportedMethodIds: Set[Long], repositor
     * or a short-circuit operator in between is `none`, and so is the early
     * return (`if (exists) return ..; repo.save(..)`, golden 18): the save
     * there is in no arm. A check on one key can guard a save of another
-    * (Q23's own caveat); that is the split's risk to score, not a fact to
-    * withhold.
+    * (Q23's own caveat); the guard names the method it tests, so the worker
+    * can tell a lookup by identity from one on another field (review A1).
     */
-  private def guardArm(save: Call, target: Target): String = {
+  private def guardOf(save: Call, target: Target): Option[Guard] = {
     var child: AstNode = save
     var parent         = save.astParent
     var steps          = 0
     while (steps < MaxAstClimb) {
       parent match {
-        case _: Method | _: TypeDecl => return NoArm
+        case _: Method | _: TypeDecl => return None
         case cs: ControlStructure if cs.controlStructureType == ControlStructureTypes.IF =>
-          if (cs.condition.exists(_.id == child.id)) return NoArm
+          if (cs.condition.exists(_.id == child.id)) return None
           val inThen = cs.whenTrue.exists(_.id == child.id)
           val inElse = cs.whenFalse.exists(_.id == child.id)
-          return cs.condition.headOption.flatMap(foundWhenTrue(_, target, 0)) match {
-            case Some(found) if inThen || inElse => if (found == inThen) Found else NotFound
-            case _                                => NoArm
-          }
-        case _: ControlStructure                   => return NoArm
-        case call: Call if Conditional(call.name) => return NoArm
+          return cs.condition.headOption
+            .flatMap(testOf(_, target, 0))
+            .filter(_ => inThen || inElse)
+            .map(test => Guard(found = test.foundWhenTrue == inThen, test.lookup))
+        case _: ControlStructure                   => return None
+        case call: Call if Conditional(call.name) => return None
         case _                                     =>
       }
       child = parent
       parent = parent.astParent
       steps += 1
     }
-    NoArm
+    None
   }
 
-  /** Some(true) when the condition holds exactly when the lookup found
-    * something, Some(false) when it holds exactly when it did not, None for
+  /** What the condition tests: whether it holds exactly when the lookup found
+    * something, or exactly when it did not, and which lookup. None for
     * anything else. Only the plain shapes: `exists*(..)`, `isPresent()`,
     * `isEmpty()`, `== null` / `!= null`, a negation of one, or a local
     * holding one; a conjunction says nothing about its else arm and is left
     * alone.
     */
-  private def foundWhenTrue(condition: AstNode, target: Target, depth: Int): Option[Boolean] =
+  private def testOf(condition: AstNode, target: Target, depth: Int): Option[Test] =
     if (depth > MaxDepth) None
     else
       condition match {
         case call: Call if call.name == Operators.logicalNot =>
-          argumentNodes(call, 1).headOption.flatMap(foundWhenTrue(_, target, depth + 1)).map(!_)
+          argumentNodes(call, 1).headOption.flatMap(testOf(_, target, depth + 1)).map(t => t.copy(foundWhenTrue = !t.foundWhenTrue))
         case call: Call if call.name == Operators.equals || call.name == Operators.notEquals =>
           argumentNodes(call, 1, 2) match {
             case List(left, right) =>
               val tested = if (isNullLiteral(right)) Some(left) else if (isNullLiteral(left)) Some(right) else None
-              tested.filter(isLookupResult(_, target, depth + 1)).map(_ => call.name == Operators.notEquals)
+              tested
+                .flatMap(lookupOf(_, target, depth + 1, nullTest = true))
+                .map(Test(call.name == Operators.notEquals, _))
             case _ => None
           }
         case call: Call if call.name == "isPresent" || call.name == "isEmpty" =>
-          Option.when(
-            argumentNodes(call, 1).isEmpty &&
-              argumentNodes(call, 0).headOption.exists(isLookupResult(_, target, depth + 1))
-          )(call.name == "isPresent")
+          if (argumentNodes(call, 1).nonEmpty) None
+          else
+            argumentNodes(call, 0).headOption
+              .flatMap(lookupOf(_, target, depth + 1, nullTest = false))
+              .map(Test(call.name == "isPresent", _))
         case call: Call if hasPrefix(call.name, ExistsPrefixes) =>
-          Option.when(repositories.repositoryOf(call).contains(target.repository))(true)
+          Option.when(repositories.repositoryOf(call).exists(sameRepository(_, target)))(Test(foundWhenTrue = true, call.name))
         case identifier: Identifier =>
           val reach = reachingDefinitions(identifier)
           val answers = reach.definitions.map(definition =>
-            argumentNodes(definition, 2).headOption.flatMap(foundWhenTrue(_, target, depth + 1))
+            argumentNodes(definition, 2).headOption.flatMap(testOf(_, target, depth + 1))
           )
           answers.distinct match {
-            case List(Some(found)) if !reach.reachesEntry && !reach.exhausted => Some(found)
-            case _                                                            => None
+            case List(Some(test)) if !reach.reachesEntry && !reach.exhausted => Some(test)
+            case _                                                           => None
           }
         case _ => None
       }
 
-  /** The value of a lookup on the save's repository: the call itself,
-    * `.orElse(null)` on one, or a local every reaching definition of which is
-    * one.
+  /** The lookup method whose value `node` is, when it is the value of a
+    * lookup on the save's repository: the call itself, `.orElse(null)` on
+    * one, or a local every reaching definition of which is one and the same
+    * method.
+    *
+    * For a null test the lookup must be able to return null, which only a
+    * declaration returning the entity type can (review A1): a `List`,
+    * `Optional`, `Page`, `Stream` or primitive is never null, so a null test
+    * on one holds always or never. `orElse(null)` is the Optional unwrapped,
+    * the entity or null, whatever the lookup returns.
     */
-  private def isLookupResult(node: AstNode, target: Target, depth: Int): Boolean =
-    depth <= MaxDepth && (node match {
-      case call: Call if hasPrefix(call.name, LookupPrefixes) =>
-        repositories.repositoryOf(call).contains(target.repository)
-      case call: Call if call.name == "orElse" =>
-        argumentNodes(call, 1).headOption.exists(isNullLiteral) &&
-        argumentNodes(call, 0).headOption.exists(isLookupResult(_, target, depth + 1))
-      case identifier: Identifier =>
-        val reach = reachingDefinitions(identifier)
-        reach.definitions.nonEmpty && !reach.reachesEntry && !reach.exhausted &&
-        reach.definitions.forall(d => argumentNodes(d, 2).headOption.exists(isLookupResult(_, target, depth + 1)))
-      case _ => false
-    })
+  private def lookupOf(node: AstNode, target: Target, depth: Int, nullTest: Boolean): Option[String] =
+    if (depth > MaxDepth) None
+    else
+      node match {
+        case call: Call if hasPrefix(call.name, ReadPrefixes) =>
+          Option.when(
+            repositories.repositoryOf(call).exists(sameRepository(_, target)) && (!nullTest || returnsEntity(call, target))
+          )(call.name)
+        case call: Call if call.name == "orElse" =>
+          if (!argumentNodes(call, 1).headOption.exists(isNullLiteral)) None
+          else argumentNodes(call, 0).headOption.flatMap(lookupOf(_, target, depth + 1, nullTest = false))
+        case identifier: Identifier =>
+          val reach = reachingDefinitions(identifier)
+          if (reach.definitions.isEmpty || reach.reachesEntry || reach.exhausted) None
+          else
+            reach.definitions
+              .map(d => argumentNodes(d, 2).headOption.flatMap(lookupOf(_, target, depth + 1, nullTest)))
+              .distinct match {
+              case List(found @ Some(_)) => found
+              case _                     => None
+            }
+        case _ => None
+      }
+
+  /** The project declaration of `call` returns the save's entity type (or a
+    * project subtype, the same test `isEntityType` applies). A method Spring
+    * Data declares has no project declaration and is never such a lookup:
+    * `findById` returns an Optional, `getReferenceById` never returns null.
+    */
+  private def returnsEntity(call: Call, target: Target): Boolean =
+    target.entity.exists(entity => repositories.declaredReturnType(call).exists(repositories.isA(_, entity)))
 
   // --- one caller hop (R1-27) --------------------------------------------------
 
@@ -346,13 +405,16 @@ private[`export`] object SaveOrigin {
     */
   trait Repositories {
 
-    /** The repository type a call is made on (the receiver's declared type),
-      * when it is one; the row's own `db.repository` for a db call.
+    /** The repository a call is made on (the receiver's declared type) with
+      * the entity it binds, when it is one: the row's own `db.repository` and
+      * `db.entity_type_full_name` for a db call.
       */
-    def repositoryOf(call: Call): Option[String]
+    def repositoryOf(call: Call): Option[RepositoryRef]
 
-    /** The qualified entity a repository binds, when bound and resolved. */
-    def entityOf(repository: String): Option[String]
+    /** The return type the project's declaration of `call` names; None when
+      * Spring Data declares the method or the declaration is not found.
+      */
+    def declaredReturnType(call: Call): Option[String]
 
     /** `typeFullName` is `entity` or a project subtype of it. */
     def isA(typeFullName: String, entity: String): Boolean
@@ -360,13 +422,20 @@ private[`export`] object SaveOrigin {
     def isProjectType(typeFullName: String): Boolean
   }
 
+  /** A repository as a `db` row names it: the declared type, and the entity
+    * the row binds when it resolved.
+    */
+  final case class RepositoryRef(name: String, entity: Option[String])
+
   /** The methods A1 attaches a `save` object to. */
   val SaveFamily: Set[String] = Set("save", "saveAndFlush", "saveAll", "saveAllAndFlush", "insert")
 
-  /** Contract A1's lookup names (`lookup_same_repository`, guard tests). */
-  private val LookupPrefixes = List("find", "get", "exists", "read", "query", "count")
-
-  /** Rule 2's read names: a saved value one of these returned was read. */
+  /** Rule 2's read names, which are also contract A1's lookup names
+    * (`lookup_same_repository`, guard tests): a saved value one of these
+    * returned was read, and a method that calls one looked up. ONE list,
+    * exactly the `READ` rows of the worker's `NAME_PREFIXES` (review B4): the
+    * two Scala lists had already drifted from it and from each other.
+    */
   private val ReadPrefixes = List("find", "get", "read", "query", "search", "stream", "count", "exists")
 
   private val ExistsPrefixes = List("exists")
@@ -384,9 +453,10 @@ private[`export`] object SaveOrigin {
     */
   private val MaxDepth    = 8
   private val MaxAstClimb = 64
-  private val WalkBudget  = 20000
+  private[`export`] val WalkBudget = 20000
 
   private val Parameter = "parameter"
+  private val Other     = "other"
   private val Found     = "found"
   private val NotFound  = "not-found"
   private val NoArm     = "none"
@@ -396,6 +466,12 @@ private[`export`] object SaveOrigin {
 
   private final case class Reach(definitions: List[Call], reachesEntry: Boolean, exhausted: Boolean)
 
+  /** A guard's condition: true when it holds exactly when the lookup found. */
+  private final case class Test(foundWhenTrue: Boolean, lookup: String)
+
+  /** The arm a save sits in, and the lookup its condition tests. */
+  private final case class Guard(found: Boolean, lookup: String)
+
   /** One possible origin of a value; a set of them is classified once. */
   private sealed trait Atom
   private case object ReadAtom              extends Atom
@@ -403,18 +479,26 @@ private[`export`] object SaveOrigin {
   private case object OtherAtom             extends Atom
   private final case class ParamAtom(index: Int) extends Atom
 
-  /** Several parameters are still `parameter`; anything else that differs
-    * between paths is `mixed`; nothing at all is `other`.
+  /** The walk stopped at a bound before it had seen every path. */
+  private case object TruncatedAtom extends Atom
+
+  /** A walk that stopped is `other`, whatever else it found (review A5):
+    * `mixed` would claim two origins on two paths, and the paths it did not
+    * see may hold any. Otherwise several parameters are still `parameter`;
+    * anything else that differs between paths is `mixed`; nothing at all is
+    * `other`.
     */
   private def classify(atoms: Set[Atom]): String =
-    atoms.map {
-      case ReadAtom        => "read"
-      case ConstructedAtom => "constructed"
-      case OtherAtom       => "other"
-      case ParamAtom(_)    => Parameter
-    }.toList match {
-      case Nil       => "other"
-      case List(one) => one
-      case _         => "mixed"
-    }
+    if (atoms.contains(TruncatedAtom)) Other
+    else
+      atoms.map {
+        case ReadAtom        => "read"
+        case ConstructedAtom => "constructed"
+        case ParamAtom(_)    => Parameter
+        case _               => Other
+      }.toList match {
+        case Nil       => Other
+        case List(one) => one
+        case _         => "mixed"
+      }
 }

@@ -33,12 +33,22 @@ class SaveOriginConformanceTest extends AnyFunSuite with Matchers with FixtureCp
   private def savesIn(owner: String): Seq[ujson.Value] =
     saveRows.filter(row => methodNames(row("method_id").num.toLong).startsWith(s"com.acme.saves.$owner:"))
 
-  /** A `save` object as the export writes it (A1). */
-  private case class Save(origin: String, lookup: Boolean, arm: String = "none", callers: List[String] = Nil) {
+  /** A `save` object as the export writes it (A1). `guardLookup` is the
+    * repository method the guard tests, set exactly when the arm is read
+    * (export 2.15.0, review A1).
+    */
+  private case class Save(
+    origin: String,
+    lookup: Boolean,
+    arm: String = "none",
+    callers: List[String] = Nil,
+    guardLookup: Option[String] = None
+  ) {
     def json: ujson.Value = ujson.Obj(
       "argument_origin"        -> origin,
       "lookup_same_repository" -> lookup,
       "guard_arm"              -> arm,
+      "guard_lookup_method"    -> guardLookup.map(ujson.Str(_)).getOrElse(ujson.Null),
       "caller_origins"         -> ujson.Arr.from(callers.map(ujson.Str(_)))
     )
   }
@@ -48,14 +58,23 @@ class SaveOriginConformanceTest extends AnyFunSuite with Matchers with FixtureCp
 
   /** Owner method → the save facts of its one save site. */
   private val shapes: List[(String, Save)] = List(
-    // Q23: each guard form the rule reads, in each arm.
-    Guard + "nullCheckNotFound"  -> Save("constructed", lookup = true, "not-found"),
-    Guard + "notNullFound"       -> Save("constructed", lookup = true, "found"),
-    Guard + "nullCheckElseArm"   -> Save("constructed", lookup = true, "found"),
-    Guard + "isPresentLocal"     -> Save("constructed", lookup = true, "found"),
-    Guard + "isEmptyChain"       -> Save("constructed", lookup = true, "not-found"),
-    Guard + "existsBooleanLocal" -> Save("constructed", lookup = true, "not-found"),
-    Guard + "noBracesArm"        -> Save("constructed", lookup = true, "not-found"),
+    // Q23: each guard form the rule reads, in each arm, with the method it
+    // tests. `findByCode` returns the entity itself, so null means not found.
+    Guard + "nullCheckNotFound"  -> Save("constructed", lookup = true, "not-found", guardLookup = Some("findByCode")),
+    Guard + "notNullFound"       -> Save("constructed", lookup = true, "found", guardLookup = Some("findByCode")),
+    Guard + "nullCheckElseArm"   -> Save("constructed", lookup = true, "found", guardLookup = Some("findByCode")),
+    Guard + "isPresentLocal"     -> Save("constructed", lookup = true, "found", guardLookup = Some("findById")),
+    Guard + "isEmptyChain"       -> Save("constructed", lookup = true, "not-found", guardLookup = Some("findById")),
+    Guard + "existsBooleanLocal" -> Save("constructed", lookup = true, "not-found", guardLookup = Some("existsById")),
+    Guard + "noBracesArm"        -> Save("constructed", lookup = true, "not-found", guardLookup = Some("existsById")),
+    // Review A1: an identity lookup's found arm, so the worker can tell it
+    // from a match on some other field.
+    Guard + "identityIsPresentFound" -> Save("constructed", lookup = true, "found", guardLookup = Some("findById")),
+    // Review A1: a null test on a lookup that never returns null decides
+    // nothing. `findByName` returns a List (the train-ticket ledger shape),
+    // and an Optional is never null either.
+    Guard + "listNotNullNone"       -> Save("constructed", lookup = true),
+    Guard + "optionalNullCheckNone" -> Save("constructed", lookup = true),
     // Not DIRECTLY in an arm of an exact existence test: no arm.
     Guard + "conjunctionNone" -> Save("constructed", lookup = true),
     Guard + "nestedLoopNone"  -> Save("constructed", lookup = true),
@@ -72,6 +91,13 @@ class SaveOriginConformanceTest extends AnyFunSuite with Matchers with FixtureCp
     Origin + "cast"                -> Save("other", lookup = false),
     Origin + "listAllocSaveAll"    -> Save("other", lookup = false),
     Origin + "subtypeConstructed"  -> Save("constructed", lookup = false),
+    // Review A5: one path reads directly, the other reaches its read only
+    // past the depth bound. A walk that stops says `other`, never `mixed`.
+    Origin + "deepChain" -> Save("other", lookup = true),
+    // Unbounded, both arms read; `SaveOriginBudgetTest` cuts this walk short.
+    Origin + "budgetSplit" -> Save("read", lookup = true),
+    // Review B4: `search` is a read prefix, so it is a lookup too.
+    Origin + "searchLookup" -> Save("constructed", lookup = true),
     // R1-27: one hop, only over call sites the export holds.
     Origin + "<lambda>0"                      -> Save("parameter", lookup = false),
     "service.WidgetWriter.storeFromTwoPlaces" -> Save("parameter", lookup = false, callers = List("read")),
@@ -87,6 +113,14 @@ class SaveOriginConformanceTest extends AnyFunSuite with Matchers with FixtureCp
   test("every save site in the export belongs to exactly one shape") {
     saveRows should have size shapes.size
     shapes.map(_._1).distinct should have size shapes.size
+  }
+
+  test("guard_lookup_method is on every save, set exactly when an arm is read (export 2.15.0)") {
+    saveRows.foreach { row =>
+      val save = row("db")("save")
+      save.obj.contains("guard_lookup_method") shouldBe true
+      (save("guard_lookup_method") != ujson.Null) shouldBe (save("guard_arm").str != "none")
+    }
   }
 
   test("the caller hop's excluded call site is really outside the export") {
