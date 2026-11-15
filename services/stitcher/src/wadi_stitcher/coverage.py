@@ -16,6 +16,7 @@ from wadi_contracts import (
     CoverageTotals,
     Endpoint,
     EndpointCollision,
+    EntityAccessAccounting,
     EntityAccessBasis,
     EntityCoverageSection,
     EntityOperation,
@@ -253,6 +254,32 @@ _UNMEASURED_ENTITY_ACCESS = (
     UnmeasuredEntityAccess.OTHER_PERSISTENCE_MECHANISMS,
 )
 
+# The verbs the save split computes (rule 5), in EntityOperation order. Only
+# these have gate flags; every other operation publishes without one.
+_SPLIT_OPERATIONS = (EntityOperation.CREATE, EntityOperation.UPDATE)
+
+
+def _gated_operations(accountings: Sequence[EntityAccessAccounting]) -> list[EntityOperation]:
+    """The split verbs no reporting service may publish from a save (review C6).
+
+    A verb is gated when no service has a flag for it that is on AND scored
+    against the rules version that service ran (E4): a flag on for another
+    version is a stale score, and the worker holds its basis back exactly as
+    if it were off. One current flag on one service is enough to ungate the
+    verb, because that service's saves can then publish it.
+    """
+    return [
+        operation
+        for operation in _SPLIT_OPERATIONS
+        if not any(
+            flag.operation is operation
+            and flag.enabled
+            and flag.scored_rules_version == accounting.rules_version
+            for accounting in accountings
+            for flag in accounting.gate_flags
+        )
+    ]
+
 
 def build_entity_coverage(
     boundaries: Sequence[ServiceBoundary],
@@ -271,6 +298,10 @@ def build_entity_coverage(
     Libraries are excluded entirely, as in :func:`build_analysis_coverage`:
     a library has no export of its own (§5.2.6), so its accounting is always
     ``None`` and counting it would read as a stale service.
+
+    ``gated_operations`` names the split verbs no service could publish from
+    a save, so a zero under ``create`` or ``update`` reads as withheld while
+    the flags are off, not as a measured absence (review C6).
 
     ``None`` when no service reports accounting, which is every snapshot from
     before the phase: a section of zeros would claim the calls were counted.
@@ -326,6 +357,7 @@ def build_entity_coverage(
         by_service=rows,
         unmeasured=list(_UNMEASURED_ENTITY_ACCESS),
         unexercised_vocabulary=unexercised,
+        gated_operations=_gated_operations(accountings),
     )
 
 
