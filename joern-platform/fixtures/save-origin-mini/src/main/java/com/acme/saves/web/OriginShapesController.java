@@ -113,4 +113,56 @@ public class OriginShapesController {
         Widget widget = widgetRepository.findById(id).orElseThrow();
         return widgetService.store(widget);
     }
+
+    /** Both paths are reads, but one reaches its read only past the walk's
+     *  depth bound: a walk that stops says `other`, never `mixed` (review A5). */
+    @PostMapping("/deep-chain")
+    public Widget deepChain(@RequestParam String id, @RequestParam boolean fresh) {
+        Widget saved;
+        if (fresh) {
+            saved = widgetRepository.findById(id).orElseThrow();
+        } else {
+            Widget c0 = widgetRepository.findById(id).orElseThrow();
+            Widget c1 = c0;
+            Widget c2 = c1;
+            Widget c3 = c2;
+            Widget c4 = c3;
+            Widget c5 = c4;
+            Widget c6 = c5;
+            Widget c7 = c6;
+            Widget c8 = c7;
+            Widget c9 = c8;
+            saved = c9;
+        }
+        return widgetRepository.save(saved);
+    }
+
+    /** A read in each arm, each behind statements that do not touch the
+     *  widget: a walk that runs out of nodes after finishing one arm has seen
+     *  only that arm's read, so it must not report it as the whole answer
+     *  (review A5; `SaveOriginBudgetTest`). */
+    @PostMapping("/budget-split")
+    public Widget budgetSplit(@RequestParam String id, @RequestParam boolean fresh) {
+        Widget widget;
+        String note = id;
+        if (fresh) {
+            widget = widgetRepository.findById(id).orElseThrow();
+            note = note.trim();
+            note = note.toLowerCase();
+            note = note.strip();
+        } else {
+            widget = widgetRepository.findById(note).orElseThrow();
+            note = note.toUpperCase();
+            note = note.intern();
+            note = note.repeat(2);
+        }
+        return widgetRepository.save(widget);
+    }
+
+    /** A `search` read on the save's own repository is a lookup (review B4). */
+    @PostMapping("/search-lookup")
+    public Widget searchLookup(@RequestParam String id, @RequestParam String name) {
+        List<Widget> similar = widgetRepository.searchByName(name);
+        return widgetRepository.save(new Widget(id + similar.size()));
+    }
 }

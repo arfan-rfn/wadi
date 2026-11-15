@@ -6,7 +6,6 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
   AnnotationLiteral,
   AstNode,
   Call,
-  Identifier,
   Literal,
   Method,
   TypeDecl
@@ -15,9 +14,11 @@ import io.shiftleft.semanticcpg.language.*
 
 import scala.collection.mutable
 
-import wadi.packs.{SpringDataRepositories, SpringPacks}
+import wadi.packs.{GenericSignature, SpringDataRepositories, SpringPacks}
+import wadi.packs.SpringDataRepositories.{MarkerReceiver, ProjectReceiver, Receiver}
 
-/** Raw entity-access facts for repository calls (§5.2.17, export 2.14.0 A1).
+/** Raw entity-access facts for repository calls (§5.2.17, export 2.14.0 A1;
+  * 2.15.0 after the rigor review).
   *
   * The export already lists every database call site as a `sinks` row; this
   * nests what the worker needs to classify the call on that row, as the `db`
@@ -29,38 +30,30 @@ import wadi.packs.{SpringDataRepositories, SpringPacks}
   * method declared on `BaseRepository<E>` names a type whose `E` is unbound,
   * and only the receiver (`IssueRepository extends BaseRepository<Issue>`)
   * says what `E` is. The extends-clause text is read from
-  * `TYPE_DECL.genericSignature` (the M0 probe, §5.2.17).
+  * `TYPE_DECL.genericSignature` (the M0 probe, §5.2.17). A receiver declared
+  * as Spring Data's own interface (`CrudRepository<Order, Long>`) or as a
+  * type variable bounded by one names its entity in that declaration
+  * (review A2).
   *
   * `exportedMethodIds` is the export's method closure: a save's caller hop
-  * (R1-27) counts only call sites the export itself holds.
+  * (R1-27) counts only call sites the export itself holds. `walkBudget` is
+  * the save walk's node budget, a parameter so a test can reach it.
   */
-private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set[Long]) {
+private[`export`] final class EntityAccessFacts(
+  cpg: Cpg,
+  exportedMethodIds: Set[Long],
+  walkBudget: Int = SaveOrigin.WalkBudget
+) {
 
   import EntityAccessFacts.*
 
   // Existing CALL edges only, the DI pass's included (same rule as the export).
   private given ICallResolver = NoResolve
 
-  private val repositoryTypes: Set[String] = SpringDataRepositories.repositoryTypes(cpg)
-
-  private val projectTypes: List[TypeDecl] = cpg.typeDecl.filterNot(_.isExternal).l
-  private val byFullName: Map[String, TypeDecl] =
-    projectTypes.groupBy(_.fullName).view.mapValues(_.head).toMap
-  private val bySimpleName: Map[String, List[TypeDecl]] =
-    projectTypes.groupBy(td => td.name.split('$').last)
-  private val byName: Map[String, List[TypeDecl]] = projectTypes.groupBy(_.name)
-
-  /** Per source file: (alias, imported entity, wildcard). */
-  private val importsByFile: Map[String, List[(String, String, Boolean)]] =
-    cpg.imports.l
-      .flatMap { imp =>
-        val entity   = imp.importedEntity.getOrElse("")
-        val wildcard = imp.isWildcard.contains(true) || entity.endsWith(".*")
-        imp.file.name.headOption.map(file =>
-          file -> (imp.importedAs.getOrElse(entity.split('.').last), entity.stripSuffix(".*"), wildcard)
-        )
-      }
-      .groupMap(_._1)(_._2)
+  private val index           = new SpringDataRepositories.Index(cpg)
+  private val repositoryTypes = index.repositoryTypes
+  private val projectTypes    = index.projectTypes
+  private val byFullName      = index.byFullName
 
   private val bindings  = mutable.Map.empty[String, Binding]
   private val ancestors = mutable.Map.empty[Long, List[TypeDecl]]
@@ -69,38 +62,61 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set
   private val saves = new SaveOrigin(
     exportedMethodIds,
     new SaveOrigin.Repositories {
-      def repositoryOf(call: Call): Option[String] = EntityAccessFacts.this.repositoryOf(call).map(_.fullName)
-      def entityOf(repository: String): Option[String] =
-        byFullName.get(repository).flatMap(td => bindingOf(td).entity).flatMap { case (ty, writtenIn) => resolve(ty, writtenIn) }
+      def repositoryOf(call: Call): Option[SaveOrigin.RepositoryRef] =
+        index.receiverOf(call).map { receiver =>
+          SaveOrigin.RepositoryRef(receiver.repository, bindingFor(Some(receiver)).entity.flatMap(resolveWritten))
+        }
+      def declaredReturnType(call: Call): Option[String] =
+        declarationOf(call, projectRepository(index.receiverOf(call))).method.map(_.methodReturn.typeFullName)
       def isA(typeFullName: String, entity: String): Boolean =
         typeFullName == entity || byFullName.get(typeFullName).exists(td => ancestorsOf(td).exists(_.fullName == entity))
       def isProjectType(typeFullName: String): Boolean = byFullName.contains(typeFullName)
-    }
+    },
+    walkBudget
   )
 
   /** The `db` object for one `sink=db` call. */
   def dbObj(call: Call): ujson.Obj = {
-    val repository  = repositoryOf(call)
-    val binding     = repository.map(bindingOf).getOrElse(Binding(None, None))
-    val declaration = declarationOf(call, repository)
+    val receiver    = index.receiverOf(call)
+    val binding     = bindingFor(receiver)
+    val declaration = declarationOf(call, projectRepository(receiver))
     val entityText = binding.entity.map { case (ty, _) => GenericSignature.render(ty) }
-    val entityFull = binding.entity.flatMap { case (ty, writtenIn) => resolve(ty, writtenIn) }
-    val kind       = binding.marker.map(repositoryKindOf).getOrElse("other")
-    val repoName   = repository.map(_.fullName).getOrElse(declaringTypeOf(call))
+    val entityFull = binding.entity.flatMap(resolveWritten)
+    val kind       = binding.marker.map(SpringDataRepositories.kindOf).getOrElse("other")
+    val repoName   = receiver.map(_.repository).getOrElse(declaringTypeOf(call))
     ujson.Obj(
       "repository"             -> repoName,
       "method_name"            -> call.name,
       "entity_type_text"       -> entityText.map(ujson.Str(_)).getOrElse(ujson.Null),
       "entity_type_full_name"  -> entityFull.map(ujson.Str(_)).getOrElse(ujson.Null),
       "repository_kind"        -> kind,
-      "implemented_in_project" -> declaration.exists(implementedInProject),
-      "query"                  -> declaration.flatMap(queryObj(_, entityFull, kind)).getOrElse(ujson.Null),
+      "implemented_in_project" -> declaration.method.exists(implementedInProject),
+      "query"                  -> declaration.method.flatMap(queryObj(_, entityFull, kind)).getOrElse(ujson.Null),
       // A1 `save`: rule 3's inputs for a save-family call (`save`,
       // `saveAndFlush`, `saveAll`, `saveAllAndFlush`, `insert`), an explicit
       // null for every other method.
-      "save" -> saves.saveObj(call, repoName, entityFull)
+      "save" -> saves.saveObj(call, repoName, entityFull),
+      // Export 2.15.0 (review B1): what annotates the method, so an
+      // annotation that changes what it does withholds the name's verb.
+      "method_annotations" -> ujson.Arr.from(declaration.method.toList.flatMap(annotationNames).map(ujson.Str(_))),
+      "declaration_resolved" -> declaration.resolved
     )
   }
+
+  private def projectRepository(receiver: Option[Receiver]): Option[TypeDecl] =
+    receiver.collect { case ProjectReceiver(name) => name }.flatMap(byFullName.get)
+
+  /** A project repository binds through its chain; a receiver declared as a
+    * Spring Data interface binds its declared argument, and its kind is that
+    * interface's.
+    */
+  private def bindingFor(receiver: Option[Receiver]): Binding = receiver match {
+    case Some(ProjectReceiver(name)) => byFullName.get(name).map(bindingOf).getOrElse(Binding(None, None))
+    case Some(MarkerReceiver(marker, entity, writtenIn)) => Binding(Some(marker), entity.map(_ -> writtenIn))
+    case None                                            => Binding(None, None)
+  }
+
+  private def resolveWritten(written: Written): Option[String] = resolve(written._1, written._2)
 
   /** A2: the entity records. Every `@Entity` / `@Document` class (the
     * `model=` tag), then every project type a repository's chain binds that
@@ -135,8 +151,26 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set
       },
       "persistence_framework" -> "spring-data",
       "storage_name"          -> storageNameOf(td).map(ujson.Str(_)).getOrElse(ujson.Null),
-      "declared_by"           -> declaredBy
+      "declared_by"           -> declaredBy,
+      // Export 2.15.0 (review B2): a schema-qualified table names this
+      // entity only when the entity declares that schema.
+      "storage_schema" -> td.annotation.nameExact("Table").headOption
+        .flatMap(attributeString(_, "schema", Some(td)))
+        .filter(_.nonEmpty)
+        .map(ujson.Str(_))
+        .getOrElse(ujson.Null),
+      // Export 2.15.0 (review B1): Hibernate runs this instead of the
+      // delete, so a delete on the entity deletes no row.
+      "delete_rewritten_by" -> deleteRewriterOf(td).map(ujson.Str(_)).getOrElse(ujson.Null)
     )
+
+  /** `@SQLDelete` / `@SoftDelete` from `org.hibernate.annotations`, or the
+    * simple name as written when the parse could not place it.
+    */
+  private def deleteRewriterOf(td: TypeDecl): Option[String] =
+    inSourceOrder(td.annotation.nameExact("SQLDelete", "SoftDelete").l)
+      .find(a => a.fullName == s"org.hibernate.annotations.${a.name}" || !isQualified(a))
+      .map(annotationName)
 
   /** `@Table(name = "x")` (and the bare `@Table("x")` of Spring Data JDBC),
     * then `@Document("x")`, `@Document(value = "x")` or
@@ -154,41 +188,77 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set
       .filter(_.nonEmpty)
   }
 
-  /** The receiver's declared type when it is a repository, else the type the
-    * call's methodFullName names (the type the sink pass tagged it by).
-    */
-  private def repositoryOf(call: Call): Option[TypeDecl] = {
-    val receiverType = call.argument.argumentIndex(0).headOption.flatMap {
-      case receiver: Call       => Some(receiver.typeFullName)
-      case receiver: Identifier => Some(receiver.typeFullName)
-      case _                    => None
-    }
-    receiverType
-      .filter(repositoryTypes.contains)
-      .orElse(Some(declaringTypeOf(call)).filter(repositoryTypes.contains))
-      .flatMap(byFullName.get)
-  }
-
-  /** The project METHOD the call names, when the project declares one.
+  /** The project METHOD the call names, when the project declares one, and
+    * whether the declaration is known.
+    *
+    * A resolved call takes the declaration its methodFullName names, which
+    * is javasrc2cpg's own resolution; the DI pass can add others, such as the
+    * base declaration a sub-interface redeclares with `@Query`. Failing that,
+    * the nearest in the receiver's chain wins, as it does at runtime (review
+    * A3): a sort by node id used to pick whichever file was parsed first.
     *
     * javasrc2cpg resolves a call on a repository receiver against the
     * receiver's own type, so a method declared on a base interface often
     * reaches no callee (`IssueRepository.findAllByIdIn:<unresolvedSignature>`).
-    * The fallback looks the name up along the repository's own chain, by name
+    * The fallback looks the name up along the chain, nearest first, by name
     * and arity; an inherited Spring Data method (`findById`) has no project
-    * declaration at all, which is the answer.
+    * declaration at all, which is the answer. When the chain declares the
+    * name but nothing with the call's arity (varargs, an overload the parse
+    * could not type), which declaration runs is not known, and none is read.
     */
-  private def declarationOf(call: Call, repository: Option[TypeDecl]): Option[Method] = {
+  private def declarationOf(call: Call, repository: Option[TypeDecl]): Declaration = {
+    val chain    = repository.toList.flatMap(nearestFirst)
     val resolved = call.callee.filterNot(_.isExternal).l
-    if (resolved.nonEmpty) return resolved.sortBy(_.id).headOption
-    val arity = call.argument.count(_.argumentIndex >= 1)
-    repository.toList
-      .flatMap(td => td :: ancestorsOf(td))
-      .flatMap(_.method.nameExact(call.name).filterNot(_.isExternal).l)
-      .filter(_.parameter.count(_.index >= 1) == arity)
-      .sortBy(_.id)
-      .headOption
+    if (resolved.nonEmpty) {
+      val rank = chain.map(_.id).zipWithIndex.toMap
+      val nearest = resolved.minBy(m => (m.typeDecl.headOption.flatMap(td => rank.get(td.id)).getOrElse(Int.MaxValue), m.id))
+      Declaration(Some(resolved.find(_.fullName == call.methodFullName).getOrElse(nearest)), resolved = true)
+    } else {
+      val arity = call.argument.count(_.argumentIndex >= 1)
+      val named = chain.flatMap(_.method.nameExact(call.name).filterNot(_.isExternal).l)
+      named.find(_.parameter.count(_.index >= 1) == arity) match {
+        case found @ Some(_) => Declaration(found, resolved = true)
+        case None            => Declaration(None, resolved = named.isEmpty)
+      }
+    }
   }
+
+  /** `td` and its in-project ancestors, breadth first: a sub-interface's
+    * declaration comes before the one it redeclares.
+    */
+  private def nearestFirst(td: TypeDecl): List[TypeDecl] = {
+    val seen     = mutable.LinkedHashMap(td.id -> td)
+    var frontier = List(td)
+    while (frontier.nonEmpty) {
+      frontier = frontier.flatMap(directParents).filterNot(p => seen.contains(p.id)).distinctBy(_.id)
+      frontier.foreach(p => seen(p.id) = p)
+    }
+    seen.values.toList
+  }
+
+  /** Every annotation on the declaration, qualified where the parse placed
+    * it, in source order. An annotation type the project declares is
+    * followed by its own annotations, one level, as `<annotation>><meta>`:
+    * Spring Data merges `@Query` from a meta-annotation (review B1).
+    */
+  private def annotationNames(declaration: Method): List[String] =
+    inSourceOrder(declaration.annotation.l).flatMap { annotation =>
+      val name = annotationName(annotation)
+      val meta = byFullName.get(annotation.fullName).toList.flatMap(td => inSourceOrder(td.annotation.l))
+      name :: meta.map(m => s"$name>${annotationName(m)}")
+    }
+
+  private def annotationName(annotation: Annotation): String =
+    if (isQualified(annotation)) annotation.fullName else annotation.name
+
+  private def isQualified(annotation: Annotation): Boolean =
+    annotation.fullName.contains('.') && !annotation.fullName.startsWith("<")
+
+  private def inSourceOrder(annotations: List[Annotation]): List[Annotation] =
+    annotations.sortBy(a => (positionOf(a.lineNumber), positionOf(a.columnNumber), a.id))
+
+  private def positionOf(value: Option[Int | Integer]): Int =
+    value.map(_.toString.toInt).getOrElse(-1)
 
   /** C3: the called method has a body in the project. Either the declaration
     * is concrete (a `default` method), or it is abstract on an interface that
@@ -220,10 +290,7 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set
     * resolves them. Read from maps built once; a graph lookup per name would
     * scale with the project for every class.
     */
-  private def directParents(td: TypeDecl): List[TypeDecl] =
-    td.inheritsFromTypeFullName.l.flatMap { parent =>
-      byFullName.get(parent).map(List(_)).getOrElse(byName.getOrElse(parent.split('.').last, Nil))
-    }.distinctBy(_.id)
+  private def directParents(td: TypeDecl): List[TypeDecl] = index.parentsOf(td)
 
   /** Every in-project ancestor, transitively, cycle-guarded and memoized. */
   private def ancestorsOf(td: TypeDecl): List[TypeDecl] =
@@ -247,9 +314,12 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set
     * over any named query, as it does at runtime.
     */
   private def queryObj(declaration: Method, entityFullName: Option[String], kind: String): Option[ujson.Obj] = {
-    val owner     = declaration.typeDecl.headOption
-    val query     = declaration.annotation.nameExact("Query").headOption
-    val modifying = declaration.annotation.nameExact("Modifying").nonEmpty
+    val owner = declaration.typeDecl.headOption
+    // Spring Data JPA 3.4's `@NativeQuery` is `@Query(nativeQuery = true)`
+    // under another name, and is read as one (review B1).
+    val nativeAnnotation = declaration.annotation.nameExact("NativeQuery").headOption
+    val query            = declaration.annotation.nameExact("Query").headOption.orElse(nativeAnnotation)
+    val modifying        = declaration.annotation.nameExact("Modifying").nonEmpty
     val hasValue  = query.exists(hasAttribute(_, "value"))
     val text      = query.flatMap(attributeString(_, "value", owner))
     val explicitName = query.flatMap(attributeString(_, "name", owner))
@@ -263,7 +333,8 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set
     val namedRef = if (hasValue) None else explicitName.orElse(implicitKey)
     val named    = namedRef.flatMap(namedQueries.get)
     Option.when(query.isDefined || modifying || named.isDefined) {
-      val nativeAttr = query.flatMap(attributeText(_, "nativeQuery")).exists(_.trim == "true")
+      val nativeAttr =
+        query.exists(_.name == "NativeQuery") || query.flatMap(attributeText(_, "nativeQuery")).exists(_.trim == "true")
       ujson.Obj(
         "text"      -> text.orElse(named.flatMap(_.text)).map(ujson.Str(_)).getOrElse(ujson.Null),
         "native"    -> (nativeAttr || named.exists(_.native)),
@@ -329,67 +400,35 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set
       case _                                                       => None
     }
     supers.iterator.flatMap { case (parentName, written) =>
-      if (SpringDataRepositories.isMarker(parentName))
-        // Every Spring Data marker declares the entity first: Repository<T, ID>.
-        Iterator(Binding(Some(parentName), written.flatMap(_.args.headOption).flatMap(substitute)))
-      else
-        directParents(td)
-          .filter(p => sameType(p.fullName, parentName) && repositoryTypes.contains(p.fullName))
-          .iterator
-          .flatMap { parent =>
-            val params = GenericSignature.parseDecl(parent.genericSignature).map(_.params).getOrElse(Nil)
-            val args   = written.map(_.args).getOrElse(Nil)
-            // A raw or mismatched reference binds nothing: guessing a position
-            // is exactly the defect TypeShapes declines for the same reason.
-            val parentEnv: Map[String, Option[Written]] =
-              if (args.sizeIs == params.size) params.zip(args.map(substitute)).toMap
-              else params.map(_ -> None).toMap
-            walk(parent, parentEnv, visited + td.id)
-          }
+      index.markerOf(parentName, td) match {
+        case Some(marker) =>
+          // Every Spring Data marker declares the entity first: Repository<T, ID>.
+          Iterator(Binding(Some(marker), written.flatMap(_.args.headOption).flatMap(substitute)))
+        case None =>
+          directParents(td)
+            .filter(p => sameType(p.fullName, parentName) && repositoryTypes.contains(p.fullName))
+            .iterator
+            .flatMap { parent =>
+              val params = GenericSignature.parseDecl(parent.genericSignature).map(_.params).getOrElse(Nil)
+              val args   = written.map(_.args).getOrElse(Nil)
+              // A raw or mismatched reference binds nothing: guessing a position
+              // is exactly the defect TypeShapes declines for the same reason.
+              val parentEnv: Map[String, Option[Written]] =
+                if (args.sizeIs == params.size) params.zip(args.map(substitute)).toMap
+                else params.map(_ -> None).toMap
+              walk(parent, parentEnv, visited + td.id)
+            }
+      }
     }.nextOption()
   }
 
-  /** The bound type text resolved to a project type, the way javac would:
-    * single-type import, then same package, then on-demand imports, then a
-    * simple name unique in the project. None when it names no project type.
+  /** The bound type text resolved to a project type through the file it was
+    * written in (`Index.resolveName`). A type variable resolves to nothing.
     */
   private def resolve(ty: GenericSignature.Ty, writtenIn: TypeDecl): Option[String] = ty match {
-    case GenericSignature.ClassTy(name, _) => resolveName(name, writtenIn)
+    case GenericSignature.ClassTy(name, _) => index.resolveName(name, writtenIn)
     case _                                 => None
   }
-
-  private def resolveName(name: String, writtenIn: TypeDecl): Option[String] =
-    if (name.contains('.')) {
-      // Qualified, or a nested type `Outer.Inner` (javasrc2cpg: `Outer$Inner`).
-      val segments = name.split('.').toList
-      val qualified = (segments.size to 1 by -1).iterator
-        .map(i => (segments.take(i).mkString(".") :: segments.drop(i)).mkString("$"))
-        .find(byFullName.contains)
-      qualified.orElse(
-        resolveName(segments.head, writtenIn).map(outer => (outer :: segments.tail).mkString("$")).filter(byFullName.contains)
-      )
-    } else {
-      val imports  = importsByFile.getOrElse(writtenIn.filename, Nil)
-      val explicit = imports.find { case (alias, _, wildcard) => !wildcard && alias == name }
-      explicit match {
-        // An explicit import settles it, even when it names a library type.
-        case Some((_, entity, _)) => byFullName.get(entity).map(_.fullName)
-        case None =>
-          val samePackage = s"${packageOf(writtenIn)}.$name"
-          if (byFullName.contains(samePackage)) Some(samePackage)
-          else {
-            val onDemand = imports.collect { case (_, pkg, true) if byFullName.contains(s"$pkg.$name") => s"$pkg.$name" }
-            onDemand match {
-              case List(one) => Some(one)
-              case Nil       => bySimpleName.get(name).collect { case List(only) => only.fullName }
-              case _         => None
-            }
-          }
-      }
-    }
-
-  private def packageOf(td: TypeDecl): String =
-    td.fullName.stripSuffix("." + td.name)
 
   /** An annotation attribute's value node; the single-element form
     * (`@Query("...")`) is the `value` attribute.
@@ -485,6 +524,11 @@ private[`export`] object EntityAccessFacts {
     */
   private type Written = (GenericSignature.Ty, TypeDecl)
 
+  /** A call's project declaration, and false when the chain declares the
+    * call's name with no matching arity, so no declaration was read.
+    */
+  private final case class Declaration(method: Option[Method], resolved: Boolean)
+
   /** A named query's text (None when unreadable) and whether it is native. */
   private final case class NamedQuery(text: Option[String], native: Boolean)
 
@@ -500,156 +544,5 @@ private[`export`] object EntityAccessFacts {
   }
 
   /** The type a call's methodFullName names as declaring the method. */
-  def declaringTypeOf(call: Call): String = {
-    val declaring = call.methodFullName.split(':').head
-    declaring.substring(0, math.max(declaring.lastIndexOf('.'), 0))
-  }
-
-  /** `jpa` / `mongo` from the marker the chain reached; a store-agnostic
-    * marker (`CrudRepository`) is `other`.
-    */
-  def repositoryKindOf(marker: String): String =
-    if (marker.contains("mongodb") || marker.contains("MongoRepository")) "mongo"
-    else if (marker.contains("data.jpa") || marker.contains("JpaRepository")) "jpa"
-    else "other"
-}
-
-/** javasrc2cpg's TYPE_DECL.genericSignature, parsed (§5.2.17, the M0 probe).
-  *
-  * It is JVM generic-signature syntax built from the source text: names as
-  * WRITTEN and dotted (`LAccount;`, `Lcom.acme.Account;`, `LOuter.Nested;`),
-  * the declaration's own parameter list first (`<E:LObject;>`), then the
-  * superclass (`LObject;` for an interface) and the interfaces with their
-  * arguments. A type variable is spelled like a class (`LE;`), so it is told
-  * apart only by the enclosing declaration's parameter list.
-  */
-private[`export`] object GenericSignature {
-
-  sealed trait Ty
-  final case class ClassTy(name: String, args: List[Arg]) extends Ty
-  final case class ArrayTy(element: Ty)                    extends Ty
-  final case class PrimitiveTy(code: Char)                 extends Ty
-  final case class VarTy(name: String)                     extends Ty
-
-  sealed trait Arg
-  case object AnyArg                                  extends Arg
-  final case class WildArg(variance: Char, bound: Ty) extends Arg
-  final case class ExactArg(ty: Ty)                   extends Arg
-
-  final case class Decl(params: List[String], supers: List[ClassTy])
-
-  /** None on anything unexpected: an unreadable chain is an unbound entity,
-    * never a guess.
-    */
-  def parseDecl(signature: String): Option[Decl] =
-    if (signature == null || signature.isEmpty || signature == "<empty>") None
-    else {
-      val reader = new Reader(signature)
-      try {
-        val params = if (reader.peek == '<') reader.typeParams() else Nil
-        val supers = mutable.ListBuffer.empty[ClassTy]
-        while (!reader.atEnd) supers += reader.classTy()
-        Some(Decl(params, supers.toList))
-      } catch { case _: Reader.Malformed => None }
-    }
-
-  /** Java source text for a type: `Map<String, List<Integer>>`, `byte[]`. */
-  def render(ty: Ty): String = ty match {
-    case ClassTy(name, Nil)  => name
-    case ClassTy(name, args) => s"$name<${args.map(renderArg).mkString(", ")}>"
-    case ArrayTy(element)    => s"${render(element)}[]"
-    case PrimitiveTy(code)   => Primitives.getOrElse(code, code.toString)
-    case VarTy(name)         => name
-  }
-
-  private def renderArg(arg: Arg): String = arg match {
-    case AnyArg                => "?"
-    case WildArg('+', bound)   => s"? extends ${render(bound)}"
-    case WildArg(_, bound)     => s"? super ${render(bound)}"
-    case ExactArg(ty)          => render(ty)
-  }
-
-  private val Primitives: Map[Char, String] = Map(
-    'B' -> "byte", 'C' -> "char", 'D' -> "double", 'F' -> "float", 'I' -> "int",
-    'J' -> "long", 'S' -> "short", 'Z' -> "boolean", 'V' -> "void"
-  )
-
-  private object Reader {
-    final class Malformed extends RuntimeException(null, null, false, false)
-  }
-
-  private final class Reader(text: String) {
-    private var at = 0
-
-    def atEnd: Boolean = at >= text.length
-    def peek: Char     = if (atEnd) throw new Reader.Malformed else text.charAt(at)
-    private def next(): Char = { val c = peek; at += 1; c }
-    private def expect(c: Char): Unit = if (next() != c) throw new Reader.Malformed
-
-    /** `<K:LObject;E:LComparable<LE;>;>`: names only; bounds are skipped. */
-    def typeParams(): List[String] = {
-      expect('<')
-      val names = mutable.ListBuffer.empty[String]
-      while (peek != '>') {
-        val start = at
-        while (peek != ':') at += 1
-        names += text.substring(start, at)
-        // One class bound and any interface bounds, each after a ':'; the
-        // class bound may be empty (`T::LIface;`).
-        while (!atEnd && peek == ':') {
-          at += 1
-          if (peek != ':' && peek != '>' && !isParamStart) ty()
-        }
-      }
-      expect('>')
-      names.toList
-    }
-
-    /** After a bound, a new parameter starts with an identifier and a ':'. */
-    private def isParamStart: Boolean = {
-      var i = at
-      while (i < text.length && Character.isJavaIdentifierPart(text.charAt(i))) i += 1
-      i > at && i < text.length && text.charAt(i) == ':'
-    }
-
-    def ty(): Ty = peek match {
-      case 'L' => classTy()
-      case '[' => at += 1; ArrayTy(ty())
-      case 'T' =>
-        at += 1
-        val start = at
-        while (peek != ';') at += 1
-        val name = text.substring(start, at)
-        at += 1
-        VarTy(name)
-      case c if Primitives.contains(c) => at += 1; PrimitiveTy(c)
-      case _                           => throw new Reader.Malformed
-    }
-
-    def classTy(): ClassTy = {
-      expect('L')
-      val start = at
-      while (peek != '<' && peek != ';') at += 1
-      val name = text.substring(start, at)
-      val args =
-        if (peek == '<') {
-          at += 1
-          val buffer = mutable.ListBuffer.empty[Arg]
-          while (peek != '>') buffer += arg()
-          at += 1
-          buffer.toList
-        } else Nil
-      // A suffix after the arguments (`LOuter<LA;>.Inner;`) is not a shape
-      // the frontend was seen to write; refuse it rather than misread it.
-      expect(';')
-      if (name.isEmpty) throw new Reader.Malformed
-      ClassTy(name, args)
-    }
-
-    private def arg(): Arg = peek match {
-      case '*'       => at += 1; AnyArg
-      case '+' | '-' => val v = next(); WildArg(v, ty())
-      case _         => ExactArg(ty())
-    }
-  }
+  def declaringTypeOf(call: Call): String = SpringDataRepositories.declaringTypeOf(call)
 }

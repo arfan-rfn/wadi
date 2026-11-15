@@ -3,6 +3,7 @@ package wadi.`export`
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import wadi.packs.GenericSignature
 import GenericSignature.*
 
 /** The TYPE_DECL.genericSignature reader (§5.2.17, the M0 probe).
@@ -49,6 +50,34 @@ class GenericSignatureTest extends AnyFunSuite with Matchers {
   test("interface RawRepo extends CrudRepository (raw: no argument to bind)") {
     parseDecl("LObject;LCrudRepository;").get.supers.map(s => (s.name, s.args)) shouldBe
       List(("Object", Nil), ("CrudRepository", Nil))
+  }
+
+  test("abstract class BoundedStore<R extends JpaRepository<Order, String>>: a parameter keeps its bound") {
+    val decl = parseDecl("<R:LJpaRepository<LOrder;LString;>;>LObject;").get
+    decl.params shouldBe List("R")
+    decl.bounds("R") shouldBe List(
+      ClassTy("JpaRepository", List(ExactArg(ClassTy("Order", Nil)), ExactArg(ClassTy("String", Nil))))
+    )
+    // No bound written is Object's.
+    parseDecl("<E:LObject;>LObject;").get.bounds("E") shouldBe List(ClassTy("Object", Nil))
+  }
+
+  test("a MEMBER's or LOCAL's signature is one type; a type variable is TR;") {
+    parseType("TR;") shouldBe Some(VarTy("R"))
+    parseType("LJpaRepository<TE;LLong;>;") shouldBe
+      Some(ClassTy("JpaRepository", List(ExactArg(VarTy("E")), ExactArg(ClassTy("Long", Nil)))))
+    parseType("LCrudRepository<LOrder;LString;>;LObject;") shouldBe None
+    parseType("<empty>") shouldBe None
+  }
+
+  test("<R extends CrudRepository<Thing, Long>> long viaMethodVar(R repo): bounds and parameter types") {
+    val sig = parseMethod("<R:LCrudRepository<LThing;LLong;>;>(TR;)J").get
+    sig.bounds("R") shouldBe List(
+      ClassTy("CrudRepository", List(ExactArg(ClassTy("Thing", Nil)), ExactArg(ClassTy("Long", Nil))))
+    )
+    sig.params shouldBe List(VarTy("R"))
+    parseMethod("(LWildRepo;LString;)Z").get.params shouldBe List(ClassTy("WildRepo", Nil), ClassTy("String", Nil))
+    parseMethod("(LWildRepo;") shouldBe None
   }
 
   test("an unreadable signature is no declaration, never a partial one") {

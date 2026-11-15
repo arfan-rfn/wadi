@@ -89,8 +89,20 @@ object WadiExport {
     * populated `storage_name`, `declared_by` and per-field `declared_type`,
     * plus a row for each entity only a repository names. Repository detection
     * is transitive (Q10).
+    *
+    * 2.15.0 (additive, §5.2.17 "Hardening after the rigor review"): the `db`
+    * object gains `method_annotations` (the resolved declaration's, one level
+    * of meta-annotation for a project annotation) and `declaration_resolved`
+    * (false when the chain declares the name with no matching arity); `save`
+    * gains `guard_lookup_method`; `data_models` rows gain `storage_schema`
+    * and `delete_rewritten_by`; the document carries `save_origin_rules`, the
+    * build's hash of the sources that derive the save facts. Repository
+    * markers match by qualified name, and a call on a receiver declared as a
+    * Spring Data interface or a type variable bounded by one is a `db` row. A
+    * null test is an existence guard only on a lookup that returns the entity,
+    * and a save walk that stops at a bound reports `other`.
     */
-  val ExportSchemaVersion = "2.14.0"
+  val ExportSchemaVersion = "2.15.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -185,6 +197,7 @@ object WadiExport {
       "sinks"                 -> sinkRows.toList,
       "unreachable_sinks"     -> unreachableObjs,
       "data_models"           -> modelObjs,
+      "save_origin_rules"     -> SaveOriginRules.Hash,
       "security_rules"        -> securityRules,
       "auth_enforcements"     -> authEnforcementObjs(cpg),
       "method_security"       -> methodSecurityObj(cpg),

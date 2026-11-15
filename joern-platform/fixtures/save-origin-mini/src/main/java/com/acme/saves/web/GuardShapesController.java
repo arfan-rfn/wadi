@@ -4,6 +4,7 @@ import com.acme.saves.domain.Widget;
 import com.acme.saves.repo.GadgetRepository;
 import com.acme.saves.repo.WidgetRepository;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -110,6 +111,36 @@ public class GuardShapesController {
     @PostMapping("/other-repository-none")
     public Widget otherRepositoryNone(@RequestParam String id) {
         if (!gadgetRepository.existsById(id)) {
+            return widgetRepository.save(new Widget(id));
+        }
+        return null;
+    }
+
+    /** The train-ticket ledger shape (review A1): a finder returning a List is
+     *  never null, so this test holds on every call and a new row is saved. */
+    @PostMapping("/list-not-null-none")
+    public Widget listNotNullNone(@RequestParam String name) {
+        if (widgetRepository.findByName(name) != null) {
+            Widget widget = new Widget(UUID.randomUUID().toString());
+            return widgetRepository.save(widget);
+        }
+        return null;
+    }
+
+    /** An Optional compared to null: never null, so never the not-found arm. */
+    @PostMapping("/optional-null-check-none")
+    public Widget optionalNullCheckNone(@RequestParam String id) {
+        Optional<Widget> existing = widgetRepository.findById(id);
+        if (existing == null) {
+            return widgetRepository.save(new Widget(id));
+        }
+        return null;
+    }
+
+    /** A lookup by identity: the guard names `findById`. */
+    @PostMapping("/identity-is-present-found")
+    public Widget identityIsPresentFound(@RequestParam String id) {
+        if (widgetRepository.findById(id).isPresent()) {
             return widgetRepository.save(new Widget(id));
         }
         return null;
