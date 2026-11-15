@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1406,6 +1406,7 @@ source = { editable = "libs/wadi-testing" }
 dependencies = [
     { name = "pytest" },
     { name = "wadi-contracts" },
+    { name = "wadi-joern-client" },
     { name = "wadi-storage" },
 ]
 
@@ -1413,5 +1414,6 @@ dependencies = [
 requires-dist = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "wadi-contracts", editable = "libs/wadi-contracts" },
+    { name = "wadi-joern-client", editable = "libs/wadi-joern-client" },
     { name = "wadi-storage", editable = "libs/wadi-storage" },
 ]
