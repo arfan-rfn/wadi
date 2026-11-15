@@ -77,8 +77,20 @@ object WadiExport {
     * rather than the lowest-numbered statement anywhere in its subtree, and
     * an empty try body routes its handlers (`exception`) and its normal
     * completion explicitly.
+    *
+    * 2.13.0 (§5.2.16, `type_defs`) shipped while this constant still read
+    * 2.12.0 (hardening H2); 2.14.0 is the first stamp to match the reader.
+    *
+    * 2.14.0 (additive, §5.2.17): `sinks` rows of kind `db` nest a `db` object
+    * of raw entity-access facts (repository, method, bound entity, repository
+    * kind, whether the project implements the method, query annotations;
+    * `save` stays null until M1b), and a statement with two db calls has two
+    * rows (R1-2). `data_models` rows gain `type_full_name`, `jpql_name`, a
+    * populated `storage_name`, `declared_by` and per-field `declared_type`,
+    * plus a row for each entity only a repository names. Repository detection
+    * is transitive (Q10).
     */
-  val ExportSchemaVersion = "2.12.0"
+  val ExportSchemaVersion = "2.14.0"
 
   /** Node ids as JSON numbers (upickle would render Long as String). Graph ids
     * stay far below 2^53, so double precision is exact. */
@@ -104,12 +116,16 @@ object WadiExport {
     val methodIds = closure.map(_.id).toSet
 
     val sinkRows = mutable.ListBuffer.empty[ujson.Obj]
+    // §5.2.17: raw entity-access facts nested on db sink rows (A1), and the
+    // entity records (A2). Built once per CPG: the repository chain index is
+    // shared by every row.
+    val entityFacts = new EntityAccessFacts(cpg)
 
     val methodObjs = closure.map(methodJson)
     val cfgObjs = closure.flatMap { method =>
       val statements = statementsOf(method)
       if (statements.isEmpty && method.cfgNode.isEmpty) None
-      else Some(cfgJson(cpg, method, statements, methodIds, sinkRows))
+      else Some(cfgJson(cpg, method, statements, methodIds, sinkRows, entityFacts))
     }
     val endpointObjs = endpointMethods.flatMap { method =>
       method.tag.nameExact("endpoint").value.l.flatMap { value =>
@@ -146,16 +162,7 @@ object WadiExport {
         }
       }
     }
-    val modelObjs = cpg.typeDecl.where(_.tag.nameExact("model")).l.map { typeDecl =>
-      ujson.Obj(
-        "entity" -> typeDecl.name,
-        "fields" -> typeDecl.member.l.map(m =>
-          ujson.Obj("name" -> m.name, "type_name" -> m.typeFullName)
-        ),
-        "persistence_framework" -> "spring-data",
-        "storage_name"          -> ujson.Null
-      )
-    }
+    val modelObjs = entityFacts.modelObjs()
 
     val unreachableObjs = unreachableSinkObjs(cpg, methodIds)
     val coverageObj     = analysisCoverageObj(cpg, methodIds)
@@ -538,7 +545,8 @@ object WadiExport {
     method: Method,
     statements: List[AstNode],
     exportedMethodIds: Set[Long],
-    sinkRows: mutable.ListBuffer[ujson.Obj]
+    sinkRows: mutable.ListBuffer[ujson.Obj],
+    entityFacts: EntityAccessFacts
   ): ujson.Obj = {
     val statementIds = statements.map(_.id).toSet
 
@@ -549,9 +557,22 @@ object WadiExport {
 
     val nodeObjs = statements.map { statement =>
       val (kind, construct, callInfo) = classify(cpg, statement, exportedMethodIds, enclosing)
-      callInfo.flatMap(_.sinkTag).foreach { case (sinkKind, sinkCall) =>
-        sinkRows ++= sinkRowsFor(cpg, statement.id, method.id, sinkKind, sinkCall)
-      }
+      val primarySink                 = callInfo.flatMap(_.sinkTag)
+      def emit(sinkKind: String, sinkCall: Call): Unit =
+        sinkRows ++= sinkRowsFor(cpg, statement.id, method.id, sinkKind, sinkCall).map { row =>
+          if (sinkKind == "db") row("db") = entityFacts.dbObj(sinkCall)
+          row
+        }
+      primarySink.foreach { case (sinkKind, sinkCall) => emit(sinkKind, sinkCall) }
+      // R1-2 (§5.2.17): the unit of entity accounting is the repository call
+      // site, and `repo.save(repo.findById(id).get())` is two of them in one
+      // statement. The node keeps ONE primary call; every other db call the
+      // statement owns still gets its row, keyed by its own call_id. Other
+      // sink kinds keep their one-per-statement contract.
+      ownedCalls(statement, enclosing)
+        .filter(_.tag.nameExact("sink").valueExact("db").nonEmpty)
+        .filterNot(call => primarySink.exists(_._2.id == call.id))
+        .foreach(call => emit("db", call))
       val obj = ujson.Obj(
         "id"       -> num(statement.id),
         "kind"     -> kind,
@@ -1606,6 +1627,17 @@ object WadiExport {
         }
     }
 
+  /** The real (non-operator) calls whose nearest enclosing statement is this
+    * one, in id order. Container bodies never double-claim their statements'
+    * calls.
+    */
+  private def ownedCalls(statement: AstNode, enclosing: mutable.Map[Long, Long]): List[Call] =
+    statement.ast.isCall
+      .filterNot(_.name.startsWith(OperatorPrefix))
+      .filter(call => enclosing.get(call.id).contains(statement.id))
+      .l
+      .sortBy(_.id)
+
   /** The most interesting real (non-operator) call the statement itself owns
     * (nearest enclosing statement is this one — container bodies never
     * double-claim their statements' calls).
@@ -1616,11 +1648,7 @@ object WadiExport {
     exportedMethodIds: Set[Long],
     enclosing: mutable.Map[Long, Long]
   ): Option[CallInfo] = {
-    val realCalls = statement.ast.isCall
-      .filterNot(_.name.startsWith(OperatorPrefix))
-      .filter(call => enclosing.get(call.id).contains(statement.id))
-      .l
-      .sortBy(_.id)
+    val realCalls = ownedCalls(statement, enclosing)
     // Prefer a tagged sink call, then one that resolves into the export, then the first.
     val chosen = realCalls
       .find(c => c.tag.nameExact("sink").nonEmpty)
