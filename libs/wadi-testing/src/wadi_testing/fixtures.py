@@ -73,7 +73,7 @@ def mongo_uri() -> Iterator[str]:
         _wait_for_mongo(uri)
         yield uri
     finally:
-        subprocess.run(["docker", "rm", "-f", container], capture_output=True, check=False)
+        subprocess.run(["docker", "rm", "-f", "-v", container], capture_output=True, check=False)
 
 
 def _wait_for_mongo(uri: str, timeout_seconds: float = 60.0) -> None:
@@ -145,7 +145,7 @@ def neo4j_uri() -> Iterator[str]:
         _wait_for_neo4j(uri)
         yield uri
     finally:
-        subprocess.run(["docker", "rm", "-f", container], capture_output=True, check=False)
+        subprocess.run(["docker", "rm", "-f", "-v", container], capture_output=True, check=False)
 
 
 def _wait_for_neo4j(uri: str, timeout_seconds: float = 120.0) -> None:
