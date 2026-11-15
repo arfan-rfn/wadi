@@ -212,6 +212,19 @@ export type CallSites1 = number
 export type CreateOrUpdate1 = number
 export type EntityUndetermined1 = number
 export type Flush1 = number
+/**
+ * What an access may do to its entity (§5.2.17).
+ *
+ * "May" is the whole meaning: some path through the endpoint performs it,
+ * never that every path does (Q16). The vocabulary is CRUD because the
+ * reader is a developer; there is no ``write``.
+ */
+export type EntityOperation1 =
+  "create" | "read" | "update" | "delete" | "create-or-update" | "unknown"
+/**
+ * 1.27.0: operations the save split computes that no reporting service may publish from a save, because every flag for that verb is off or stale. Its count still includes what the query text published; a save that would have been one is withheld as create-or-update, so the count is not every such access. Enum order
+ */
+export type GatedOperations = EntityOperation1[]
 export type ImplementedInProject1 = number
 export type InEndpointFlow1 = number
 export type InNoEndpointFlow1 = number
@@ -552,6 +565,7 @@ export interface EntityCoverageSection {
   create_or_update: CreateOrUpdate1
   entity_undetermined: EntityUndetermined1
   flush: Flush1
+  gated_operations?: GatedOperations
   implemented_in_project: ImplementedInProject1
   in_endpoint_flow: InEndpointFlow1
   in_no_endpoint_flow: InNoEndpointFlow1

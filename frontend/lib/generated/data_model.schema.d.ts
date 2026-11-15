@@ -11,6 +11,10 @@ export type CreatedAt = string
  */
 export type EntityDeclaredBy = "annotation" | "repository-argument"
 /**
+ * 1.27.0: the Hibernate annotation that replaces this entity's DELETE (`org.hibernate.annotations.SQLDelete` or `SoftDelete`), when present. A repository delete then runs that statement, so its verb is unknown (§5.2.17)
+ */
+export type DeleteRewrittenBy = string | null
+/**
  * Entity/class name, e.g. 'Order'
  */
 export type Entity = string
@@ -49,6 +53,10 @@ export type SnapshotId = string
  */
 export type StorageName = string | null
 /**
+ * 1.27.0: `@Table(schema=)` when set. A schema-qualified table name in native SQL binds this entity only when its qualifier equals this value (§5.2.17)
+ */
+export type StorageSchema = string | null
+/**
  * 1.26.0: the qualified class name, e.g. 'com.acme.orders.Order'. `id` derives from it when the export carries it, so two classes sharing a simple name in one service get two ids (C2). None on a pre-1.26.0 document
  */
 export type TypeFullName = string | null
@@ -62,6 +70,7 @@ export interface DataModel {
    * 1.26.0: how this type came to be an entity — `annotation` (@Entity/@Document) or `repository-argument` (a repository's type argument names it and it carries no annotation, Q1). None = a pre-1.26.0 document, which recorded neither
    */
   declared_by?: EntityDeclaredBy | null
+  delete_rewritten_by?: DeleteRewrittenBy
   entity: Entity
   fields?: Fields
   id: Id
@@ -72,6 +81,7 @@ export interface DataModel {
   service_id: ServiceId
   snapshot_id: SnapshotId
   storage_name?: StorageName
+  storage_schema?: StorageSchema
   type_full_name?: TypeFullName
 }
 export interface DataModelField {

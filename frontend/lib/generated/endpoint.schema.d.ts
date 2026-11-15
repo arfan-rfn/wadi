@@ -181,6 +181,12 @@ export type EntityAccess = EndpointEntityAccess[] | null
  * Distinct repository call sites contributing to this row
  */
 export type CallSites = number
+/**
+ * 1.27.0: per operation in `operations`, the distinct call sites with an access of this entity and that operation. None on a summary written before 1.27.0, which counted only per entity
+ */
+export type CallSitesByOperation = {
+  [k: string]: number
+} | null
 export type DataModelId = string | null
 /**
  * Qualified type name; None = the row for accesses whose entity could not be determined
@@ -425,6 +431,7 @@ export interface EndpointStatus {
  */
 export interface EndpointEntityAccess {
   call_sites: CallSites
+  call_sites_by_operation?: CallSitesByOperation
   data_model_id: DataModelId
   entity: Entity
   operations: Operations

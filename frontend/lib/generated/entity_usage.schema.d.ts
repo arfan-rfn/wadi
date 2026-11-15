@@ -6,7 +6,7 @@
  */
 
 /**
- * False when no endpoint row has entity_access — the snapshot predates it
+ * False when no listed service reports accounting and no endpoint row has entity_access: nothing here was examined
  */
 export type Analyzed = boolean
 /**
@@ -27,9 +27,9 @@ export type Entity = string | null
  */
 export type Name = string
 /**
- * The endpoint's call sites touching this entity (its summary row's)
+ * The endpoint's call sites that perform THIS operation on this entity; None when its summary predates per-operation counts (written before 1.27.0)
  */
-export type CallSites = number
+export type CallSites = number | null
 export type EndpointId = string
 export type FullUri = string
 export type HttpMethod =
@@ -115,6 +115,11 @@ export type RulesVersion = string
 export type UnknownOperation = number
 export type ServiceId1 = string
 export type ServiceName = string
+/**
+ * 1.27.0: why accounting is or is not present; only `reporting` carries it
+ */
+export type EntityAccountingStatus =
+  "reporting" | "predating" | "extraction-failed" | "library"
 export type Services = EntityUsageService[]
 export type SnapshotId = string
 
@@ -126,9 +131,10 @@ export type SnapshotId = string
  * documents and one read of the snapshot's data models. Nothing is stored
  * for it.
  *
- * ``analyzed=False`` means no endpoint of the snapshot carries entity facts:
- * it predates the phase, and ``entities`` is empty because nothing was
- * looked at, not because nothing is touched (R1-6).
+ * ``analyzed=False`` means nothing in the view was examined with entity
+ * facts: no listed service reports accounting and no endpoint row carries a
+ * summary. ``entities`` is then empty because nothing was looked at, not
+ * because nothing is touched (R1-6).
  */
 export interface EntityUsageView {
   analyzed: Analyzed
@@ -178,11 +184,12 @@ export interface EntityUsageEndpoint {
  */
 export interface EntityUsageService {
   /**
-   * None = the service's boundary predates entity accounting
+   * Present exactly when status is `reporting`
    */
   accounting: EntityAccessAccounting | null
   service_id: ServiceId1
   service_name: ServiceName
+  status: EntityAccountingStatus
 }
 /**
  * Every repository call site of one service, accounted for (§5.2.17, R1-1).

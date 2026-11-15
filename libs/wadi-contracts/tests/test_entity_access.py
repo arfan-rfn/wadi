@@ -7,7 +7,7 @@ fact does not. Each one is pinned by an input it must reject.
 """
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import ValidationError
@@ -21,10 +21,12 @@ from wadi_contracts.entity_access import (
     EntityAccessAccounting,
     EntityAccessBasis,
     EntityAccessSite,
+    EntityAccountingStatus,
     EntityCoverageSection,
     EntityDeclaredBy,
     EntityGateFlagState,
     EntityOperation,
+    EntityOperationUsage,
     EntityUsageEndpoint,
     EntityUsageRow,
     EntityUsageService,
@@ -289,6 +291,8 @@ class TestSummarizeEntityAccess:
                 data_model_id=_DM,
                 operations=[EntityOperation.READ, EntityOperation.DELETE],
                 call_sites=2,
+                # One read site and one delete site, never "2" under each.
+                call_sites_by_operation={"read": 1, "delete": 1},
             )
         ]
 
@@ -335,6 +339,9 @@ class TestSummarizeEntityAccess:
                 data_model_id=None,
                 operations=[EntityOperation.READ, EntityOperation.DELETE],
                 call_sites=2,
+                # The query site reads and deletes Invoice, so it counts once
+                # under each; the plain read site adds one read.
+                call_sites_by_operation={"read": 2, "delete": 1},
             )
         ]
 
@@ -496,8 +503,23 @@ def _accounting(**overrides: Any) -> dict[str, Any]:
         "unknown_operation": 1,
         "create_or_update": 2,
         "bound": 3,
-        "accesses_by_operation": {op.value: 1 for op in EntityOperation},
-        "sites_by_basis": {basis.value: 2 for basis in EntityAccessBasis},
+        # Nine non-flush sites: one basis each, at least one access each, and
+        # at least as many create-or-update and unknown accesses as the
+        # buckets that count them.
+        "accesses_by_operation": {
+            "create": 1,
+            "read": 2,
+            "update": 1,
+            "delete": 1,
+            "create-or-update": 2,
+            "unknown": 2,
+        },
+        "sites_by_basis": {
+            "method-name": 3,
+            "query-text": 2,
+            "argument-origin": 2,
+            "existence-guard": 2,
+        },
         "rules_version": "r-0123abcd",
         "gate_flags": [
             {
@@ -546,6 +568,24 @@ class TestEntityAccessAccounting:
         counts = {**_accounting()[field], "write": 0}
         with pytest.raises(ValidationError, match=field):
             EntityAccessAccounting.model_validate(_accounting(**{field: counts}))
+
+    def test_the_bases_count_every_site_but_the_flushes(self) -> None:
+        # 1.27.0: `bound=10` beside all-zero dicts used to pass.
+        bases = {**_accounting()["sites_by_basis"], "method-name": 2}
+        with pytest.raises(ValidationError, match="sites_by_basis sums to 8"):
+            EntityAccessAccounting.model_validate(_accounting(sites_by_basis=bases))
+
+    def test_every_site_has_at_least_one_access(self) -> None:
+        accesses = dict.fromkeys(_accounting()["accesses_by_operation"], 0)
+        accesses["create-or-update"] = 2
+        accesses["unknown"] = 1
+        with pytest.raises(ValidationError, match="fewer than the 9 sites"):
+            EntityAccessAccounting.model_validate(_accounting(accesses_by_operation=accesses))
+
+    def test_a_bucket_needs_accesses_with_its_operation(self) -> None:
+        accesses = {**_accounting()["accesses_by_operation"], "create-or-update": 1, "read": 3}
+        with pytest.raises(ValidationError, match="counted under create-or-update"):
+            EntityAccessAccounting.model_validate(_accounting(accesses_by_operation=accesses))
 
     def test_a_negative_count_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="flush"):
@@ -653,9 +693,17 @@ def _summary(
     *ops: EntityOperation,
     model_id: str | None = None,
     sites: int = 1,
+    by_operation: dict[str, int] | None | Literal["all"] = "all",
 ) -> EndpointEntityAccess:
+    """A summary row; by default every operation was performed by every site."""
     return EndpointEntityAccess(
-        entity=entity, data_model_id=model_id, operations=list(ops), call_sites=sites
+        entity=entity,
+        data_model_id=model_id,
+        operations=list(ops),
+        call_sites=sites,
+        call_sites_by_operation=(
+            {op.value: sites for op in ops} if by_operation == "all" else by_operation
+        ),
     )
 
 
@@ -663,9 +711,25 @@ def _usage(row: EntityUsageRow) -> dict[EntityOperation, list[str]]:
     return {usage.operation: [e.endpoint_id for e in usage.endpoints] for usage in row.operations}
 
 
-_SERVICES = [
-    EntityUsageService(service_id=_PETS, service_name="pets", accounting=None),
-]
+def _reporting(service_id: str, name: str) -> EntityUsageService:
+    return EntityUsageService(
+        service_id=service_id,
+        service_name=name,
+        status=EntityAccountingStatus.REPORTING,
+        accounting=EntityAccessAccounting.model_validate(_accounting()),
+    )
+
+
+def _not_reporting(
+    service_id: str, name: str, status: EntityAccountingStatus = EntityAccountingStatus.PREDATING
+) -> EntityUsageService:
+    return EntityUsageService(
+        service_id=service_id, service_name=name, status=status, accounting=None
+    )
+
+
+_SERVICES = [_reporting(_PETS, "pets"), _reporting(_OWNERS, "owners")]
+_PREDATING = [_not_reporting(_PETS, "pets"), _not_reporting(_OWNERS, "owners")]
 
 
 class TestBuildEntityUsageView:
@@ -834,12 +898,92 @@ class TestBuildEntityUsageView:
             "snap-1",
             [_row("ep_1", "/a", None), _row("ep_2", "/b", None)],
             [_model(_PETS, "Pet", _DM)],
-            _SERVICES,
+            _PREDATING,
         )
         assert view.analyzed is False
         assert view.entities == []
         assert view.endpoints_predating == 2
-        assert view.services == _SERVICES
+        assert [s.service_id for s in view.services] == [_OWNERS, _PETS]
+
+    def test_a_reporting_service_with_no_endpoints_is_analyzed(self) -> None:
+        # The service_id filter on a queue consumer or a gateway: no endpoint
+        # rows, measured accounting. "Holds no endpoints yet" was false.
+        view = build_entity_usage_view(
+            "snap-1", [], [_model(_PETS, "Pet", _DM)], [_reporting(_PETS, "pets")]
+        )
+        assert view.analyzed is True
+        [row] = view.entities
+        assert all(u.endpoints == [] for u in row.operations)
+
+    def test_a_predating_service_lists_no_entities_in_an_analyzed_snapshot(self) -> None:
+        # Its six empty lists would read as "touched by nothing" when nothing
+        # was looked at; its status says why it has no rows.
+        view = build_entity_usage_view(
+            "snap-1",
+            [
+                _row("ep_p", "/p", [_summary("com.acme.Pet", EntityOperation.READ, model_id=_DM)]),
+                _row("ep_o", "/o", None, service_id=_OWNERS),
+            ],
+            [_model(_PETS, "Pet", _DM), _model(_OWNERS, "Owner", "dm_3333333333333333")],
+            [_reporting(_PETS, "pets"), _not_reporting(_OWNERS, "owners")],
+        )
+        assert [(r.service_id, r.name) for r in view.entities] == [(_PETS, "Pet")]
+        assert view.endpoints_predating == 1
+
+    def test_a_model_of_a_non_reporting_service_joins_when_an_access_names_it(self) -> None:
+        # A library's entity, named by a dependent's access through its model id.
+        library = "svc-lib"
+        lib_model = "dm_4444444444444444"
+        view = build_entity_usage_view(
+            "snap-1",
+            [
+                _row(
+                    "ep_p",
+                    "/p",
+                    [_summary("com.acme.Tag", EntityOperation.READ, model_id=lib_model)],
+                )
+            ],
+            [_model(library, "Tag", lib_model, storage_name="tags")],
+            [
+                _reporting(_PETS, "pets"),
+                _not_reporting(library, "lib", EntityAccountingStatus.LIBRARY),
+            ],
+        )
+        [row] = view.entities
+        assert (row.service_id, row.storage_name) == (library, "tags")
+        assert _usage(row)[EntityOperation.READ] == ["ep_p"]
+
+    def test_a_count_under_an_operation_counts_that_operation(self) -> None:
+        # The live defect: 11 sites on Order, 3 of them deletes, read "11 calls"
+        # under delete.
+        summary = _summary(
+            "com.acme.Order",
+            EntityOperation.READ,
+            EntityOperation.DELETE,
+            EntityOperation.CREATE_OR_UPDATE,
+            sites=11,
+            by_operation={"read": 5, "delete": 3, "create-or-update": 3},
+        )
+        view = build_entity_usage_view(
+            "snap-1", [_row("ep_t", "/crud/inherited-method-table", [summary])], [], _SERVICES
+        )
+        [row] = view.entities
+        counts = {u.operation: [e.call_sites for e in u.endpoints] for u in row.operations}
+        assert counts[EntityOperation.READ] == [5]
+        assert counts[EntityOperation.DELETE] == [3]
+        assert counts[EntityOperation.CREATE_OR_UPDATE] == [3]
+
+    def test_a_summary_without_per_operation_counts_has_no_count(self) -> None:
+        # Written before 1.27.0: the entity count is not reused as an
+        # operation count, which is the defect this field fixes.
+        summary = _summary(
+            "com.acme.Pet", EntityOperation.READ, model_id=_DM, sites=4, by_operation=None
+        )
+        view = build_entity_usage_view(
+            "snap-1", [_row("ep_1", "/p", [summary])], [_model(_PETS, "Pet", _DM)], _SERVICES
+        )
+        read = next(u for u in view.entities[0].operations if u.operation is EntityOperation.READ)
+        assert read.endpoints[0].call_sites is None
 
     def test_endpoints_predating_counts_only_none_rows(self) -> None:
         view = build_entity_usage_view(
@@ -855,6 +999,49 @@ class TestBuildEntityUsageView:
         assert view.analyzed is True
         assert view.endpoints_predating == 1
         assert view.snapshot_id == "snap-1"
+
+
+class TestReverseViewShapes:
+    def test_a_service_carries_accounting_exactly_when_reporting(self) -> None:
+        with pytest.raises(ValidationError, match="accounting is present exactly"):
+            EntityUsageService(
+                service_id=_PETS,
+                service_name="pets",
+                status=EntityAccountingStatus.REPORTING,
+                accounting=None,
+            )
+        with pytest.raises(ValidationError, match="accounting is present exactly"):
+            EntityUsageService(
+                service_id=_PETS,
+                service_name="pets",
+                status=EntityAccountingStatus.EXTRACTION_FAILED,
+                accounting=EntityAccessAccounting.model_validate(_accounting()),
+            )
+
+    def test_a_usage_row_lists_all_six_operations(self) -> None:
+        with pytest.raises(ValidationError, match="every EntityOperation once"):
+            EntityUsageRow(
+                service_id=_PETS,
+                entity="com.acme.Pet",
+                name="Pet",
+                data_model_id=None,
+                storage_name=None,
+                declared_by=None,
+                operations=[
+                    EntityOperationUsage(operation=op, endpoints=[])
+                    for op in list(EntityOperation)[:5]
+                ],
+            )
+
+    def test_per_operation_counts_must_match_the_operations(self) -> None:
+        with pytest.raises(ValidationError, match="must be exactly the row's operations"):
+            _summary("com.acme.Pet", EntityOperation.READ, by_operation={"delete": 1})
+        with pytest.raises(ValidationError, match="between 1 and call_sites 2"):
+            _summary("com.acme.Pet", EntityOperation.READ, sites=2, by_operation={"read": 3})
+
+    def test_the_undetermined_row_names_no_model(self) -> None:
+        with pytest.raises(ValidationError, match="data_model_id requires an entity"):
+            _summary(None, EntityOperation.READ, model_id=_DM)
 
 
 class TestPublishedSurface:

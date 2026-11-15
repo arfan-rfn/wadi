@@ -483,6 +483,14 @@
           "title": "Flush",
           "type": "integer"
         },
+        "gated_operations": {
+          "description": "1.27.0: operations the save split computes that no reporting service may publish from a save, because every flag for that verb is off or stale. Its count still includes what the query text published; a save that would have been one is withheld as create-or-update, so the count is not every such access. Enum order",
+          "items": {
+            "$ref": "#/$defs/EntityOperation"
+          },
+          "title": "Gated Operations",
+          "type": "array"
+        },
         "implemented_in_project": {
           "minimum": 0,
           "title": "Implemented In Project",
@@ -986,7 +994,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.26.0/coverage_report.schema.json",
+  "$id": "https://trywadi.com/schemas/1.27.0/coverage_report.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What the map knows it doesn't know (\u00a75.4) \u2014 surfaced FIRST everywhere.\n\nSnapshot-level; the stitcher is this collection's single writer (P4).\nHint fields are reserved now so the schema is hint-ready; hints themselves\nship in Phase 4 (\u00a711).",
@@ -1099,7 +1107,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.26.0",
+      "default": "1.27.0",
       "title": "Schema Version",
       "type": "string"
     },

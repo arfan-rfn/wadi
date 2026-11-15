@@ -12,7 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.14.0"
+EXPORT_SCHEMA_VERSION = "2.15.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -427,6 +427,13 @@ class ExportDbSave(ExportModelBase):
         description="The enclosing method also reads from the SAME repository"
     )
     guard_arm: GuardArm
+    guard_lookup_method: str | None = Field(
+        default=None,
+        description=(
+            "2.15.0: the repository method the guard's condition tests, e.g. 'findById', "
+            "when guard_arm is found or not-found; None otherwise and on older exports"
+        ),
+    )
     caller_origins: list[SaveArgumentOrigin] = Field(
         default_factory=list[SaveArgumentOrigin],
         description=(
@@ -463,6 +470,23 @@ class ExportDbAccess(ExportModelBase):
     )
     query: ExportDbQuery | None = None
     save: ExportDbSave | None = None
+    method_annotations: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "2.15.0: qualified names of the annotations on the resolved repository method "
+            "declaration (the simple name as written when unresolved). For an annotation the "
+            "project declares, the annotations on its own declaration follow, written "
+            "'<annotation>><meta-annotation>'. Empty for a method Spring Data declares"
+        ),
+    )
+    declaration_resolved: bool = Field(
+        default=True,
+        description=(
+            "2.15.0: False when a project interface in the receiver's chain declares the "
+            "method name but no declaration matched the call's arity, so the method's "
+            "annotations were not read"
+        ),
+    )
 
 
 class SinkValueConfidence(StrEnum):
@@ -813,6 +837,16 @@ class ExportDataModel(ExportModelBase):
         default=None,
         description="2.14.0: annotation | repository-argument; None on older exports",
     )
+    storage_schema: str | None = Field(
+        default=None, description="2.15.0: @Table(schema=...) when set"
+    )
+    delete_rewritten_by: str | None = Field(
+        default=None,
+        description=(
+            "2.15.0: org.hibernate.annotations.SQLDelete | SoftDelete when the entity class "
+            "carries one (simple name as written when unresolved)"
+        ),
+    )
 
 
 class ExportAnalysisCoverage(ExportModelBase):
@@ -849,6 +883,14 @@ class ServiceExport(ExportModelBase):
         default_factory=list[ExportUnreachableSink]
     )
     data_models: list[ExportDataModel] = Field(default_factory=list[ExportDataModel])
+    save_origin_rules: str | None = Field(
+        default=None,
+        description=(
+            "2.15.0: a hash of the Scala sources that compute the save facts (SaveOrigin, "
+            "EntityAccessFacts), computed by the sbt build. Part of the worker's rules "
+            "version, so a change to how a gated input is derived voids a flag's score"
+        ),
+    )
     security_rules: list[ExportSecurityRule] = Field(default_factory=list[ExportSecurityRule])
     auth_enforcements: list[ExportAuthEnforcement] = Field(
         default_factory=list[ExportAuthEnforcement],

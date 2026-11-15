@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from wadi_joern_client.export import (
     EXPORT_SCHEMA_VERSION,
     ExportDataModel,
+    ExportDbAccess,
     ExportDeclaredBy,
     ExportMethod,
     ExportSink,
@@ -186,5 +187,24 @@ class TestDataModelRows:
         assert method.params[0].declared_type is None
 
 
-def test_the_reader_is_at_2_14_0() -> None:
-    assert EXPORT_SCHEMA_VERSION == "2.14.0"
+def test_the_reader_is_at_2_15_0() -> None:
+    assert EXPORT_SCHEMA_VERSION == "2.15.0"
+
+
+def test_2_15_0_facts_default_to_what_an_older_export_meant() -> None:
+    # A 2.14.0 row has no annotation list, no resolution flag and no guard
+    # lookup; reading it must not invent any of them.
+    db = ExportDbAccess.model_validate(
+        {
+            "repository": "com.acme.PetRepository",
+            "method_name": "findByName",
+            "repository_kind": "jpa",
+            "implemented_in_project": False,
+        }
+    )
+    assert db.method_annotations == []
+    assert db.declaration_resolved is True
+    model = ExportDataModel.model_validate(
+        {"entity": "Pet", "persistence_framework": "spring-data-jpa"}
+    )
+    assert (model.storage_schema, model.delete_rewritten_by) == (None, None)

@@ -219,6 +219,14 @@ class EndpointEntityAccess(WadiModel):
     call_sites: int = Field(
         ge=1, description="Distinct repository call sites contributing to this row"
     )
+    call_sites_by_operation: dict[str, int] | None = Field(
+        default=None,
+        description=(
+            "1.27.0: per operation in `operations`, the distinct call sites with an access "
+            "of this entity and that operation. None on a summary written before 1.27.0, "
+            "which counted only per entity"
+        ),
+    )
 
     @model_validator(mode="after")
     def _operations_are_a_set_in_enum_order(self) -> Self:
@@ -228,6 +236,39 @@ class EndpointEntityAccess(WadiModel):
             raise ValueError(
                 "operations must be in EntityOperation enum order, got "
                 f"{[op.value for op in self.operations]}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _per_operation_counts_cover_the_operations(self) -> Self:
+        """Each listed operation has a count between 1 and the row's site count.
+
+        A site may perform two operations on one entity (a query that updates
+        a row it also reads), so the counts may sum past ``call_sites``; no
+        single one can exceed it.
+        """
+        counts = self.call_sites_by_operation
+        if counts is None:
+            return self
+        expected = {op.value for op in self.operations}
+        if set(counts) != expected:
+            raise ValueError(
+                f"call_sites_by_operation keys {sorted(counts)} must be exactly the "
+                f"row's operations {sorted(expected)}"
+            )
+        for operation, count in counts.items():
+            if not 1 <= count <= self.call_sites:
+                raise ValueError(
+                    f"call_sites_by_operation[{operation!r}] = {count} must be between 1 "
+                    f"and call_sites {self.call_sites}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _model_id_names_an_entity(self) -> Self:
+        if self.data_model_id is not None and self.entity is None:
+            raise ValueError(
+                "data_model_id requires an entity: the undetermined row cannot name a model"
             )
         return self
 
@@ -339,6 +380,38 @@ class EntityAccessAccounting(WadiModel):
         _keys_are_the_vocabulary("sites_by_basis", self.sites_by_basis, EntityAccessBasis)
         return self
 
+    @model_validator(mode="after")
+    def _counts_agree_with_the_partitions(self) -> Self:
+        """The two dicts describe the same sites the partitions count (1.27.0).
+
+        Every site except a flush has exactly one basis, so the basis counts
+        sum to ``call_sites - flush``. Every such site has at least one
+        access, and a site in the ``create_or_update`` or ``unknown_operation``
+        bucket has at least one access with that operation.
+        """
+        sites = sum(self.sites_by_basis.values())
+        if sites != self.call_sites - self.flush:
+            raise ValueError(
+                f"sites_by_basis sums to {sites}, expected call_sites - flush = "
+                f"{self.call_sites - self.flush}: every non-flush site has one basis"
+            )
+        accesses = sum(self.accesses_by_operation.values())
+        if accesses < sites:
+            raise ValueError(
+                f"accesses_by_operation sums to {accesses}, fewer than the {sites} "
+                "sites it describes: every site has at least one access"
+            )
+        for bucket, operation in (
+            (self.create_or_update, EntityOperation.CREATE_OR_UPDATE),
+            (self.unknown_operation, EntityOperation.UNKNOWN),
+        ):
+            if self.accesses_by_operation[operation.value] < bucket:
+                raise ValueError(
+                    f"{bucket} sites are counted under {operation.value} but only "
+                    f"{self.accesses_by_operation[operation.value]} accesses carry it"
+                )
+        return self
+
 
 class ServiceEntityAccounting(WadiModel):
     """One service's accounting, named for the snapshot rollup."""
@@ -395,6 +468,16 @@ class EntityCoverageSection(WadiModel):
             "zero is evidence of nothing"
         ),
     )
+    gated_operations: list[EntityOperation] = Field(
+        default_factory=list[EntityOperation],
+        description=(
+            "1.27.0: operations the save split computes that no reporting service may "
+            "publish from a save, because every flag for that verb is off or stale. Its "
+            "count still includes what the query text published; a save that would have "
+            "been one is withheld as create-or-update, so the count is not every such "
+            "access. Enum order"
+        ),
+    )
 
 
 class EndpointEntityAccessRow(WadiModel):
@@ -418,8 +501,12 @@ class EntityUsageEndpoint(WadiModel):
     endpoint_id: str
     http_method: HttpMethod
     full_uri: str
-    call_sites: int = Field(
-        ge=1, description="The endpoint's call sites touching this entity (its summary row's)"
+    call_sites: int | None = Field(
+        ge=1,
+        description=(
+            "The endpoint's call sites that perform THIS operation on this entity; None when "
+            "its summary predates per-operation counts (written before 1.27.0)"
+        ),
     )
 
 
@@ -453,15 +540,62 @@ class EntityUsageRow(WadiModel):
         description="All six operations, in enum order; lists may be empty"
     )
 
+    @model_validator(mode="after")
+    def _every_operation_once_in_enum_order(self) -> Self:
+        listed = [usage.operation for usage in self.operations]
+        if listed != list(EntityOperation):
+            raise ValueError(
+                "operations must list every EntityOperation once, in enum order, got "
+                f"{[op.value for op in listed]}: an empty list is a stated 'no endpoint'"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _model_id_names_an_entity(self) -> Self:
+        if self.data_model_id is not None and self.entity is None:
+            raise ValueError("data_model_id requires an entity")
+        return self
+
+
+class EntityAccountingStatus(StrEnum):
+    """Why a service in the reverse view does or does not carry accounting (1.27.0)."""
+
+    REPORTING = "reporting"
+    """The service was analyzed with entity facts; its accounting is present."""
+
+    PREDATING = "predating"
+    """The boundary was written before entity facts existed. Nothing was looked at."""
+
+    EXTRACTION_FAILED = "extraction-failed"
+    """Extraction failed (the boundary's ``extraction_error``). Nothing was looked at."""
+
+    LIBRARY = "library"
+    """A library module, analyzed inside each service that depends on it (§5.2.14).
+    It has no accounting of its own; its calls count in the dependents'."""
+
 
 class EntityUsageService(WadiModel):
     """One service as the reverse view lists it, with its accounting."""
 
     service_id: str
     service_name: str
-    accounting: EntityAccessAccounting | None = Field(
-        description="None = the service's boundary predates entity accounting"
+    status: EntityAccountingStatus = Field(
+        description="1.27.0: why accounting is or is not present; only `reporting` carries it"
     )
+    accounting: EntityAccessAccounting | None = Field(
+        description="Present exactly when status is `reporting`"
+    )
+
+    @model_validator(mode="after")
+    def _accounting_iff_reporting(self) -> Self:
+        reporting = self.status is EntityAccountingStatus.REPORTING
+        if reporting != (self.accounting is not None):
+            raise ValueError(
+                f"status {self.status.value} with accounting "
+                f"{'present' if self.accounting is not None else 'None'}: accounting is "
+                "present exactly when the service is reporting"
+            )
+        return self
 
 
 class EntityUsageView(WadiModel):
@@ -472,14 +606,18 @@ class EntityUsageView(WadiModel):
     documents and one read of the snapshot's data models. Nothing is stored
     for it.
 
-    ``analyzed=False`` means no endpoint of the snapshot carries entity facts:
-    it predates the phase, and ``entities`` is empty because nothing was
-    looked at, not because nothing is touched (R1-6).
+    ``analyzed=False`` means nothing in the view was examined with entity
+    facts: no listed service reports accounting and no endpoint row carries a
+    summary. ``entities`` is then empty because nothing was looked at, not
+    because nothing is touched (R1-6).
     """
 
     snapshot_id: str
     analyzed: bool = Field(
-        description="False when no endpoint row has entity_access — the snapshot predates it"
+        description=(
+            "False when no listed service reports accounting and no endpoint row has "
+            "entity_access: nothing here was examined"
+        )
     )
     endpoints_predating: int = Field(ge=0, description="Endpoint rows whose entity_access is None")
     entities: list[EntityUsageRow] = Field(
@@ -509,14 +647,22 @@ class _UsageRecord:
     )
 
     def add(self, row: EndpointEntityAccessRow, summary: EndpointEntityAccess) -> None:
+        by_operation = summary.call_sites_by_operation
         for operation in summary.operations:
             listed = self.endpoints.setdefault(operation, {})
             prior = listed.get(row.endpoint_id)
+            count = by_operation[operation.value] if by_operation is not None else None
+            if prior is not None:
+                # The same endpoint landing on this row twice (one type written
+                # with and without its model id): both rows' sites count, and a
+                # count either side lacks makes the sum unknown.
+                prior_count = prior.call_sites
+                count = None if count is None or prior_count is None else count + prior_count
             listed[row.endpoint_id] = EntityUsageEndpoint(
                 endpoint_id=row.endpoint_id,
                 http_method=row.http_method,
                 full_uri=row.full_uri,
-                call_sites=summary.call_sites + (prior.call_sites if prior else 0),
+                call_sites=count,
             )
 
     def build(self) -> EntityUsageRow:
@@ -549,6 +695,9 @@ def summarize_entity_access(sites: Iterable[EntityAccessSite]) -> list[EndpointE
     and ``call_sites`` counts the sites that contributed — a site touching one
     entity twice (a delete whose subquery reads the same table) counts once,
     because sites are counted as sites and accesses as accesses (R1-2).
+    ``call_sites_by_operation`` counts, per operation, the sites with an access
+    of that entity and that operation, so that site counts once under delete
+    and once under read.
 
     Every element of ``sites`` is one call site. An ICFG holds each statement
     once and each statement lists each of its calls once, so the caller passes
@@ -566,20 +715,31 @@ def summarize_entity_access(sites: Iterable[EntityAccessSite]) -> list[EndpointE
     """
     operations: dict[tuple[str | None, str | None], set[EntityOperation]] = {}
     site_counts: dict[tuple[str | None, str | None], int] = {}
+    operation_counts: dict[tuple[str | None, str | None], dict[EntityOperation, int]] = {}
     for site in sites:
-        touched: set[tuple[str | None, str | None]] = set()
+        touched: dict[tuple[str | None, str | None], set[EntityOperation]] = {}
         for access in site.accesses:
             key = (access.entity, access.data_model_id)
             operations.setdefault(key, set()).add(access.operation)
-            touched.add(key)
-        for key in touched:
+            touched.setdefault(key, set()).add(access.operation)
+        for key, site_operations in touched.items():
             site_counts[key] = site_counts.get(key, 0) + 1
+            per_operation = operation_counts.setdefault(key, {})
+            for operation in site_operations:
+                per_operation[operation] = per_operation.get(operation, 0) + 1
     return [
         EndpointEntityAccess(
             entity=entity,
             data_model_id=model_id,
             operations=sorted(operations[(entity, model_id)], key=_OPERATION_ORDER.__getitem__),
             call_sites=site_counts[(entity, model_id)],
+            call_sites_by_operation={
+                operation.value: count
+                for operation, count in sorted(
+                    operation_counts[(entity, model_id)].items(),
+                    key=lambda item: _OPERATION_ORDER[item[0]],
+                )
+            },
         )
         for entity, model_id in sorted(operations, key=_none_last_key)
     ]
@@ -618,17 +778,25 @@ def build_entity_usage_view(
     with the call sites of both. Under each operation the endpoints sort by
     ``full_uri``, then ``http_method``.
 
-    If every endpoint row's ``entity_access`` is ``None`` — or there are no
-    rows — no endpoint was examined: ``analyzed`` is False and ``entities``
-    is empty, because listing the data models as unreached would turn "not
-    looked at" into "touched by nothing" (R1-6). ``endpoints_predating``
-    counts the ``None`` rows either way, so a partly re-analyzed snapshot says
-    how much of it predates the phase.
+    Data models are listed only for services whose status is ``reporting``.
+    A predating or failed service was not looked at, so its declared entities
+    would otherwise read as six empty lists, "touched by nothing" (R1-6); the
+    service's status says why it has no rows.
+
+    ``analyzed`` is False when no listed service reports and no endpoint row
+    carries a summary: nothing was examined, and ``entities`` is empty. A
+    reporting service with no endpoints is analyzed, and its entities are
+    listed with empty operations. ``endpoints_predating`` counts the ``None``
+    rows either way, so a partly re-analyzed snapshot says how much of it
+    predates the phase.
     """
     endpoint_rows = list(rows)
     listed_services = sorted(services, key=lambda s: (s.service_name, s.service_id))
+    reporting = {
+        s.service_id for s in listed_services if s.status is EntityAccountingStatus.REPORTING
+    }
     predating = sum(1 for row in endpoint_rows if row.entity_access is None)
-    if predating == len(endpoint_rows):
+    if not reporting and predating == len(endpoint_rows):
         return EntityUsageView(
             snapshot_id=snapshot_id,
             analyzed=False,
@@ -639,9 +807,10 @@ def build_entity_usage_view(
 
     records: dict[tuple[str, str | None], _UsageRecord] = {}
     by_model_id: dict[str, tuple[str, str | None]] = {}
+    model_records: dict[tuple[str, str | None], _UsageRecord] = {}
     for model in data_models:
         key = (model.service_id, model.type_full_name or model.entity)
-        records.setdefault(
+        model_records.setdefault(
             key,
             _UsageRecord(
                 service_id=model.service_id,
@@ -653,13 +822,17 @@ def build_entity_usage_view(
             ),
         )
         by_model_id.setdefault(model.id, key)
+        if model.service_id in reporting:
+            records.setdefault(key, model_records[key])
 
     for row in endpoint_rows:
         for summary in row.entity_access or []:
             key = by_model_id.get(summary.data_model_id or "") or (row.service_id, summary.entity)
             record = records.get(key)
             if record is None:
-                record = records[key] = _UsageRecord(
+                # A model of a service not listed as reporting joins only when an
+                # access names it, and then with its own metadata.
+                record = records[key] = model_records.get(key) or _UsageRecord(
                     service_id=key[0],
                     entity=key[1],
                     name=_simple_name(key[1]),

@@ -97,7 +97,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.26.0/data_model.schema.json",
+  "$id": "https://trywadi.com/schemas/1.27.0/data_model.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One persisted entity of one service.",
@@ -118,6 +118,19 @@
       ],
       "default": null,
       "description": "1.26.0: how this type came to be an entity \u2014 `annotation` (@Entity/@Document) or `repository-argument` (a repository's type argument names it and it carries no annotation, Q1). None = a pre-1.26.0 document, which recorded neither"
+    },
+    "delete_rewritten_by": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "1.27.0: the Hibernate annotation that replaces this entity's DELETE (`org.hibernate.annotations.SQLDelete` or `SoftDelete`), when present. A repository delete then runs that statement, so its verb is unknown (\u00a75.2.17)",
+      "title": "Delete Rewritten By"
     },
     "entity": {
       "description": "Entity/class name, e.g. 'Order'",
@@ -164,7 +177,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.26.0",
+      "default": "1.27.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -188,6 +201,19 @@
       "default": null,
       "description": "Collection/table name where recoverable: `@Table(name=)` or `@Document`. Populated since 1.26.0; native SQL resolves its table names through it (\u00a75.2.17)",
       "title": "Storage Name"
+    },
+    "storage_schema": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "1.27.0: `@Table(schema=)` when set. A schema-qualified table name in native SQL binds this entity only when its qualifier equals this value (\u00a75.2.17)",
+      "title": "Storage Schema"
     },
     "type_full_name": {
       "anyOf": [

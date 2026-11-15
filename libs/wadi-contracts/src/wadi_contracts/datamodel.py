@@ -67,6 +67,21 @@ class DataModel(ArtifactEnvelope):
             "names through it (§5.2.17)"
         ),
     )
+    storage_schema: str | None = Field(
+        default=None,
+        description=(
+            "1.27.0: `@Table(schema=)` when set. A schema-qualified table name in native "
+            "SQL binds this entity only when its qualifier equals this value (§5.2.17)"
+        ),
+    )
+    delete_rewritten_by: str | None = Field(
+        default=None,
+        description=(
+            "1.27.0: the Hibernate annotation that replaces this entity's DELETE "
+            "(`org.hibernate.annotations.SQLDelete` or `SoftDelete`), when present. A "
+            "repository delete then runs that statement, so its verb is unknown (§5.2.17)"
+        ),
+    )
     declared_by: EntityDeclaredBy | None = Field(
         default=None,
         description=(

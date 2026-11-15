@@ -116,6 +116,17 @@
       "title": "EntityAccessBasis",
       "type": "string"
     },
+    "EntityAccountingStatus": {
+      "description": "Why a service in the reverse view does or does not carry accounting (1.27.0).",
+      "enum": [
+        "reporting",
+        "predating",
+        "extraction-failed",
+        "library"
+      ],
+      "title": "EntityAccountingStatus",
+      "type": "string"
+    },
     "EntityDeclaredBy": {
       "description": "How an entity came to be one (Q1, Q15).",
       "enum": [
@@ -204,10 +215,17 @@
       "description": "One endpoint that may perform one operation on one entity.",
       "properties": {
         "call_sites": {
-          "description": "The endpoint's call sites touching this entity (its summary row's)",
-          "minimum": 1,
-          "title": "Call Sites",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The endpoint's call sites that perform THIS operation on this entity; None when its summary predates per-operation counts (written before 1.27.0)",
+          "title": "Call Sites"
         },
         "endpoint_id": {
           "title": "Endpoint Id",
@@ -323,7 +341,7 @@
               "type": "null"
             }
           ],
-          "description": "None = the service's boundary predates entity accounting"
+          "description": "Present exactly when status is `reporting`"
         },
         "service_id": {
           "title": "Service Id",
@@ -332,11 +350,16 @@
         "service_name": {
           "title": "Service Name",
           "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/EntityAccountingStatus",
+          "description": "1.27.0: why accounting is or is not present; only `reporting` carries it"
         }
       },
       "required": [
         "service_id",
         "service_name",
+        "status",
         "accounting"
       ],
       "title": "EntityUsageService",
@@ -357,13 +380,13 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.26.0/entity_usage.schema.json",
+  "$id": "https://trywadi.com/schemas/1.27.0/entity_usage.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Which endpoints may create, read, update or delete each entity (\u00a75.2.17).\n\nThe reverse question, answered at read time by\n:func:`build_entity_usage_view` from a projection of the endpoint\ndocuments and one read of the snapshot's data models. Nothing is stored\nfor it.\n\n``analyzed=False`` means no endpoint of the snapshot carries entity facts:\nit predates the phase, and ``entities`` is empty because nothing was\nlooked at, not because nothing is touched (R1-6).",
+  "description": "Which endpoints may create, read, update or delete each entity (\u00a75.2.17).\n\nThe reverse question, answered at read time by\n:func:`build_entity_usage_view` from a projection of the endpoint\ndocuments and one read of the snapshot's data models. Nothing is stored\nfor it.\n\n``analyzed=False`` means nothing in the view was examined with entity\nfacts: no listed service reports accounting and no endpoint row carries a\nsummary. ``entities`` is then empty because nothing was looked at, not\nbecause nothing is touched (R1-6).",
   "properties": {
     "analyzed": {
-      "description": "False when no endpoint row has entity_access \u2014 the snapshot predates it",
+      "description": "False when no listed service reports accounting and no endpoint row has entity_access: nothing here was examined",
       "title": "Analyzed",
       "type": "boolean"
     },

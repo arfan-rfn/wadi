@@ -10,10 +10,13 @@ import asyncio
 from typing import NamedTuple
 
 from wadi_contracts import (
+    EntityAccountingStatus,
     EntityUsageService,
     EntityUsageView,
     Icfg,
     RemoteEdgeItem,
+    ServiceBoundary,
+    ServiceKind,
     build_entity_usage_view,
 )
 from wadi_storage.artifacts import ArtifactRepository
@@ -99,8 +102,29 @@ async def entity_usage_view(
             EntityUsageService(
                 service_id=boundary.service_id,
                 service_name=boundary.name,
-                accounting=boundary.entity_access_accounting,
+                status=_accounting_status(boundary),
+                accounting=(
+                    boundary.entity_access_accounting
+                    if boundary.kind is ServiceKind.SERVICE
+                    else None
+                ),
             )
             for boundary in boundaries
         ],
     )
+
+
+def _accounting_status(boundary: ServiceBoundary) -> EntityAccountingStatus:
+    """Why a boundary does or does not carry accounting (1.27.0).
+
+    A library has no export of its own (§5.2.14); its calls count in each
+    dependent. A failed extraction and a boundary from before the phase both
+    have nothing measured, and ``extraction_error`` tells them apart.
+    """
+    if boundary.kind is not ServiceKind.SERVICE:
+        return EntityAccountingStatus.LIBRARY
+    if boundary.entity_access_accounting is not None:
+        return EntityAccountingStatus.REPORTING
+    if boundary.extraction_error is not None:
+        return EntityAccountingStatus.EXTRACTION_FAILED
+    return EntityAccountingStatus.PREDATING

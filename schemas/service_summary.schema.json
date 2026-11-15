@@ -670,7 +670,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.26.0/service_summary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.27.0/service_summary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "A service boundary plus counts aggregated at read time.",
@@ -844,7 +844,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.26.0",
+      "default": "1.27.0",
       "title": "Schema Version",
       "type": "string"
     },
