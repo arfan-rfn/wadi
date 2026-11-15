@@ -89,9 +89,9 @@ measure-repository-sites: ## Repository call sites from Java source (SRC=<root> 
 	uv run python -m wadi_testing.measure.repository_oracle "$(SRC)" $(if $(OUT),--json "$(OUT)")
 
 # EXPORTS: export JSON files, or a directory of them (WADI_BASELINE_EXPORT_DIR).
-reconcile-repository-sites: ## Oracle vs wadi db sinks, site by site (ORACLE=sites.json EXPORTS=<dir|files> [OUT=])
-	@test -n "$(ORACLE)" -a -n "$(EXPORTS)" || { echo "usage: make reconcile-repository-sites ORACLE=sites.json EXPORTS=<dir-or-files> [OUT=reconciled.json]"; exit 1; }
-	uv run python -m wadi_testing.measure.reconcile_repository_sites --oracle "$(ORACLE)" --exports $(EXPORTS) $(if $(OUT),--json "$(OUT)")
+reconcile-repository-sites: ## Oracle vs wadi db sinks, site by site (ORACLE=sites.json EXPORTS=<dir|files> [PUBLISHED=bundle.ndjson] [OUT=])
+	@test -n "$(ORACLE)" -a -n "$(EXPORTS)" || { echo "usage: make reconcile-repository-sites ORACLE=sites.json EXPORTS=<dir-or-files> [PUBLISHED=snapshot-export.ndjson] [OUT=reconciled.json]"; exit 1; }
+	uv run python -m wadi_testing.measure.reconcile_repository_sites --oracle "$(ORACLE)" --exports $(EXPORTS) $(if $(PUBLISHED),--published "$(PUBLISHED)") $(if $(OUT),--json "$(OUT)")
 
 # The §5.2.17 blind hand check (reviews D3-D5): a seeded draw from a running
 # orchestrator. Give the reader OUT/blind.json only; key.json holds wadi's answers.

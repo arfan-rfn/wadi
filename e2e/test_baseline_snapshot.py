@@ -16,7 +16,11 @@ Set ``WADI_BASELINE_EXPORT_DIR`` as well to keep each service's export as
 the repository call-site reconciler and the labeled-set scorer read:
 
     make measure-repository-sites SRC=~/repos/train-ticket OUT=sites.json
-    make reconcile-repository-sites ORACLE=sites.json EXPORTS=$WADI_BASELINE_EXPORT_DIR
+    make reconcile-repository-sites ORACLE=sites.json \\
+        EXPORTS=$WADI_BASELINE_EXPORT_DIR PUBLISHED=bundle.ndjson
+
+``bundle.ndjson`` is ``GET /snapshots/{id}/export``; with it the reconciler also
+compares each site's published operation against the oracle's.
 """
 
 import json
