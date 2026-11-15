@@ -43,6 +43,7 @@ def method_rollup(icfg: Icfg) -> dict[str, Any]:
             or node.sink is not None
             or node.remote_call_id is not None
             or node.mq_interaction_id is not None
+            or node.entity_access_sites
         ):
             # Not gated on CALL kind: sinks anchor to the coarsened statement,
             # so `return client.get(...)` carries its marker on a RETURN node
@@ -63,6 +64,14 @@ def method_rollup(icfg: Icfg) -> dict[str, Any]:
                 call["remote_call_id"] = node.remote_call_id
             if node.mq_interaction_id is not None:
                 call["mq_interaction_id"] = node.mq_interaction_id
+            # §5.2.17: what a repository call touches, one entry per call the
+            # statement makes (R1-2). This is the default detail level, so an
+            # agent reading "which line writes Order" must not need a
+            # statement-level drill-down to find out.
+            if node.entity_access_sites:
+                call["entity_access_sites"] = [
+                    site.model_dump(mode="json") for site in node.entity_access_sites
+                ]
             record["calls"].append(call)
 
     root = icfg.root_entry()

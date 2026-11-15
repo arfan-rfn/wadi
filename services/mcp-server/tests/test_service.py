@@ -158,6 +158,19 @@ class TestServerRegistration:
             "endpoint_icfg",
             "coverage_report",
             "remote_edges",
+            "entity_usage",
         }
         # Every tool ships an agent-facing description (the docstring).
         assert all(tool.description for tool in tools)
+
+    async def test_entity_usage_takes_an_optional_entity_and_service(
+        self, database: WadiDatabase
+    ) -> None:
+        server = create_server(_service(database))
+        [tool] = [tool for tool in await server.list_tools() if tool.name == "entity_usage"]
+        assert set(tool.input_schema["properties"]) == {"snapshot_id", "entity", "service_id"}
+        assert tool.input_schema["required"] == ["snapshot_id"]
+        # The answer an old snapshot gets is part of the tool's description,
+        # because that is where an agent learns how to read an empty list.
+        assert tool.description is not None
+        assert "predates" in tool.description
