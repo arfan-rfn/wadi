@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Save shapes: where the saved object came from decides the candidate
- *  operation (rule 3). Their `save` facts are Phase 2.10 M1b. */
+ *  operation (rule 3). Each pins its `save` raw facts (Phase 2.10 M1b). */
 @RestController
 @RequestMapping("/crud")
 public class SaveController {
@@ -122,11 +122,11 @@ public class SaveController {
         return orderRepository.save(order);
     }
 
-    /** Golden 24: delete, then save of a rebuilt object. */
+    /** Golden 24: delete, then save of a rebuilt object (a static factory). */
     @PutMapping("/delete-then-save")
     public Order deleteThenSave(@RequestParam String id) {
         orderRepository.deleteById(id);
-        Order rebuilt = new Order(id);
+        Order rebuilt = Order.withId(id);
         rebuilt.setStatus("REBUILT");
         return orderRepository.save(rebuilt);
     }

@@ -118,8 +118,8 @@ object WadiExport {
     val sinkRows = mutable.ListBuffer.empty[ujson.Obj]
     // §5.2.17: raw entity-access facts nested on db sink rows (A1), and the
     // entity records (A2). Built once per CPG: the repository chain index is
-    // shared by every row.
-    val entityFacts = new EntityAccessFacts(cpg)
+    // shared by every row. A save's caller hop stays inside this closure.
+    val entityFacts = new EntityAccessFacts(cpg, methodIds)
 
     val methodObjs = closure.map(methodJson)
     val cfgObjs = closure.flatMap { method =>

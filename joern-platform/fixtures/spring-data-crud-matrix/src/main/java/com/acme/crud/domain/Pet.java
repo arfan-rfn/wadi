@@ -25,4 +25,24 @@ public class Pet {
     public String getStatus() {
         return status;
     }
+
+    /** A hand-written builder in Lombok's shape: `Pet.builder()...build()`
+     *  constructs (golden 34). */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+
+        private String status;
+
+        public Builder status(String status) {
+            this.status = status;
+            return this;
+        }
+
+        public Pet build() {
+            return new Pet(status);
+        }
+    }
 }

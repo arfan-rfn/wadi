@@ -35,6 +35,12 @@ public class Order {
         this.id = id;
     }
 
+    /** A static factory on the entity type: saving its result is a
+     *  construction, the same as `new` (golden 24). */
+    public static Order withId(String id) {
+        return new Order(id);
+    }
+
     public String getId() {
         return id;
     }

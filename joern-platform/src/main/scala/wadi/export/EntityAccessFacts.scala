@@ -30,8 +30,11 @@ import wadi.packs.{SpringDataRepositories, SpringPacks}
   * and only the receiver (`IssueRepository extends BaseRepository<Issue>`)
   * says what `E` is. The extends-clause text is read from
   * `TYPE_DECL.genericSignature` (the M0 probe, §5.2.17).
+  *
+  * `exportedMethodIds` is the export's method closure: a save's caller hop
+  * (R1-27) counts only call sites the export itself holds.
   */
-private[`export`] final class EntityAccessFacts(cpg: Cpg) {
+private[`export`] final class EntityAccessFacts(cpg: Cpg, exportedMethodIds: Set[Long]) {
 
   import EntityAccessFacts.*
 
@@ -62,6 +65,19 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg) {
   private val bindings  = mutable.Map.empty[String, Binding]
   private val ancestors = mutable.Map.empty[Long, List[TypeDecl]]
 
+  /** A1 `save` (M1b): rule 3's inputs, from this index's repositories. */
+  private val saves = new SaveOrigin(
+    exportedMethodIds,
+    new SaveOrigin.Repositories {
+      def repositoryOf(call: Call): Option[String] = EntityAccessFacts.this.repositoryOf(call).map(_.fullName)
+      def entityOf(repository: String): Option[String] =
+        byFullName.get(repository).flatMap(td => bindingOf(td).entity).flatMap { case (ty, writtenIn) => resolve(ty, writtenIn) }
+      def isA(typeFullName: String, entity: String): Boolean =
+        typeFullName == entity || byFullName.get(typeFullName).exists(td => ancestorsOf(td).exists(_.fullName == entity))
+      def isProjectType(typeFullName: String): Boolean = byFullName.contains(typeFullName)
+    }
+  )
+
   /** The `db` object for one `sink=db` call. */
   def dbObj(call: Call): ujson.Obj = {
     val repository  = repositoryOf(call)
@@ -70,24 +86,21 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg) {
     val entityText = binding.entity.map { case (ty, _) => GenericSignature.render(ty) }
     val entityFull = binding.entity.flatMap { case (ty, writtenIn) => resolve(ty, writtenIn) }
     val kind       = binding.marker.map(repositoryKindOf).getOrElse("other")
+    val repoName   = repository.map(_.fullName).getOrElse(declaringTypeOf(call))
     ujson.Obj(
-      "repository"             -> repository.map(_.fullName).getOrElse(declaringTypeOf(call)),
+      "repository"             -> repoName,
       "method_name"            -> call.name,
       "entity_type_text"       -> entityText.map(ujson.Str(_)).getOrElse(ujson.Null),
       "entity_type_full_name"  -> entityFull.map(ujson.Str(_)).getOrElse(ujson.Null),
       "repository_kind"        -> kind,
       "implemented_in_project" -> declaration.exists(implementedInProject),
       "query"                  -> declaration.flatMap(queryObj(_, entityFull, kind)).getOrElse(ujson.Null),
-      "save"                   -> saveObj(call)
+      // A1 `save`: rule 3's inputs for a save-family call (`save`,
+      // `saveAndFlush`, `saveAll`, `saveAllAndFlush`, `insert`), an explicit
+      // null for every other method.
+      "save" -> saves.saveObj(call, repoName, entityFull)
     )
   }
-
-  /** A1 `save`: rule 3's inputs for a save-family call (`save`,
-    * `saveAndFlush`, `saveAll`, `saveAllAndFlush`, `insert`), null for every
-    * other method. M1b attaches them here from `SaveOrigin`; until then
-    * every row carries null, which a reader takes as "not measured".
-    */
-  private def saveObj(call: Call): ujson.Value = ujson.Null
 
   /** A2: the entity records. Every `@Entity` / `@Document` class (the
     * `model=` tag), then every project type a repository's chain binds that
@@ -287,11 +300,6 @@ private[`export`] final class EntityAccessFacts(cpg: Cpg) {
   private def isAbstract(method: Method): Boolean =
     method.modifier.modifierType.l.contains("ABSTRACT")
 
-  private def declaringTypeOf(call: Call): String = {
-    val declaring = call.methodFullName.split(':').head
-    declaring.substring(0, math.max(declaring.lastIndexOf('.'), 0))
-  }
-
   /** Walks the extends chain from `root` to the first marker, carrying each
     * type parameter's binding by POSITION (R1-4). `root`'s own parameters are
     * unbound: a receiver declared as `BaseRepository<E>` binds nothing.
@@ -489,6 +497,12 @@ private[`export`] object EntityAccessFacts {
   private def sameType(fullName: String, written: String): Boolean = {
     val normalized = fullName.replace('$', '.')
     normalized == written || normalized.endsWith("." + written)
+  }
+
+  /** The type a call's methodFullName names as declaring the method. */
+  def declaringTypeOf(call: Call): String = {
+    val declaring = call.methodFullName.split(':').head
+    declaring.substring(0, math.max(declaring.lastIndexOf('.'), 0))
   }
 
   /** `jpa` / `mongo` from the marker the chain reached; a store-agnostic
