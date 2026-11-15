@@ -96,6 +96,10 @@ produced by an ad-hoc script outside the repo. They are correct as of
 Next step: land the measurement as a test or a `make` target so the numbers
 become a standing check rather than a claim in a document.
 
+v0.9.0 paid part of this for entity access: the repository call-site oracle and its reconciler
+are committed (`make measure-repository-sites`, `make reconcile-repository-sites`), and the
+baseline harness can store each service's export (`WADI_BASELINE_EXPORT_DIR`).
+
 ---
 
 ## Auth — project-defined vocabularies (§5.2.12)
@@ -286,6 +290,69 @@ composes one cross-service hop at read time.
 Abdelfattah et al. (CLOSER 2023) built a hand-validated set of 1,364 CRUD operations on
 TrainTicket. Ask the authors for it. It is a different revision from `train-ticket-aitest`, so
 check how much of it maps before relying on it.
+
+### A method reached only through a bound method reference gets no db row
+**Priority:** P2
+**Opened:** v0.9.0
+
+`widgetWriter::storeViaRef` is a bound method reference on a field. In the `save-origin-mini`
+fixture the method it names emitted no `db` sink row, so it appears to be outside the export
+closure. §5.2 says method references are followed. Nobody has checked whether the REF edge is
+missing or the closure skips it. Found while building the save facts.
+
+### Collision losers' ICFGs survive the collision filter
+**Priority:** P2
+**Opened:** v0.9.0
+
+`resolve_id_collisions` drops a losing endpoint's ICFG by `endpoint_id`
+(`services/extraction-worker/src/wadi_worker/assembler.py`), but a loser shares the kept
+endpoint's id, so its ICFG passes the filter. `write_icfg` upserts on
+`(snapshot_id, endpoint_id)`, so the stored graph can belong to the dropped handler, and that
+handler's repository calls are counted as in endpoint flow. This predates Phase 2.10.
+
+### A custom repository fragment's body is outside the endpoint flow
+**Priority:** P3
+**Opened:** v0.9.0
+
+`SpringDIPass` does not link `OrderRepository.archiveOld` to `OrderRepositoryImpl.archiveOld`.
+The export finds the implementation to set `implemented_in_project`, so the call reads
+`unknown` correctly, but the ICFG dead-ends at the call and the fragment's own repository calls
+reach no endpoint.
+
+### Jar-less parses miss some Spring Data repository families
+**Priority:** P3
+**Opened:** v0.9.0
+
+`SpringDataRepositories.Markers` holds four bare names and three package substrings. Without
+the jar, reactive, R2DBC, Elasticsearch, Neo4j, Cassandra and Couchbase repositories match only
+when the parent's full name resolves. A call that resolves to `JpaSpecificationExecutor`
+(`repo.findAll(spec)`) is tagged by its declaring type, which has no marker parent, so it may go
+untagged. Neither shape occurs in train-ticket. Reconcile yas and ICPC with the oracle before
+deciding.
+
+### No standing index-scan test for the older hot read paths
+**Priority:** P3
+**Opened:** v0.9.0
+
+§5.2.15 audited eight read paths by hand. The profiler-based helper in
+`libs/wadi-storage/tests/test_entity_access_reads.py` covers only the three entity reads.
+Extending it to the rest turns the audit into a check.
+
+### A 1.0.x ICFG shows no outbound edges on the detail route
+**Priority:** P3
+**Opened:** v0.9.0
+
+`wadi_storage.compose.endpoint_outbound` reads `IcfgNode.remote_call_ids` only, as the detail
+route always did. An ICFG written before 1.1.0 carries only the deprecated `remote_call_id`,
+so `/detail` and MCP `endpoint_detail` return an empty `outbound` for it while MCP
+`cross_service=true` reads both fields.
+
+### `e2e/` is outside pyright's include
+**Priority:** P3
+**Opened:** v0.9.0
+
+`e2e/test_baseline_snapshot.py` has four strict-mode errors in its schema spot-check that CI
+never reports.
 
 ---
 
