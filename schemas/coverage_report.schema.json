@@ -484,12 +484,20 @@
           "type": "integer"
         },
         "gated_operations": {
-          "description": "1.27.0: operations the save split computes that no reporting service may publish from a save, because every flag for that verb is off or stale. Its count still includes what the query text published; a save that would have been one is withheld as create-or-update, so the count is not every such access. Enum order",
-          "items": {
-            "$ref": "#/$defs/EntityOperation"
-          },
-          "title": "Gated Operations",
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EntityOperation"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "1.27.0: operations the save split computes that no reporting service may publish from a save, because every flag for that verb is off or stale. Its count still includes what the query text published; a save that would have been one is withheld as create-or-update, so the count is not every such access. Enum order. None = the report predates this field, so whether a zero is withheld is not known; [] = computed, nothing withheld",
+          "title": "Gated Operations"
         },
         "implemented_in_project": {
           "minimum": 0,

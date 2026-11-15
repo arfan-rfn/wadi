@@ -653,6 +653,15 @@ class TestEntityCoverageSection:
         assert restored.entity_coverage.by_service[0].accounting.call_sites == 10
         assert restored.entity_coverage.unexercised_vocabulary == []
 
+    def test_gated_operations_not_computed_is_not_none_gated(self) -> None:
+        # A report written before 1.27.0 never computed which verbs the gate
+        # withholds; reading it as [] would claim a zero is measured.
+        section = self._section()
+        assert section.gated_operations is None
+        legacy = json.loads(section.model_dump_json())
+        del legacy["gated_operations"]
+        assert EntityCoverageSection.model_validate(legacy).gated_operations is None
+
 
 _PETS = "svc-pets"
 _OWNERS = "svc-owners"
@@ -693,7 +702,7 @@ def _summary(
     *ops: EntityOperation,
     model_id: str | None = None,
     sites: int = 1,
-    by_operation: dict[str, int] | None | Literal["all"] = "all",
+    by_operation: dict[str, int] | Literal["all"] | None = "all",
 ) -> EndpointEntityAccess:
     """A summary row; by default every operation was performed by every site."""
     return EndpointEntityAccess(

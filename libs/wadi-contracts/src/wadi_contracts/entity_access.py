@@ -468,14 +468,15 @@ class EntityCoverageSection(WadiModel):
             "zero is evidence of nothing"
         ),
     )
-    gated_operations: list[EntityOperation] = Field(
-        default_factory=list[EntityOperation],
+    gated_operations: list[EntityOperation] | None = Field(
+        default=None,
         description=(
             "1.27.0: operations the save split computes that no reporting service may "
             "publish from a save, because every flag for that verb is off or stale. Its "
             "count still includes what the query text published; a save that would have "
             "been one is withheld as create-or-update, so the count is not every such "
-            "access. Enum order"
+            "access. Enum order. None = the report predates this field, so whether a zero "
+            "is withheld is not known; [] = computed, nothing withheld"
         ),
     )
 
