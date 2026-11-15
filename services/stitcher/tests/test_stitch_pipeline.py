@@ -6,9 +6,14 @@ import pytest
 from wadi_contracts import (
     AnalysisCoverage,
     Confidence,
+    EntityAccessAccounting,
+    EntityAccessBasis,
+    EntityGateFlagState,
+    EntityOperation,
     NetworkIdentity,
     Provenance,
     ServiceBoundary,
+    ServiceKind,
     Snapshot,
     TargetKind,
 )
@@ -164,6 +169,102 @@ class TestStitchPipeline:
         report = await stitch.get_coverage_report(snapshot.id)
         assert report is not None
         assert report.totals.call_sites == 0
+
+    async def test_entity_coverage_survives_the_stored_report(
+        self, database: WadiDatabase, graph_repository: GraphRepository
+    ) -> None:
+        """§5.2.17: the section is read back from Mongo as written, gate flags
+        included (E3), and a pre-phase service stays a count, never zeros."""
+        artifacts = ArtifactRepository(database)
+        stitch = StitchRepository(database)
+        snapshot = make_snapshot(make_system())
+        accounting = EntityAccessAccounting(
+            call_sites=3,
+            in_endpoint_flow=2,
+            in_no_endpoint_flow=1,
+            flush=0,
+            implemented_in_project=0,
+            entity_undetermined=0,
+            unknown_operation=0,
+            create_or_update=1,
+            bound=2,
+            accesses_by_operation={
+                "create": 0,
+                "read": 2,
+                "update": 0,
+                "delete": 0,
+                "create-or-update": 1,
+                "unknown": 0,
+            },
+            sites_by_basis={
+                "method-name": 2,
+                "query-text": 0,
+                "argument-origin": 1,
+                "existence-guard": 0,
+            },
+            rules_version="rules-1",
+            gate_flags=[
+                EntityGateFlagState(
+                    basis=EntityAccessBasis.ARGUMENT_ORIGIN,
+                    operation=EntityOperation.CREATE,
+                    enabled=True,
+                    scored_rules_version="rules-1",
+                ),
+                EntityGateFlagState(
+                    basis=EntityAccessBasis.ARGUMENT_ORIGIN,
+                    operation=EntityOperation.UPDATE,
+                    enabled=False,
+                    scored_rules_version=None,
+                ),
+            ],
+        )
+        petstore = make_service(snapshot, "services/petstore").model_copy(
+            update={"entity_access_accounting": accounting}
+        )
+        legacy = make_service(snapshot, "services/legacy")
+        library = make_service(snapshot, "libs/common").model_copy(
+            update={"kind": ServiceKind.LIBRARY}
+        )
+        await artifacts.write_service_boundaries([petstore, legacy, library])
+
+        await StitchPipeline(artifacts, stitch, graph_repository).run(snapshot.id)
+        report = await stitch.get_coverage_report(snapshot.id)
+
+        assert report is not None
+        section = report.entity_coverage
+        assert section is not None
+        assert (section.services_reporting, section.services_predating) == (1, 1)
+        assert (section.call_sites, section.create_or_update, section.bound) == (3, 1, 2)
+        assert section.in_no_endpoint_flow == 1
+        [row] = section.by_service
+        assert (row.service_id, row.service_name) == (petstore.service_id, "petstore")
+        assert row.accounting == accounting
+        assert section.unexercised_vocabulary == [
+            "basis:existence-guard",
+            "basis:query-text",
+            "operation:create",
+            "operation:delete",
+            "operation:unknown",
+            "operation:update",
+        ]
+        assert [case.value for case in section.unmeasured] == [
+            "cascaded-operations",
+            "dirty-checking-updates",
+            "other-persistence-mechanisms",
+        ]
+
+    async def test_a_snapshot_from_before_the_phase_stores_no_entity_section(
+        self, database: WadiDatabase, graph_repository: GraphRepository
+    ) -> None:
+        artifacts = ArtifactRepository(database)
+        stitch = StitchRepository(database)
+        snapshot = await _seed_two_service_snapshot(artifacts)
+
+        await StitchPipeline(artifacts, stitch, graph_repository).run(snapshot.id)
+        report = await stitch.get_coverage_report(snapshot.id)
+
+        assert report is not None
+        assert report.entity_coverage is None
 
     async def test_graph_failure_propagates(self, database: WadiDatabase) -> None:
         """A Tier-2 write failure fails the run (job → snapshot FAILED); Mongo

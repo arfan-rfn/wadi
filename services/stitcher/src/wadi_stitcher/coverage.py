@@ -16,6 +16,9 @@ from wadi_contracts import (
     CoverageTotals,
     Endpoint,
     EndpointCollision,
+    EntityAccessBasis,
+    EntityCoverageSection,
+    EntityOperation,
     ExternalApiEntry,
     PlaceholderEntry,
     QuarantinedFact,
@@ -24,9 +27,11 @@ from wadi_contracts import (
     ServiceBoundary,
     ServiceCfgAnomalyEntry,
     ServiceCoverageEntry,
+    ServiceEntityAccounting,
     ServiceKind,
     StitchedEdge,
     TargetKind,
+    UnmeasuredEntityAccess,
     UnmodelledMechanismEntry,
     UnresolvedCallEntry,
 )
@@ -239,6 +244,91 @@ def build_auth_coverage(
     )
 
 
+# Q2, Q17, Q4: named one by one, not iterated from the enum, so the
+# vocabulary-liveness test sees this module report each case and a value
+# added to the registry fails it until a reader decides it belongs here.
+_UNMEASURED_ENTITY_ACCESS = (
+    UnmeasuredEntityAccess.CASCADED_OPERATIONS,
+    UnmeasuredEntityAccess.DIRTY_CHECKING_UPDATES,
+    UnmeasuredEntityAccess.OTHER_PERSISTENCE_MECHANISMS,
+)
+
+
+def build_entity_coverage(
+    boundaries: Sequence[ServiceBoundary],
+) -> EntityCoverageSection | None:
+    """Snapshot rollup of every service's repository-call accounting (§5.2.17).
+
+    Built the way :func:`build_auth_coverage` is, from facts the worker wrote:
+    the counters and both dicts are summed over the services that report
+    accounting, and each service keeps its own row, which carries the gate
+    flag states it ran with because the stitcher cannot know them (E3).
+
+    A service with no accounting is counted in ``services_predating`` and is
+    never summed in as zeros (P10). That is every boundary written before the
+    phase, and also a service whose extraction failed: both have nothing
+    measured, and the boundary's ``extraction_error`` tells them apart.
+    Libraries are excluded entirely, as in :func:`build_analysis_coverage`:
+    a library has no export of its own (§5.2.6), so its accounting is always
+    ``None`` and counting it would read as a stale service.
+
+    ``None`` when no service reports accounting, which is every snapshot from
+    before the phase: a section of zeros would claim the calls were counted.
+    """
+    rows: list[ServiceEntityAccounting] = []
+    predating = 0
+    services = [b for b in boundaries if b.kind is ServiceKind.SERVICE]
+    for boundary in sorted(services, key=lambda b: (b.name, b.service_id)):
+        if boundary.entity_access_accounting is None:
+            predating += 1
+            continue
+        rows.append(
+            ServiceEntityAccounting(
+                service_id=boundary.service_id,
+                service_name=boundary.name,
+                accounting=boundary.entity_access_accounting,
+            )
+        )
+    if not rows:
+        return None
+    accountings = [row.accounting for row in rows]
+    # Every vocabulary value is a key, in enum order: the accounting validator
+    # guarantees each service wrote all of them, so a sum never misses one (E8).
+    accesses_by_operation = {
+        op.value: sum(a.accesses_by_operation[op.value] for a in accountings)
+        for op in EntityOperation
+    }
+    sites_by_basis = {
+        basis.value: sum(a.sites_by_basis[basis.value] for a in accountings)
+        for basis in EntityAccessBasis
+    }
+    # §5.2.11 T6, E8: a zero is ambiguous between "measured and none found" and
+    # "this corpus never exercises the case". Judged on the snapshot sum, so a
+    # value one service exercises is exercised.
+    unexercised = sorted(
+        [f"operation:{op}" for op, count in accesses_by_operation.items() if count == 0]
+        + [f"basis:{basis}" for basis, count in sites_by_basis.items() if count == 0]
+    )
+    return EntityCoverageSection(
+        services_reporting=len(rows),
+        services_predating=predating,
+        call_sites=sum(a.call_sites for a in accountings),
+        in_endpoint_flow=sum(a.in_endpoint_flow for a in accountings),
+        in_no_endpoint_flow=sum(a.in_no_endpoint_flow for a in accountings),
+        flush=sum(a.flush for a in accountings),
+        implemented_in_project=sum(a.implemented_in_project for a in accountings),
+        entity_undetermined=sum(a.entity_undetermined for a in accountings),
+        unknown_operation=sum(a.unknown_operation for a in accountings),
+        create_or_update=sum(a.create_or_update for a in accountings),
+        bound=sum(a.bound for a in accountings),
+        accesses_by_operation=accesses_by_operation,
+        sites_by_basis=sites_by_basis,
+        by_service=rows,
+        unmeasured=list(_UNMEASURED_ENTITY_ACCESS),
+        unexercised_vocabulary=unexercised,
+    )
+
+
 def build_coverage_report(
     snapshot_id: str,
     *,
@@ -251,6 +341,7 @@ def build_coverage_report(
     analysis_coverage: AnalysisCoverageSection | None = None,
     cfg_anomalies: CfgAnomalySection | None = None,
     auth_coverage: AuthCoverageSection | None = None,
+    entity_coverage: EntityCoverageSection | None = None,
     quarantined_facts: Sequence[QuarantinedFact] = (),
     endpoint_collisions: Sequence[EndpointCollision] = (),
 ) -> CoverageReport:
@@ -333,6 +424,7 @@ def build_coverage_report(
         analysis_coverage=analysis_coverage,
         cfg_anomalies=cfg_anomalies,
         auth_coverage=auth_coverage,
+        entity_coverage=entity_coverage,
         quarantined_facts=list(quarantined_facts),
         endpoint_collisions=list(endpoint_collisions),
     )
