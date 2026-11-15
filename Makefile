@@ -1,10 +1,10 @@
 # Wadi developer entrypoints (architecture.md §9).
 # Everything here must also be runnable as plain commands in CI.
 
-.PHONY: sync lint fmt typecheck test test-unit test-integration schema up down help bump sync-compose joern-image e2e
+.PHONY: sync lint fmt typecheck test test-unit test-integration schema up down help bump sync-compose joern-image e2e measure-repository-sites reconcile-repository-sites
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 
 sync: ## Install / sync the uv workspace (all members + dev group)
 	uv sync --all-packages
@@ -82,3 +82,13 @@ joern-image: ## Build the wadi-joern image (pinned Joern + the wadi jar)
 
 e2e: ## Whole-stack conformance e2e (needs Docker + the wadi-joern image)
 	uv run pytest e2e -q
+
+# The §5.2.17 repository call-site oracle: reads source only, never an export (C4).
+measure-repository-sites: ## Repository call sites from Java source (SRC=<root> [OUT=sites.json])
+	@test -n "$(SRC)" || { echo "usage: make measure-repository-sites SRC=<source-root> [OUT=sites.json]"; exit 1; }
+	uv run python -m wadi_testing.measure.repository_oracle "$(SRC)" $(if $(OUT),--json "$(OUT)")
+
+# EXPORTS: export JSON files, or a directory of them (WADI_BASELINE_EXPORT_DIR).
+reconcile-repository-sites: ## Oracle vs wadi db sinks, site by site (ORACLE=sites.json EXPORTS=<dir|files> [OUT=])
+	@test -n "$(ORACLE)" -a -n "$(EXPORTS)" || { echo "usage: make reconcile-repository-sites ORACLE=sites.json EXPORTS=<dir-or-files> [OUT=reconciled.json]"; exit 1; }
+	uv run python -m wadi_testing.measure.reconcile_repository_sites --oracle "$(ORACLE)" --exports $(EXPORTS) $(if $(OUT),--json "$(OUT)")

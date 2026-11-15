@@ -10,6 +10,13 @@ worker/stitcher (identical wiring to the conformance e2e), then prints the
 snapshot's pinned commits, endpoint total, and the full analysis-coverage
 section — the numbers recorded in commit messages and tranche issues, and the
 before/after instrument for the T2/T3/T4 accuracy work.
+
+Set ``WADI_BASELINE_EXPORT_DIR`` as well to keep each service's export as
+``<service name>.json`` in that directory (§5.2.17). It is the stored export
+the repository call-site reconciler and the labeled-set scorer read:
+
+    make measure-repository-sites SRC=~/repos/train-ticket OUT=sites.json
+    make reconcile-repository-sites ORACLE=sites.json EXPORTS=$WADI_BASELINE_EXPORT_DIR
 """
 
 import json
@@ -25,15 +32,17 @@ from httpx import ASGITransport, AsyncClient
 from wadi_config import WadiSettings
 from wadi_contracts import JobType
 from wadi_joern_client import JoernClient
+from wadi_joern_client.export import ServiceExport
 from wadi_orchestrator.app import create_app
 from wadi_orchestrator.monitor import SnapshotMonitor
 from wadi_orchestrator.state import AppState
 from wadi_repo import RepoCache
 from wadi_stitcher.pipeline import StitchPipeline
 from wadi_storage import GraphRepository, StitchRepository, WadiDatabase
-from wadi_worker.pipeline import CpgqlJoernExtractor, ExtractionPipeline
+from wadi_worker.pipeline import CpgqlJoernExtractor, ExtractionPipeline, JoernExtractor
 
 BASELINE_REPO = os.environ.get("WADI_BASELINE_REPO", "")
+BASELINE_EXPORT_DIR = os.environ.get("WADI_BASELINE_EXPORT_DIR", "")
 
 pytestmark = [
     pytest.mark.integration,
@@ -42,6 +51,36 @@ pytestmark = [
         reason="baseline harness is opt-in — set WADI_BASELINE_REPO to a repo path/URL",
     ),
 ]
+
+
+class StoringExtractor:
+    """Keeps a copy of every export the worker receives (§5.2.17).
+
+    A wrapper rather than a change to the worker: the stored document is the
+    one the assembler was handed, and production code gains no measurement
+    path. Files are named by service id while extraction runs, because that is
+    all `extract` is told (its `export_dir` is `<workspace>/exports/<svc_id>`);
+    `name_by_service` renames them once the boundaries are known.
+    """
+
+    def __init__(self, inner: JoernExtractor, store: Path) -> None:
+        self._inner = inner
+        self._store = store
+        store.mkdir(parents=True, exist_ok=True)
+
+    def extract(self, source_path: Path, export_dir: Path, project_name: str) -> ServiceExport:
+        export = self._inner.extract(source_path, export_dir, project_name)
+        (self._store / f"{export_dir.name}.json").write_text(export.model_dump_json())
+        return export
+
+    def name_by_service(self, names: dict[str, str]) -> list[Path]:
+        """Rename `<svc_id>.json` to `<service name>.json`; a clash keeps the id."""
+        for service_id, name in names.items():
+            stored = self._store / f"{service_id}.json"
+            target = self._store / f"{name}.json"
+            if stored.exists() and not target.exists():
+                stored.rename(target)
+        return sorted(self._store.glob("*.json"))
 
 
 @requires_joern_image
@@ -92,6 +131,11 @@ class TestBaselineSnapshot:
         # Benchmark services can be far larger than the fixtures — a generous
         # per-request budget, not the e2e's 120s.
         joern = JoernClient(joern_url, request_timeout=1800)
+        extractor: JoernExtractor = CpgqlJoernExtractor(joern)
+        storing: StoringExtractor | None = None
+        if BASELINE_EXPORT_DIR:
+            storing = StoringExtractor(extractor, Path(BASELINE_EXPORT_DIR).expanduser())
+            extractor = storing
         try:
             await ExtractionPipeline(
                 settings=state.settings,
@@ -99,7 +143,7 @@ class TestBaselineSnapshot:
                 snapshots=state.snapshots,
                 artifacts=state.artifacts,
                 repo_cache=RepoCache(state.settings.repo_cache_dir),
-                extractor=CpgqlJoernExtractor(joern),
+                extractor=extractor,
             ).run(job)
         finally:
             joern.close()
@@ -137,6 +181,11 @@ class TestBaselineSnapshot:
         libraries = [s["name"] for s in boundaries if s["kind"] == "library"]
         print(f"services: {len(services)}   libraries: {sorted(libraries)}")
         print(f"endpoints: {endpoint_total}")
+        if storing is not None:
+            stored = storing.name_by_service(
+                {service["service_id"]: service["name"] for service in services}
+            )
+            print(f"stored exports: {len(stored)} in {BASELINE_EXPORT_DIR}")
         print(f"totals: {json.dumps(coverage['totals'])}")
         print("analysis_coverage:")
         section = coverage["analysis_coverage"]
