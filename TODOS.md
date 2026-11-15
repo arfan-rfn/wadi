@@ -347,6 +347,34 @@ route always did. An ICFG written before 1.1.0 carries only the deprecated `remo
 so `/detail` and MCP `endpoint_detail` return an empty `outbound` for it while MCP
 `cross_service=true` reads both fields.
 
+### Native SQL cannot name an entity that declares no `@Table`
+**Priority:** P1 (decide before releasing M6)
+**Opened:** v0.9.0
+
+The query reader resolves a native table only through `DataModel.storage_name`, which comes from
+`@Table`/`@Document`, and does not guess a naming strategy. On train-ticket-aitest every one of the
+9 query sites is native SQL on such an entity, so M6 moved all 9 from the repository's entity
+with `unknown` to an undetermined entity with `read`: the verb is now right and the entity is
+lost. The project sets no `spring.jpa.hibernate.naming.physical-strategy`, and Spring Boot's
+default (`CamelCaseToUnderscoresNamingStrategy`) maps `TrainType`, `Contacts`, `Station`,
+`PriceConfig` and `Route` to exactly the tables those queries name. Proposed: fall back to that
+default when the service's config sets no physical strategy, and record it as a decision in
+§5.2.17 first. Measure the effect on yas and ICPC the same way.
+
+### The query reader leaves HQL selects that start at `from` unread
+**Priority:** P3
+**Opened:** v0.9.0
+
+`from Order o where ...` is valid HQL with an implied select. The reader follows only the four
+leading verbs, so such a query keeps the pre-M6 `unknown`. Count them on ICPC before building.
+
+### Implicit joins through a path in a `where` clause are not claimed
+**Priority:** P3
+**Opened:** v0.9.0
+
+`select o from Order o where o.customer.vip = true` reads `Customer` without naming it in a
+declaring position, so the reader claims only `Order`. Reads are under-claimed there.
+
 ### A flush-only endpoint reads "No repository call found"
 **Priority:** P3
 **Opened:** v0.9.0
