@@ -72,7 +72,26 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     )
   }
 
-  /** One site's expected `db` raw facts, minus `save` (M1b). */
+  /** A `save` object as the export writes it (A1): rule 3's raw inputs.
+    * Callers are in source order of their call sites.
+    */
+  private case class Save(
+    origin: String,
+    lookup: Boolean,
+    arm: String = "none",
+    callers: List[String] = Nil
+  ) {
+    def json: ujson.Value = ujson.Obj(
+      "argument_origin"        -> origin,
+      "lookup_same_repository" -> lookup,
+      "guard_arm"              -> arm,
+      "caller_origins"         -> ujson.Arr.from(callers.map(ujson.Str(_)))
+    )
+  }
+
+  /** One site's expected `db` raw facts. `save` is null on every row whose
+    * method is not save-family, and that null is asserted too.
+    */
   private case class Db(
     repository: String,
     method: String,
@@ -80,7 +99,8 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     entityFullName: Option[String],
     kind: String = "jpa",
     implemented: Boolean = false,
-    query: Option[Q] = None
+    query: Option[Q] = None,
+    save: Option[Save] = None
   ) {
     def json: ujson.Value = ujson.Obj(
       "repository"             -> repository,
@@ -89,12 +109,16 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
       "entity_type_full_name"  -> entityFullName.map(ujson.Str(_)).getOrElse(ujson.Null),
       "repository_kind"        -> kind,
       "implemented_in_project" -> implemented,
-      "query"                  -> query.map(_.json).getOrElse(ujson.Null)
+      "query"                  -> query.map(_.json).getOrElse(ujson.Null),
+      "save"                   -> save.map(_.json).getOrElse(ujson.Null)
     )
   }
 
   private def order(method: String, query: Option[Q] = None, implemented: Boolean = false): Db =
     Db(Repo + "OrderRepository", method, Some("Order"), Some(Dom + "Order"), implemented = implemented, query = query)
+
+  /** An OrderRepository save-family site with its `save` facts. */
+  private def orderSave(save: Save, method: String = "save"): Db = order(method).copy(save = Some(save))
 
   /** The plan's "Fixture goldens, by name" list (R1-18), in its numbering. */
   private val planGoldens: List[String] = List(
@@ -157,22 +181,41 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     ),
     // The receiver is BaseRepository<E> itself: nothing binds E (P10).
     "unbindable-entity-chain" -> List(Db(Repo + "BaseRepository", "count", None, None)),
-    // Save shapes (rule 3). Their `save` facts are M1b's; the sites are now.
-    "inherited-save-read-origin" -> List(order("findById"), order("save")),
-    "save-constructed-no-lookup" -> List(order("save")),
-    "save-guard-not-found-arm"   -> List(order("existsById"), order("save")),
-    "save-guard-found-arm"       -> List(order("existsById"), order("save")),
-    "save-guard-early-return"    -> List(order("existsById"), order("save")),
-    "save-upsert-by-branch"      -> List(order("findById"), order("save")),
+    // Save shapes (rule 3): each pins the RAW facts, never a verb (the worker
+    // classifies, Q22/Q23). Origin is def-use inside the saving method.
+    "inherited-save-read-origin" -> List(order("findById"), orderSave(Save("read", lookup = true))),
+    "save-constructed-no-lookup" -> List(orderSave(Save("constructed", lookup = false))),
+    // Q23: the save sits directly in an arm of the same-repository check.
+    "save-guard-not-found-arm" -> List(order("existsById"), orderSave(Save("constructed", lookup = true, "not-found"))),
+    "save-guard-found-arm"     -> List(order("existsById"), orderSave(Save("constructed", lookup = true, "found"))),
+    // The check returns early; the save follows it and is in no arm.
+    "save-guard-early-return" -> List(order("existsById"), orderSave(Save("constructed", lookup = true))),
+    // `new` on one branch, a read on the other: both definitions reach the save.
+    "save-upsert-by-branch" -> List(order("findById"), orderSave(Save("mixed", lookup = true))),
     // Two reads in the handler, ONE save site in OrderWriter.storeAgreed that
-    // both calls reach: a site is a call site, not a call.
-    "save-parameter-callers-agree"     -> List(order("findById"), order("findById"), order("save")),
-    "save-parameter-callers-disagree"  -> List(order("findById"), order("save")),
-    "save-parameter-from-request-body" -> List(order("save")),
-    // The read is in OrderLookup.loadEnvelope, one call away.
-    "save-via-helper-wrapper" -> List(order("findById"), order("save")),
-    "delete-then-save"        -> List(order("deleteById"), order("save")),
-    "two-calls-one-statement" -> List(order("save"), order("findById")),
+    // both calls reach: a site is a call site, not a call. Its origin is a
+    // parameter; each caller's argument is a read (R1-27, one hop).
+    "save-parameter-callers-agree" -> List(
+      order("findById"),
+      order("findById"),
+      orderSave(Save("parameter", lookup = false, callers = List("read", "read")))
+    ),
+    "save-parameter-callers-disagree" -> List(
+      order("findById"),
+      orderSave(Save("parameter", lookup = false, callers = List("read", "constructed")))
+    ),
+    // The caller passes its own @RequestBody: still a parameter after one hop.
+    "save-parameter-from-request-body" -> List(
+      orderSave(Save("parameter", lookup = false, callers = List("parameter")))
+    ),
+    // The read is in OrderLookup.loadEnvelope, one call away; here the object
+    // comes out of a wrapper's getter, which def-use does not follow.
+    "save-via-helper-wrapper" -> List(order("findById"), orderSave(Save("other", lookup = false))),
+    // A delete is not a lookup. The rebuilt object comes from a static
+    // factory on the entity type, which constructs.
+    "delete-then-save" -> List(order("deleteById"), orderSave(Save("constructed", lookup = false))),
+    // The saved argument IS the findById call.
+    "two-calls-one-statement" -> List(orderSave(Save("read", lookup = true)), order("findById")),
     // The lambda body is in the export but in no endpoint flow (R1-1): see
     // the dedicated test below.
     "save-in-lambda" -> Nil,
@@ -188,13 +231,23 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
       order("count"),
       order("existsById"),
       order("getReferenceById"),
-      order("saveAll"),
-      order("saveAndFlush"),
-      order("saveAllAndFlush"),
+      // Each saved list or object was read from the same repository above.
+      orderSave(Save("read", lookup = true), "saveAll"),
+      orderSave(Save("read", lookup = true), "saveAndFlush"),
+      orderSave(Save("read", lookup = true), "saveAllAndFlush"),
       order("deleteAllById"),
       order("deleteAllInBatch"),
       order("deleteAll"),
-      Db(Repo + "PetRepository", "insert", Some("Pet"), Some(Dom + "Pet"), kind = "mongo")
+      // A builder rooted at the entity type constructs; nothing reads from
+      // PetRepository in this method.
+      Db(
+        Repo + "PetRepository",
+        "insert",
+        Some("Pet"),
+        Some(Dom + "Pet"),
+        kind = "mongo",
+        save = Some(Save("constructed", lookup = false))
+      )
     ),
     "flush-not-an-operation" -> List(order("flush")),
     // R1-12: a query method's name never decides its verb, so the text and
@@ -284,7 +337,8 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     "repository-default-method" -> List(
       order("findAndTouch", implemented = true),
       order("findById"),
-      order("save")
+      // The receiver is `this`; the lookup is the findById on it.
+      orderSave(Save("read", lookup = true))
     ),
     // C3: the fragment's body is OrderRepositoryImpl.archiveOld.
     "repository-custom-fragment" -> List(order("archiveOld", implemented = true)),
@@ -295,20 +349,18 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     )
   )
 
-  /** A site's `db` object with `save` set aside; facts compare order-free. */
-  private def factsOf(site: ujson.Value): ujson.Value = {
-    val db = site.obj.getOrElse("db", fail(s"db sink row without a db object: $site"))
-    ujson.Obj.from(db.obj.view.filterKeys(_ != "save").toSeq)
-  }
+  /** A site's whole `db` object, `save` included; facts compare order-free. */
+  private def factsOf(site: ujson.Value): ujson.Value =
+    site.obj.getOrElse("db", fail(s"db sink row without a db object: $site"))
 
   planGoldens.zipWithIndex.foreach { case (golden, index) =>
     val expected = goldens.getOrElse(golden, Nil)
     test(f"golden ${index + 1}%02d $golden: ${expected.size} site(s) with their db raw facts") {
       goldens.contains(golden) shouldBe true
       val sites = sitesOf(golden)
+      // `save` is compared with the rest: its facts on a save-family row, an
+      // explicit null on every other row.
       sites.map(factsOf).map(_.render()).sorted shouldBe expected.map(_.json.render()).sorted
-      // `save` is M1b's (rule 3 inputs): present-or-absent, never set yet.
-      sites.foreach(site => site("db").obj.get("save").foreach(_ shouldBe ujson.Null))
     }
   }
 
@@ -326,7 +378,9 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
       m("line").num >= handler("line").num && m("line").num <= handler("line_end").num
     }
     val rows = dbRows.filter(row => lambdas.exists(_("id").num.toLong == row("method_id").num.toLong))
-    rows.map(factsOf).map(_.render()) shouldBe List(order("save").json.render())
+    // Facts are per call site, so the row carries them even though no
+    // endpoint ICFG reaches it.
+    rows.map(factsOf).map(_.render()) shouldBe List(orderSave(Save("constructed", lookup = false)).json.render())
     flowOf(handlerId("save-in-lambda")).intersect(lambdas.map(_("id").num.toLong).toSet) shouldBe empty
   }
 
@@ -339,6 +393,31 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
   test("every db sink row in the export carries a db object, and only db rows do") {
     exportJson("sinks").arr.foreach { row =>
       row.obj.contains("db") shouldBe (row("kind").str == "db")
+    }
+  }
+
+  test("A1 save: every save-family row in the export has a save object in the contract's vocabulary; every other row null") {
+    val saveFamily = Set("save", "saveAndFlush", "saveAll", "saveAllAndFlush", "insert")
+    val origins    = Set("read", "constructed", "parameter", "mixed", "other")
+    val saves = dbRows.filter(row => saveFamily.contains(row("db")("method_name").str))
+    // Ten in SaveController (golden 26's lambda included), three in
+    // OrderWriter, one in golden 32's default method, four in golden 34.
+    saves.distinctBy(_("call_id").num.toLong) should have size 18
+    dbRows.foreach { row =>
+      val db = row("db")
+      db.obj.contains("save") shouldBe true
+      if (!saveFamily.contains(db("method_name").str)) db("save") shouldBe ujson.Null
+      else {
+        val save = db("save")
+        save.obj.keySet shouldBe Set("argument_origin", "lookup_same_repository", "guard_arm", "caller_origins")
+        origins should contain(save("argument_origin").str)
+        Set("found", "not-found", "none") should contain(save("guard_arm").str)
+        save("caller_origins").arr.foreach(o => origins should contain(o.str))
+        // One hop is traced only for a parameter.
+        if (save("argument_origin").str != "parameter") save("caller_origins").arr shouldBe empty
+        // An arm is read only off a same-repository check, which is a lookup.
+        if (save("guard_arm").str != "none") save("lookup_same_repository").bool shouldBe true
+      }
     }
   }
 

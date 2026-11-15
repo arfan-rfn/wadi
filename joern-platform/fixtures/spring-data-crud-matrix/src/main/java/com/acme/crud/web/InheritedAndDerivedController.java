@@ -82,7 +82,7 @@ public class InheritedAndDerivedController {
         orderRepository.deleteAllById(ids);
         orderRepository.deleteAllInBatch();
         orderRepository.deleteAll();
-        petRepository.insert(new Pet("NEW"));
+        petRepository.insert(Pet.builder().status("NEW").build());
         return present ? total : 0;
     }
 
