@@ -5,11 +5,17 @@
 import { fireEvent, render, within } from "@testing-library/react"
 import { describe, expect, test, vi } from "vitest"
 
-import type { DataListRow, EntitySiteRef } from "@/lib/wadi/entity-access"
+import type { EndpointDetailView } from "@/lib/generated/endpoint_detail.schema"
+import {
+  deriveDataListState,
+  type DataListRow,
+  type EntitySiteRef,
+} from "@/lib/wadi/entity-access"
 import { UNDETERMINED_ENTITY_KEY } from "@/lib/wadi/routes"
 import { DataList } from "@/components/explorer/data-list"
 
 const record: DataListRow = {
+  id: "com.acme.consign.ConsignRecord#no-model",
   key: "com.acme.consign.ConsignRecord",
   entity: "com.acme.consign.ConsignRecord",
   name: "ConsignRecord",
@@ -21,6 +27,7 @@ const record: DataListRow = {
 }
 
 const price: DataListRow = {
+  id: "com.acme.consign.ConsignPrice#no-model",
   key: "com.acme.consign.ConsignPrice",
   entity: "com.acme.consign.ConsignPrice",
   name: "ConsignPrice",
@@ -32,6 +39,7 @@ const price: DataListRow = {
 }
 
 const undetermined: DataListRow = {
+  id: `${UNDETERMINED_ENTITY_KEY}#no-model`,
   key: UNDETERMINED_ENTITY_KEY,
   entity: null,
   name: "entity not determined",
@@ -43,6 +51,7 @@ const undetermined: DataListRow = {
 }
 
 const topic: DataListRow = {
+  id: "com.acme.notify.Topic#no-model",
   key: "com.acme.notify.Topic",
   entity: "com.acme.notify.Topic",
   name: "Topic",
@@ -86,6 +95,59 @@ function renderList(
 }
 
 describe("Data list", () => {
+  test("one type summarized with and without its model id is two rows, keyed apart (C7)", () => {
+    // The fold groups by (entity, data_model_id) as the sites wrote them, so
+    // one type can arrive twice. Keyed by entity alone, React reused one row
+    // for both and warned about the duplicate key.
+    const order = "com.acme.order.Order"
+    const detail: EndpointDetailView = {
+      snapshot_id: "snap_x",
+      system_id: "sys_x",
+      service_id: "svc_order",
+      service_name: "ts-order-service",
+      icfg_available: true,
+      stitched: true,
+      outbound: [],
+      endpoint: {
+        id: "ep_" + "b".repeat(16),
+        snapshot_id: "snap_x",
+        service_id: "svc_order",
+        http_method: "PUT",
+        full_uri: "/orders",
+        simplified_uri: "/orders",
+        handler: { id: "m_" + "b".repeat(16), signature: "put:void()" },
+        entity_access: [
+          {
+            entity: order,
+            data_model_id: "dm_" + "1".repeat(16),
+            operations: ["read"],
+            call_sites: 1,
+            call_sites_by_operation: { read: 1 },
+          },
+          {
+            entity: order,
+            data_model_id: null,
+            operations: ["create-or-update"],
+            call_sites: 1,
+            call_sites_by_operation: { "create-or-update": 1 },
+          },
+        ],
+      },
+    }
+    const state = deriveDataListState({ detail, error: null })
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const { view } = renderList({ state })
+      expect(view.getAllByRole("button", { name: /^Order/ })).toHaveLength(2)
+      const duplicateKeys = consoleError.mock.calls.filter((args) =>
+        args.some((arg) => String(arg).includes("same key"))
+      )
+      expect(duplicateKeys).toEqual([])
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   test("populated: simple name shown, qualified name on hover, chips and call count", () => {
     const { view } = renderList()
     const row = view.getByRole("button", { name: /ConsignRecord/ })
