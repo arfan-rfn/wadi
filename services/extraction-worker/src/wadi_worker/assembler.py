@@ -80,6 +80,7 @@ from wadi_worker.entity_access import (
     carries_entity_facts,
     classify_db_sinks,
 )
+from wadi_worker.query_reader import EntityCatalog
 
 logger = logging.getLogger(__name__)
 
@@ -240,11 +241,7 @@ class Assembler:
         db_calls = (
             classify_db_sinks(
                 export.sinks,
-                data_model_ids={
-                    model.type_full_name: model.id
-                    for model in artifacts.data_models
-                    if model.type_full_name is not None
-                },
+                entities=EntityCatalog(artifacts.data_models),
                 gate_flags=self._gate_flags,
             )
             if carries_entity_facts(export)

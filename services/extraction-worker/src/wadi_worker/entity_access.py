@@ -33,6 +33,7 @@ from wadi_joern_client.export import (
     SaveArgumentOrigin,
     ServiceExport,
 )
+from wadi_worker.query_reader import EntityCatalog, read_repository_query
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,10 @@ def rules_version(
     Canonical JSON rather than ``hash()``, which is salted per process: the
     version is compared across runs, and against a number a person recorded
     when they scored a flag.
+
+    The query reader (M6) is not hashed in. It publishes on the
+    ``query-text`` basis, which no flag gates, and it cannot change what a
+    gated basis computes, so a change to it must not void a save score.
     """
     canonical = json.dumps(
         {
@@ -247,7 +252,7 @@ def name_route(method_name: str) -> NameRoute | None:
 def classify_db_access(
     db: ExportDbAccess,
     *,
-    data_model_ids: Mapping[str, str],
+    entities: EntityCatalog,
     gate_flags: Sequence[GateFlag] = SHIPPED_GATE_FLAGS,
 ) -> EntityAccessSite | None:
     """Classify one repository call into its site; None for ``flush``.
@@ -266,12 +271,15 @@ def classify_db_access(
     entity = db.entity_type_full_name
     repository_entity = EntityAccess(
         entity=entity,
-        data_model_id=data_model_ids.get(entity) if entity else None,
+        data_model_id=entities.model_id(entity),
         operation=EntityOperation.UNKNOWN,
     )
+    # R1-4: the type argument as written is evidence only while it is
+    # unresolved; once resolved, `entity` already says it.
+    entity_type_text = db.entity_type_text if entity is None else None
     if db.query is not None:
         basis = EntityAccessBasis.QUERY_TEXT
-        accesses = read_query(db, repository_entity)
+        accesses, entity_type_text = read_query(db, repository_entity, entities)
     elif db.implemented_in_project:
         basis = EntityAccessBasis.METHOD_NAME
         accesses = [repository_entity]
@@ -299,9 +307,7 @@ def classify_db_access(
         method_name=db.method_name,
         basis=basis,
         accesses=accesses,
-        # R1-4: the type argument as written is evidence only while it is
-        # unresolved; once resolved, `entity` already says it.
-        entity_type_text=db.entity_type_text if entity is None else None,
+        entity_type_text=entity_type_text,
     )
 
 
@@ -359,18 +365,32 @@ def _gate(
     return EntityOperation.CREATE_OR_UPDATE
 
 
-def read_query(db: ExportDbAccess, repository_entity: EntityAccess) -> list[EntityAccess]:
-    """The accesses an annotated query performs (rule 1, rule 6).
+def read_query(
+    db: ExportDbAccess, repository_entity: EntityAccess, entities: EntityCatalog
+) -> tuple[list[EntityAccess], str | None]:
+    """The accesses an annotated query performs, and the site's unresolved text.
 
-    The seam the query reader plugs into (milestone M6). Until it exists the
-    answer is one ``unknown`` access on the repository's own entity: the
-    method is known to touch data, and what it does is not read. The reader
-    replaces this body and may return several accesses, one per entity the
-    query names, each with its own verb (C1). That is why the site's
-    validator allows several only on the ``query-text`` basis.
+    The query reader (M6, :mod:`wadi_worker.query_reader`) reads the text and
+    may return several accesses, one per entity the query names, each with
+    its own verb (rule 6, C1). That is why the site's validator allows several
+    only on the ``query-text`` basis. A query it does not read (no text, a
+    Mongo JSON query, a verb it cannot follow) keeps the pre-M6 answer: one
+    ``unknown`` access on the repository's own entity, because the method is
+    known to touch data and what it does is not read.
+
+    The text returned is the site's ``entity_type_text``: the names as written
+    when no access resolved to an entity, and None as soon as one did.
     """
-    del db  # read by the M6 reader; the pre-M6 answer does not depend on the text
-    return [repository_entity]
+    reading = read_repository_query(db, entities)
+    if reading is None:
+        unread_text = db.entity_type_text if repository_entity.entity is None else None
+        return [repository_entity], unread_text
+    accesses = [
+        EntityAccess(entity=entity, data_model_id=entities.model_id(entity), operation=operation)
+        for entity, operation in reading.accesses
+    ]
+    resolved = any(access.entity is not None for access in accesses)
+    return accesses, None if resolved or not reading.unresolved else ", ".join(reading.unresolved)
 
 
 class SiteOutcome(StrEnum):
@@ -418,15 +438,16 @@ def carries_entity_facts(export: ServiceExport) -> bool:
 def classify_db_sinks(
     sinks: Iterable[ExportSink],
     *,
-    data_model_ids: Mapping[str, str],
+    entities: EntityCatalog,
     gate_flags: Sequence[GateFlag] = SHIPPED_GATE_FLAGS,
 ) -> list[DbCallSite]:
     """Every repository call site of an export, classified once, in export order.
 
     One record per distinct ``call_id``: two calls in one statement are two
     sites (R1-2), and the rows a call site would repeat per candidate value
-    (§5.2 over-approximation) are one. ``data_model_ids`` maps a qualified
-    entity type to its ``dm_`` id.
+    (§5.2 over-approximation) are one. ``entities`` is the service's entity
+    records, which give an access its ``dm_`` id and the query reader its
+    names (M6).
     """
     rows: dict[int, ExportSink] = {}
     for sink in sinks:
@@ -451,7 +472,7 @@ def classify_db_sinks(
             )
             outcome, site = SiteOutcome.ENTITY_UNDETERMINED, None
         else:
-            site = classify_db_access(sink.db, data_model_ids=data_model_ids, gate_flags=gate_flags)
+            site = classify_db_access(sink.db, entities=entities, gate_flags=gate_flags)
             outcome = _outcome(sink.db, site)
         calls.append(
             DbCallSite(

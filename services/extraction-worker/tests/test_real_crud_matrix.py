@@ -15,9 +15,10 @@ the test id.
 Both gate states run (rule 5): the shipped table, where every save publishes
 `create-or-update` and keeps its candidate as evidence (R1-11), and all four
 flags on and scored against the current `RULES_VERSION`, where the candidate
-is what publishes. Goldens 7-13 and 31 carry a query, and until milestone M6
-reads it they publish `unknown` on the `query-text` basis. M6 changes those
-expectations on purpose.
+is what publishes. Goldens 7-13 and 31 carry a query, and the query reader
+(M6) publishes what its text states on the `query-text` basis, which no flag
+gates. A query it does not read (Mongo JSON, a named query that did not
+resolve) stays `unknown` on the repository's own entity.
 """
 
 import json
@@ -163,9 +164,15 @@ def saved(
     return Site(repository, method, basis, (Access(entity, CU, candidate),), owner=owner)
 
 
-def queried(method: str, entity: str = ORDER, repository: str = ORDER_REPO) -> Site:
-    """An annotated query method before M6: the name never decides (R1-12)."""
-    return Site(repository, method, EntityAccessBasis.QUERY_TEXT, (Access(entity, UNK),))
+def queried(
+    method: str, *accesses: Access, repository: str = ORDER_REPO, unread: str | None = None
+) -> Site:
+    """An annotated query method: its text decides and the name never does
+    (R1-12). ``unread`` names the repository entity of a query the reader
+    does not read, which stays `unknown` on it."""
+    if unread is not None:
+        accesses = (Access(unread, UNK),)
+    return Site(repository, method, EntityAccessBasis.QUERY_TEXT, accesses)
 
 
 def published_with_flags_on(site: Site) -> Site:
@@ -218,66 +225,79 @@ GOLDENS: tuple[Golden, ...] = (
         (named(R, "countByStatus"), named(R, "existsByStatus")),
         (Row(ORDER, (R,), 2),),
     ),
-    # Goldens 7-13 and 31: M6 replaces `unknown` with the verb the query reader
-    # finds, and 9 and 31 gain the second entity the query names (rule 6, C1).
+    # Goldens 7-13 and 31: the query reader (M6) publishes the verb the text
+    # states, and 9 and 31 name a second entity, each with its own operation
+    # (rule 6, C1). Each expectation was checked against QUERY_FACTS below.
     Golden(
         7,
         "query-jpql-select",
         "GET",
-        (queried("findBySkuText", ORDER_LINE, ORDER_LINE_REPO),),
-        (Row(ORDER_LINE, (UNK,), 1),),
+        # select l from OrderLine l where l.sku = ?1
+        (queried("findBySkuText", Access(ORDER_LINE, R), repository=ORDER_LINE_REPO),),
+        (Row(ORDER_LINE, (R,), 1),),
     ),
     Golden(
         8,
         "query-jpql-update-modifying",
         "PUT",
-        (queried("updateStatus"),),
-        (Row(ORDER, (UNK,), 1),),
+        # update Order o set o.status = ?2 where o.id = ?1
+        (queried("updateStatus", Access(ORDER, U)),),
+        (Row(ORDER, (U,), 1),),
     ),
     Golden(
         9,
         "query-jpql-join-association",
         "GET",
-        (queried("findContainingSku"),),
-        (Row(ORDER, (UNK,), 1),),
+        # select o from Order o join o.lines l: `lines` is List<OrderLine>.
+        (queried("findContainingSku", Access(ORDER, R), Access(ORDER_LINE, R)),),
+        (Row(ORDER, (R,), 1), Row(ORDER_LINE, (R,), 1)),
     ),
     Golden(
         10,
         "query-jpql-keyword-entity",
         "GET",
-        (queried("findInStatus"),),
-        (Row(ORDER, (UNK,), 1),),
+        # select o from Order o where ...: `Order` by position, not a keyword.
+        (queried("findInStatus", Access(ORDER, R)),),
+        (Row(ORDER, (R,), 1),),
     ),
     Golden(
         11,
         "query-native-table",
         "GET",
-        (queried("findNativeByStatus"), queried("findNativeConcatenated")),
-        (Row(ORDER, (UNK,), 2),),
+        # select * from orders ...: the table Order's @Table names.
+        (
+            queried("findNativeByStatus", Access(ORDER, R)),
+            queried("findNativeConcatenated", Access(ORDER, R)),
+        ),
+        (Row(ORDER, (R,), 2),),
     ),
     Golden(
         12,
         "query-named",
         "GET",
         (
-            queried("shipped"),
-            queried("findOpen", ISSUE, ISSUE_REPO),
-            queried("findVip", CUSTOMER, CUSTOMER_REPO),
-            queried("sumOpen", INVOICE, INVOICE_REPO),
-            queried("undeclaredNamed"),
+            queried("shipped", Access(ORDER, R)),
+            queried("findOpen", Access(ISSUE, R), repository=ISSUE_REPO),
+            # `Client` is Customer's @Entity(name=).
+            queried("findVip", Access(CUSTOMER, R), repository=CUSTOMER_REPO),
+            # A named NATIVE query on the `invoices` table.
+            queried("sumOpen", Access(INVOICE, R), repository=INVOICE_REPO),
+            # A name nothing declares: no text, so not read (P10).
+            queried("undeclaredNamed", unread=ORDER),
         ),
         (
-            Row(CUSTOMER, (UNK,), 1),
-            Row(INVOICE, (UNK,), 1),
-            Row(ISSUE, (UNK,), 1),
-            Row(ORDER, (UNK,), 2),
+            Row(CUSTOMER, (R,), 1),
+            Row(INVOICE, (R,), 1),
+            Row(ISSUE, (R,), 1),
+            Row(ORDER, (R, UNK), 2),
         ),
     ),
     Golden(
         13,
         "query-mongo-json",
         "GET",
-        (queried("findByStatusJson", PET, PET_REPO),),
+        # A Mongo query is JSON: not read (R1-24).
+        (queried("findByStatusJson", unread=PET, repository=PET_REPO),),
         (Row(PET, (UNK,), 1),),
     ),
     Golden(
@@ -409,8 +429,17 @@ GOLDENS: tuple[Golden, ...] = (
         31,
         "query-delete-with-subquery",
         "DELETE",
-        (queried("deleteForNonVip", INVOICE, INVOICE_REPO),),
-        (Row(INVOICE, (UNK,), 1),),
+        # delete from Invoice i where i.customer in (select c from Client c ...):
+        # one site, two accesses, two operations (C1).
+        (
+            queried(
+                "deleteForNonVip",
+                Access(INVOICE, D),
+                Access(CUSTOMER, R),
+                repository=INVOICE_REPO,
+            ),
+        ),
+        (Row(CUSTOMER, (R,), 1), Row(INVOICE, (D,), 1)),
     ),
     Golden(
         32,
@@ -705,16 +734,19 @@ class TestAccounting:
             "flush": 1,  # golden 35
             "implemented_in_project": 2,  # goldens 32 and 33
             "entity_undetermined": 1,  # golden 30
-            "unknown_operation": 13,  # the query methods, goldens 7-13 and 31
+            # The two queries the reader does not read: golden 12's undeclared
+            # named query and golden 13's Mongo JSON. The other eleven bind.
+            "unknown_operation": 2,
             "create_or_update": 18,  # every save-family call, the lambda's included
-            "bound": 33,
+            "bound": 44,
+            # 69 accesses over 67 sites: goldens 9 and 31 name two entities.
             "accesses_by_operation": {
                 "create": 0,
-                "read": 28,
-                "update": 0,
-                "delete": 6,
+                "read": 39,  # 28 by name, 11 by query text
+                "update": 1,  # golden 8
+                "delete": 7,  # 6 by name, golden 31's Invoice
                 "create-or-update": 18,
-                "unknown": 15,
+                "unknown": 4,  # goldens 32 and 33 (C3), and the two unread queries
             },
             "sites_by_basis": {
                 "method-name": 36,
@@ -736,14 +768,14 @@ class TestAccounting:
         accounting = flags_on.accounting
         # Five saves have no candidate (goldens 18, 19, 21, 22, 23) and stay
         # create-or-update; the other thirteen publish a single verb.
-        assert (accounting.create_or_update, accounting.bound) == (5, 46)
+        assert (accounting.create_or_update, accounting.bound) == (5, 57)
         assert accounting.accesses_by_operation == {
             "create": 5,  # goldens 15, 16, 24, 26 and 34's insert
-            "read": 28,
-            "update": 8,  # goldens 2, 17, 20, 25, 32 and 34's three saves
-            "delete": 6,
+            "read": 39,
+            "update": 9,  # goldens 2, 17, 20, 25, 32 and 34's three saves, and 8's query
+            "delete": 7,
             "create-or-update": 5,
-            "unknown": 15,
+            "unknown": 4,
         }
         flags = {(f.enabled, f.scored_rules_version) for f in accounting.gate_flags}
         assert flags == {(True, RULES_VERSION)}
