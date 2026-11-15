@@ -97,8 +97,11 @@ Next step: land the measurement as a test or a `make` target so the numbers
 become a standing check rather than a claim in a document.
 
 v0.9.0 paid part of this for entity access: the repository call-site oracle and its reconciler
-are committed (`make measure-repository-sites`, `make reconcile-repository-sites`), and the
-baseline harness can store each service's export (`WADI_BASELINE_EXPORT_DIR`).
+are committed (`make measure-repository-sites`, `make reconcile-repository-sites`), the
+baseline harness can store each service's export (`WADI_BASELINE_EXPORT_DIR`), the blind hand
+check is drawn and scored by `make blind-sample` / `make blind-score`, and each run's summary is
+committed under `docs/measurements/entity-access/`. The older phases' numbers are still
+ad hoc.
 
 ---
 
@@ -399,6 +402,66 @@ distinguishing suffix, when two rows share a simple name.
 A call on `BaseRepository<E>` that binds no entity has `entity_type_text = null`, as contract A1
 says, so the "entity not determined" row has nothing to show a reader about what it saw. The
 repository type is on the site; whether to show it there is a UI decision.
+
+### A statement's second call into project code is not followed
+**Priority:** P1
+**Opened:** v0.9.0
+
+Found while building the rigor review's fixtures (F1). The ICFG puts one callee on a statement
+node, so in `a.count() > 0 && helper.existsIn(...)` the flow never enters `existsIn`, and any
+repository call or outbound call inside it is missing from that endpoint. Repository calls made
+directly in the statement are not affected: a node lists every site it holds (R1-2). The fixture
+was restructured around it, so no golden covers the shape yet. It affects endpoint completeness
+wherever a condition or an expression chains two calls into project methods.
+
+### The save's existence check is looked for only in the saving method
+**Priority:** P2
+**Opened:** v0.9.0
+
+Review A6. `lookup_same_repository` asks whether the saving method reads the same repository
+type. An existence check in the caller, in a helper, or on another repository of the same
+entity (train-ticket's travel and preserve services each have two repositories on `Order`)
+gives `constructed` with no lookup, which is a `create` candidate. The split is gated, so
+nothing false is published, but M5 must settle this before it scores `argument-origin:create`.
+
+### Transitive detection and the hard matching cases have no real-corpus measurement
+**Priority:** P2
+**Opened:** v0.9.0
+
+Reviews A7 and D9. `RepositoryDetectionRegressionTest` holds three database calls on the older
+fixtures, and every train-ticket repository is direct, so transitive detection is exercised only
+by the crud-matrix fixture. The ICPC claim (111 repositories through a project base) is not
+measured on this branch. On train-ticket the reconciler met no two calls on one line, no
+multi-line call and no overload, so those matching rules are proven only by synthetic tests.
+M7 (yas, ICPC) is where both get a real corpus.
+
+### The query reader's remaining silent misses
+**Priority:** P3
+**Opened:** v0.9.0
+
+Review B7, after the hardening. The reader still drops an access without a flag for an implicit
+join through a path (see the entry above), `treat(...)`, `delete ... using`, `straight_join`,
+and the second table of a MySQL multi-table delete (`delete o, l from ...`). None claims a false
+verb; each loses an entity the text names. The module docstring lists them.
+
+### An entity named only through a marker-typed receiver has no entity record
+**Priority:** P3
+**Opened:** v0.9.0
+
+F1 finding 5. A call on `CrudRepository<Foo, Long>` where `Foo` has no `@Entity` and no
+repository of its own binds `Foo`, but no `data_models` row is written for it. The reverse view
+still lists it (a row from the access, with no storage name), so nothing is lost; the record is.
+
+### Small reader gaps left by the 1.27.0 change
+**Priority:** P3
+**Opened:** v0.9.0
+
+- MCP `endpoint_detail` shows `call_sites_by_operation: null` on a summary written before
+  1.27.0 with no note saying why, where `entity_usage` explains it.
+- Two frontend fixtures still cast whole payloads (`tests/data-list-state.test.ts:40`,
+  `tests/entity-sites.test.ts:23`).
+- One type that arrives as two Data list rows (with and without a model id) shares one
+  `entity=` selection key, so selecting one selects both.
 
 ### `e2e/` is outside pyright's include
 **Priority:** P3
