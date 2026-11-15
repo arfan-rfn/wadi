@@ -11,7 +11,7 @@ from dataclasses import replace
 
 import pytest
 
-from wadi_contracts import EntityAccessBasis, EntityOperation
+from wadi_contracts import DataModel, EntityAccessBasis, EntityOperation
 from wadi_joern_client.export import (
     ExportDbAccess,
     ExportDbQuery,
@@ -29,10 +29,24 @@ from wadi_worker.entity_access import (
     classify_db_access,
     rules_version,
 )
+from wadi_worker.query_reader import EntityCatalog
 
 PET = "com.acme.pets.Pet"
 PET_REPOSITORY = "com.acme.pets.PetRepository"
 PET_MODEL_ID = "dm_" + "1" * 16
+PETS = EntityCatalog(
+    [
+        DataModel(
+            snapshot_id="snap_" + "a" * 16,
+            service_id="svc_" + "b" * 16,
+            id=PET_MODEL_ID,
+            entity="Pet",
+            type_full_name=PET,
+            persistence_framework="spring-data",
+        )
+    ]
+)
+NO_ENTITIES = EntityCatalog()
 
 
 def _db(method_name: str, **facts: object) -> ExportDbAccess:
@@ -50,7 +64,7 @@ def _db(method_name: str, **facts: object) -> ExportDbAccess:
 
 class TestMethodName:
     def test_a_derived_read_is_one_read_access_on_the_repository_entity(self) -> None:
-        site = classify_db_access(_db("findByStatus"), data_model_ids={PET: PET_MODEL_ID})
+        site = classify_db_access(_db("findByStatus"), entities=PETS)
 
         assert site is not None
         assert site.repository == PET_REPOSITORY
@@ -63,23 +77,23 @@ class TestMethodName:
         assert site.entity_type_text is None
 
     def test_flush_is_not_an_entity_operation_and_yields_no_site(self) -> None:
-        assert classify_db_access(_db("flush"), data_model_ids={}) is None
+        assert classify_db_access(_db("flush"), entities=NO_ENTITIES) is None
 
     def test_save_and_flush_is_a_save_not_a_flush(self) -> None:
-        site = classify_db_access(_db("saveAndFlush"), data_model_ids={})
+        site = classify_db_access(_db("saveAndFlush"), entities=NO_ENTITIES)
 
         assert site is not None
         assert site.accesses[0].operation is EntityOperation.CREATE_OR_UPDATE
 
     def test_a_name_outside_the_verb_table_is_unknown(self) -> None:
-        site = classify_db_access(_db("purgeStale"), data_model_ids={})
+        site = classify_db_access(_db("purgeStale"), entities=NO_ENTITIES)
 
         assert site is not None
         assert site.basis is EntityAccessBasis.METHOD_NAME
         assert site.accesses[0].operation is EntityOperation.UNKNOWN
 
     def test_an_entity_absent_from_data_models_has_no_model_id(self) -> None:
-        site = classify_db_access(_db("deleteById"), data_model_ids={})
+        site = classify_db_access(_db("deleteById"), entities=NO_ENTITIES)
 
         assert site is not None
         assert site.accesses[0].entity == PET
@@ -91,7 +105,7 @@ class TestMethodName:
         # to a project type. The text is evidence; the entity is not claimed.
         site = classify_db_access(
             _db("findAll", entity_type_full_name=None, entity_type_text="T"),
-            data_model_ids={PET: PET_MODEL_ID},
+            entities=PETS,
         )
 
         assert site is not None
@@ -103,7 +117,7 @@ class TestMethodName:
     def test_an_unbindable_chain_is_undetermined_with_no_text(self) -> None:
         site = classify_db_access(
             _db("findAll", entity_type_full_name=None, entity_type_text=None),
-            data_model_ids={},
+            entities=NO_ENTITIES,
         )
 
         assert site is not None
@@ -114,21 +128,23 @@ class TestMethodName:
 class TestQueryAndProjectBodies:
     """Rule 1 and C3: two cases where the method name must not decide."""
 
-    def test_an_annotated_query_is_unknown_on_the_query_text_basis(self) -> None:
+    def test_an_annotated_query_is_decided_by_its_text_not_its_name(self) -> None:
         # R1-12: `findActive` reads like a read, but its @Query decides, and
-        # until the query reader exists (M6) that decision is "unknown".
+        # since the query reader (M6) that decision is the text's own verb.
         site = classify_db_access(
             _db(
                 "findActive",
-                query=ExportDbQuery(text="select p from Pet p", native=False, modifying=False),
+                query=ExportDbQuery(
+                    text="delete from Pet p where p.active = false", native=False, modifying=True
+                ),
             ),
-            data_model_ids={PET: PET_MODEL_ID},
+            entities=PETS,
         )
 
         assert site is not None
         assert site.basis is EntityAccessBasis.QUERY_TEXT
         assert [(a.entity, a.data_model_id, a.operation) for a in site.accesses] == [
-            (PET, PET_MODEL_ID, EntityOperation.UNKNOWN)
+            (PET, PET_MODEL_ID, EntityOperation.DELETE)
         ]
 
     def test_a_modifying_query_named_like_a_save_is_still_query_text(self) -> None:
@@ -137,7 +153,7 @@ class TestQueryAndProjectBodies:
                 "saveStatus",
                 query=ExportDbQuery(text=None, native=True, modifying=True),
             ),
-            data_model_ids={},
+            entities=NO_ENTITIES,
         )
 
         assert site is not None
@@ -148,9 +164,7 @@ class TestQueryAndProjectBodies:
     def test_a_project_implemented_method_is_unknown_whatever_its_name(self) -> None:
         # C3: membership of a repository does not establish what a
         # hand-written `default` body or custom fragment does.
-        site = classify_db_access(
-            _db("findOrCreate", implemented_in_project=True), data_model_ids={PET: PET_MODEL_ID}
-        )
+        site = classify_db_access(_db("findOrCreate", implemented_in_project=True), entities=PETS)
 
         assert site is not None
         assert site.basis is EntityAccessBasis.METHOD_NAME
@@ -256,9 +270,7 @@ class TestSaveSplit:
         candidate: EntityOperation | None,
         basis: EntityAccessBasis,
     ) -> None:
-        site = classify_db_access(
-            _save(origin, lookup, arm, callers), data_model_ids={PET: PET_MODEL_ID}
-        )
+        site = classify_db_access(_save(origin, lookup, arm, callers), entities=PETS)
 
         assert site is not None
         assert site.basis is basis
@@ -282,7 +294,7 @@ class TestSaveSplit:
     ) -> None:
         site = classify_db_access(
             _save(origin, lookup, arm, callers),
-            data_model_ids={PET: PET_MODEL_ID},
+            entities=PETS,
             gate_flags=ALL_FLAGS_ON,
         )
 
@@ -297,7 +309,7 @@ class TestSaveSplit:
         # Before T3's save facts (or on a row the pass did not describe) the
         # split has no input: no candidate in either gate state.
         for flags in (SHIPPED_GATE_FLAGS, ALL_FLAGS_ON):
-            site = classify_db_access(_db("save"), data_model_ids={}, gate_flags=flags)
+            site = classify_db_access(_db("save"), entities=NO_ENTITIES, gate_flags=flags)
 
             assert site is not None
             assert site.basis is _ORIGIN
@@ -308,7 +320,7 @@ class TestSaveSplit:
         for name in ("insert", "saveAll", "saveAllAndFlush"):
             site = classify_db_access(
                 _save(_NEW, False, GuardArm.NONE, [], method_name=name),
-                data_model_ids={},
+                entities=NO_ENTITIES,
                 gate_flags=ALL_FLAGS_ON,
             )
 
@@ -324,7 +336,7 @@ class TestSaveSplit:
         )
 
         def published(save: ExportDbAccess) -> tuple[EntityOperation, EntityOperation | None]:
-            site = classify_db_access(save, data_model_ids={}, gate_flags=only_guard_create)
+            site = classify_db_access(save, entities=NO_ENTITIES, gate_flags=only_guard_create)
             assert site is not None
             return site.accesses[0].operation, site.accesses[0].candidate_operation
 
@@ -347,7 +359,7 @@ class TestSaveSplit:
             for flag in SHIPPED_GATE_FLAGS
         )
         site = classify_db_access(
-            _save(_NEW, False, GuardArm.NONE, []), data_model_ids={}, gate_flags=stale
+            _save(_NEW, False, GuardArm.NONE, []), entities=NO_ENTITIES, gate_flags=stale
         )
 
         assert site is not None
@@ -439,7 +451,7 @@ class TestInheritedMethodTable:
     def test_every_inherited_method_has_its_pinned_verb(
         self, interface: str, method_name: str, expected: EntityOperation | None
     ) -> None:
-        site = classify_db_access(_db(method_name), data_model_ids={})
+        site = classify_db_access(_db(method_name), entities=NO_ENTITIES)
 
         if expected is None:
             assert site is None, f"{interface}.{method_name} must not be an entity access"
