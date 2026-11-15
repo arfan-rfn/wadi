@@ -179,6 +179,10 @@ def make_data_model(snapshot: Snapshot, boundary: ServiceBoundary, entity: str) 
 
 
 def make_accounting(call_sites: int) -> EntityAccessAccounting:
+    """Accounting for ``call_sites`` bound reads, each one site with one access.
+
+    The two dicts count those same sites, which the 1.27.0 validators require.
+    """
     return EntityAccessAccounting(
         call_sites=call_sites,
         in_endpoint_flow=call_sites,
@@ -189,8 +193,13 @@ def make_accounting(call_sites: int) -> EntityAccessAccounting:
         unknown_operation=0,
         create_or_update=0,
         bound=call_sites,
-        accesses_by_operation={op.value: 0 for op in EntityOperation},
-        sites_by_basis={basis.value: 0 for basis in EntityAccessBasis},
+        accesses_by_operation={
+            op.value: call_sites if op is EntityOperation.READ else 0 for op in EntityOperation
+        },
+        sites_by_basis={
+            basis.value: call_sites if basis is EntityAccessBasis.METHOD_NAME else 0
+            for basis in EntityAccessBasis
+        },
         rules_version="rules-test",
         gate_flags=[],
     )

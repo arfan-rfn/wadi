@@ -758,7 +758,9 @@ def create_app(
         response_model=EntityUsageView,
         dependencies=[Depends(_require_auth)],
     )
-    async def entity_usage(snapshot_id: str, state: StateDep) -> EntityUsageView:
+    async def entity_usage(
+        snapshot_id: str, state: StateDep, service_id: str | None = None
+    ) -> EntityUsageView:
         """Which endpoints may create, read, update or delete each entity (§5.2.17).
 
         The reverse of each endpoint's summary, folded at read time from one
@@ -766,13 +768,26 @@ def create_app(
         nothing is stored for it. System-wide for the same reason `/auth` is:
         "who writes `Order`?" does not stop at a service boundary.
 
-        `analyzed=False` is the answer for a snapshot written before entity
-        facts existed, and its `entities` list is empty because nothing was
-        examined, not because nothing is touched (R1-6).
+        `service_id` narrows the inputs to one service, exactly as MCP
+        `entity_usage(service_id=...)` does, through the same composition, so
+        the two surfaces give one answer (review C4). The view passes through
+        unchanged: each service's `status` says why it has accounting or not.
+
+        `analyzed=False` means nothing listed was examined, as on a snapshot
+        written before entity facts existed: `entities` is empty because
+        nothing was looked at, not because nothing is touched (R1-6).
         """
         if await state.snapshots.get(snapshot_id) is None:
             raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
-        return await entity_usage_view(state.artifacts, snapshot_id)
+        if (
+            service_id is not None
+            and await state.artifacts.get_service_boundary(snapshot_id, service_id) is None
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail=f"service {service_id} not found in snapshot {snapshot_id}",
+            )
+        return await entity_usage_view(state.artifacts, snapshot_id, service_id=service_id)
 
     # --- system graph (§11 Phase 2.7 M4) ----------------------------------------------
 

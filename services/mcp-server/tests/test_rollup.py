@@ -121,6 +121,35 @@ class TestMethodRollup:
         http = next(c for c in service["calls"] if c.get("sink") == "http-client")
         assert "entity_access_sites" not in http
 
+    def test_a_gated_candidate_is_labelled_as_evidence_at_both_levels(self) -> None:
+        """Reviews A1, B5: the candidate is the verb a gated basis computed, not a claim.
+
+        `candidate_operation: "update"` beside `operation: "create-or-update"`
+        reads as the operation to an agent skimming the JSON, and the agent
+        cannot open the code to check. The label says it is withheld.
+        """
+        snapshot = make_snapshot(make_system())
+        boundary = make_service(snapshot)
+        icfg = make_two_method_icfg(
+            snapshot,
+            boundary,
+            make_endpoint(snapshot, boundary),
+            db_sites=[make_site(EntityOperation.CREATE_OR_UPDATE), make_site(EntityOperation.READ)],
+        )
+        rollup = method_rollup(icfg)
+        service = next(m for m in rollup["methods"] if "OrderService" in m["signature"])
+        db = next(c for c in service["calls"] if c.get("sink") == "db")
+        [demoted], [read] = (site["accesses"] for site in db["entity_access_sites"])
+        assert demoted["operation"] == "create-or-update"
+        assert demoted["candidate_operation"] == "update"
+        assert demoted["candidate_note"] == "candidate (gated, not published): update"
+        # A published verb has no candidate, so nothing to label.
+        assert "candidate_note" not in read
+
+        detail = statement_detail(icfg, service["id"])
+        db_node = next(node for node in detail["nodes"] if node["id"] == "s-db")
+        assert db_node["entity_access_sites"] == db["entity_access_sites"]
+
     def test_a_node_carrying_sites_is_a_call_row_even_without_a_sink(self) -> None:
         """A repository call is a call site whatever else the node lacks (P10)."""
         snapshot = make_snapshot(make_system())

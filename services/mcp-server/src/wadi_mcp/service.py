@@ -7,12 +7,15 @@ dicts at the boundary.
 """
 
 import asyncio
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from wadi_contracts import (
     UNDETERMINED_ENTITY_NAME,
     EndpointEntityAccess,
+    EntityAccountingStatus,
     EntityUsageRow,
+    EntityUsageService,
     EntityUsageView,
     Icfg,
     resolve_type_shape,
@@ -36,6 +39,16 @@ ENTITY_FACTS_PREDATE_NOTE = (
     "This snapshot predates entity facts: entity_access is null because nothing was "
     "examined, not because the endpoint touches no data. Re-analyze the system to get them."
 )
+
+
+#: Beside a reverse-view count that the endpoint's summary never recorded
+#: (review C1). A summary written before 1.27.0 counted per entity only, and
+#: `null` alone would read as zero, or invite the entity count in its place.
+CALL_SITES_NOT_RECORDED_NOTE = "count not recorded (summary predates 1.27.0; re-analyze)"
+
+#: The statuses whose service was never looked at. A library is not one: its
+#: sources were examined inside every service that depends on it (§5.2.14).
+_UNEXAMINED = (EntityAccountingStatus.EXTRACTION_FAILED, EntityAccountingStatus.PREDATING)
 
 
 class NotFoundError(LookupError):
@@ -69,33 +82,103 @@ def _select_entity(rows: list[EntityUsageRow], entity: str) -> list[EntityUsageR
     return named
 
 
-def _usage_note(view: EntityUsageView) -> str | None:
+def _named(services: Sequence[EntityUsageService]) -> str:
+    names = ", ".join(repr(service.service_name) for service in services)
+    return f"Service {names}" if len(services) == 1 else f"Services {names}"
+
+
+def _status_notes(services: Sequence[EntityUsageService]) -> list[str]:
+    """Why each listed service that carries no accounting has none (reviews C3, C5).
+
+    Read from the service's status and never from endpoint counts: a failed
+    service has no endpoint rows, so `endpoints_predating` is 0 for it and
+    said nothing about it at all.
+    """
+
+    def having(status: EntityAccountingStatus) -> list[EntityUsageService]:
+        return [service for service in services if service.status is status]
+
+    notes: list[str] = []
+    failed = having(EntityAccountingStatus.EXTRACTION_FAILED)
+    if failed:
+        one = len(failed) == 1
+        names = ", ".join(repr(service.service_name) for service in failed)
+        notes.append(
+            f"Extraction failed for {'service' if one else 'services'} {names}: "
+            f"{'its' if one else 'their'} entities were never examined, so nothing here "
+            f"says what {'it touches' if one else 'they touch'}. list_services shows the "
+            "extraction_error."
+        )
+    predating = having(EntityAccountingStatus.PREDATING)
+    if predating:
+        one = len(predating) == 1
+        notes.append(
+            f"{_named(predating)} {'predates' if one else 'predate'} entity facts: "
+            f"{'its' if one else 'their'} endpoints and entities were never examined, so "
+            f"they are not in this view. Re-analyze the system to include "
+            f"{'it' if one else 'them'}."
+        )
+    libraries = having(EntityAccountingStatus.LIBRARY)
+    if libraries:
+        one = len(libraries) == 1
+        notes.append(
+            f"{_named(libraries)} {'is a library' if one else 'are libraries'}: "
+            f"{'it has' if one else 'they have'} no accounting of {'its' if one else 'their'} "
+            f"own, and {'its' if one else 'their'} repository calls are counted in each "
+            f"service that depends on {'it' if one else 'them'}."
+        )
+    return notes
+
+
+def _usage_note(view: EntityUsageView, unexamined: Sequence[EntityUsageService] = ()) -> str | None:
     """Say what an empty or partial reverse view is, so it is not read as a fact.
 
-    `entities: []` on a snapshot that predates the phase means nothing was
-    looked at; read as "touched by nothing" it would be the claim R1-6 exists
-    to prevent.
+    `entities: []` where nothing was examined means nothing was looked at;
+    read as "touched by nothing" it would be the claim R1-6 exists to
+    prevent. Each listed service without accounting says why, from its
+    status. `unexamined` names services an entity answer left out of
+    `services` that might still hold that entity.
     """
+    listed = {service.service_id for service in view.services}
+    status_notes = _status_notes(
+        [*view.services, *(s for s in unexamined if s.service_id not in listed)]
+    )
     predating = view.endpoints_predating
+    sentences: list[str] = []
     if not view.analyzed:
-        if predating == 0:
+        if not view.services and predating == 0:
+            # No boundary and no endpoint row: nothing has been extracted, and
+            # this is the only case where "no endpoints" is the whole story.
             return "This snapshot holds no endpoints yet, so there are no entity facts to read."
-        return (
-            "This snapshot predates entity facts: its endpoints were never examined for "
-            "repository calls, so `entities` is empty because nothing was looked at. "
-            "Re-analyze the system to get them."
+        sentences.append(
+            "No service in this answer reports entity facts, so `entities` is empty because "
+            "nothing here was looked at, not because nothing is touched."
         )
-    if predating == 1:
-        return (
+        if not status_notes:
+            # Endpoint rows with no boundary to say why: the rows are the evidence.
+            sentences.append(
+                "This snapshot predates entity facts: its endpoints were never examined for "
+                "repository calls. Re-analyze the system to get them."
+            )
+    sentences.extend(status_notes)
+    if view.analyzed and predating:
+        sentences.append(
             "1 endpoint predates entity facts and is not in this view; "
             "re-analyze the system to include it."
-        )
-    if predating:
-        return (
-            f"{predating} endpoints predate entity facts and are not in this view; "
+            if predating == 1
+            else f"{predating} endpoints predate entity facts and are not in this view; "
             "re-analyze the system to include them."
         )
-    return None
+    return " ".join(sentences) or None
+
+
+def _say_unrecorded_counts(result: dict[str, Any]) -> None:
+    """Put the words beside every per-operation count a summary never recorded (C1)."""
+    for row in result["entities"]:
+        for usage in row["operations"]:
+            for endpoint in usage["endpoints"]:
+                if endpoint["call_sites"] is None:
+                    endpoint["call_sites_note"] = CALL_SITES_NOT_RECORDED_NOTE
 
 
 def _entity_facts(summary: list[EndpointEntityAccess] | None) -> dict[str, str]:
@@ -229,7 +312,13 @@ class WadiMcpService:
 
         A snapshot written before entity facts answers `analyzed: false` and a
         `note` saying so, whatever entity is asked about, because nothing was
-        examined. It never answers that no endpoint touches the entity.
+        examined. It never answers that no endpoint touches the entity, and an
+        entity that only an unexamined service could hold is answered with
+        those services rather than "not found" (review C3).
+
+        Under each operation an endpoint's `call_sites` counts its sites that
+        perform that operation on that entity (review C1); a summary written
+        before 1.27.0 has no such count, and the entry says so in words.
         """
         if await self._snapshots.get(snapshot_id) is None:
             raise NotFoundError(f"snapshot {snapshot_id!r} not found; use list_snapshots first")
@@ -242,8 +331,15 @@ class WadiMcpService:
                 "use list_services first"
             )
         view = await entity_usage_view(self._artifacts, snapshot_id, service_id=service_id)
+        unexamined: list[EntityUsageService] = []
         if entity is not None and view.analyzed:
-            rows = _select_entity(view.entities, entity)
+            unexamined = [s for s in view.services if s.status in _UNEXAMINED]
+            try:
+                rows = _select_entity(view.entities, entity)
+            except NotFoundError:
+                if not unexamined:
+                    raise
+                return self._not_among_the_examined(view, entity, unexamined)
             owners = {row.service_id for row in rows}
             view = view.model_copy(
                 update={
@@ -252,9 +348,33 @@ class WadiMcpService:
                 }
             )
         result = view.model_dump(mode="json")
-        note = _usage_note(view)
+        _say_unrecorded_counts(result)
+        note = _usage_note(view, unexamined)
         if note is not None:
             result["note"] = note
+        return result
+
+    @staticmethod
+    def _not_among_the_examined(
+        view: EntityUsageView, entity: str, unexamined: list[EntityUsageService]
+    ) -> dict[str, Any]:
+        """An entity no examined service has, in a snapshot with services nobody examined.
+
+        "No entity is declared or touched here" would be a claim about code
+        that was never read (review C3): a failed service's entities, or a
+        predating one's, are exactly what is missing from the view. So the
+        answer is the services it could be in, with nothing examined about
+        them, which is what `analyzed: false` says.
+        """
+        answer = view.model_copy(update={"analyzed": False, "entities": [], "services": unexamined})
+        result = answer.model_dump(mode="json")
+        result["note"] = " ".join(
+            [
+                f"{entity!r} is not an entity of any service that was examined, and the "
+                "services listed here were not examined, so it may be one of theirs.",
+                *_status_notes(unexamined),
+            ]
+        )
         return result
 
     async def coverage_report(self, snapshot_id: str) -> dict[str, Any]:
