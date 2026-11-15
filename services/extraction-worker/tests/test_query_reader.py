@@ -381,6 +381,26 @@ class TestNativeSql:
         for text in ("update shop.orders set status = 'X'", 'select * from "shop"."orders"'):
             assert _accesses(_read(_query(text, native=True)))[0][0] is None, text
 
+    def test_an_unqualified_name_binds_only_an_entity_that_declares_no_schema(self) -> None:
+        # The search path decides where an unqualified name goes, and the
+        # source does not state it (F1 finding 1). `orders` is the entity in
+        # the default schema, never the one that declared `audit`.
+        audited = f"{SHOP}.AuditedOrder"
+        both = EntityCatalog(
+            [
+                _model(ORDER, storage_name="orders"),
+                _model(audited, storage_name="orders", storage_schema="audit"),
+            ]
+        )
+        assert _accesses(_read(_query("select * from orders", native=True), both)) == [(ORDER, R)]
+        assert _accesses(_read(_query("select * from audit.orders", native=True), both)) == [
+            (audited, R)
+        ]
+        only_audit = EntityCatalog([_model(audited, storage_name="orders", storage_schema="audit")])
+        assert _accesses(_read(_query("select * from orders", native=True), only_audit)) == [
+            (None, R)
+        ]
+
     def test_a_three_part_name_is_undetermined(self) -> None:
         entities = EntityCatalog([_model(ORDER, storage_name="orders", storage_schema="shop")])
         site = _read(_query("select * from sales.shop.orders", native=True), entities)

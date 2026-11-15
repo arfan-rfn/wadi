@@ -491,22 +491,25 @@ class TestCrudMatrixReconciles:
         # No expected disagreements: the two implicit-receiver calls in the
         # golden-32 default method are sites on both sides, and the golden-26
         # lambda save is in the export (in no endpoint flow, A1) and in source.
+        # The rigor review's 16 hardening sites are on both sides too, the
+        # type-variable receiver in BoundedStore included (review A2).
         assert result.oracle_only == []
         assert result.wadi_only == []
-        assert len(result.agree) == 68
-        # Review D6: every agreed site also names the same entity, except
-        # AbstractArchiver's `BaseRepository<E>`, which neither side binds and
-        # which counts as withheld, never as agreement. No snapshot is read
-        # here, so no operation is compared; the oracle's own operation
-        # counts are pinned in `test_repository_oracle.py`.
+        assert len(result.agree) == 84
+        # Review D6: every agreed site also names the same entity, except the
+        # two whose type argument is a class's type variable (AbstractArchiver's
+        # `BaseRepository<E>`, GenericStore's `JpaRepository<E, String>`), which
+        # neither side binds and which count as withheld, never as agreement.
+        # No snapshot is read here, so no operation is compared; the oracle's
+        # own operation counts are pinned in `test_repository_oracle.py`.
         totals = result.totals()
         entity_keys = ("agree_entity", "entity_disagree", "entity_withheld", "entity_not_read")
-        assert [totals[key] for key in entity_keys] == [67, 0, 1, 0]
+        assert [totals[key] for key in entity_keys] == [82, 0, 2, 0]
         assert [
             (c.agreement.oracle.file.rsplit("/", 1)[-1], c.agreement.oracle.method)
             for c in result.entity_withheld
-        ] == [("AbstractArchiver.java", "count")]
-        assert totals["operation_unpublished"] == 68
+        ] == [("AbstractArchiver.java", "count"), ("GenericStore.java", "findAll")]
+        assert totals["operation_unpublished"] == 84
 
 
 class TestCommandLine:

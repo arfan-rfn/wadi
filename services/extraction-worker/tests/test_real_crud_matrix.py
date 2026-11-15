@@ -2,19 +2,19 @@
 
 Consumes the REAL sbt-produced `spring-data-crud-matrix` and `save-origin-mini`
 exports and assembles them with the worker's `Assembler`, proving the chain end
-to end: the Scala pass describes each repository call (export 2.14.0 `db`
+to end: the Scala pass describes each repository call (export 2.15.0 `db`
 rows), and the worker turns that into per-node sites, a per-endpoint summary
 and a per-service accounting.
 
 The unit tests in `test_entity_classification.py` and
 `test_assembler_entity_access.py` pin the rules against synthetic rows. This
 pins them against what Joern actually produces from Java source, one golden
-per endpoint of the plan's 36 (R1-18), so a golden that drifts names itself in
-the test id.
+per endpoint: the plan's 36 (R1-18) and the rigor review's 15 hardening shapes
+(37-51), so a golden that drifts names itself in the test id.
 
 Both gate states run (rule 5): the shipped table, where every save publishes
 `create-or-update` and keeps its candidate as evidence (R1-11), and all four
-flags on and scored against the current `RULES_VERSION`, where the candidate
+flags on and scored against the export's own rules version, where the candidate
 is what publishes. Goldens 7-13 and 31 carry a query, and the query reader
 (M6) publishes what its text states on the `query-text` basis, which no flag
 gates. A query it does not read (Mongo JSON, a named query that did not
@@ -39,7 +39,7 @@ from wadi_contracts import (
 )
 from wadi_joern_client.export import ExportSink, ServiceExport
 from wadi_worker.assembler import AssembledArtifacts, Assembler
-from wadi_worker.entity_access import RULES_VERSION, SHIPPED_GATE_FLAGS, GateFlag
+from wadi_worker.entity_access import SHIPPED_GATE_FLAGS, GateFlag, export_rules_version
 
 TARGET = Path(__file__).resolve().parents[3] / "joern-platform" / "target"
 CRUD_MATRIX_EXPORT = TARGET / "spring-data-crud-matrix-export" / "export.json"
@@ -64,18 +64,21 @@ C, R, U, D = (
 CU, UNK = EntityOperation.CREATE_OR_UPDATE, EntityOperation.UNKNOWN
 AO, EG = EntityAccessBasis.ARGUMENT_ORIGIN, EntityAccessBasis.EXISTENCE_GUARD
 
-FLAGS_ON: tuple[GateFlag, ...] = (
-    GateFlag(AO, C, True, RULES_VERSION),
-    GateFlag(AO, U, True, RULES_VERSION),
-    GateFlag(EG, C, True, RULES_VERSION),
-    GateFlag(EG, U, True, RULES_VERSION),
-)
-"""Every (basis, verb) flag on, scored against the rules that run."""
+_SPLIT_FLAGS = ((AO, C), (AO, U), (EG, C), (EG, U))
+
+
+def flags_on_scored_at(version: str) -> tuple[GateFlag, ...]:
+    """Every (basis, verb) flag on, scored against ``version``.
+
+    Since export 2.15.0 the rules version is per export: it hashes the
+    export's ``save_origin_rules`` (review B4). A flag scored against the
+    rules that run is scored against that export's version.
+    """
+    return tuple(GateFlag(basis, operation, True, version) for basis, operation in _SPLIT_FLAGS)
+
 
 STALE_RULES_VERSION = "0000000000000000"
-FLAGS_ON_STALE: tuple[GateFlag, ...] = tuple(
-    GateFlag(flag.basis, flag.operation, True, STALE_RULES_VERSION) for flag in FLAGS_ON
-)
+FLAGS_ON_STALE = flags_on_scored_at(STALE_RULES_VERSION)
 """The same four flags on, scored against rules that no longer run (E4)."""
 
 _ACME = "com.acme.crud"
@@ -90,6 +93,11 @@ AUDIT_ENTRY = f"{_ACME}.domain.AuditEntry"
 SHIPMENT = f"{_ACME}.domain.Shipment"
 BILLING_ACCOUNT = f"{_ACME}.billing.Account"
 CRM_ACCOUNT = f"{_ACME}.crm.Account"
+TRIP = f"{_ACME}.domain.Trip"
+PET_LOG = f"{_ACME}.domain.PetLog"
+NOTE = f"{_ACME}.domain.Note"
+AUDITED_ORDER = f"{_ACME}.domain.AuditedOrder"
+COUPON = f"{_ACME}.domain.Coupon"
 
 ORDER_REPO = f"{_ACME}.repo.OrderRepository"
 ORDER_LINE_REPO = f"{_ACME}.repo.OrderLineRepository"
@@ -102,6 +110,13 @@ AUDIT_REPO = f"{_ACME}.repo.AuditEntryRepository"
 BASE_REPO = f"{_ACME}.repo.BaseRepository"
 BILLING_REPO = f"{_ACME}.billing.AccountRepository"
 CRM_REPO = f"{_ACME}.repo.CrmAccountRepository"
+TRIP_REPO = f"{_ACME}.repo.TripRepository"
+PET_LOG_REPO = f"{_ACME}.repo.PetLogRepository"
+NOTE_REPO = f"{_ACME}.repo.NoteRepository"
+AUDITED_ORDER_REPO = f"{_ACME}.repo.AuditedOrderRepository"
+COUPON_REPO = f"{_ACME}.repo.CouponRepository"
+CRUD_REPOSITORY = "org.springframework.data.repository.CrudRepository"
+JPA_REPOSITORY = "org.springframework.data.jpa.repository.JpaRepository"
 
 
 # --- expectation shapes --------------------------------------------------------
@@ -480,10 +495,11 @@ GOLDENS: tuple[Golden, ...] = (
             named(D, "deleteAllById"),
             named(D, "deleteAllInBatch"),
             named(D, "deleteAll"),
-            # `Pet.builder()...build()` constructs.
-            saved(C, "insert", entity=PET, repository=PET_REPO),
+            # `MongoRepository.insert` never updates, so its name says create
+            # and it never reaches the save split (review B8).
+            named(C, "insert", PET, PET_REPO),
         ),
-        (Row(ORDER, (R, D, CU), 11), Row(PET, (CU,), 1)),
+        (Row(ORDER, (R, D, CU), 11), Row(PET, (C,), 1)),
         (Row(ORDER, (R, U, D), 11), Row(PET, (C,), 1)),
     ),
     # flush() is not an entity operation: no site, counted on its own.
@@ -497,6 +513,144 @@ GOLDENS: tuple[Golden, ...] = (
             named(R, "findById", CRM_ACCOUNT, CRM_REPO),
         ),
         (Row(BILLING_ACCOUNT, (R,), 1), Row(CRM_ACCOUNT, (R,), 1)),
+    ),
+    # --- the rigor review's hardening shapes (export 2.15.0) -------------------
+    Golden(
+        37,
+        "marker-typed-receiver",
+        "GET",
+        # A field and a parameter typed `CrudRepository<Order, String>`: Spring
+        # Data's own interface is the receiver, and its calls count (review A2).
+        (
+            named(R, "count", ORDER, CRUD_REPOSITORY, owner="MarkerTypedOrders.countOrders"),
+            named(R, "existsById", ORDER, CRUD_REPOSITORY, owner="MarkerTypedOrders.existsIn"),
+        ),
+        (Row(ORDER, (R,), 2),),
+    ),
+    Golden(
+        38,
+        "marker-receiver-unbound-entity",
+        "GET",
+        # `JpaRepository<E, String>` in a class generic in E: counted, entity
+        # undetermined, the type argument kept as written (R1-4).
+        (
+            Site(
+                JPA_REPOSITORY,
+                "findAll",
+                EntityAccessBasis.METHOD_NAME,
+                (Access(None, R),),
+                entity_type_text="E",
+                owner="GenericStore.all",
+            ),
+        ),
+        (Row(None, (R,), 1),),
+    ),
+    Golden(
+        39,
+        "type-variable-receiver",
+        "GET",
+        # `R repository` where `R extends JpaRepository<Order, String>`: the
+        # bound is the repository it is known to be (review A2).
+        (named(R, "findAll", ORDER, JPA_REPOSITORY, owner="BoundedStore.all"),),
+        (Row(ORDER, (R,), 1),),
+    ),
+    Golden(
+        40,
+        "marker-named-project-base",
+        "GET",
+        # `KeyedJpaRepository<ID, E>` only contains a marker's name; it is a
+        # project interface, so `<TripId, Trip>` binds Trip by position (A4).
+        (named(R, "findById", TRIP, TRIP_REPO),),
+        (Row(TRIP, (R,), 1),),
+    ),
+    Golden(
+        41,
+        "marker-named-mongo-base",
+        "GET",
+        (named(R, "findAll", PET_LOG, PET_LOG_REPO),),
+        (Row(PET_LOG, (R,), 1),),
+    ),
+    Golden(
+        42,
+        "redeclared-query-override",
+        "GET",
+        # The sub-interface redeclares the base's `search` with `@Query`; the
+        # nearest declaration wins, so the text decides, not the name (A3).
+        (queried("search", Access(NOTE, R), repository=NOTE_REPO),),
+        (Row(NOTE, (R,), 1),),
+    ),
+    Golden(
+        43,
+        "arity-mismatch",
+        "GET",
+        # A project interface declares `findTagged`, no declaration matches the
+        # call's arity, so its annotations were not read: unknown (A3).
+        (named(UNK, "findTagged", NOTE, NOTE_REPO),),
+        (Row(NOTE, (UNK,), 1),),
+    ),
+    Golden(
+        44,
+        "annotation-mongo-update",
+        "PUT",
+        # Mongo `@Update` on a `find...` name: the name would say read (B1).
+        (named(UNK, "findAndIncrementVisitsByStatus", PET, PET_REPO),),
+        (Row(PET, (UNK,), 1),),
+    ),
+    Golden(
+        45,
+        "annotation-procedure",
+        "PUT",
+        (named(UNK, "getArchivedCount"),),
+        (Row(ORDER, (UNK,), 1),),
+    ),
+    Golden(
+        46,
+        "annotation-aggregation",
+        "GET",
+        (named(UNK, "findStatusSummary", PET, PET_REPO),),
+        (Row(PET, (UNK,), 1),),
+    ),
+    Golden(
+        47,
+        "annotation-native-query",
+        "GET",
+        # `@NativeQuery` is read exactly as a native `@Query`.
+        (queried("findNativeAnnotated", Access(ORDER, R)),),
+        (Row(ORDER, (R,), 1),),
+    ),
+    Golden(
+        48,
+        "annotation-neutral",
+        "GET",
+        # `@Transactional` and `@Lock` change no verb: the name decides.
+        (named(R, "findFirstByStatus"),),
+        (Row(ORDER, (R,), 1),),
+    ),
+    Golden(
+        49,
+        "annotation-project-meta-query",
+        "GET",
+        # A project annotation meta-annotated with `@Query`: the export carries
+        # no text for it, so nothing read decides (B1).
+        (named(UNK, "openOrders"),),
+        (Row(ORDER, (UNK,), 1),),
+    ),
+    Golden(
+        50,
+        "query-native-schema-table",
+        "GET",
+        # `audit.orders` binds the entity that declares `schema = "audit"`, and
+        # golden 11's unqualified `orders` keeps binding Order (B2).
+        (queried("findAuditedByStatus", Access(AUDITED_ORDER, R), repository=AUDITED_ORDER_REPO),),
+        (Row(AUDITED_ORDER, (R,), 1),),
+    ),
+    Golden(
+        51,
+        "soft-delete-entity",
+        "DELETE",
+        # `@SQLDelete` on Coupon: `deleteById` runs that statement instead (B1).
+        (named(UNK, "deleteById", COUPON, COUPON_REPO),),
+        (Row(COUPON, (UNK,), 1),),
     ),
 )
 
@@ -540,8 +694,11 @@ class Assembled:
         return _owner(method.full_name)
 
 
-def _assemble(path: Path, gate_flags: tuple[GateFlag, ...]) -> Assembled:
+def _assemble(path: Path, gate_flags: tuple[GateFlag, ...] | None) -> Assembled:
+    """Assemble one real export; ``gate_flags=None`` is every flag on and current."""
     export = ServiceExport.model_validate(json.loads(path.read_text()))
+    if gate_flags is None:
+        gate_flags = flags_on_scored_at(export_rules_version(export))
     artifacts = Assembler(
         snapshot_id="snap_crudmatrix",
         service_id="svc_" + "c" * 16,
@@ -592,7 +749,7 @@ def shipped() -> Assembled:
 
 @pytest.fixture(scope="module")
 def flags_on() -> Assembled:
-    return _assemble(CRUD_MATRIX_EXPORT, FLAGS_ON)
+    return _assemble(CRUD_MATRIX_EXPORT, None)
 
 
 # --- per golden ----------------------------------------------------------------
@@ -639,7 +796,7 @@ class TestGoldenFlagsOn:
             assert actual == _multiset(golden.sites), golden.id
         flags = {(f.enabled, f.scored_rules_version) for f in stale.accounting.gate_flags}
         assert flags == {(True, STALE_RULES_VERSION)}
-        assert stale.accounting.create_or_update == 18
+        assert stale.accounting.create_or_update == 17
 
 
 # --- goldens whose claim is not only a site list -------------------------------
@@ -726,35 +883,41 @@ class TestAccounting:
     def test_as_shipped(self, shipped: Assembled) -> None:
         accounting = shipped.accounting
         assert accounting.model_dump(mode="json", exclude={"gate_flags"}) == {
-            "call_sites": 68,
+            "call_sites": 84,
             # Partition 1: the lambda save (golden 26) is the one outside.
-            "in_endpoint_flow": 67,
+            "in_endpoint_flow": 83,
             "in_no_endpoint_flow": 1,
             # Partition 2, first match wins.
             "flush": 1,  # golden 35
             "implemented_in_project": 2,  # goldens 32 and 33
-            "entity_undetermined": 1,  # golden 30
-            # The two queries the reader does not read: golden 12's undeclared
-            # named query and golden 13's Mongo JSON. The other eleven bind.
-            "unknown_operation": 2,
-            "create_or_update": 18,  # every save-family call, the lambda's included
-            "bound": 44,
-            # 69 accesses over 67 sites: goldens 9 and 31 name two entities.
+            "entity_undetermined": 2,  # goldens 30 and 38
+            # The two queries the reader does not read (golden 12's undeclared
+            # named query, golden 13's Mongo JSON), and the six hardening calls
+            # whose verb nothing read decides: 43, 44, 45, 46, 49, 51.
+            "unknown_operation": 8,
+            # Every save-family call, the lambda's included; 34's insert is a
+            # create by its name now (review B8), so not among them.
+            "create_or_update": 17,
+            # 44, golden 34's insert, and the nine bound hardening sites: 37 (two),
+            # 39, 40, 41, 42, 47, 48, 50.
+            "bound": 54,
+            # 85 accesses over 83 sites: goldens 9 and 31 name two entities.
             "accesses_by_operation": {
-                "create": 0,
-                "read": 39,  # 28 by name, 11 by query text
+                "create": 1,  # golden 34's insert
+                "read": 49,  # 28 + 7 by name, 11 + 3 by query text
                 "update": 1,  # golden 8
                 "delete": 7,  # 6 by name, golden 31's Invoice
-                "create-or-update": 18,
-                "unknown": 4,  # goldens 32 and 33 (C3), and the two unread queries
+                "create-or-update": 17,
+                # Goldens 32 and 33 (C3), the two unread queries, the six above.
+                "unknown": 10,
             },
             "sites_by_basis": {
-                "method-name": 36,
-                "query-text": 13,
-                "argument-origin": 16,
+                "method-name": 50,
+                "query-text": 16,
+                "argument-origin": 15,
                 "existence-guard": 2,
             },
-            "rules_version": RULES_VERSION,
+            "rules_version": export_rules_version(shipped.export),
         }
         assert [(f.basis, f.operation, f.enabled) for f in accounting.gate_flags] == [
             (AO, C, False),
@@ -767,25 +930,25 @@ class TestAccounting:
     def test_flags_on(self, flags_on: Assembled) -> None:
         accounting = flags_on.accounting
         # Five saves have no candidate (goldens 18, 19, 21, 22, 23) and stay
-        # create-or-update; the other thirteen publish a single verb.
-        assert (accounting.create_or_update, accounting.bound) == (5, 57)
+        # create-or-update; the other twelve publish a single verb.
+        assert (accounting.create_or_update, accounting.bound) == (5, 66)
         assert accounting.accesses_by_operation == {
-            "create": 5,  # goldens 15, 16, 24, 26 and 34's insert
-            "read": 39,
+            "create": 5,  # goldens 15, 16, 24, 26, and 34's insert by its name
+            "read": 49,
             "update": 9,  # goldens 2, 17, 20, 25, 32 and 34's three saves, and 8's query
             "delete": 7,
             "create-or-update": 5,
-            "unknown": 4,
+            "unknown": 10,
         }
         flags = {(f.enabled, f.scored_rules_version) for f in accounting.gate_flags}
-        assert flags == {(True, RULES_VERSION)}
+        assert flags == {(True, export_rules_version(flags_on.export))}
         _assert_partitions_sum(accounting)
 
     def test_every_db_row_carries_its_facts(self, shipped: Assembled) -> None:
         # A 2.14.0 db row without `db` would be counted entity_undetermined
         # with no site (T4); the Scala pass must never emit one.
         rows = shipped.db_rows()
-        assert len({row.call_id for row in rows}) == 68
+        assert len({row.call_id for row in rows}) == 84
         assert [row.call_id for row in rows if row.db is None] == []
 
 
@@ -879,6 +1042,11 @@ QUERY_FACTS: dict[str, tuple[str | None, bool, str | None, bool]] = {
     ),
     # A name nothing declares: the text stays unknown (P10).
     "undeclaredNamed": (None, False, "Order.notDeclaredAnywhere", False),
+    # The hardening shapes: the sub-interface's redeclaration (A3), `@NativeQuery`
+    # read as a native `@Query` (B1), and a schema-qualified table (B2).
+    "search": ("select n from Note n where n.body like ?1", False, None, False),
+    "findNativeAnnotated": ("select * from orders where status = ?1", True, None, False),
+    "findAuditedByStatus": ("select * from audit.orders where status = ?1", True, None, False),
     "findByStatusJson": ("{ 'status': ?0 }", False, None, False),
     "deleteForNonVip": (
         "delete from Invoice i where i.customer in (select c from Client c where c.vip = false)",
@@ -928,6 +1096,7 @@ class TestRawFacts:
         records = {
             name: (m.entity, m.declared_by, m.storage_name, m.jpql_name)
             for name, m in shipped.models.items()
+            if m.storage_schema is None and m.delete_rewritten_by is None
         }
         by_annotation = EntityDeclaredBy.ANNOTATION
         assert records == {
@@ -943,9 +1112,50 @@ class TestRawFacts:
             BILLING_ACCOUNT: ("Account", by_annotation, "billing_accounts", "BillingAccount"),
             CRM_ACCOUNT: ("Account", by_annotation, None, None),
             AUDIT_ENTRY: ("AuditEntry", EntityDeclaredBy.REPOSITORY_ARGUMENT, None, None),
+            TRIP: ("Trip", by_annotation, "trips", None),
+            PET_LOG: ("PetLog", by_annotation, "pet_logs", None),
+            NOTE: ("Note", by_annotation, "notes", None),
         }
         reached = {row.entity for e in shipped.artifacts.endpoints for row in e.entity_access or []}
         assert SHIPMENT not in reached
+        # 2.15.0's two entity facts, each on the one entity that carries it.
+        # `TripId`, a key class, is no entity and gets no record (A4).
+        assert {
+            name: (m.storage_name, m.storage_schema, m.delete_rewritten_by)
+            for name, m in shipped.models.items()
+            if m.storage_schema is not None or m.delete_rewritten_by is not None
+        } == {
+            AUDITED_ORDER: ("orders", "audit", None),
+            COUPON: ("coupons", None, "org.hibernate.annotations.SQLDelete"),
+        }
+        assert f"{_ACME}.domain.TripId" not in shipped.models
+
+    def test_annotations_and_declaration_resolution(self, shipped: Assembled) -> None:
+        # Export 2.15.0 (review B1, A3): what the classifier reads to refuse a
+        # verb. Every row carries the list; a Spring-declared method's is empty.
+        annotated = {
+            row.db.method_name: tuple(row.db.method_annotations)
+            for row in shipped.db_rows()
+            if row.db is not None and row.db.method_annotations
+        }
+        spring = "org.springframework.data"
+        assert annotated["findAndIncrementVisitsByStatus"] == (
+            f"{spring}.mongodb.repository.Update",
+        )
+        assert annotated["getArchivedCount"] == (f"{spring}.jpa.repository.query.Procedure",)
+        assert annotated["findStatusSummary"] == (f"{spring}.mongodb.repository.Aggregation",)
+        assert annotated["findNativeAnnotated"] == (f"{spring}.jpa.repository.NativeQuery",)
+        assert annotated["findFirstByStatus"] == (
+            "org.springframework.transaction.annotation.Transactional",
+            f"{spring}.jpa.repository.Lock",
+        )
+        meta = f"{_ACME}.repo.OpenOrdersQuery"
+        assert f"{meta}>{spring}.jpa.repository.Query" in annotated["openOrders"]
+        assert annotated["openOrders"][0] == meta
+        unresolved = [
+            r.db.method_name for r in shipped.db_rows() if r.db and not r.db.declaration_resolved
+        ]
+        assert unresolved == ["findTagged"]
 
 
 # --- save-origin-mini: the save split's shapes ---------------------------------
@@ -967,8 +1177,15 @@ class SaveShape(NamedTuple):
 
 SAVE_SHAPES: tuple[SaveShape, ...] = (
     SaveShape("/save/guard/null-check-not-found", EG, C),
-    SaveShape("/save/guard/not-null-found", EG, U),
-    SaveShape("/save/guard/null-check-else-arm", EG, U),
+    # A found arm tested by `findByCode`, a lookup by a non-key field: a new
+    # object saved there may well be an insert, so no candidate (review B5).
+    SaveShape("/save/guard/not-null-found", AO, None),
+    SaveShape("/save/guard/null-check-else-arm", AO, None),
+    # The found arm of an identity lookup is the update it was written for.
+    SaveShape("/save/guard/identity-is-present-found", EG, U),
+    # A null test on a List or an Optional decides nothing (review A1).
+    SaveShape("/save/guard/list-not-null-none", AO, None),
+    SaveShape("/save/guard/optional-null-check-none", AO, None),
     SaveShape("/save/guard/is-present-local", EG, U),
     SaveShape("/save/guard/is-empty-chain", EG, C),
     SaveShape("/save/guard/exists-boolean-local", EG, C),
@@ -989,6 +1206,13 @@ SAVE_SHAPES: tuple[SaveShape, ...] = (
     # A new list is not a new entity.
     SaveShape("/save/origin/list-alloc-save-all", AO, None, method="saveAll"),
     SaveShape("/save/origin/subtype-constructed", AO, C),
+    # A walk past depth 8 reports other, never a partial finding (review A5).
+    SaveShape("/save/origin/deep-chain", AO, None),
+    # Two reads on two paths, both inside the budget: read.
+    SaveShape("/save/origin/budget-split", AO, U),
+    # `searchByName` is a lookup (one prefix list, review B4), so a constructed
+    # object beside it is no longer a plain create.
+    SaveShape("/save/origin/search-lookup", AO, None),
     # The one caller hop: a caller outside the export does not count, and a
     # call through an interface reaches its DI-linked impl (R1-27).
     SaveShape("/save/origin/caller-outside-export", AO, U, "WidgetWriter.storeFromTwoPlaces"),
@@ -1013,7 +1237,7 @@ def save_origin() -> Assembled:
 
 @pytest.fixture(scope="module")
 def save_origin_flags_on() -> Assembled:
-    return _assemble(SAVE_ORIGIN_EXPORT, FLAGS_ON)
+    return _assemble(SAVE_ORIGIN_EXPORT, None)
 
 
 @requires_save_origin
@@ -1037,35 +1261,39 @@ class TestSaveOriginMini:
         route = ("POST", "/save/origin/lambda-parameter-no-caller")
         assert save_origin.endpoint(route).entity_access == []
         saves = [r for r in save_origin.db_rows() if r.db is not None and r.db.save is not None]
-        assert len(saves) == 23
+        assert len(saves) == 29
         assert save_origin.accounting.in_no_endpoint_flow == 1
 
     def test_accounting(self, save_origin: Assembled, save_origin_flags_on: Assembled) -> None:
         shipped = save_origin.accounting
         flow = (shipped.call_sites, shipped.in_endpoint_flow, shipped.in_no_endpoint_flow)
-        assert flow == (41, 40, 1)
-        assert (shipped.create_or_update, shipped.bound) == (23, 18)
+        assert flow == (55, 54, 1)
+        assert (shipped.create_or_update, shipped.bound) == (29, 26)
+        # Seven guard shapes decided by their arm, less the two `findByCode`
+        # found arms (B5), plus the identity found arm.
         assert shipped.sites_by_basis == {
-            "method-name": 18,
+            "method-name": 26,
             "query-text": 0,
-            "argument-origin": 16,
-            "existence-guard": 7,
+            "argument-origin": 23,
+            "existence-guard": 6,
         }
         _assert_partitions_sum(shipped)
         on = save_origin_flags_on.accounting
-        # Nine saves have no candidate and stay create-or-update.
-        assert (on.create_or_update, on.bound) == (9, 32)
+        # Fifteen saves have no candidate and stay create-or-update: the nine
+        # before, the two `findByCode` found arms, and the List, Optional,
+        # deep-chain and search-lookup shapes.
+        assert (on.create_or_update, on.bound) == (15, 40)
         assert on.accesses_by_operation == {
             "create": 6,
-            "read": 18,
+            "read": 26,
             "update": 8,
             "delete": 0,
-            "create-or-update": 9,
+            "create-or-update": 15,
             "unknown": 0,
         }
         _assert_partitions_sum(on)
 
     def test_every_db_row_carries_its_facts(self, save_origin: Assembled) -> None:
         rows = save_origin.db_rows()
-        assert len({row.call_id for row in rows}) == 41
+        assert len({row.call_id for row in rows}) == 55
         assert [row.call_id for row in rows if row.db is None] == []

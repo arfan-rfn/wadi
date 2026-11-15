@@ -18,7 +18,9 @@ What it does, over comment- and literal-stripped text:
   qualified.
 * **Repository variables.** Every `<Type> <name>` declaration of such a type
   (or of a marker itself): fields, `@Autowired` or constructor-injected, method
-  and lambda parameters, locals.
+  and lambda parameters, locals. A variable typed by a type parameter of the
+  file whose first bound is one (`R repository` where
+  `R extends JpaRepository<Order, String>`) is a repository of that bound.
 * **Call sites.** Every `<name>.<method>(` on those variables, lambda bodies
   included (`in_lambda`), and every unqualified or `this.` call inside a
   repository interface's `default` method (golden 32).
@@ -57,8 +59,7 @@ is opened by hand, so it stays simple. What it does NOT see:
 * A receiver that is not a plain variable: `getRepository().save(x)`,
   `repositories.get(0).save(x)`, a chained builder.
 * A variable whose type is not written: `var repo = ...`, an untyped lambda
-  parameter (`repos.forEach(r -> r.save(x))`), a field typed by a generic
-  parameter (`R repository` where `R extends JpaRepository<...>`).
+  parameter (`repos.forEach(r -> r.save(x))`).
 * A field declared in a superclass in another file: variables are scoped to
   the file that declares them.
 * Method references (`orderRepository::save`). These are invocations, so they
@@ -954,7 +955,12 @@ type _Declaration = tuple[int, str, str, _TypeArgs | None]
 
 
 def _repository_variables(java: _JavaFile, repositories: set[str]) -> list[_Declaration]:
-    """One entry for each repository-typed declaration in ``java``."""
+    """One entry for each repository-typed declaration in ``java``.
+
+    A variable typed by a type parameter whose bound is a repository
+    (`<R extends JpaRepository<Order, String>>`, then `R repository`) is a
+    repository of that bound, the type wadi's pass also reads it as.
+    """
     candidates = sorted(repositories | SPRING_DATA_MARKERS, key=lambda n: (-len(n), n))
     declaration = re.compile(
         rf"(?<![\w$])({'|'.join(map(re.escape, candidates))})"
@@ -966,7 +972,34 @@ def _repository_variables(java: _JavaFile, repositories: set[str]) -> list[_Decl
         if type_name in repositories or _is_spring_marker(java, type_name):
             args = _type_ref(type_name + match.group(2)).args if match.group(2) else None
             found.append((match.start(), match.group(3), type_name, args))
+    bounds = _repository_bounds(java, repositories)
+    if bounds:
+        typed_by_variable = re.compile(
+            rf"(?<![\w$.])({'|'.join(map(re.escape, sorted(bounds)))})"
+            rf"\s+({_IDENT})\s*(?=[;=,):])"
+        )
+        for match in typed_by_variable.finditer(java.text):
+            bound = bounds[match.group(1)]
+            found.append((match.start(), match.group(2), bound.name, bound.args))
+        found.sort()
     return found
+
+
+def _repository_bounds(java: _JavaFile, repositories: set[str]) -> dict[str, _TypeRef]:
+    """Type parameters of ``java`` bounded by a repository: `R` -> its first bound."""
+    bounds: dict[str, _TypeRef] = {}
+    for match in _GENERIC_DECLARATION.finditer(java.text):
+        opening = match.end() - 1
+        end = _balanced_end(java.text, opening, "<", ">")
+        for part in _top_level_split(java.text[opening + 1 : end - 1]):
+            words = part.split(None, 2)
+            if len(words) < 3 or words[1] != "extends":
+                continue
+            first = _type_ref(words[2].split("&", 1)[0])
+            name = first.name.rsplit(".", 1)[-1]
+            if name in repositories or _is_spring_marker(java, first.name):
+                bounds[words[0]] = _TypeRef(name, first.args)
+    return bounds
 
 
 def _declared_type(declarations: list[_Declaration], name: str, offset: int) -> _Declaration:

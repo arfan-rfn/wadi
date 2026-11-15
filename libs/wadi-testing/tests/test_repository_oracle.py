@@ -92,6 +92,60 @@ def _controller(tmp_path: Path, body: str, *, fields: str = "") -> list[Reposito
     return scan(tmp_path).sites
 
 
+class TestTypeVariableReceivers:
+    def test_a_receiver_typed_by_a_bounded_type_parameter_is_a_repository(
+        self, tmp_path: Path
+    ) -> None:
+        # wadi's pass reads `R repository` as its bound (review A2), so the
+        # oracle must as well, or the reconciler reports a wadi-only site.
+        _write(
+            tmp_path,
+            "src/main/java/com/acme/service/BoundedStore.java",
+            """\
+package com.acme.service;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public abstract class BoundedStore<R extends JpaRepository<Order, String>> {
+    private final R repository;
+
+    public List<Order> all() {
+        return repository.findAll();
+    }
+}
+""",
+        )
+        [site] = scan(tmp_path).sites
+        assert (site.repository, site.receiver, site.method) == (
+            "JpaRepository",
+            "repository",
+            "findAll",
+        )
+        assert (site.entity, site.operation) == ("Order", OracleOperation.READ)
+
+    def test_an_unbounded_or_non_repository_type_parameter_is_not(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "src/main/java/com/acme/service/Holder.java",
+            """\
+package com.acme.service;
+
+import java.util.List;
+
+public class Holder<T, L extends List<String>> {
+    private final T value;
+    private final L names;
+
+    public int size() {
+        value.findAll();
+        return names.size();
+    }
+}
+""",
+        )
+        assert scan(tmp_path).sites == []
+
+
 class TestCommentsAndStrings:
     def test_a_call_in_a_comment_or_a_string_is_not_a_site(self, tmp_path: Path) -> None:
         sites = _controller(
@@ -789,37 +843,56 @@ CRUD_MATRIX_SITES_PER_FILE = {
     "service/AbstractArchiver.java": 1,
     # `findById` and `save` with no receiver, inside the golden-32 default method.
     "repo/OrderRepository.java": 2,
+    # The hardening shapes (rigor review, export 2.15.0), one call per route at
+    # 93 99 105 111 117 123 129 135 141 147 153 159.
+    "web/HardeningController.java": 12,
+    # `CrudRepository<Order, String>` field and parameter (review A2).
+    "service/MarkerTypedOrders.java": 2,
+    # `JpaRepository<E, String>`: a marker-typed receiver whose entity is unbound.
+    "service/GenericStore.java": 1,
+    # `R repository` where `R extends JpaRepository<Order, String>`.
+    "service/BoundedStore.java": 1,
 }
 
 
-#: The oracle's operation reading of the same 68 sites, counted by hand from
+#: The oracle's operation reading of the same 84 sites, counted by hand from
 #: each call's name and its repository declaration (review D6).
 CRUD_MATRIX_OPERATIONS = {
-    OracleOperation.READ: 29,
+    # 29, plus the hardening shapes: MarkerTypedOrders `count` and `existsById`,
+    # GenericStore and BoundedStore `findAll`, Hardening 93 99 111 141
+    # (`findTagged` reads by its name: the oracle matches declarations by name).
+    OracleOperation.READ: 37,
     # Every save-family call, the default method's receiverless save included.
     OracleOperation.CREATE_OR_UPDATE: 17,
-    # 47 59 82 83 84 of InheritedAndDerived, 128 of SaveController.
-    OracleOperation.DELETE: 6,
+    # 47 59 82 83 84 of InheritedAndDerived, 128 of SaveController, and the
+    # soft-deleted `Coupon` at Hardening 159 (the oracle does not read
+    # `@SQLDelete`; wadi does, so this is an operation the two may differ on).
+    OracleOperation.DELETE: 7,
     # `petRepository.insert` (golden 34).
     OracleOperation.CREATE: 1,
     # `orderRepository.flush()` (92).
     OracleOperation.NONE: 1,
     # Every `@Query` / `@Modifying` method QueryController calls: 54 60 66 72
-    # 78 79 89 90 93 102 108.
-    OracleOperation.QUERY: 11,
+    # 78 79 89 90 93 102 108; and Hardening 105 (the sub-interface's `@Query`
+    # redeclaration), 135 (`@NativeQuery`), 153 (`audit.orders`).
+    OracleOperation.QUERY: 14,
     # `sumOpen` (a name outside the table, golden 12), the `findAndTouch`
     # default method, and the `archiveOld` fragment `OrderRepositoryImpl`
-    # implements.
-    OracleOperation.UNKNOWN: 3,
+    # implements. Hardening 117 (`@Update`), 123 (`@Procedure`), 129
+    # (`@Aggregation`), and 147 `openOrders`: its project annotation is neutral
+    # to the oracle and the name is outside the prefix table.
+    OracleOperation.UNKNOWN: 7,
 }
 
-#: The entity of each of the 68 sites, from the repositories' type arguments.
+#: The entity of each of the 84 sites, from the repositories' type arguments.
 CRUD_MATRIX_ENTITIES = {
-    "Order": 54,
+    # 54, plus MarkerTypedOrders 2, BoundedStore 1, Hardening 123 135 141 147.
+    "Order": 61,
     # ShapeController 60 61 (findAllByIdIn, declared by BaseRepository<E>) and
     # QueryController 90.
     "Issue": 3,
-    "Pet": 2,
+    # 2, plus Hardening 117 and 129.
+    "Pet": 4,
     "Invoice": 2,
     # One billing and one crm `Account`: the simple name is the comparison.
     "Account": 2,
@@ -828,8 +901,17 @@ CRUD_MATRIX_ENTITIES = {
     "Customer": 1,
     # Through `KeyedRepository<ID, E> extends JpaRepository<E, ID>`.
     "Ticket": 1,
-    # AbstractArchiver's `BaseRepository<E>`: E is the class's type variable.
-    None: 1,
+    # AbstractArchiver's `BaseRepository<E>`: E is the class's type variable;
+    # and GenericStore's `JpaRepository<E, String>`.
+    None: 2,
+    # `TripRepository extends KeyedJpaRepository<TripId, Trip>`, bound by
+    # position, not by the first argument (review A4).
+    "Trip": 1,
+    "PetLog": 1,
+    # Hardening 105 and 111.
+    "Note": 2,
+    "AuditedOrder": 1,
+    "Coupon": 1,
 }
 
 
@@ -865,24 +947,24 @@ class TestCommandLine:
         written = json.loads(out.read_text())
         assert load_sites(out) == scan(CRUD_MATRIX).sites
         assert written["totals"] == {
-            "sites": 68,
+            "sites": 84,
             "in_lambda": 1,
             "method_references": 0,
-            "by_module": {".": 68},
-            "entity_unbound": 1,
+            "by_module": {".": 84},
+            "entity_unbound": 2,
             "by_operation": {
                 "create": 1,
                 "create-or-update": 17,
-                "delete": 6,
+                "delete": 7,
                 "none": 1,
-                "query": 11,
-                "read": 29,
-                "unknown": 3,
+                "query": 14,
+                "read": 37,
+                "unknown": 7,
             },
         }
         printed = capsys.readouterr().out
         assert "src/main/java/com/acme/crud/web/SaveController.java:144" in printed
-        assert "sites: 68" in printed
+        assert "sites: 84" in printed
 
     def test_a_run_stored_before_entity_and_operation_loads_with_neither(
         self, tmp_path: Path

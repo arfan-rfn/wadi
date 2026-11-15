@@ -886,8 +886,9 @@ class ServiceExport(ExportModelBase):
     save_origin_rules: str | None = Field(
         default=None,
         description=(
-            "2.15.0: a hash of the Scala sources that compute the save facts (SaveOrigin, "
-            "EntityAccessFacts), computed by the sbt build. Part of the worker's rules "
+            "2.15.0: a hash of the Scala sources that derive the repository facts and the "
+            "save facts (SaveOrigin, EntityAccessFacts, SpringDataRepositories, "
+            "GenericSignature), computed by the sbt build. Part of the worker's rules "
             "version, so a change to how a gated input is derived voids a flag's score"
         ),
     )

@@ -32,7 +32,8 @@ What it reads:
   no entity's (an ``@ElementCollection`` of strings, an embeddable) adds no
   access (review B6). **SQL tables** match the storage name,
   case-insensitively unless quoted. A schema-qualified name binds only the
-  entity whose ``@Table(schema=)`` is that qualifier (review B2).
+  entity whose ``@Table(schema=)`` is that qualifier (review B2), and an
+  unqualified name binds only an entity that declares no schema.
   ``#{#entityName}``, written alone, is the repository's own entity.
 * **One access per entity (rule 6, C1).** The verb applies to the target of a
   write statement, or to every entity a select names. Every other entity a
@@ -55,7 +56,9 @@ entity:
 What it reads as undetermined, keeping the verb:
 
 * A schema qualifier the entity does not declare (``audit.orders`` for an
-  entity in no schema, or in another), and any three-part name.
+  entity in no schema, or in another), and any three-part name. An
+  unqualified name for an entity that declares a schema (``orders`` when only
+  ``audit.orders`` is mapped), because the search path is not in the source.
 * SpEL in a name position other than a bare ``#{#entityName}``, including one
   joined to a name (``#{#entityName}_archive``).
 * A join path whose type cannot be read: an owner or field the catalog lacks,
@@ -188,15 +191,20 @@ class EntityCatalog:
         qualifier is matched the same way against the entity's
         ``storage_schema``, and an entity that declares none matches no
         qualified name (review B2): ``audit.orders`` is not ``orders`` because
-        both end in the same word.
+        both end in the same word. The rule runs the other way too: an
+        unqualified name binds only an entity that declares no schema. Which
+        schema an unqualified name resolves to is the connection's search
+        path, which the source does not state, so ``orders`` reaches the
+        entity in the default schema and never one that declared ``audit``.
         """
         return _only(
             full
             for full, model in self._models.items()
             if _same_identifier(model.storage_name, name, quoted=quoted)
             and (
-                schema is None
-                or _same_identifier(model.storage_schema, schema, quoted=schema_quoted)
+                model.storage_schema is None
+                if schema is None
+                else _same_identifier(model.storage_schema, schema, quoted=schema_quoted)
             )
         )
 
