@@ -343,9 +343,11 @@ class TestVerticalSlice:
             "flush": 1,
             "implemented_in_project": 2,
             "entity_undetermined": 1,
-            "unknown_operation": 13,
+            # M6: the query reader binds 11 of the 13 query sites; the named query
+            # nothing declares and the Mongo JSON query stay unknown.
+            "unknown_operation": 2,
             "create_or_update": 18,
-            "bound": 33,
+            "bound": 44,
         }
 
         # 2. The list route: every row was analyzed ([] or rows, never null).
@@ -410,9 +412,10 @@ class TestVerticalSlice:
             "dirty-checking-updates",
             "other-persistence-mechanisms",
         ]
-        # Shipped flags publish no single save verb, and the report says those
-        # zeros were never exercised rather than measured (E8).
-        assert section["unexercised_vocabulary"] == ["operation:create", "operation:update"]
+        # Shipped flags publish no single save verb, so `create` is a zero the
+        # report names as never exercised (E8). `update` is exercised, by query
+        # text (golden 8, M6), not by a save.
+        assert section["unexercised_vocabulary"] == ["operation:create"]
 
         # 6. MCP, through the service object the server registers.
         mcp = WadiMcpService(database, graph_repository)
@@ -462,7 +465,10 @@ class TestVerticalSlice:
         (order_row,) = order_usage["entities"]
         order_ops = _by_operation(order_row)
         assert list(order_ops) == OPERATIONS
-        assert (order_ops["create"], order_ops["update"]) == ([], [])
+        # No save publishes a single verb (R1-5). The one update is golden 8's
+        # `update Order o set ...`, read from its query text (M6).
+        assert order_ops["create"] == []
+        assert order_ops["update"] == [("PUT", "/crud/query-jpql-update-modifying")]
         assert [op for op, routes in order_ops.items() if constructed in routes] == [
             "create-or-update"
         ]
