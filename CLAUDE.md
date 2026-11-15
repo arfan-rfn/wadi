@@ -52,6 +52,10 @@ Monorepo (see `architecture.md` §9 for the full tree): `joern-platform/` (Scala
 
 The vertical slice proving the architecture: `spring-petstore-mini` fixture → wadi-joern image (pinned Joern + spring packs + SpringDIPass) → extraction worker pipeline → orchestrator REST API under `/api/v1` → MCP listing tools + `endpoint_icfg` → one frontend page → stitcher skeleton → conformance e2e in CI → thin `wadi` CLI. Week-one validations: the bulk-export transport (§5.1) and the `lombok-mini` fixture (delombok anchor correctness). See `architecture.md` §11 for the full phase list.
 
+## Constraints
+
+Read `CONSTRAINTS.md` before writing code. Do not weaken it to make a change pass.
+
 <!-- astack:workflow:start -->
 ## Development workflow
 
