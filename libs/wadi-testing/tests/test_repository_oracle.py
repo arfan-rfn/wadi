@@ -12,7 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from wadi_testing.measure.repository_oracle import RepositoryCallSite, load_sites, main, scan
+from wadi_testing.measure.repository_oracle import (
+    OracleOperation,
+    RepositoryCallSite,
+    load_sites,
+    main,
+    name_operation,
+    scan,
+)
 
 JOERN_PLATFORM = Path(__file__).resolve().parents[3] / "joern-platform"
 CRUD_MATRIX = JOERN_PLATFORM / "fixtures" / "spring-data-crud-matrix"
@@ -65,6 +72,8 @@ public class OrderController {
                 enclosing_class="OrderController",
                 enclosing_method="show",
                 in_lambda=False,
+                entity="Order",
+                operation=OracleOperation.READ,
             )
         ]
 
@@ -370,6 +379,400 @@ class TestWhichFilesAreRead:
         }
 
 
+def _repositories(root: Path, *files: tuple[str, str]) -> None:
+    for name, text in files:
+        _write(root, f"src/main/java/com/acme/repo/{name}.java", text)
+
+
+def _calls(root: Path, fields: str, body: str) -> list[RepositoryCallSite]:
+    """Scan one service class holding ``fields`` and a method ``body``."""
+    _write(
+        root,
+        "src/main/java/com/acme/web/Calls.java",
+        "package com.acme.web;\n\npublic class Calls {\n"
+        + fields
+        + "    void m() {\n"
+        + body
+        + "    }\n}\n",
+    )
+    return scan(root).sites
+
+
+_JPA = "import org.springframework.data.jpa.repository.JpaRepository;\n"
+
+
+class TestEntityFromTheTypeArgument:
+    """Review D6: the oracle names the entity from the repository's declared
+    type argument, so a reconciled site can be compared on WHAT it touches."""
+
+    def test_the_markers_first_argument_qualified_or_not_is_the_entity(
+        self, tmp_path: Path
+    ) -> None:
+        _repositories(
+            tmp_path,
+            ("OrderRepository", _ORDER_REPOSITORY),
+            (
+                "AccountRepository",
+                "package com.acme.repo;\n\n" + _JPA + "\npublic interface AccountRepository "
+                "extends JpaRepository<com.acme.crm.Account, Long> {\n}\n",
+            ),
+        )
+
+        sites = _calls(
+            tmp_path,
+            "    private OrderRepository orders;\n    private AccountRepository accounts;\n",
+            "        orders.count();\n        accounts.count();\n",
+        )
+
+        assert [(s.repository, s.entity) for s in sites] == [
+            ("OrderRepository", "Order"),
+            ("AccountRepository", "Account"),
+        ]
+
+    def test_an_argument_binds_by_position_through_a_project_base_interface(
+        self, tmp_path: Path
+    ) -> None:
+        # KeyedRepository puts the key first; JpaRepository wants the entity
+        # first. Position, not the letter, decides which argument is the entity.
+        _repositories(
+            tmp_path,
+            (
+                "KeyedRepository",
+                "package com.acme.repo;\n\n" + _JPA + "\npublic interface KeyedRepository<ID, E> "
+                "extends JpaRepository<E, ID> {\n}\n",
+            ),
+            (
+                "TicketRepository",
+                "package com.acme.repo;\n\npublic interface TicketRepository "
+                "extends KeyedRepository<String, Ticket> {\n}\n",
+            ),
+        )
+
+        sites = _calls(
+            tmp_path, "    private TicketRepository tickets;\n", "        tickets.findAll();\n"
+        )
+
+        assert [(s.repository, s.entity) for s in sites] == [("TicketRepository", "Ticket")]
+
+    def test_a_variables_own_type_arguments_bind_or_leave_the_entity_unbound(
+        self, tmp_path: Path
+    ) -> None:
+        _repositories(
+            tmp_path,
+            (
+                "BaseRepository",
+                "package com.acme.repo;\n\n" + _JPA + "\npublic interface BaseRepository<E> "
+                "extends JpaRepository<E, Long> {\n}\n",
+            ),
+        )
+        _write(
+            tmp_path,
+            "src/main/java/com/acme/web/Archiver.java",
+            """\
+package com.acme.web;
+
+import org.springframework.data.repository.CrudRepository;
+
+public abstract class Archiver<E> {
+    private BaseRepository<Issue> issues;
+    private BaseRepository<E> generic;
+    private BaseRepository raw;
+    private CrudRepository<Pet, String> pets;
+
+    void m() {
+        issues.count();
+        generic.count();
+        raw.count();
+        pets.count();
+    }
+}
+""",
+        )
+
+        sites = scan(tmp_path).sites
+
+        # `E` is the class's own type variable and a raw type binds nothing:
+        # both are unbound, never the letter `E` as if it were a class.
+        assert [(s.receiver, s.entity) for s in sites] == [
+            ("issues", "Issue"),
+            ("generic", None),
+            ("raw", None),
+            ("pets", "Pet"),
+        ]
+
+    def test_a_receiverless_call_in_a_default_method_names_its_interfaces_entity(
+        self, tmp_path: Path
+    ) -> None:
+        _repositories(
+            tmp_path,
+            (
+                "OrderRepository",
+                "package com.acme.repo;\n\n" + _JPA + "\npublic interface OrderRepository "
+                "extends JpaRepository<Order, String> {\n"
+                "    default void touch(String id) { save(findById(id).orElseThrow()); }\n}\n",
+            ),
+        )
+
+        assert [(s.method, s.entity) for s in scan(tmp_path).sites] == [
+            ("save", "Order"),
+            ("findById", "Order"),
+        ]
+
+
+class TestOperationByName:
+    """Spring Data's subject-prefix rule: a prefix counts only where the name
+    ends there or continues with an uppercase letter (review B, review D6)."""
+
+    @pytest.mark.parametrize(
+        ("name", "operation"),
+        [
+            ("save", OracleOperation.CREATE_OR_UPDATE),
+            ("saveAll", OracleOperation.CREATE_OR_UPDATE),
+            ("saveAndFlush", OracleOperation.CREATE_OR_UPDATE),
+            ("insert", OracleOperation.CREATE),
+            ("delete", OracleOperation.DELETE),
+            ("deleteAllInBatch", OracleOperation.DELETE),
+            ("removeByStatus", OracleOperation.DELETE),
+            ("findById", OracleOperation.READ),
+            ("getReferenceById", OracleOperation.READ),
+            ("readByName", OracleOperation.READ),
+            ("queryByName", OracleOperation.READ),
+            ("searchByName", OracleOperation.READ),
+            ("streamAllBy", OracleOperation.READ),
+            ("count", OracleOperation.READ),
+            ("existsById", OracleOperation.READ),
+            ("flush", OracleOperation.NONE),
+            # The prefix continues in lowercase: not the verb it starts with.
+            ("deleted", OracleOperation.UNKNOWN),
+            ("saved", OracleOperation.UNKNOWN),
+            ("finder", OracleOperation.UNKNOWN),
+            ("counter", OracleOperation.UNKNOWN),
+            # `insert` is a whole name, and a name outside the table is not guessed.
+            ("insertAll", OracleOperation.UNKNOWN),
+            ("flushAll", OracleOperation.UNKNOWN),
+            ("sumOpen", OracleOperation.UNKNOWN),
+            ("archiveOld", OracleOperation.UNKNOWN),
+        ],
+    )
+    def test_the_name_table(self, name: str, operation: OracleOperation) -> None:
+        assert name_operation(name) is operation
+
+
+_ANNOTATED_REPOSITORY = """\
+package com.acme.repo;
+
+import com.acme.repo.Audited;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.NativeQuery;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.query.Procedure;
+import org.springframework.data.mongodb.repository.Update;
+import org.springframework.transaction.annotation.Transactional;
+
+public interface OrderRepository extends JpaRepository<Order, String> {
+
+    @Query("select o from Order o where o.status = ?1")
+    List<Order> findInStatus(String status);
+
+    @NativeQuery("select * from orders")
+    List<Order> findNative();
+
+    @Modifying
+    int deleteStale();
+
+    @Update("{ '$set': { 'status': ?1 } }")
+    void findAndSetStatus(String id, String status);
+
+    @Procedure("archive")
+    void findArchived();
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Transactional
+    Optional<Order> findLockedById(String id);
+
+    @Audited
+    List<Order> findByStatus(String status);
+
+    default Order findAndTouch(String id) {
+        return findById(id).orElseThrow();
+    }
+}
+"""
+
+
+class TestOperationFromTheDeclaration:
+    """The repository method's declaration can take the verb away from its name."""
+
+    def test_query_unknown_and_neutral_annotations(self, tmp_path: Path) -> None:
+        _repositories(tmp_path, ("OrderRepository", _ANNOTATED_REPOSITORY))
+
+        sites = _calls(
+            tmp_path,
+            "    private OrderRepository orders;\n",
+            "        orders.findInStatus(s);\n"
+            "        orders.findNative();\n"
+            "        orders.deleteStale();\n"
+            "        orders.findAndSetStatus(id, s);\n"
+            "        orders.findArchived();\n"
+            "        orders.findLockedById(id);\n"
+            "        orders.findByStatus(s);\n"
+            "        orders.findAndTouch(id);\n"
+            "        orders.findById(id);\n",
+        )
+
+        assert [(s.method, s.operation) for s in sites if s.receiver == "orders"] == [
+            # The verb is in query text, which the oracle does not read.
+            ("findInStatus", OracleOperation.QUERY),
+            ("findNative", OracleOperation.QUERY),
+            ("deleteStale", OracleOperation.QUERY),
+            # A persistence annotation outside the neutral list takes the verb
+            # away from the name: Mongo `@Update`, JPA `@Procedure`.
+            ("findAndSetStatus", OracleOperation.UNKNOWN),
+            ("findArchived", OracleOperation.UNKNOWN),
+            # `@Lock` only tunes the read; `@Transactional` is not a Spring Data
+            # annotation; `@Audited` is the project's own. The name decides.
+            ("findLockedById", OracleOperation.READ),
+            ("findByStatus", OracleOperation.READ),
+            # A default method's body is project code, whatever it is called.
+            ("findAndTouch", OracleOperation.UNKNOWN),
+            # Declared by Spring Data, not the project: the name decides.
+            ("findById", OracleOperation.READ),
+        ]
+
+    def test_an_annotation_counts_only_when_it_is_spring_datas_or_hibernates(
+        self, tmp_path: Path
+    ) -> None:
+        _repositories(
+            tmp_path,
+            (
+                "OrderRepository",
+                "package com.acme.repo;\n\n"
+                "import com.acme.search.Query;\n" + _JPA + "\npublic interface OrderRepository "
+                "extends JpaRepository<Order, String> {\n"
+                '    @Query("indexed")\n    List<Order> findByStatus(String status);\n\n'
+                '    @org.springframework.data.jpa.repository.Query("select o from Order o")\n'
+                "    List<Order> findEverything();\n\n"
+                '    @org.hibernate.annotations.SQLSelect(sql = "select 1")\n'
+                "    List<Order> findRaw();\n}\n",
+            ),
+        )
+
+        sites = _calls(
+            tmp_path,
+            "    private OrderRepository orders;\n",
+            "        orders.findByStatus(s);\n        orders.findEverything();\n"
+            "        orders.findRaw();\n",
+        )
+
+        assert [(s.method, s.operation) for s in sites] == [
+            ("findByStatus", OracleOperation.READ),
+            ("findEverything", OracleOperation.QUERY),
+            ("findRaw", OracleOperation.UNKNOWN),
+        ]
+
+    def test_the_nearest_declaration_wins_and_a_base_declaration_counts(
+        self, tmp_path: Path
+    ) -> None:
+        # A sub-interface's `@Query` redeclaration overrides the base's plain
+        # one, and a method only the base declares is still read from there.
+        _repositories(
+            tmp_path,
+            (
+                "BaseRepository",
+                "package com.acme.repo;\n\n" + _JPA + "\npublic interface BaseRepository<E> "
+                "extends JpaRepository<E, Long> {\n"
+                "    List<E> findByName(String name);\n\n"
+                "    @org.springframework.data.jpa.repository.Modifying\n"
+                "    int deleteOld();\n}\n",
+            ),
+            (
+                "IssueRepository",
+                "package com.acme.repo;\n\n"
+                "import org.springframework.data.jpa.repository.Query;\n\n"
+                "public interface IssueRepository extends BaseRepository<Issue> {\n"
+                '    @Query("select i from Issue i where i.name = ?1")\n'
+                "    List<Issue> findByName(String name);\n}\n",
+            ),
+        )
+
+        sites = _calls(
+            tmp_path,
+            "    private IssueRepository issues;\n",
+            "        issues.findByName(n);\n        issues.deleteOld();\n",
+        )
+
+        assert [(s.method, s.operation) for s in sites] == [
+            ("findByName", OracleOperation.QUERY),
+            ("deleteOld", OracleOperation.QUERY),
+        ]
+
+    def test_a_fragment_method_is_unknown_only_when_a_class_implements_it(
+        self, tmp_path: Path
+    ) -> None:
+        # Spring Data routes a fragment interface's method to its `Impl` class.
+        # With no implementation in the project it is a query method like any
+        # other, and its name decides.
+        _repositories(
+            tmp_path,
+            (
+                "OrderRepository",
+                "package com.acme.repo;\n\n" + _JPA + "\npublic interface OrderRepository "
+                "extends JpaRepository<Order, String>, OrderCustom, OrderNamed {\n}\n",
+            ),
+            (
+                "OrderCustom",
+                "package com.acme.repo;\n\npublic interface OrderCustom {\n"
+                "    List<Order> findStale();\n}\n",
+            ),
+            (
+                "OrderCustomImpl",
+                "package com.acme.repo;\n\npublic class OrderCustomImpl implements OrderCustom {\n"
+                "    public List<Order> findStale() { return List.of(); }\n}\n",
+            ),
+            (
+                "OrderNamed",
+                "package com.acme.repo;\n\npublic interface OrderNamed {\n"
+                "    List<Order> findByName(String name);\n}\n",
+            ),
+        )
+
+        sites = _calls(
+            tmp_path,
+            "    private OrderRepository orders;\n",
+            "        orders.findStale();\n        orders.findByName(n);\n",
+        )
+
+        assert [(s.method, s.operation) for s in sites] == [
+            ("findStale", OracleOperation.UNKNOWN),
+            ("findByName", OracleOperation.READ),
+        ]
+
+    def test_overloads_that_read_differently_are_unknown(self, tmp_path: Path) -> None:
+        # The oracle does not match arity, so it does not pick between them.
+        _repositories(
+            tmp_path,
+            (
+                "OrderRepository",
+                "package com.acme.repo;\n\n"
+                "import org.springframework.data.jpa.repository.Query;\n" + _JPA + "\n"
+                "public interface OrderRepository extends JpaRepository<Order, String> {\n"
+                "    List<Order> findByStatus(String status);\n\n"
+                '    @Query("select o from Order o where o.status = ?1 and o.vip = ?2")\n'
+                "    List<Order> findByStatus(String status, boolean vip);\n}\n",
+            ),
+        )
+
+        sites = _calls(
+            tmp_path, "    private OrderRepository orders;\n", "        orders.findByStatus(s);\n"
+        )
+
+        assert [(s.method, s.operation) for s in sites] == [
+            ("findByStatus", OracleOperation.UNKNOWN)
+        ]
+
+
 #: Counted by opening each fixture file, one handler at a time, against the
 #: flows `SpringDataCrudMatrixConformanceTest` names. Not derived from any export.
 CRUD_MATRIX_SITES_PER_FILE = {
@@ -389,7 +792,54 @@ CRUD_MATRIX_SITES_PER_FILE = {
 }
 
 
+#: The oracle's operation reading of the same 68 sites, counted by hand from
+#: each call's name and its repository declaration (review D6).
+CRUD_MATRIX_OPERATIONS = {
+    OracleOperation.READ: 29,
+    # Every save-family call, the default method's receiverless save included.
+    OracleOperation.CREATE_OR_UPDATE: 17,
+    # 47 59 82 83 84 of InheritedAndDerived, 128 of SaveController.
+    OracleOperation.DELETE: 6,
+    # `petRepository.insert` (golden 34).
+    OracleOperation.CREATE: 1,
+    # `orderRepository.flush()` (92).
+    OracleOperation.NONE: 1,
+    # Every `@Query` / `@Modifying` method QueryController calls: 54 60 66 72
+    # 78 79 89 90 93 102 108.
+    OracleOperation.QUERY: 11,
+    # `sumOpen` (a name outside the table, golden 12), the `findAndTouch`
+    # default method, and the `archiveOld` fragment `OrderRepositoryImpl`
+    # implements.
+    OracleOperation.UNKNOWN: 3,
+}
+
+#: The entity of each of the 68 sites, from the repositories' type arguments.
+CRUD_MATRIX_ENTITIES = {
+    "Order": 54,
+    # ShapeController 60 61 (findAllByIdIn, declared by BaseRepository<E>) and
+    # QueryController 90.
+    "Issue": 3,
+    "Pet": 2,
+    "Invoice": 2,
+    # One billing and one crm `Account`: the simple name is the comparison.
+    "Account": 2,
+    "AuditEntry": 1,
+    "OrderLine": 1,
+    "Customer": 1,
+    # Through `KeyedRepository<ID, E> extends JpaRepository<E, ID>`.
+    "Ticket": 1,
+    # AbstractArchiver's `BaseRepository<E>`: E is the class's type variable.
+    None: 1,
+}
+
+
 class TestCrudMatrixFixture:
+    def test_entity_and_operation_per_site_match_the_hand_count(self) -> None:
+        sites = scan(CRUD_MATRIX).sites
+
+        assert dict(Counter(site.operation for site in sites)) == CRUD_MATRIX_OPERATIONS
+        assert dict(Counter(site.entity for site in sites)) == CRUD_MATRIX_ENTITIES
+
     def test_the_site_count_per_file_matches_the_fixture(self) -> None:
         prefix = "src/main/java/com/acme/crud/"
         counts = Counter(site.file.removeprefix(prefix) for site in scan(CRUD_MATRIX).sites)
@@ -419,10 +869,43 @@ class TestCommandLine:
             "in_lambda": 1,
             "method_references": 0,
             "by_module": {".": 68},
+            "entity_unbound": 1,
+            "by_operation": {
+                "create": 1,
+                "create-or-update": 17,
+                "delete": 6,
+                "none": 1,
+                "query": 11,
+                "read": 29,
+                "unknown": 3,
+            },
         }
         printed = capsys.readouterr().out
         assert "src/main/java/com/acme/crud/web/SaveController.java:144" in printed
         assert "sites: 68" in printed
+
+    def test_a_run_stored_before_entity_and_operation_loads_with_neither(
+        self, tmp_path: Path
+    ) -> None:
+        # Format 1 runs (the R1 train-ticket evidence) carry no reading; the
+        # reconciler then says the oracle did not read them, never "agree".
+        stored = tmp_path / "format-1.json"
+        row = {
+            "module": ".",
+            "file": "src/main/java/A.java",
+            "line": 3,
+            "repository": "OrderRepository",
+            "receiver": "orders",
+            "method": "save",
+            "enclosing_class": "A",
+            "enclosing_method": "m",
+            "in_lambda": False,
+        }
+        stored.write_text(json.dumps({"oracle_format": "1", "sites": [row]}))
+
+        [site] = load_sites(stored)
+
+        assert (site.method, site.entity, site.operation) == ("save", None, None)
 
     def test_a_method_reference_is_counted_apart_from_the_sites(self, tmp_path: Path) -> None:
         _write(tmp_path, "src/main/java/com/acme/repo/OrderRepository.java", _ORDER_REPOSITORY)
