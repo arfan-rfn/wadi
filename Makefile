@@ -1,7 +1,7 @@
 # Wadi developer entrypoints (architecture.md §9).
 # Everything here must also be runnable as plain commands in CI.
 
-.PHONY: sync lint fmt typecheck test test-unit test-integration schema up down help bump sync-compose joern-image e2e measure-repository-sites reconcile-repository-sites
+.PHONY: sync lint fmt typecheck test test-unit test-integration schema up down help bump sync-compose joern-image e2e measure-repository-sites reconcile-repository-sites blind-sample blind-score
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
@@ -92,3 +92,13 @@ measure-repository-sites: ## Repository call sites from Java source (SRC=<root> 
 reconcile-repository-sites: ## Oracle vs wadi db sinks, site by site (ORACLE=sites.json EXPORTS=<dir|files> [OUT=])
 	@test -n "$(ORACLE)" -a -n "$(EXPORTS)" || { echo "usage: make reconcile-repository-sites ORACLE=sites.json EXPORTS=<dir-or-files> [OUT=reconciled.json]"; exit 1; }
 	uv run python -m wadi_testing.measure.reconcile_repository_sites --oracle "$(ORACLE)" --exports $(EXPORTS) $(if $(OUT),--json "$(OUT)")
+
+# The §5.2.17 blind hand check (reviews D3-D5): a seeded draw from a running
+# orchestrator. Give the reader OUT/blind.json only; key.json holds wadi's answers.
+blind-sample: ## Seeded blind draw for a hand check (SNAPSHOT= SEED= N= CORPUS=<root> [API=] [OUT=dir])
+	@test -n "$(SNAPSHOT)" -a -n "$(SEED)" -a -n "$(N)" -a -n "$(CORPUS)" || { echo "usage: make blind-sample SNAPSHOT=<snap_id> SEED=<int> N=<size> CORPUS=<source-root> [API=http://127.0.0.1:9234/api/v1] [OUT=dir]"; exit 1; }
+	uv run python -m wadi_testing.measure.blind_sample draw --snapshot "$(SNAPSHOT)" --seed "$(SEED)" --size "$(N)" --corpus "$(CORPUS)" $(if $(API),--api "$(API)") $(if $(OUT),--out-dir "$(OUT)")
+
+blind-score: ## Score a reader's labels against the draw's key (KEY=key.json LABELS=labels.json [OUT=score.json])
+	@test -n "$(KEY)" -a -n "$(LABELS)" || { echo "usage: make blind-score KEY=key.json LABELS=labels.json [OUT=score.json]"; exit 1; }
+	uv run python -m wadi_testing.measure.blind_sample score --key "$(KEY)" --labels "$(LABELS)" $(if $(OUT),--json "$(OUT)")
