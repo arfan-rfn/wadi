@@ -347,6 +347,31 @@ route always did. An ICFG written before 1.1.0 carries only the deprecated `remo
 so `/detail` and MCP `endpoint_detail` return an empty `outbound` for it while MCP
 `cross_service=true` reads both fields.
 
+### A flush-only endpoint reads "No repository call found"
+**Priority:** P3
+**Opened:** v0.9.0
+
+`flush()` is deliberately not an entity operation, so an endpoint whose only repository call is
+`flush` summarizes to `[]` and the Data list says "No repository call found." while the canvas
+shows a db icon on that call. Found by the release QA on `POST /crud/flush-not-an-operation`. The
+state can check the ICFG for db sink nodes without sites and say "no entity access found" there.
+
+### Two entities with one simple name differ only on hover in the Data matrix
+**Priority:** P3
+**Opened:** v0.9.0
+
+`com.acme.crud.billing.Account` and `com.acme.crud.crm.Account` render as two "Account" rows on the
+home `?view=data` matrix. The qualified name is only the cell's `title`. Show the package, or the
+distinguishing suffix, when two rows share a simple name.
+
+### The undetermined-entity row carries no text for an unbound type argument
+**Priority:** P3
+**Opened:** v0.9.0
+
+A call on `BaseRepository<E>` that binds no entity has `entity_type_text = null`, as contract A1
+says, so the "entity not determined" row has nothing to show a reader about what it saw. The
+repository type is on the site; whether to show it there is a UI decision.
+
 ### `e2e/` is outside pyright's include
 **Priority:** P3
 **Opened:** v0.9.0
