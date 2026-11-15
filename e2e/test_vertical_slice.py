@@ -121,6 +121,12 @@ ENTITY_NAMES = (
     "Pet",
     "Shipment",
     "Ticket",
+    # The rigor review's hardening shapes (export 2.15.0).
+    "AuditedOrder",
+    "Coupon",
+    "Note",
+    "PetLog",
+    "Trip",
 )
 OPERATIONS = ["create", "read", "update", "delete", "create-or-update", "unknown"]
 """`EntityOperation` in declaration order, which every reader displays in."""
@@ -162,6 +168,12 @@ def _by_operation(row: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
         usage["operation"]: [(e["http_method"], e["full_uri"]) for e in usage["endpoints"]]
         for usage in row["operations"]
     }
+
+
+def _endpoints_under(row: dict[str, Any], operation: str) -> list[dict[str, Any]]:
+    return next(
+        usage["endpoints"] for usage in row["operations"] if usage["operation"] == operation
+    )
 
 
 @requires_joern_image
@@ -337,22 +349,24 @@ class TestVerticalSlice:
         accounting = service["entity_access_accounting"]
         assert accounting is not None
         assert {key: accounting[key] for key in ACCOUNTING_COUNTS} == {
-            "call_sites": 68,
-            "in_endpoint_flow": 67,
+            "call_sites": 84,
+            "in_endpoint_flow": 83,
             "in_no_endpoint_flow": 1,  # the lambda save (R1-1)
             "flush": 1,
             "implemented_in_project": 2,
-            "entity_undetermined": 1,
-            # M6: the query reader binds 11 of the 13 query sites; the named query
-            # nothing declares and the Mongo JSON query stay unknown.
-            "unknown_operation": 2,
-            "create_or_update": 18,
-            "bound": 44,
+            # Golden 30's unbindable chain and golden 38's `JpaRepository<E, ...>`.
+            "entity_undetermined": 2,
+            # M6 leaves the undeclared named query and the Mongo JSON query
+            # unknown; the rigor review's six verbs nothing read decides join them.
+            "unknown_operation": 8,
+            # Every save; golden 34's insert is a create by its name now.
+            "create_or_update": 17,
+            "bound": 54,
         }
 
         # 2. The list route: every row was analyzed ([] or rows, never null).
         rows = (await http.get(f"{api}/services/{service_id}/endpoints")).json()
-        assert len(rows) == 36
+        assert len(rows) == 51  # the plan's 36 and the rigor review's 15
         assert [row["full_uri"] for row in rows if row["entity_access"] is None] == []
         by_route = {(row["http_method"], row["full_uri"]): row for row in rows}
 
@@ -380,12 +394,30 @@ class TestVerticalSlice:
         # The verb was read, the entity was not (golden 30, R1-25).
         undetermined = entities[None]
         assert undetermined["name"] == "entity not determined"
-        assert _by_operation(undetermined)["read"] == [("GET", "/crud/unbindable-entity-chain")]
+        assert _by_operation(undetermined)["read"] == [
+            ("GET", "/crud/marker-receiver-unbound-entity"),
+            ("GET", "/crud/unbindable-entity-chain"),
+        ]
         assert [s["accounting"] for s in usage["services"]] == [accounting]
+        assert [s["status"] for s in usage["services"]] == ["reporting"]
+        # 1.27.0: under each operation, the endpoint's sites for that operation.
+        # Golden 34 makes 11 calls on Order, three of them deletes (review C1).
+        table = ("POST", "/crud/inherited-method-table")
+        assert [
+            (endpoint["full_uri"], endpoint["call_sites"])
+            for endpoint in _endpoints_under(entities[ORDER], "delete")
+            if (endpoint["http_method"], endpoint["full_uri"]) == table
+        ] == [("/crud/inherited-method-table", 3)]
 
         find_row = by_route[("GET", "/crud/inherited-find-by-id")]
         assert find_row["entity_access"] == [
-            {"entity": ORDER, "data_model_id": order_dm, "operations": ["read"], "call_sites": 1}
+            {
+                "entity": ORDER,
+                "data_model_id": order_dm,
+                "operations": ["read"],
+                "call_sites": 1,
+                "call_sites_by_operation": {"read": 1},
+            }
         ]
         forwarding = by_route[("PUT", "/crud/forwarding-endpoint")]
         assert forwarding["entity_access"] == []
@@ -412,10 +444,11 @@ class TestVerticalSlice:
             "dirty-checking-updates",
             "other-persistence-mechanisms",
         ]
-        # Shipped flags publish no single save verb, so `create` is a zero the
-        # report names as never exercised (E8). `update` is exercised, by query
-        # text (golden 8, M6), not by a save.
-        assert section["unexercised_vocabulary"] == ["operation:create"]
+        # Every operation and basis is exercised: `create` by golden 34's insert
+        # (by its name), `update` by golden 8's query text. Neither comes from a
+        # save, which the shipped flags withhold: the section says so (C6).
+        assert section["unexercised_vocabulary"] == []
+        assert section["gated_operations"] == ["create", "update"]
 
         # 6. MCP, through the service object the server registers.
         mcp = WadiMcpService(database, graph_repository)
@@ -449,6 +482,8 @@ class TestVerticalSlice:
                 "data_model_id": order_dm,
                 "operation": "create-or-update",
                 "candidate_operation": "update",  # evidence, never a claim (R1-11)
+                # ...and MCP says so in words, for an agent with no code to check.
+                "candidate_note": "candidate (gated, not published): update",
             }
         ]
 
