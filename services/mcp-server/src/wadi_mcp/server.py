@@ -29,7 +29,10 @@ SERVER_INSTRUCTIONS = (
     "which downstream endpoints a flow reaches (recurse into them with further "
     "endpoint_icfg calls). Every stitched edge carries confidence "
     "(exact/high/heuristic/none) and provenance (how it was determined) — "
-    "undetermined targets are explicit facts, never silently dropped."
+    "undetermined targets are explicit facts, never silently dropped. "
+    "For data, endpoint_detail's entity_access says which entities an endpoint "
+    "may touch and how, and entity_usage answers the reverse: which endpoints "
+    "may create, read, update or delete a given entity."
 )
 
 
@@ -66,6 +69,12 @@ def create_server(service: WadiMcpService) -> MCPServer:
         The shapes are NOT on `list_endpoints` rows — that list is deliberately
         light — so this is where you read what an endpoint accepts and returns.
 
+        Also here: `entity_access` (the entities it may touch, and how),
+        `entity_facts` ("analyzed", or "predates-phase" with a note to
+        re-analyze), and `outbound` with `stitched`, the stitched calls this
+        endpoint's flow makes. An endpoint with no entity access but outbound
+        calls forwards the work to another service.
+
         `resolve_shapes=True` (default) gives a plain tree. Pass False for the
         shared form: each type defined once in `type_defs` and referenced
         wherever it occurs, which is dramatically smaller when a response names
@@ -95,6 +104,29 @@ def create_server(service: WadiMcpService) -> MCPServer:
         return await service.remote_edges(snapshot_id, service_id)
 
     @mcp.tool()
+    async def entity_usage(
+        snapshot_id: str, entity: str | None = None, service_id: str | None = None
+    ) -> dict[str, Any]:
+        """Which endpoints may create, read, update, delete each entity.
+
+        One row per entity per service, with all six operations (create, read,
+        update, delete, create-or-update, unknown) and the endpoints under
+        each. "May" is the meaning: some path through the endpoint performs
+        it. `create-or-update` is one save the analysis could not split, never
+        a create plus an update. An entity no endpoint reaches is a row of
+        empty lists; accesses whose entity could not be determined have their
+        own "entity not determined" row.
+
+        `entity` takes a qualified type name, or a simple name that names one
+        entity. `service_id` narrows to one service.
+
+        `analyzed: false` means the snapshot predates entity facts: nothing
+        was examined, so an empty list is not "no endpoint touches it".
+        Re-analyze to get them; the `note` says so.
+        """
+        return await service.entity_usage(snapshot_id, entity, service_id)
+
+    @mcp.tool()
     async def endpoint_icfg(
         snapshot_id: str,
         endpoint_id: str,
@@ -111,6 +143,11 @@ def create_server(service: WadiMcpService) -> MCPServer:
         roll-up gains 'remote_targets' (stitched targets per call site) and
         'downstream' (analyzed endpoints this flow reaches — recurse into them
         with further endpoint_icfg calls).
+
+        Repository calls carry `entity_access_sites` (the entities and
+        operations each one touches) at both levels, and `entity_facts` says
+        whether the snapshot was analyzed for them: on a "predates-phase"
+        graph, no sites does not mean no repository calls.
         """
         return await service.endpoint_icfg(
             snapshot_id, endpoint_id, detail, method_id, cross_service

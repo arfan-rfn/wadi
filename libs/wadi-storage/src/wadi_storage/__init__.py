@@ -8,6 +8,7 @@ from wadi_storage.chunking import (
     needs_chunking,
     pack_items,
 )
+from wadi_storage.compose import EndpointOutbound, endpoint_outbound, entity_usage_view
 from wadi_storage.graph import GraphRepository, GraphStore
 from wadi_storage.jobs import JobQueue
 from wadi_storage.mongo import WadiDatabase, create_client
@@ -23,6 +24,7 @@ __all__ = [
     "SAFE_PART_BYTES",
     "ArtifactRepository",
     "DuplicateSystemNameError",
+    "EndpointOutbound",
     "GraphRepository",
     "GraphStore",
     "JobQueue",
@@ -32,6 +34,8 @@ __all__ = [
     "SystemRepository",
     "WadiDatabase",
     "create_client",
+    "endpoint_outbound",
+    "entity_usage_view",
     "needs_chunking",
     "pack_items",
 ]

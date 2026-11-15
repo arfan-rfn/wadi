@@ -17,6 +17,7 @@ from pymongo import ReplaceOne
 from wadi_contracts import (
     DataModel,
     Endpoint,
+    EndpointEntityAccessRow,
     EndpointSummary,
     Icfg,
     MqInteraction,
@@ -36,6 +37,31 @@ from wadi_storage.mongo import (
     MongoDocument,
     WadiDatabase,
 )
+
+#: The five fields the entity reads name (R1-8). An inclusion projection, so a
+#: field a later contract adds to an endpoint is not read by accident.
+_ENTITY_ACCESS_PROJECTION: MongoDocument = {
+    "_id": 0,
+    "id": 1,
+    "service_id": 1,
+    "http_method": 1,
+    "full_uri": 1,
+    "entity_access": 1,
+}
+
+
+def _entity_access_row(doc: MongoDocument) -> EndpointEntityAccessRow:
+    # `get`, not indexing: a document written before the phase has no
+    # `entity_access` key, and that absence is the answer "predates" (R1-6).
+    return EndpointEntityAccessRow.model_validate(
+        {
+            "endpoint_id": doc["id"],
+            "service_id": doc["service_id"],
+            "http_method": doc["http_method"],
+            "full_uri": doc["full_uri"],
+            "entity_access": doc.get("entity_access"),
+        }
+    )
 
 
 class ArtifactRepository:
@@ -144,6 +170,44 @@ class ArtifactRepository:
             .sort([("service_id", 1), ("simplified_uri", 1), ("http_method", 1)])
         )
         return [from_doc(Endpoint, doc) async for doc in cursor]
+
+    async def list_endpoint_entity_access(self, snapshot_id: str) -> list[EndpointEntityAccessRow]:
+        """Every endpoint's entity summary in the snapshot, as projected rows (§5.2.17).
+
+        The reverse view's input. It names the five fields it reads instead of
+        excluding the ones it does not (R1-8): an exclusion projection would
+        carry whatever a later contract adds to an endpoint, and the wire shapes
+        alone were 124 MB of one service's documents before §5.2.15.
+
+        Sorted by the unique ``(snapshot_id, service_id, id)`` index so the
+        order costs no in-memory sort; the view sorts its own output anyway.
+
+        A document written before the phase has no ``entity_access`` key, so
+        the row reads it with ``get`` and the absence arrives as ``None``: the
+        snapshot predates entity facts, never "touches nothing" (R1-6).
+        """
+        cursor = (
+            self._db.collection(ENDPOINTS)
+            .find({"snapshot_id": snapshot_id}, projection=_ENTITY_ACCESS_PROJECTION)
+            .sort([("service_id", 1), ("id", 1)])
+        )
+        return [_entity_access_row(doc) async for doc in cursor]
+
+    async def get_endpoint_entity_access(
+        self, snapshot_id: str, endpoint_id: str
+    ) -> EndpointEntityAccessRow | None:
+        """One endpoint's entity summary, without reading the endpoint (§5.2.17).
+
+        The ICFG tools need only whether the summary is ``None``, to say
+        whether empty ``entity_access_sites`` mean "no repository call" or "not
+        looked at" (R1-6). The full document carries the wire shapes, which is
+        the cost this projection exists to avoid.
+        """
+        doc = await self._db.collection(ENDPOINTS).find_one(
+            {"snapshot_id": snapshot_id, "id": endpoint_id},
+            projection=_ENTITY_ACCESS_PROJECTION,
+        )
+        return _entity_access_row(doc) if doc is not None else None
 
     async def count_endpoints_by_service(self, snapshot_id: str) -> dict[str, int]:
         """Endpoint counts per service for one snapshot (single aggregation)."""
@@ -332,5 +396,20 @@ class ArtifactRepository:
             self._db.collection(DATA_MODELS)
             .find({"snapshot_id": snapshot_id, "service_id": service_id})
             .sort("entity", 1)
+        )
+        return [from_doc(DataModel, doc) async for doc in cursor]
+
+    async def list_data_models_for_snapshot(self, snapshot_id: str) -> list[DataModel]:
+        """Every service's data models in one query (§5.2.17, R1-8).
+
+        The reverse view lists each declared entity, reached or not (Q6), for
+        the whole snapshot. One query rather than one per service, ordered by
+        the unique ``(snapshot_id, service_id, id)`` index so no sort stage
+        runs.
+        """
+        cursor = (
+            self._db.collection(DATA_MODELS)
+            .find({"snapshot_id": snapshot_id})
+            .sort([("service_id", 1), ("id", 1)])
         )
         return [from_doc(DataModel, doc) async for doc in cursor]
