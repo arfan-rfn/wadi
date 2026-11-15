@@ -20,6 +20,7 @@ from wadi_contracts import (
     EntityAccessSite,
     EntityOperation,
     ServiceBoundary,
+    ServiceKind,
     Snapshot,
     summarize_entity_access,
 )
@@ -89,7 +90,13 @@ class TestEndpointDetailEntityFacts:
         assert detail["entity_facts"] == "analyzed"
         assert "entity_facts_note" not in detail
         assert detail["entity_access"] == [
-            {"entity": _ORDER, "data_model_id": None, "operations": ["read"], "call_sites": 1}
+            {
+                "entity": _ORDER,
+                "data_model_id": None,
+                "operations": ["read"],
+                "call_sites": 1,
+                "call_sites_by_operation": {"read": 1},
+            }
         ]
         # Pre-stitch: 'not yet', and Neo4j is never asked (P10).
         assert detail["stitched"] is False
@@ -230,7 +237,12 @@ class TestEndpointIcfgEntityFacts:
 class _Usage:
     """Two services. `orders` declares Order and Customer; `audit` declares an
     Order of its own (a different class with the same simple name) and makes
-    one call whose entity could not be determined."""
+    one call whose entity could not be determined.
+
+    Both report accounting. Since 1.27.0 only a reporting service's data
+    models are listed (§5.2.17 hardening), so a non-reporting `audit` would
+    have no Order row for the ambiguity tests to find.
+    """
 
     def __init__(self) -> None:
         system = make_system("usage-shop")
@@ -239,7 +251,9 @@ class _Usage:
         self.orders = make_service(self.snapshot, "services/orders").model_copy(
             update={"entity_access_accounting": make_accounting(call_sites=3)}
         )
-        self.audit = make_service(self.snapshot, "services/audit")
+        self.audit = make_service(self.snapshot, "services/audit").model_copy(
+            update={"entity_access_accounting": make_accounting(call_sites=1)}
+        )
         self.order_model = make_data_model(self.snapshot, self.orders, _ORDER)
         self.customer_model = make_data_model(self.snapshot, self.orders, "com.acme.Customer")
         self.audit_order = make_data_model(self.snapshot, self.audit, "com.acme.audit.Order")
@@ -306,7 +320,11 @@ class TestEntityUsageTool:
         assert _uris(customer) == {op.value: [] for op in EntityOperation}
         accounting = {s["service_name"]: s["accounting"] for s in view["services"]}
         assert accounting["orders"]["call_sites"] == 3
-        assert accounting["audit"] is None
+        assert accounting["audit"]["call_sites"] == 1
+        assert {s["service_name"]: s["status"] for s in view["services"]} == {
+            "orders": "reporting",
+            "audit": "reporting",
+        }
 
     async def test_one_unsplit_save_never_reads_as_a_create_plus_an_update(
         self, database: WadiDatabase, usage: _Usage
@@ -322,6 +340,59 @@ class TestEntityUsageTool:
             "create-or-update": ["/orders/import"],
             "unknown": [],
         }
+
+    async def test_each_operation_counts_only_its_own_call_sites(
+        self, database: WadiDatabase, usage: _Usage
+    ) -> None:
+        """Review C1: `/orders` makes one create and one update, so 1 under each, never 2."""
+        view = await _offline_service(database).entity_usage(usage.snapshot.id, entity=_ORDER)
+        [order] = view["entities"]
+        counts = {
+            usage_row["operation"]: [
+                (endpoint["full_uri"], endpoint["call_sites"])
+                for endpoint in usage_row["endpoints"]
+            ]
+            for usage_row in order["operations"]
+        }
+        assert counts["create"] == [("/orders", 1)]
+        assert counts["update"] == [("/orders", 1)]
+        assert counts["create-or-update"] == [("/orders/import", 1)]
+        endpoints = [e for usage_row in order["operations"] for e in usage_row["endpoints"]]
+        assert all("call_sites_note" not in endpoint for endpoint in endpoints)
+
+    async def test_a_count_a_summary_never_recorded_is_said_not_numbered(
+        self, database: WadiDatabase
+    ) -> None:
+        """A summary written before 1.27.0 counted per entity only (review C1).
+
+        Its per-operation count is `null`, and the entry says why in words, so
+        an agent never reads the entity count, or zero, in its place.
+        """
+        snapshot, boundary = await _snapshot(database)
+        boundary = boundary.model_copy(
+            update={"entity_access_accounting": make_accounting(call_sites=2)}
+        )
+        await ArtifactRepository(database).write_service_boundaries([boundary])
+        old_summary = [
+            row.model_copy(update={"call_sites_by_operation": None})
+            for row in summarize_entity_access(
+                [make_site(EntityOperation.READ), make_site(EntityOperation.DELETE)]
+            )
+        ]
+        endpoint = make_endpoint(snapshot, boundary, "/orders/{id}").model_copy(
+            update={"entity_access": old_summary}
+        )
+        await ArtifactRepository(database).write_endpoints([endpoint])
+
+        view = await _offline_service(database).entity_usage(snapshot.id, entity=_ORDER)
+        [order] = view["entities"]
+        listed = {u["operation"]: u["endpoints"] for u in order["operations"]}
+        for operation in ("read", "delete"):
+            [entry] = listed[operation]
+            assert entry["call_sites"] is None
+            assert entry["call_sites_note"] == (
+                "count not recorded (summary predates 1.27.0; re-analyze)"
+            )
 
     async def test_a_simple_name_that_names_one_entity_selects_it(
         self, database: WadiDatabase, usage: _Usage
@@ -403,3 +474,189 @@ class TestEntityUsageTool:
         assert view["analyzed"] is True
         assert view["endpoints_predating"] == 1
         assert "1 endpoint" in view["note"]
+
+
+class _Statuses:
+    """One service of each accounting status (1.27.0) in one snapshot.
+
+    `gateway` reports and has no endpoints, the live `ts-gateway` shape
+    (review C4). `billing` failed extraction and `legacy` predates the phase,
+    so neither was examined (review C3). `common` is a library.
+    """
+
+    def __init__(self) -> None:
+        self.system = make_system("status-shop")
+        self.snapshot = make_snapshot(self.system)
+        self.orders = make_service(self.snapshot, "services/orders").model_copy(
+            update={"entity_access_accounting": make_accounting(call_sites=1)}
+        )
+        self.gateway = make_service(self.snapshot, "services/gateway").model_copy(
+            update={"entity_access_accounting": make_accounting(call_sites=0)}
+        )
+        self.billing = make_service(self.snapshot, "services/billing").model_copy(
+            update={"extraction_error": "RuntimeError: parse failed"}
+        )
+        self.legacy = make_service(self.snapshot, "services/legacy")
+        self.common = make_service(self.snapshot, "libs/common").model_copy(
+            update={"kind": ServiceKind.LIBRARY}
+        )
+        self.order_model = make_data_model(self.snapshot, self.orders, _ORDER)
+        self.route_model = make_data_model(self.snapshot, self.gateway, "com.acme.gateway.Route")
+        self.ledger_model = make_data_model(self.snapshot, self.legacy, "com.acme.legacy.Ledger")
+        self.reader = make_endpoint(self.snapshot, self.orders, "/orders").model_copy(
+            update={
+                "entity_access": summarize_entity_access(
+                    [make_site(EntityOperation.READ, model_id=self.order_model.id)]
+                )
+            }
+        )
+
+    async def write(self, database: WadiDatabase) -> None:
+        await SystemRepository(database).insert(self.system)
+        await SnapshotRepository(database).insert(self.snapshot)
+        artifacts = ArtifactRepository(database)
+        await artifacts.write_service_boundaries(
+            [self.orders, self.gateway, self.billing, self.legacy, self.common]
+        )
+        await artifacts.write_endpoints([self.reader])
+        await _write_predating(database, make_endpoint(self.snapshot, self.legacy, "/ledger"))
+        await artifacts.write_data_models([self.order_model, self.route_model, self.ledger_model])
+
+
+@pytest.fixture
+async def statuses(database: WadiDatabase) -> _Statuses:
+    seed = _Statuses()
+    await seed.write(database)
+    return seed
+
+
+class TestEntityUsageSaysWhyAServiceHasNoAccounting:
+    """Reviews C3, C4: the notes come from each service's status, never from endpoint counts.
+
+    A failed service has no endpoint rows, so `endpoints_predating` is 0 for
+    it, and arithmetic on that count said nothing about it at all.
+    """
+
+    async def test_each_service_that_was_not_examined_says_why(
+        self, database: WadiDatabase, statuses: _Statuses
+    ) -> None:
+        view = await _offline_service(database).entity_usage(statuses.snapshot.id)
+        assert view["analyzed"] is True
+        assert {s["service_name"]: s["status"] for s in view["services"]} == {
+            "billing": "extraction-failed",
+            "common": "library",
+            "gateway": "reporting",
+            "legacy": "predating",
+            "orders": "reporting",
+        }
+        # A predating service's declared entities are not listed as six empty
+        # lists: that would say "touched by nothing" about code nobody read.
+        assert {(row["service_id"], row["entity"]) for row in view["entities"]} == {
+            (statuses.orders.service_id, _ORDER),
+            (statuses.gateway.service_id, "com.acme.gateway.Route"),
+        }
+        note: str = view["note"]
+        assert "Extraction failed for service 'billing'" in note
+        assert "never examined" in note
+        assert "Service 'legacy' predates entity facts" in note
+        assert "re-analyze" in note.lower()
+        assert "Service 'common' is a library" in note
+        assert "counted in each service that depends on it" in note
+        assert "1 endpoint predates" in note
+
+    async def test_a_failed_services_entity_is_never_said_to_be_absent(
+        self, database: WadiDatabase, statuses: _Statuses
+    ) -> None:
+        """Review C3: "no entity 'Invoice' is declared or touched here" is a
+        claim about billing's code, which nobody examined."""
+        service = _offline_service(database)
+        for view in (
+            await service.entity_usage(statuses.snapshot.id, entity="Invoice"),
+            await service.entity_usage(
+                statuses.snapshot.id, entity="Invoice", service_id=statuses.billing.service_id
+            ),
+            await service.entity_usage(
+                statuses.snapshot.id, service_id=statuses.billing.service_id
+            ),
+        ):
+            assert view["analyzed"] is False
+            assert view["entities"] == []
+            note: str = view["note"]
+            assert "Extraction failed for service 'billing'" in note
+            assert "never examined" in note
+            assert "no entity" not in note.lower()
+            assert "holds no endpoints" not in note
+        across = await service.entity_usage(statuses.snapshot.id, entity="Invoice")
+        assert across["note"].startswith(
+            "'Invoice' is not an entity of any service that was examined"
+        )
+        # The answer names the services it could be in, and only those.
+        assert {s["service_name"] for s in across["services"]} == {"billing", "legacy"}
+
+    async def test_a_predating_services_entity_is_said_to_need_reanalysis(
+        self, database: WadiDatabase, statuses: _Statuses
+    ) -> None:
+        view = await _offline_service(database).entity_usage(
+            statuses.snapshot.id, entity="com.acme.legacy.Ledger"
+        )
+        assert view["analyzed"] is False
+        assert view["entities"] == []
+        assert "Service 'legacy' predates entity facts" in view["note"]
+        assert "re-analyze" in view["note"].lower()
+
+    async def test_an_answer_about_one_entity_names_the_services_not_examined(
+        self, database: WadiDatabase, statuses: _Statuses
+    ) -> None:
+        """Found in `orders`, but `billing` and `legacy` might also touch an Order."""
+        view = await _offline_service(database).entity_usage(statuses.snapshot.id, entity=_ORDER)
+        assert view["analyzed"] is True
+        assert [row["service_id"] for row in view["entities"]] == [statuses.orders.service_id]
+        assert [s["service_name"] for s in view["services"]] == ["orders"]
+        note: str = view["note"]
+        assert "Extraction failed for service 'billing'" in note
+        assert "Service 'legacy' predates entity facts" in note
+        # The library has no entities of its own to be missing from this answer.
+        assert "library" not in note
+
+    async def test_a_reporting_service_with_no_endpoints_lists_its_entities(
+        self, database: WadiDatabase, statuses: _Statuses
+    ) -> None:
+        """Review C4, live on `ts-gateway`: it said "This snapshot holds no endpoints yet"."""
+        view = await _offline_service(database).entity_usage(
+            statuses.snapshot.id, service_id=statuses.gateway.service_id
+        )
+        assert view["analyzed"] is True
+        assert view["endpoints_predating"] == 0
+        [route] = view["entities"]
+        assert route["entity"] == "com.acme.gateway.Route"
+        assert _uris(route) == {op.value: [] for op in EntityOperation}
+        assert [s["status"] for s in view["services"]] == ["reporting"]
+        assert "note" not in view
+
+    async def test_a_library_says_its_calls_count_in_its_dependents(
+        self, database: WadiDatabase, statuses: _Statuses
+    ) -> None:
+        view = await _offline_service(database).entity_usage(
+            statuses.snapshot.id, service_id=statuses.common.service_id
+        )
+        assert view["analyzed"] is False
+        assert [s["status"] for s in view["services"]] == ["library"]
+        note: str = view["note"]
+        assert "Service 'common' is a library" in note
+        assert "counted in each service that depends on it" in note
+        assert "holds no endpoints" not in note
+
+    async def test_only_a_snapshot_with_nothing_extracted_holds_no_endpoints(
+        self, database: WadiDatabase
+    ) -> None:
+        system = make_system("empty")
+        snapshot = make_snapshot(system)
+        await SystemRepository(database).insert(system)
+        await SnapshotRepository(database).insert(snapshot)
+
+        view = await _offline_service(database).entity_usage(snapshot.id)
+        assert view["analyzed"] is False
+        assert view["services"] == []
+        assert view["note"] == (
+            "This snapshot holds no endpoints yet, so there are no entity facts to read."
+        )

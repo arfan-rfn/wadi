@@ -117,12 +117,20 @@ def create_server(service: WadiMcpService) -> MCPServer:
         empty lists; accesses whose entity could not be determined have their
         own "entity not determined" row.
 
+        Under each operation, an endpoint's `call_sites` counts its calls that
+        perform THAT operation on that entity, not all its calls on the
+        entity. It is null, with a `call_sites_note`, when the endpoint's
+        summary predates per-operation counts; re-analyze to get them.
+
         `entity` takes a qualified type name, or a simple name that names one
         entity. `service_id` narrows to one service.
 
-        `analyzed: false` means the snapshot predates entity facts: nothing
-        was examined, so an empty list is not "no endpoint touches it".
-        Re-analyze to get them; the `note` says so.
+        Each service carries a `status`: `reporting` (examined; its
+        `accounting` is present), `predating` (written before entity facts;
+        re-analyze), `extraction-failed` (never examined), or `library` (its
+        calls are counted in each service that depends on it).
+        `analyzed: false` means nothing in the answer was examined, so an
+        empty list is not "no endpoint touches it". The `note` says why.
         """
         return await service.entity_usage(snapshot_id, entity, service_id)
 
@@ -147,7 +155,10 @@ def create_server(service: WadiMcpService) -> MCPServer:
         Repository calls carry `entity_access_sites` (the entities and
         operations each one touches) at both levels, and `entity_facts` says
         whether the snapshot was analyzed for them: on a "predates-phase"
-        graph, no sites does not mean no repository calls.
+        graph, no sites does not mean no repository calls. An access's
+        `operation` is the claim. A `candidate_operation` beside it is the
+        verb a gated rule computed and withheld, labelled by its
+        `candidate_note`; it is evidence, never the operation.
         """
         return await service.endpoint_icfg(
             snapshot_id, endpoint_id, detail, method_id, cross_service

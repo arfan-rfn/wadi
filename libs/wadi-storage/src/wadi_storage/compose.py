@@ -81,9 +81,10 @@ async def entity_usage_view(
     boundaries, whose accounting the fold copies into the view unchanged.
 
     ``service_id`` narrows the inputs rather than the output, so ``analyzed``
-    and ``endpoints_predating`` describe that service's endpoints: a service
-    re-analyzed after the phase is not reported as predating it because a
-    sibling was not.
+    and ``endpoints_predating`` describe that service: a service re-analyzed
+    after the phase is not reported as predating it because a sibling was
+    not, and a reporting service with no endpoints is analyzed and lists its
+    entities (review C4, live on ``ts-gateway``).
     """
     rows, models, boundaries = await asyncio.gather(
         artifacts.list_endpoint_entity_access(snapshot_id),
