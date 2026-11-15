@@ -44,23 +44,25 @@ def mongo_uri() -> Iterator[str]:
     if not _docker_available():
         pytest.skip("Docker is not available — skipping Mongo integration tests")
     container = f"wadi-test-mongo-{uuid.uuid4().hex[:8]}"
-    subprocess.run(
-        [
-            "docker",
-            "run",
-            "--detach",
-            "--rm",
-            "--name",
-            container,
-            "--publish",
-            "127.0.0.1:0:27017",
-            MONGO_IMAGE,
-        ],
-        check=True,
-        capture_output=True,
-        timeout=120,
-    )
+    # The run is inside the try: a `docker run` that times out has still
+    # created the container, and only the finally removes it.
     try:
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--detach",
+                "--rm",
+                "--name",
+                container,
+                "--publish",
+                "127.0.0.1:0:27017",
+                MONGO_IMAGE,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
         port_output = subprocess.run(
             ["docker", "port", container, "27017/tcp"],
             check=True,
@@ -110,29 +112,31 @@ def neo4j_uri() -> Iterator[str]:
     if not _docker_available():
         pytest.skip("Docker is not available — skipping Neo4j integration tests")
     container = f"wadi-test-neo4j-{uuid.uuid4().hex[:8]}"
-    subprocess.run(
-        [
-            "docker",
-            "run",
-            "--detach",
-            "--rm",
-            "--name",
-            container,
-            "--publish",
-            "127.0.0.1:0:7687",
-            "--env",
-            f"NEO4J_AUTH=neo4j/{_NEO4J_TEST_PASSWORD}",
-            "--env",
-            "NEO4J_server_memory_heap_max__size=512m",
-            "--env",
-            "NEO4J_server_memory_pagecache_size=128m",
-            NEO4J_IMAGE,
-        ],
-        check=True,
-        capture_output=True,
-        timeout=180,
-    )
+    # The run is inside the try: a `docker run` that times out has still
+    # created the container, and only the finally removes it.
     try:
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--detach",
+                "--rm",
+                "--name",
+                container,
+                "--publish",
+                "127.0.0.1:0:7687",
+                "--env",
+                f"NEO4J_AUTH=neo4j/{_NEO4J_TEST_PASSWORD}",
+                "--env",
+                "NEO4J_server_memory_heap_max__size=512m",
+                "--env",
+                "NEO4J_server_memory_pagecache_size=128m",
+                NEO4J_IMAGE,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=180,
+        )
         port_output = subprocess.run(
             ["docker", "port", container, "7687/tcp"],
             check=True,

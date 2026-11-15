@@ -105,9 +105,9 @@ async def entity_usage_view(
                 service_name=boundary.name,
                 status=_accounting_status(boundary),
                 accounting=(
-                    boundary.entity_access_accounting
-                    if boundary.kind is ServiceKind.SERVICE
-                    else None
+                    None
+                    if boundary.kind is ServiceKind.LIBRARY
+                    else boundary.entity_access_accounting
                 ),
             )
             for boundary in boundaries
@@ -120,9 +120,12 @@ def _accounting_status(boundary: ServiceBoundary) -> EntityAccountingStatus:
 
     A library has no export of its own (§5.2.14); its calls count in each
     dependent. A failed extraction and a boundary from before the phase both
-    have nothing measured, and ``extraction_error`` tells them apart.
+    have nothing measured, and ``extraction_error`` tells them apart. Only
+    ``library`` is a library: the kinds reserved for Phase 9 (``function``,
+    ``edge-worker``, ``firmware``) have exports of their own, so they report
+    or not on their accounting like a service.
     """
-    if boundary.kind is not ServiceKind.SERVICE:
+    if boundary.kind is ServiceKind.LIBRARY:
         return EntityAccountingStatus.LIBRARY
     if boundary.entity_access_accounting is not None:
         return EntityAccountingStatus.REPORTING

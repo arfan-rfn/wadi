@@ -342,6 +342,25 @@ class TestEntityUsageView:
         else:
             assert service.accounting is None
 
+    async def test_a_reserved_kind_with_accounting_reports_like_a_service(
+        self, database: WadiDatabase
+    ) -> None:
+        # Only `library` has no export of its own; a Phase 9 kind that was
+        # analyzed is not one (F3 finding).
+        repo = ArtifactRepository(database)
+        snapshot = make_snapshot(make_system())
+        worker = make_service(snapshot, "functions/thumbnail").model_copy(
+            update={
+                "kind": ServiceKind.FUNCTION,
+                "entity_access_accounting": _accounting(call_sites=0),
+            }
+        )
+        await repo.write_service_boundaries([worker])
+        view = await entity_usage_view(repo, snapshot.id)
+        [service] = view.services
+        assert service.status is EntityAccountingStatus.REPORTING
+        assert service.accounting == worker.entity_access_accounting
+
     async def test_only_reporting_services_list_their_declared_entities(
         self, database: WadiDatabase
     ) -> None:
