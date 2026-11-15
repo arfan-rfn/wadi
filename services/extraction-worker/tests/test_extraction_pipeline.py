@@ -157,13 +157,15 @@ class TestExtractionPipeline:
 
         endpoints = await artifacts.list_endpoints(snapshot.id, boundary.service_id)
         assert [e.simplified_uri for e in endpoints] == ["/pets/{?}"]
-        # The per-endpoint summary survives the store round trip.
+        # The per-endpoint summary survives the store round trip, its
+        # per-operation count (1.27.0) included.
         assert endpoints[0].entity_access == [
             EndpointEntityAccess(
                 entity="com.acme.pets.Pet",
                 data_model_id=data_model_id(boundary.service_id, "com.acme.pets.Pet"),
                 operations=[EntityOperation.READ],
                 call_sites=1,
+                call_sites_by_operation={"read": 1},
             )
         ]
 
