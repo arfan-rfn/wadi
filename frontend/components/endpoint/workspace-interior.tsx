@@ -13,6 +13,11 @@
 //   * the Selection facts moved INTO the source header (`SelectionStrip`),
 //     annotating the code rather than sitting beside it.
 //
+// The left panel reads the flow two ways (§5.2.17 UI): Calls, the call tree,
+// and Data, the entities the endpoint may touch. The switch is URL state
+// (`pane=data`, `entity=…`), so a link can open straight onto one entity with
+// its call sites lit on the canvas.
+//
 // Each side panel collapses to a labelled rail and comes back on click, so a
 // panel can be got out of the way without being lost. Below `lg` the three
 // panels become one at a time behind a segmented switcher — three columns on a
@@ -29,10 +34,14 @@ import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import { BREAKPOINT, useMediaQuery } from "@/lib/hooks/use-media-query"
 import { cn } from "@/lib/utils"
 import type { EndpointDetailView, Icfg } from "@/lib/wadi/api"
+import { deriveDataListState, entitySites } from "@/lib/wadi/entity-access"
+import type { WorkspacePane } from "@/lib/wadi/routes"
 import { sourceSelectionFor } from "@/lib/wadi/source-map"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CallTree } from "@/components/explorer/call-tree"
+import { DataList } from "@/components/explorer/data-list"
 import { FlowCanvas } from "@/components/flow/flow-canvas"
 import { EmptyState } from "@/components/shared/empty-state"
 import { SourceViewer } from "@/components/source/source-viewer"
@@ -54,11 +63,80 @@ export const browserLayoutStorage: Pick<Storage, "getItem" | "setItem"> = {
 
 const COLLAPSE_KEY = "wadi-workspace-collapsed"
 type PaneId = "tree" | "flow" | "source"
-const PANES: { id: PaneId; label: string }[] = [
-  { id: "tree", label: "Call tree" },
-  { id: "flow", label: "Flow" },
-  { id: "source", label: "Source" },
+
+/** The left panel's name follows its mode, so the rail it collapses to never
+ * names something other than what it restores. */
+function leftPaneLabel(pane: WorkspacePane): string {
+  return pane === "data" ? "Data" : "Call tree"
+}
+
+const LEFT_MODES: { id: WorkspacePane; label: string }[] = [
+  { id: "calls", label: "Calls" },
+  { id: "data", label: "Data" },
 ]
+
+function LeftPaneSwitch({
+  pane,
+  onPane,
+}: {
+  pane: WorkspacePane
+  onPane: (pane: WorkspacePane) => void
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Left panel shows"
+      className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5"
+    >
+      {LEFT_MODES.map(({ id, label }) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={pane === id}
+          onClick={() => onPane(id)}
+          className={cn(
+            "cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            pane === id
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** A failed detail read, said as a failure. The flow canvas is drawn with the
+ * endpoint's outbound calls and the source viewer is scoped to its service,
+ * so both wait on it; neither may fall through to an extraction verdict. */
+function DetailFailed({
+  error,
+  onRetry,
+}: {
+  error: Error | null
+  onRetry: () => void
+}) {
+  return (
+    <div className="space-y-1.5 p-6">
+      <p className="text-sm text-muted-foreground">
+        Could not load this endpoint
+        {error ? ` — ${error.message}` : ""}. Nothing here is a result.
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-6 px-2 text-2xs"
+        onClick={onRetry}
+      >
+        Retry
+      </Button>
+    </div>
+  )
+}
 
 function ResizeHandle() {
   return (
@@ -96,11 +174,15 @@ function useCollapsedPanes() {
 
 export function WorkspaceInterior({
   detail,
+  detailError,
+  onRetryDetail,
   icfg,
   icfgLoading,
   icfgError,
 }: {
   detail: EndpointDetailView | undefined
+  detailError: Error | null
+  onRetryDetail: () => void
   icfg: Icfg | undefined
   icfgLoading: boolean
   icfgError: Error | null
@@ -108,6 +190,8 @@ export function WorkspaceInterior({
   const storeApi = useWorkspaceStoreApi()
   const sourceTarget = useWorkspaceStore((s) => s.sourceTarget)
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId)
+  const pane = useWorkspaceStore((s) => s.pane)
+  const selectedEntity = useWorkspaceStore((s) => s.selectedEntity)
   const { collapsed, toggle } = useCollapsedPanes()
   const wide = useMediaQuery(BREAKPOINT.lg)
   const [narrowPane, setNarrowPane] = useState<PaneId>("flow")
@@ -160,13 +244,20 @@ export function WorkspaceInterior({
     [icfg, selectedNodeId]
   )
 
+  const dataState = useMemo(
+    () => deriveDataListState({ detail, error: detailError }),
+    [detail, detailError]
+  )
+
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "wadi-endpoint-workspace-v2",
     onlySaveAfterUserInteractions: true,
     storage: browserLayoutStorage,
   })
 
-  if (!detail || (icfgLoading && !icfg)) {
+  // A failed detail read renders (below) rather than holding the skeleton up
+  // forever: the Data list owes the reader its fetch-failed state.
+  if ((!detail && !detailError) || (icfgLoading && !icfg)) {
     return (
       <div className="space-y-3 p-6">
         <Skeleton className="h-8 w-96" />
@@ -175,38 +266,65 @@ export function WorkspaceInterior({
     )
   }
 
-  const treeBody = icfg ? (
-    <ScrollArea className="min-h-0 flex-1">
-      <CallTree
-        icfg={icfg}
-        selectedMethodId={selectedMethodId}
-        onSelect={(node) =>
-          storeApi.getState().selectNode(`method:${node.methodId}`)
-        }
+  const treeBody = (
+    <>
+      <LeftPaneSwitch
+        pane={pane}
+        onPane={(next) => storeApi.getState().setPane(next)}
       />
-    </ScrollArea>
-  ) : (
-    <EmptyState>No flow graph — nothing to walk.</EmptyState>
+      {pane === "data" ? (
+        <ScrollArea className="min-h-0 flex-1">
+          <DataList
+            state={dataState}
+            selectedEntity={selectedEntity}
+            sitesOf={(key) => (icfg ? entitySites(icfg, key) : [])}
+            flowAvailable={icfg !== undefined}
+            onSelectEntity={(key) => storeApi.getState().selectEntity(key)}
+            // Selecting the statement is what reveals it: the canvas opens a
+            // collapsed method and frames it, and the source panel scrolls.
+            onSelectSite={(site) =>
+              storeApi.getState().selectNode(`stmt:${site.nodeId}`)
+            }
+            onRetry={onRetryDetail}
+          />
+        </ScrollArea>
+      ) : icfg ? (
+        <ScrollArea className="min-h-0 flex-1">
+          <CallTree
+            icfg={icfg}
+            selectedMethodId={selectedMethodId}
+            onSelect={(node) =>
+              storeApi.getState().selectNode(`method:${node.methodId}`)
+            }
+          />
+        </ScrollArea>
+      ) : (
+        <EmptyState>No flow graph — nothing to walk.</EmptyState>
+      )}
+    </>
   )
 
-  const flowBody =
-    icfg && remoteEdgesView ? (
-      <FlowCanvas icfg={icfg} remoteEdges={remoteEdgesView} />
-    ) : icfgError ? (
-      // "Not fetched" and "not extracted" are different facts, and only one of
-      // them is about the code (P10).
-      <EmptyState className="p-6">
-        Could not load the flow graph — {icfgError.message}. This says nothing
-        about whether one was extracted; retry to find out.
-      </EmptyState>
-    ) : (
-      <EmptyState className="p-6">
-        No flow graph was extracted for this endpoint — the handler could not be
-        resolved into an ICFG. The coverage report says why.
-      </EmptyState>
-    )
+  const flowBody = !detail ? (
+    <DetailFailed error={detailError} onRetry={onRetryDetail} />
+  ) : icfg && remoteEdgesView ? (
+    <FlowCanvas icfg={icfg} remoteEdges={remoteEdgesView} />
+  ) : icfgError ? (
+    // "Not fetched" and "not extracted" are different facts, and only one of
+    // them is about the code (P10).
+    <EmptyState className="p-6">
+      Could not load the flow graph — {icfgError.message}. This says nothing
+      about whether one was extracted; retry to find out.
+    </EmptyState>
+  ) : (
+    <EmptyState className="p-6">
+      No flow graph was extracted for this endpoint — the handler could not be
+      resolved into an ICFG. The coverage report says why.
+    </EmptyState>
+  )
 
-  const sourceBody = (
+  const sourceBody = !detail ? (
+    <DetailFailed error={detailError} onRetry={onRetryDetail} />
+  ) : (
     <>
       {selectedNodeId ? (
         <div className="shrink-0 border-b px-2.5 py-1.5">
@@ -249,7 +367,13 @@ export function WorkspaceInterior({
           aria-label="Workspace panel"
           className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5"
         >
-          {PANES.map(({ id, label }) => (
+          {(
+            [
+              { id: "tree", label: leftPaneLabel(pane) },
+              { id: "flow", label: "Flow" },
+              { id: "source", label: "Source" },
+            ] as const
+          ).map(({ id, label }) => (
             <button
               key={id}
               role="tab"
@@ -285,7 +409,7 @@ export function WorkspaceInterior({
     >
       {collapsed.has("tree") ? (
         <PaneRail
-          label="Call tree"
+          label={leftPaneLabel(pane)}
           side="left"
           onExpand={() => toggle("tree", false)}
         />
@@ -297,7 +421,7 @@ export function WorkspaceInterior({
             className="flex min-h-0 min-w-0 flex-col"
           >
             <PaneShell
-              label="Call tree"
+              label={leftPaneLabel(pane)}
               side="left"
               onCollapse={() => toggle("tree", true)}
             >

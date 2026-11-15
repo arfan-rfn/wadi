@@ -33,6 +33,7 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { PanelHeader } from "@/components/shared/panel-header"
 
 import { AuthPane } from "./auth-pane"
+import { DataPane } from "./data-pane"
 import { EndpointRow, unreadKindsOf } from "./endpoint-list"
 import { EndpointPeek } from "./endpoint-peek"
 import { RoleLegend, rolesInSnapshot, type RoleFilter } from "./role-legend"
@@ -150,6 +151,7 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
             ["coverage", "Coverage"],
             ["map", "Map"],
             ["services", "Services"],
+            ["data", "Data"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -174,6 +176,10 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
           <span className="ml-2 text-2xs text-muted-foreground">
             who can reach what — and where the answer is withheld
           </span>
+        ) : view === "data" ? (
+          <span className="ml-2 text-2xs text-muted-foreground">
+            which endpoints may create, read, update or delete each entity
+          </span>
         ) : null}
       </div>
 
@@ -184,6 +190,10 @@ export function OverviewHome({ snapshotId }: { snapshotId: string }) {
       ) : view === "auth" ? (
         <div className="flex min-h-0 flex-1">
           <AuthPane snapshotId={snapshotId} active={view === "auth"} />
+        </div>
+      ) : view === "data" ? (
+        <div className="flex min-h-0 flex-1">
+          <DataPane snapshotId={snapshotId} active={view === "data"} />
         </div>
       ) : view === "map" ? (
         <div className="flex min-h-0 flex-1">

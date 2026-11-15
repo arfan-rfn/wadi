@@ -14,6 +14,7 @@ export const QUERY_KEYS = {
     ["remote-edges", snapshotId, serviceId] as const,
   systemGraph: (snapshotId: string) => ["system-graph", snapshotId] as const,
   systemAuth: (snapshotId: string) => ["system-auth", snapshotId] as const,
+  entityUsage: (snapshotId: string) => ["entity-usage", snapshotId] as const,
   endpointDependencies: (snapshotId: string, serviceId: string) =>
     ["endpoint-dependencies", snapshotId, serviceId] as const,
   sourceFile: (

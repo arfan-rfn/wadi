@@ -3,10 +3,12 @@ import { describe, expect, test } from "vitest"
 import {
   constrain,
   endpointPath,
+  HOME_VIEWS,
   newestSucceeded,
   parseWorkspaceParams,
   serializeWorkspaceParams,
   snapshotPath,
+  UNDETERMINED_ENTITY_KEY,
   WORKSPACE_DEFAULTS,
 } from "@/lib/wadi/routes"
 
@@ -67,6 +69,11 @@ describe("route builders (§11 Phase 2.8)", () => {
     ).toBe("/s/snap_1?view=services&service=svc_9")
   })
 
+  test("the home Data view is a known view with its own URL (§5.2.17)", () => {
+    expect(constrain("data", HOME_VIEWS, "coverage")).toBe("data")
+    expect(snapshotPath("snap_1", { view: "data" })).toBe("/s/snap_1?view=data")
+  })
+
   test("endpoint path carries workspace params", () => {
     expect(endpointPath("snap_1", "ep_a")).toBe("/s/snap_1/e/ep_a")
     expect(endpointPath("snap_1", "ep_a", { node: "n1", focus: "m_2" })).toBe(
@@ -88,6 +95,8 @@ describe("workspace params round-trip", () => {
       focus: "m_7",
       expand: ["m_1", "m_2"],
       file: "src/A.java",
+      pane: "data" as const,
+      entity: "com.acme.pets.Pet",
     }
     const query = serializeWorkspaceParams(state)
     expect(parseWorkspaceParams(query)).toEqual({
@@ -123,6 +132,69 @@ describe("workspace params round-trip", () => {
       new URLSearchParams("lens=hologram&tab=nope&node=stmt:n1")
     )
     expect(parsed).toEqual({ ...WORKSPACE_DEFAULTS, node: "stmt:n1" })
+  })
+})
+
+describe("the Data pane in the URL (R1-26, E6)", () => {
+  test("absent pane means the call tree, and writes nothing", () => {
+    const parsed = parseWorkspaceParams(new URLSearchParams())
+    expect(parsed.pane).toBe("calls")
+    expect(parsed.entity).toBeNull()
+    expect(
+      serializeWorkspaceParams({ pane: "calls", entity: null }).toString()
+    ).toBe("")
+  })
+
+  test("pane=data and a qualified entity name round-trip", () => {
+    const query = serializeWorkspaceParams({
+      pane: "data",
+      entity: "com.acme.pets.Pet",
+    })
+    expect(query.toString()).toBe("pane=data&entity=com.acme.pets.Pet")
+    expect(parseWorkspaceParams(query)).toMatchObject({
+      pane: "data",
+      entity: "com.acme.pets.Pet",
+    })
+  })
+
+  test("the undetermined row round-trips as ~undetermined", () => {
+    const query = serializeWorkspaceParams({
+      pane: "data",
+      entity: UNDETERMINED_ENTITY_KEY,
+    })
+    expect(query.get("entity")).toBe("~undetermined")
+    expect(parseWorkspaceParams(query).entity).toBe(UNDETERMINED_ENTITY_KEY)
+  })
+
+  test("an entity is only meaningful in the Data pane (one form only)", () => {
+    // E6: the selected entity belongs to the Data list. A URL that names one
+    // while showing the call tree would be a second spelling of the same
+    // state, so it neither parses nor serializes.
+    expect(
+      parseWorkspaceParams(new URLSearchParams("entity=com.acme.pets.Pet"))
+        .entity
+    ).toBeNull()
+    expect(
+      serializeWorkspaceParams({
+        pane: "calls",
+        entity: "com.acme.pets.Pet",
+      }).toString()
+    ).toBe("")
+  })
+
+  test("an unknown pane value falls back to the call tree", () => {
+    expect(
+      parseWorkspaceParams(new URLSearchParams("pane=entities")).pane
+    ).toBe("calls")
+  })
+
+  test("the endpoint path deep-links straight into a selected entity", () => {
+    expect(
+      endpointPath("snap_1", "ep_a", {
+        pane: "data",
+        entity: "com.acme.pets.Pet",
+      })
+    ).toBe("/s/snap_1/e/ep_a?pane=data&entity=com.acme.pets.Pet")
   })
 })
 

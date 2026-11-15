@@ -14,7 +14,7 @@ import { IdentityHeader } from "./identity-header"
 import { WorkspaceInterior } from "./workspace-interior"
 import {
   createWorkspaceStore,
-  expandToParams,
+  workspaceParamsOf,
   WorkspaceStoreContext,
 } from "./workspace-store"
 
@@ -37,12 +37,7 @@ export function EndpointWorkspace({
   useEffect(
     () =>
       store.subscribe((state) => {
-        writeWorkspaceParams({
-          node: state.selectedNodeId,
-          focus: state.focusMethodId,
-          expand: expandToParams(state.expand),
-          file: state.sourceTarget?.file ?? null,
-        })
+        writeWorkspaceParams(workspaceParamsOf(state))
       }),
     [store]
   )
@@ -83,6 +78,8 @@ export function EndpointWorkspace({
         ) : null}
         <WorkspaceInterior
           detail={detail.data}
+          detailError={detail.isError ? (detail.error as Error) : null}
+          onRetryDetail={() => void detail.refetch()}
           icfg={icfg.data}
           icfgLoading={detail.data?.icfg_available !== false && icfg.isPending}
           // A failed fetch is not an extraction result. Without this the
