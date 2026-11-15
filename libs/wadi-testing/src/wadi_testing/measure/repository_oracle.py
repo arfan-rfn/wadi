@@ -22,6 +22,32 @@ What it does, over comment- and literal-stripped text:
 * **Call sites.** Every `<name>.<method>(` on those variables, lambda bodies
   included (`in_lambda`), and every unqualified or `this.` call inside a
   repository interface's `default` method (golden 32).
+* **Entity.** The first type argument of the Spring Data marker the
+  receiver's type reaches, bound by position through each project interface
+  on the way (`TicketRepository extends KeyedRepository<String, Ticket>`,
+  `KeyedRepository<ID, E> extends JpaRepository<E, ID>` names `Ticket`), and
+  through the variable's own type arguments (`BaseRepository<Issue> issues`).
+  Recorded as a simple name. A type variable that nothing binds, a raw type
+  and a wildcard leave it None (unbound), never the letter as a class.
+* **Operation.** Read from the call's name and its declaration, with no
+  table shared with wadi (review D6). The declaration is the one nearest the
+  receiver's type, sub-interface first. In order:
+
+  - a `default` method, or a method of a fragment interface some project
+    class implements, is `unknown`: its body is project code;
+  - `@Query`, `@NativeQuery` or `@Modifying` is `query`, a verb the oracle
+    does not read because it lives in query text;
+  - any other Spring Data or Hibernate annotation outside `VERB_NEUTRAL` is
+    `unknown`;
+  - otherwise the name decides by Spring Data's subject-prefix rule, where a
+    prefix counts only where the name ends or continues with an uppercase
+    letter: `flush` is `none`, `insert` is `create`, `save*` is
+    `create-or-update`, `delete*` and `remove*` are `delete`, `find`, `get`,
+    `read`, `query`, `search`, `stream`, `count` and `exists` are `read`, and
+    any other name is `unknown`.
+
+  Two declarations at the nearest level that read differently (overloads)
+  give `unknown`, because the oracle does not match arity.
 * **Skipped trees.** `src/test/**`, `.evosuite-work/**`, and `target/**` /
   `build/**` outside a `src` tree.
 
@@ -39,6 +65,13 @@ is opened by hand, so it stays simple. What it does NOT see:
   are listed apart in `method_references` rather than dropped.
 * Repositories declared outside the source root (a jar), interfaces made
   repositories by `@RepositoryDefinition`, and any non-Java source.
+* Named queries (`@NamedQuery` on an entity, `orm.xml`): a method they
+  implement reads by its name here, so it shows up as a one-sided query in
+  the reconciliation.
+* Meta-annotations: a project annotation is neutral even when it carries
+  `@Query`.
+* Type variables of a generic method declared without a modifier
+  (`<T> void m(...)`): its `T` is read as a class name.
 
 And what it over-reads, each of which shows up as an oracle-only site:
 
@@ -60,6 +93,7 @@ import sys
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -103,7 +137,75 @@ SPRING_DATA_MARKERS = frozenset(
 )
 
 #: The JSON document's own version, so a stored oracle run says what wrote it.
-ORACLE_FORMAT = "1"
+#: 2 added each site's `entity` and `operation`; a format-1 run loads with both
+#: None, which the reconciler reports as not read.
+ORACLE_FORMAT = "2"
+
+
+class OracleOperation(StrEnum):
+    """What the oracle reads a repository call to do (see the module docstring).
+
+    Not wadi's vocabulary: ``none`` and ``query`` are the oracle's own words
+    for a call it reads as no entity operation and a verb it does not read.
+    """
+
+    CREATE = "create"
+    READ = "read"
+    DELETE = "delete"
+    CREATE_OR_UPDATE = "create-or-update"
+    NONE = "none"
+    """`flush`: no entity operation."""
+    QUERY = "query"
+    """An annotated query: the verb is in the query text, which is not read."""
+    UNKNOWN = "unknown"
+
+
+#: Method names read whole, before any prefix: `saveAndFlush` is a save, and
+#: `insertAll` is not `insert`.
+EXACT_NAMES = {"flush": OracleOperation.NONE, "insert": OracleOperation.CREATE}
+
+#: Spring Data's derived-method subject prefixes and the save family. Written
+#: from the Spring Data reference, not copied from wadi's table, so a word one
+#: side lacks is a disagreement rather than a shared blind spot.
+NAME_PREFIXES = (
+    ("save", OracleOperation.CREATE_OR_UPDATE),
+    ("delete", OracleOperation.DELETE),
+    ("remove", OracleOperation.DELETE),
+    ("find", OracleOperation.READ),
+    ("get", OracleOperation.READ),
+    ("read", OracleOperation.READ),
+    ("query", OracleOperation.READ),
+    ("search", OracleOperation.READ),
+    ("stream", OracleOperation.READ),
+    ("count", OracleOperation.READ),
+    ("exists", OracleOperation.READ),
+)
+
+#: Annotations that put the verb in query text.
+QUERY_ANNOTATIONS = frozenset({"Query", "NativeQuery", "Modifying"})
+
+#: Spring Data annotations that tune how a method runs and never change what
+#: it does to the entity: locking, hints, fetch graphs, cursor and read
+#: options, highlighting, REST exposure. Every other Spring Data or Hibernate
+#: annotation makes the operation `unknown`.
+VERB_NEUTRAL = frozenset(
+    {
+        "Lock",
+        "QueryHints",
+        "EntityGraph",
+        "Meta",
+        "Tailable",
+        "ReadPreference",
+        "Collation",
+        "Hint",
+        "Highlight",
+        "SourceFilters",
+        "RestResource",
+    }
+)
+
+#: Only Spring Data and Hibernate act on a repository method's annotations.
+_PERSISTENCE_PACKAGES = ("org.springframework.data.", "org.hibernate.")
 
 _SPRING_DATA_PACKAGE = "org.springframework.data."
 _BUILD_FILES = ("pom.xml", "build.gradle", "build.gradle.kts")
@@ -120,6 +222,14 @@ _TRAILING_NEW = re.compile(r"(?<![\w$])new\s*$")
 _SWITCH_RULE = re.compile(r"\s*(?:case|default)\b")
 _ARROW = re.compile(r"->")
 _UNQUALIFIED_CALL = re.compile(rf"(?<![\w$.])(this\s*\.\s*)?({_IDENT})\s*\(")
+_ANNOTATION_NAME = re.compile(rf"\s*({_IDENT}(?:\s*\.\s*{_IDENT})*)")
+_IMPLEMENTS = re.compile(
+    rf"(?<![\w$@])(?:class|record|enum)\s+{_IDENT}[^{{;]*?\bimplements\b([^{{]*)\{{"
+)
+_GENERIC_DECLARATION = re.compile(
+    rf"(?<![\w$@])(?:(?:class|interface|record)\s+{_IDENT}\s*"
+    r"|(?:public|protected|private|static|final|abstract|default|synchronized|native)\s+)<"
+)
 
 #: Words a `name(` can follow that are not a method name.
 _NOT_A_METHOD = frozenset(
@@ -159,6 +269,11 @@ class RepositoryCallSite:
     enclosing_class: str | None
     enclosing_method: str | None
     in_lambda: bool
+    #: Simple name of the entity the repository's type argument names; None
+    #: when unbound, and on a format-1 run.
+    entity: str | None = None
+    #: None only on a format-1 run, which did not read it.
+    operation: OracleOperation | None = None
 
 
 @dataclass(frozen=True)
@@ -175,6 +290,12 @@ class OracleReport:
             "in_lambda": sum(site.in_lambda for site in self.sites),
             "method_references": len(self.method_references),
             "by_module": dict(sorted(Counter(site.module for site in self.sites).items())),
+            "entity_unbound": sum(site.entity is None for site in self.sites),
+            "by_operation": dict(
+                sorted(
+                    Counter(site.operation.value for site in self.sites if site.operation).items()
+                )
+            ),
         }
 
 
@@ -197,8 +318,39 @@ class _JavaFile:
     static_imports: set[str]
 
 
-#: (offset, receiver, repository, method) of one call, before its context.
-type _Call = tuple[int, str, str, str]
+#: Type arguments as written; None in a position is an unbound one.
+type _TypeArgs = tuple[str | None, ...]
+
+
+@dataclass(frozen=True)
+class _TypeRef:
+    """A type as written: its name, and its arguments (None = raw or not generic)."""
+
+    name: str
+    args: _TypeArgs | None
+
+
+@dataclass(frozen=True)
+class _Member:
+    """One method an interface declares, with the annotations before its name."""
+
+    name: str
+    annotations: tuple[str, ...]
+    is_default: bool
+
+
+@dataclass(frozen=True)
+class _InterfaceDecl:
+    java: _JavaFile
+    name: str
+    params: tuple[str, ...]
+    parents: tuple[_TypeRef, ...]
+    members: tuple[_Member, ...]
+
+
+#: (offset, receiver, repository, method, receiver type arguments) of one
+#: call, before its context.
+type _Call = tuple[int, str, str, str, _TypeArgs | None]
 
 
 def scan(source_root: Path) -> OracleReport:
@@ -209,14 +361,16 @@ def scan(source_root: Path) -> OracleReport:
         for path in sorted(root.rglob("*.java"))
         if not _excluded(path.relative_to(root).parts)
     ]
-    repositories = _repository_interfaces(_interface_parents(files))
+    interfaces = _interfaces(files)
+    repositories = _repository_interfaces(interfaces)
+    reader = _Reader(interfaces, repositories, _implemented_interfaces(files))
 
     sites: list[RepositoryCallSite] = []
     references: list[RepositoryCallSite] = []
     modules: dict[Path, str] = {}
     for java in files:
         module = _module_of(java.path.parent, root, modules)
-        file_sites, file_references = _sites_in(java, repositories, module)
+        file_sites, file_references = _sites_in(java, reader, module)
         sites.extend(file_sites)
         references.extend(file_references)
     return OracleReport(
@@ -286,20 +440,48 @@ def to_json(report: OracleReport) -> dict[str, Any]:
 
 
 def load_sites(path: Path) -> list[RepositoryCallSite]:
-    """The sites of a stored oracle run (the reconciler's input)."""
+    """The sites of a stored oracle run (the reconciler's input).
+
+    A format-1 run has no `entity` or `operation` key; both load as None.
+    """
     document = json.loads(path.read_text())
-    return [RepositoryCallSite(**row) for row in document["sites"]]
+    sites: list[RepositoryCallSite] = []
+    for row in document["sites"]:
+        operation = row.pop("operation", None)
+        sites.append(
+            RepositoryCallSite(
+                **row, operation=OracleOperation(operation) if operation is not None else None
+            )
+        )
+    return sites
 
 
 def describe(site: RepositoryCallSite) -> str:
-    """One line per site: where it is, what it calls, and from where."""
+    """One line per site: where it is, what it calls, from where, and its reading."""
     receiver = f"{site.receiver}." if site.receiver else ""
     where = ".".join(part for part in (site.enclosing_class, site.enclosing_method) if part)
     lambda_mark = "  [lambda]" if site.in_lambda else ""
+    operation = site.operation.value if site.operation is not None else "?"
     return (
         f"{site.file}:{site.line}  {receiver}{site.method}()  "
         f"<{site.repository}>  in {where or '?'}{lambda_mark}"
+        f"  entity={site.entity or '-'} op={operation}"
     )
+
+
+def name_operation(method: str) -> OracleOperation:
+    """The operation a method name reads as, by Spring Data's subject-prefix rule.
+
+    A prefix counts only where the name ends there or continues with an
+    uppercase letter, so `deleted` is not a delete and `finder` not a read.
+    """
+    exact = EXACT_NAMES.get(method)
+    if exact is not None:
+        return exact
+    for prefix, operation in NAME_PREFIXES:
+        if method == prefix or (method.startswith(prefix) and method[len(prefix)].isupper()):
+            return operation
+    return OracleOperation.UNKNOWN
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -324,6 +506,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         f"sites: {totals['sites']}   in_lambda: {totals['in_lambda']}"
         f"   method_references: {totals['method_references']}"
+        f"   entity unbound: {totals['entity_unbound']}"
+    )
+    print(
+        "operations: "
+        + "   ".join(f"{name} {count}" for name, count in totals["by_operation"].items())
     )
     for module, count in totals["by_module"].items():
         print(f"  {module}: {count}")
@@ -361,50 +548,301 @@ def _load(path: Path, root: Path) -> _JavaFile:
     return _JavaFile(path, path.relative_to(root).as_posix(), text, imports, wildcards, static)
 
 
-def _interface_parents(files: list[_JavaFile]) -> dict[str, list[tuple[_JavaFile, str]]]:
-    """Simple interface name -> every (declaring file, parent as written)."""
-    parents: dict[str, list[tuple[_JavaFile, str]]] = {}
+def _interfaces(files: list[_JavaFile]) -> dict[str, list[_InterfaceDecl]]:
+    """Simple interface name -> every declaration of it, in file order."""
+    declarations: dict[str, list[_InterfaceDecl]] = {}
     for java in files:
         for match in _INTERFACE.finditer(java.text):
             header_end = java.text.find("{", match.end())
             if header_end < 0:
                 continue
-            declared = parents.setdefault(match.group(1), [])
-            for parent in _extends_clause(java.text[match.end() : header_end]):
-                declared.append((java, parent))
-    return parents
+            params, parents = _interface_header(java.text[match.end() : header_end])
+            body_end = _balanced_end(java.text, header_end, "{", "}") - 1
+            declarations.setdefault(match.group(1), []).append(
+                _InterfaceDecl(
+                    java=java,
+                    name=match.group(1),
+                    params=params,
+                    parents=parents,
+                    members=tuple(_members(java.text, header_end + 1, body_end)),
+                )
+            )
+    return declarations
 
 
-def _extends_clause(header: str) -> list[str]:
-    """The parents of `interface X<...> extends A<..>, b.B permits ...`, as written."""
+def _interface_header(header: str) -> tuple[tuple[str, ...], tuple[_TypeRef, ...]]:
+    """(type parameters, parents) of `interface X<...> extends A<..>, b.B permits ...`."""
     rest = header.strip()
+    params: tuple[str, ...] = ()
     if rest.startswith("<"):
-        rest = rest[_balanced_end(rest, 0, "<", ">") :].strip()
+        end = _balanced_end(rest, 0, "<", ">")
+        params = _type_parameter_names(rest[1 : end - 1])
+        rest = rest[end:].strip()
     if not rest.startswith("extends"):
-        return []
+        return params, ()
     rest = re.split(r"\bpermits\b", rest[len("extends") :], maxsplit=1)[0]
-    return [part.split("<", 1)[0].strip() for part in _top_level_split(rest) if part.strip()]
+    return params, tuple(_type_ref(part) for part in _top_level_split(rest) if part.strip())
 
 
-def _repository_interfaces(parents: dict[str, list[tuple[_JavaFile, str]]]) -> set[str]:
+def _type_ref(written: str) -> _TypeRef:
+    text = written.strip()
+    opening = text.find("<")
+    if opening < 0:
+        return _TypeRef(text, None)
+    end = _balanced_end(text, opening, "<", ">")
+    args = tuple(part.strip() for part in _top_level_split(text[opening + 1 : end - 1]))
+    return _TypeRef(text[:opening].strip(), args)
+
+
+def _type_parameter_names(text: str) -> tuple[str, ...]:
+    """`ID, E extends Comparable<E>` -> ("ID", "E")."""
+    names: list[str] = []
+    for part in _top_level_split(text):
+        words = part.split()
+        if words:
+            names.append(words[0])
+    return tuple(names)
+
+
+def _members(text: str, start: int, end: int) -> list[_Member]:
+    """The methods declared directly in the body ``text[start:end]``.
+
+    A member ends at a `;` (an abstract method, a constant) or at a `{` that
+    opens its body (a default method, a nested type), outside any parentheses
+    so an annotation's `{...}` array does not end it. Nested bodies are skipped.
+    """
+    members: list[_Member] = []
+    segment = index = start
+    depth = 0
+    while index < end:
+        char = text[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif depth == 0 and char in ";{}":
+            member = _member(text[segment:index]) if char != "}" else None
+            if member is not None:
+                members.append(member)
+            if char == "{":
+                index = _balanced_end(text, index, "{", "}") - 1
+            segment = index + 1
+        index += 1
+    return members
+
+
+def _member(header: str) -> _Member | None:
+    """A method declaration's name, annotations and `default`; None for anything else.
+
+    Annotations are read only before the parameter list, so a parameter's
+    `@Param` is not the method's.
+    """
+    annotations: list[str] = []
+    kept: list[str] = []
+    position = 0
+    while True:
+        at = header.find("@", position)
+        chunk = header[position:] if at < 0 else header[position:at]
+        if at < 0 or "(" in chunk:
+            kept.append(header[position:])
+            break
+        kept.append(chunk)
+        name = _ANNOTATION_NAME.match(header, at + 1)
+        if name is None:
+            position = at + 1
+            continue
+        written = re.sub(r"\s+", "", name.group(1))
+        if written == "interface":
+            return None  # an annotation type, not a method
+        annotations.append(written)
+        position = name.end()
+        while position < len(header) and header[position].isspace():
+            position += 1
+        if position < len(header) and header[position] == "(":
+            position = _balanced_end(header, position, "(", ")")
+    rest = "".join(kept)
+    opening = rest.find("(")
+    if opening < 0:
+        return None
+    before = rest[:opening].rstrip()
+    if "=" in before:
+        return None  # a constant whose initializer calls something
+    name = _TRAILING_IDENT.search(before)
+    if name is None or name.group(1) in _NOT_A_METHOD:
+        return None
+    return _Member(name.group(1), tuple(annotations), bool(_DEFAULT_MODIFIER.search(before)))
+
+
+def _implemented_interfaces(files: list[_JavaFile]) -> frozenset[str]:
+    """Simple names of the interfaces some project class implements."""
+    names: set[str] = set()
+    for java in files:
+        for match in _IMPLEMENTS.finditer(java.text):
+            names.update(
+                part.split("<", 1)[0].strip().rsplit(".", 1)[-1]
+                for part in _top_level_split(match.group(1))
+                if part.strip()
+            )
+    return frozenset(names)
+
+
+def _repository_interfaces(interfaces: dict[str, list[_InterfaceDecl]]) -> set[str]:
     resolved: dict[str, bool] = {}
 
     def reaches_marker(name: str, seen: frozenset[str]) -> bool:
         if name in resolved:
             return resolved[name]
         answer = any(
-            _is_spring_marker(java, parent)
+            _is_spring_marker(declaration.java, parent.name)
             or (
-                (simple := parent.rsplit(".", 1)[-1]) in parents
+                (simple := parent.name.rsplit(".", 1)[-1]) in interfaces
                 and simple not in seen
                 and reaches_marker(simple, seen | {simple})
             )
-            for java, parent in parents[name]
+            for declaration in interfaces[name]
+            for parent in declaration.parents
         )
         resolved[name] = answer
         return answer
 
-    return {name for name in parents if reaches_marker(name, frozenset({name}))}
+    return {name for name in interfaces if reaches_marker(name, frozenset({name}))}
+
+
+class _Reader:
+    """Reads one call's entity and operation from the project's interfaces."""
+
+    def __init__(
+        self,
+        interfaces: dict[str, list[_InterfaceDecl]],
+        repositories: set[str],
+        implemented: frozenset[str],
+    ) -> None:
+        self.interfaces = interfaces
+        self.repositories = repositories
+        self.implemented = implemented
+
+    def entity(
+        self,
+        written: str,
+        args: _TypeArgs | None,
+        java: _JavaFile,
+        seen: frozenset[str] = frozenset(),
+    ) -> str | None:
+        """The entity `written<args>` names: its marker's first type argument."""
+        if _is_spring_marker(java, written):
+            return _entity_name(args[0]) if args else None
+        simple = written.rsplit(".", 1)[-1]
+        if simple in seen or simple not in self.repositories:
+            return None
+        for declaration in self.interfaces.get(simple, []):
+            bound = args if args is not None and len(args) == len(declaration.params) else None
+            # A raw reference (`BaseRepository repo`) binds no parameter.
+            env: dict[str, str | None] = {
+                param: bound[index] if bound is not None else None
+                for index, param in enumerate(declaration.params)
+            }
+            for parent in declaration.parents:
+                parent_args = (
+                    None
+                    if parent.args is None
+                    else tuple(
+                        env[arg] if arg is not None and arg in env else arg for arg in parent.args
+                    )
+                )
+                if _is_spring_marker(declaration.java, parent.name):
+                    return _entity_name(parent_args[0]) if parent_args else None
+                if parent.name.rsplit(".", 1)[-1] in self.repositories:
+                    return self.entity(parent.name, parent_args, declaration.java, seen | {simple})
+        return None
+
+    def operation(self, repository: str, method: str, java: _JavaFile) -> OracleOperation:
+        """The operation of `repository.method(...)`, from its nearest declaration and name."""
+        if _is_spring_marker(java, repository):
+            return name_operation(method)
+        readings = {
+            self._declared(declaration, member)
+            for declaration, member in self._nearest(repository.rsplit(".", 1)[-1], method)
+        }
+        operations = {name_operation(method) if r is None else r for r in readings}
+        if not operations:
+            return name_operation(method)
+        return operations.pop() if len(operations) == 1 else OracleOperation.UNKNOWN
+
+    def _nearest(self, repository: str, method: str) -> list[tuple[_InterfaceDecl, _Member]]:
+        """Every declaration of ``method`` at the nearest inheritance distance."""
+        frontier, seen = [repository], {repository}
+        while frontier:
+            found = [
+                (declaration, member)
+                for name in frontier
+                for declaration in self.interfaces.get(name, [])
+                for member in declaration.members
+                if member.name == method
+            ]
+            if found:
+                return found
+            following: list[str] = []
+            for name in frontier:
+                for declaration in self.interfaces.get(name, []):
+                    for parent in declaration.parents:
+                        simple = parent.name.rsplit(".", 1)[-1]
+                        if (
+                            simple in self.interfaces
+                            and simple not in seen
+                            and not _is_spring_marker(declaration.java, parent.name)
+                        ):
+                            seen.add(simple)
+                            following.append(simple)
+            frontier = following
+        return []
+
+    def _declared(self, declaration: _InterfaceDecl, member: _Member) -> OracleOperation | None:
+        """What a declaration says about the verb; None when the name decides."""
+        if member.is_default:
+            return OracleOperation.UNKNOWN
+        if declaration.name not in self.repositories and declaration.name in self.implemented:
+            return OracleOperation.UNKNOWN  # a fragment: Spring Data runs its Impl class
+        persistence = {
+            written.rsplit(".", 1)[-1]
+            for written in member.annotations
+            if _is_persistence_annotation(declaration.java, written)
+        }
+        if persistence & QUERY_ANNOTATIONS:
+            return OracleOperation.QUERY
+        if persistence - VERB_NEUTRAL:
+            return OracleOperation.UNKNOWN
+        return None
+
+
+def _entity_name(arg: str | None) -> str | None:
+    """The simple name a type argument names; None for a wildcard or nothing."""
+    if arg is None:
+        return None
+    text = arg.strip()
+    if not text or text.startswith("?"):
+        return None
+    base = text.split("<", 1)[0].strip()
+    return base.rsplit(".", 1)[-1] or None
+
+
+def _is_persistence_annotation(java: _JavaFile, written: str) -> bool:
+    """Whether an annotation as written in ``java`` is Spring Data's or Hibernate's."""
+    if "." in written:
+        return written.startswith(_PERSISTENCE_PACKAGES)
+    imported = java.imports.get(written)
+    if imported is not None:
+        return imported.startswith(_PERSISTENCE_PACKAGES)
+    return any(f"{package}.".startswith(_PERSISTENCE_PACKAGES) for package in java.wildcard_imports)
+
+
+def _type_variables(text: str) -> frozenset[str]:
+    """Type parameters a file declares on its types and modifier-led generic methods."""
+    names: set[str] = set()
+    for match in _GENERIC_DECLARATION.finditer(text):
+        opening = match.end() - 1
+        end = _balanced_end(text, opening, "<", ">")
+        names.update(_type_parameter_names(text[opening + 1 : end - 1]))
+    return frozenset(names)
 
 
 def _is_spring_marker(java: _JavaFile, written: str) -> bool:
@@ -421,11 +859,11 @@ def _is_spring_marker(java: _JavaFile, written: str) -> bool:
 
 
 def _sites_in(
-    java: _JavaFile, repositories: set[str], module: str
+    java: _JavaFile, reader: _Reader, module: str
 ) -> tuple[list[RepositoryCallSite], list[RepositoryCallSite]]:
     """(call sites, method references) in one file."""
     text = java.text
-    declarations = _repository_variables(java, repositories)
+    declarations = _repository_variables(java, reader.repositories)
     blocks = _blocks(text)
     calls: list[_Call] = []
     references: list[_Call] = []
@@ -438,16 +876,25 @@ def _sites_in(
             name, separator, method = match.group(1), match.group(2), match.group(3)
             if separator == "." and match.group(4) is None:
                 continue  # a field read, `repo.x`, not a call
-            entry = (match.start(), name, _declared_type(declarations, name, match.start()), method)
+            _, _, repository, args = _declared_type(declarations, name, match.start())
+            entry = (match.start(), name, repository, method, args)
             (calls if separator == "." else references).append(entry)
-    calls.extend(_implicit_receiver_calls(java, blocks, repositories))
+    calls.extend(_implicit_receiver_calls(java, blocks, reader.repositories))
     if not calls and not references:
         return [], []
     lambdas = _lambda_bodies(text, blocks)
     lines = _line_starts(text)
+    type_variables = _type_variables(text)
 
     def record(call: _Call) -> RepositoryCallSite:
-        offset, receiver, repository, method = call
+        offset, receiver, repository, method, written_args = call
+        # A type variable of this file (`BaseRepository<E>` inside a class
+        # generic in E) binds nothing here: it is unbound, not a class `E`.
+        args = (
+            None
+            if written_args is None
+            else tuple(None if arg in type_variables else arg for arg in written_args)
+        )
         return RepositoryCallSite(
             module=module,
             file=java.relative,
@@ -458,9 +905,17 @@ def _sites_in(
             enclosing_class=_innermost(blocks, offset, "type"),
             enclosing_method=_innermost(blocks, offset, "method"),
             in_lambda=any(start <= offset < end for start, end in lambdas),
+            entity=reader.entity(repository, args, java),
+            operation=reader.operation(repository, method, java),
         )
 
-    return [record(c) for c in sorted(calls)], [record(r) for r in sorted(references)]
+    def by_offset(call: _Call) -> tuple[int, str, str, str]:
+        return call[:4]
+
+    return (
+        [record(c) for c in sorted(calls, key=by_offset)],
+        [record(r) for r in sorted(references, key=by_offset)],
+    )
 
 
 def _implicit_receiver_calls(
@@ -488,31 +943,38 @@ def _implicit_receiver_calls(
                 continue
             if not this and _TRAILING_NEW.search(body, 0, match.start()):
                 continue  # `new Order(...)` constructs, it does not call
-            found.append((method.start + match.start(), "this" if this else "", owner.name, name))
+            found.append(
+                (method.start + match.start(), "this" if this else "", owner.name, name, None)
+            )
     return found
 
 
-def _repository_variables(java: _JavaFile, repositories: set[str]) -> list[tuple[int, str, str]]:
-    """(offset, variable, repository simple name) for each repository-typed declaration."""
+#: (offset, variable, repository simple name, its type arguments as written).
+type _Declaration = tuple[int, str, str, _TypeArgs | None]
+
+
+def _repository_variables(java: _JavaFile, repositories: set[str]) -> list[_Declaration]:
+    """One entry for each repository-typed declaration in ``java``."""
     candidates = sorted(repositories | SPRING_DATA_MARKERS, key=lambda n: (-len(n), n))
     declaration = re.compile(
         rf"(?<![\w$])({'|'.join(map(re.escape, candidates))})"
-        rf"\s*(?:<[^;{{}}()]*?>)?\s*(?:\[\s*\]\s*)*\s({_IDENT})\s*(?=[;=,):])"
+        rf"\s*(<[^;{{}}()]*?>)?\s*(?:\[\s*\]\s*)*\s({_IDENT})\s*(?=[;=,):])"
     )
-    found: list[tuple[int, str, str]] = []
+    found: list[_Declaration] = []
     for match in declaration.finditer(java.text):
         type_name = match.group(1)
         if type_name in repositories or _is_spring_marker(java, type_name):
-            found.append((match.start(), match.group(2), type_name))
+            args = _type_ref(type_name + match.group(2)).args if match.group(2) else None
+            found.append((match.start(), match.group(3), type_name, args))
     return found
 
 
-def _declared_type(declarations: list[tuple[int, str, str]], name: str, offset: int) -> str:
+def _declared_type(declarations: list[_Declaration], name: str, offset: int) -> _Declaration:
     """The nearest declaration of ``name`` before ``offset``, else the first after."""
     before = [d for d in declarations if d[1] == name and d[0] <= offset]
     if before:
-        return before[-1][2]
-    return next(d[2] for d in declarations if d[1] == name)
+        return before[-1]
+    return next(d for d in declarations if d[1] == name)
 
 
 def _blocks(text: str) -> list[_Block]:
