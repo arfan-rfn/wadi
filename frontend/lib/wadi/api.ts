@@ -6,6 +6,7 @@ import type { EndpointDependenciesView } from "@/lib/generated/endpoint_dependen
 import type { EndpointDetailView } from "@/lib/generated/endpoint_detail.schema"
 import type { EndpointSummary } from "@/lib/generated/endpoint_summary.schema"
 import type { Endpoint } from "@/lib/generated/endpoint.schema"
+import type { EntityUsageView } from "@/lib/generated/entity_usage.schema"
 import type { Icfg } from "@/lib/generated/icfg.schema"
 import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import type { ServiceSummary } from "@/lib/generated/service_summary.schema"
@@ -71,6 +72,10 @@ export const wadiApi = {
     ),
   systemAuth: (snapshotId: string) =>
     get<SystemAuthView>(`/api/v1/snapshots/${seg(snapshotId)}/auth`),
+  // Which endpoints may create, read, update or delete each entity (§5.2.17),
+  // one read for the whole snapshot.
+  entityUsage: (snapshotId: string) =>
+    get<EntityUsageView>(`/api/v1/snapshots/${seg(snapshotId)}/entities`),
   remoteEdges: (snapshotId: string, serviceId: string) =>
     get<RemoteEdgesView>(
       `/api/v1/snapshots/${seg(snapshotId)}/services/${seg(serviceId)}/remote-edges`
@@ -112,6 +117,7 @@ export type {
   Endpoint,
   EndpointSummary,
   EndpointDetailView,
+  EntityUsageView,
   Icfg,
   RemoteEdgesView,
   ServiceSummary,

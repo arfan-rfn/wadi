@@ -3,7 +3,13 @@
 // query params written with history.replaceState (zero re-renders — the URL
 // is an output of state after the initial read). Lens flips use pushState so
 
-export const HOME_VIEWS = ["coverage", "map", "auth", "services"] as const
+export const HOME_VIEWS = [
+  "coverage",
+  "map",
+  "auth",
+  "services",
+  "data",
+] as const
 export type HomeView = (typeof HOME_VIEWS)[number]
 
 /**
@@ -44,14 +50,28 @@ export function endpointPath(
   return `/s/${snapshotId}/e/${endpointId}${query ? `?${query}` : ""}`
 }
 
+/** What the workspace's left pane shows (§5.2.17 UI): the call tree, or the
+ * entities the endpoint may touch. Absent from the URL = the call tree. */
+export const WORKSPACE_PANES = ["calls", "data"] as const
+export type WorkspacePane = (typeof WORKSPACE_PANES)[number]
+
+/** The `entity=` value of the Data list's "entity not determined" row. Any
+ * other entity is named by its qualified type name, and only by that, never
+ * also by its `dm_` id (E6). `~` cannot begin a Java type name, so the two
+ * spellings cannot collide. */
+export const UNDETERMINED_ENTITY_KEY = "~undetermined"
+
 /** Deep-linkable workspace state: the shareable subset of the store.
  * `expand` is the expanded-method set — "all" | "none" | explicit ids;
- * null = the default (entry handler only). */
+ * null = the default (entry handler only). `entity` is the selected Data-list
+ * row: a qualified type name or {@link UNDETERMINED_ENTITY_KEY}. */
 export interface WorkspaceParams {
   node: string | null
   focus: string | null
   expand: "all" | "none" | string[] | null
   file: string | null
+  pane: WorkspacePane
+  entity: string | null
 }
 
 export const WORKSPACE_DEFAULTS: WorkspaceParams = {
@@ -59,10 +79,13 @@ export const WORKSPACE_DEFAULTS: WorkspaceParams = {
   focus: null,
   expand: null,
   file: null,
+  pane: "calls",
+  entity: null,
 }
 
 export function parseWorkspaceParams(params: URLSearchParams): WorkspaceParams {
   const rawExpand = params.get("expand")
+  const pane = constrain(params.get("pane"), WORKSPACE_PANES, "calls")
   return {
     node: params.get("node"),
     focus: params.get("focus"),
@@ -73,6 +96,10 @@ export function parseWorkspaceParams(params: URLSearchParams): WorkspaceParams {
           ? rawExpand
           : rawExpand.split(",").filter(Boolean),
     file: params.get("file"),
+    pane,
+    // A selected entity is a Data-list fact; read beside the call tree it
+    // would be a second spelling of the same state (E6).
+    entity: pane === "data" ? params.get("entity") || null : null,
   }
 }
 
@@ -93,6 +120,10 @@ export function serializeWorkspaceParams(
     if (value) params.set("expand", value)
   }
   if (state.file) params.set("file", state.file)
+  if (state.pane === "data") {
+    params.set("pane", "data")
+    if (state.entity) params.set("entity", state.entity)
+  }
   return params
 }
 
