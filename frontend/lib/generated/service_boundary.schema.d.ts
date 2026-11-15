@@ -180,6 +180,62 @@ export type Uri = string
  */
 export type EndpointCollisions = EndpointCollision[]
 /**
+ * Every access has an entity and a single CRUD verb
+ */
+export type Bound = number
+/**
+ * Distinct repository call sites in the export
+ */
+export type CallSites = number
+/**
+ * Some access has operation create-or-update
+ */
+export type CreateOrUpdate = number
+/**
+ * Some access has no entity
+ */
+export type EntityUndetermined = number
+/**
+ * flush() — not an entity operation
+ */
+export type Flush = number
+/**
+ * argument-origin | existence-guard
+ */
+export type EntityAccessBasis =
+  "method-name" | "query-text" | "argument-origin" | "existence-guard"
+export type Enabled = boolean
+/**
+ * create | update
+ */
+export type EntityOperation =
+  "create" | "read" | "update" | "delete" | "create-or-update" | "unknown"
+/**
+ * The rules version this flag was scored against; a flag on for a different version than `rules_version` is a stale score (E4)
+ */
+export type ScoredRulesVersion = string | null
+/**
+ * The (basis, verb) gate flags as they were set for this run (E3)
+ */
+export type GateFlags = EntityGateFlagState[]
+/**
+ * The called repository method has a body in the project (C3)
+ */
+export type ImplementedInProject = number
+export type InEndpointFlow = number
+/**
+ * In the export but in no endpoint ICFG (lambda bodies, A1)
+ */
+export type InNoEndpointFlow = number
+/**
+ * The verb-table rules version (a hash) that ran
+ */
+export type RulesVersion = string
+/**
+ * Some access has operation unknown
+ */
+export type UnknownOperation = number
+/**
  * Set when this service's CPG extraction failed (§5.2.6 per-service isolation): the error, recorded as a queryable fact (P10). The service then has no endpoints/calls — absence with a stated cause, never silence
  */
 export type ExtractionError = string | null
@@ -311,6 +367,10 @@ export interface ServiceBoundary {
   client_libraries?: ClientLibraries
   created_at?: CreatedAt
   endpoint_collisions?: EndpointCollisions
+  /**
+   * 1.26.0 (§5.2.17): every repository call site of this service, partitioned by flow membership and by outcome (R1-1). A sibling of `analysis_coverage`, not part of it (E2). None = written before entity facts existed, or the service has no analysis (library, extraction failed) — never zero
+   */
+  entity_access_accounting?: EntityAccessAccounting | null
   extraction_error?: ExtractionError
   kind?: ServiceKind
   languages: Languages
@@ -420,6 +480,71 @@ export interface EndpointCollision {
   http_method: HttpMethod
   kept_handler: KeptHandler
   uri: Uri
+}
+/**
+ * Every repository call site of one service, accounted for (§5.2.17, R1-1).
+ *
+ * The unit is one repository call site: one distinct ``call_id`` among the
+ * export's ``db`` sink rows. The sites are partitioned twice, and each
+ * partition must sum to ``call_sites``, so no site can fall out of the
+ * report unseen (P10):
+ *
+ * 1. **Flow membership** — whether the site lies in some endpoint's ICFG.
+ *    A site in the export but in no endpoint flow (a call inside a lambda
+ *    body, finding A1) is counted rather than lost.
+ * 2. **Outcome** — the first of these that holds, in this order:
+ *    ``flush`` (not an entity operation), ``implemented_in_project`` (a body
+ *    the verb table does not read, C3), ``entity_undetermined``,
+ *    ``unknown_operation``, ``create_or_update``, ``bound`` (every access has
+ *    an entity and a single CRUD verb).
+ *
+ * ``accesses_by_operation`` counts ACCESSES (a two-entity query counts two)
+ * and ``sites_by_basis`` counts SITES; both list every vocabulary value, so
+ * a zero reads as measured rather than as missing (E8).
+ *
+ * A sibling of ``ServiceBoundary.analysis_coverage``, never part of it: that
+ * one is an in-CPG methods metric with its own invariant (E2).
+ */
+export interface EntityAccessAccounting {
+  accesses_by_operation: AccessesByOperation
+  bound: Bound
+  call_sites: CallSites
+  create_or_update: CreateOrUpdate
+  entity_undetermined: EntityUndetermined
+  flush: Flush
+  gate_flags: GateFlags
+  implemented_in_project: ImplementedInProject
+  in_endpoint_flow: InEndpointFlow
+  in_no_endpoint_flow: InNoEndpointFlow
+  rules_version: RulesVersion
+  sites_by_basis: SitesByBasis
+  unknown_operation: UnknownOperation
+}
+/**
+ * Accesses per EntityOperation value; every value present
+ */
+export interface AccessesByOperation {
+  [k: string]: number
+}
+/**
+ * One (basis, verb) gate flag, as it was set when the worker ran (rule 5, E3).
+ *
+ * A gated basis publishes its candidate verb only while its flag is on, and
+ * a flag is only turned on after the basis met a precision bar on labeled
+ * saves. The stitcher cannot know how the worker was configured, so the
+ * worker records it here.
+ */
+export interface EntityGateFlagState {
+  basis: EntityAccessBasis
+  enabled: Enabled
+  operation: EntityOperation
+  scored_rules_version: ScoredRulesVersion
+}
+/**
+ * Sites per EntityAccessBasis value; every value present
+ */
+export interface SitesByBasis {
+  [k: string]: number
 }
 /**
  * How this service is addressed at runtime, as far as statics can see.

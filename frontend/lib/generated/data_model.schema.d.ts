@@ -7,9 +7,17 @@
 
 export type CreatedAt = string
 /**
+ * How an entity came to be one (Q1, Q15).
+ */
+export type EntityDeclaredBy = "annotation" | "repository-argument"
+/**
  * Entity/class name, e.g. 'Order'
  */
 export type Entity = string
+/**
+ * 1.26.0: the field's type as written in source, generics kept, e.g. 'List<Release>'. `type_name` stays erased; a JPQL join target resolves through this one, because the element type is the entity the join reaches (§5.2.17)
+ */
+export type DeclaredType = string | null
 export type Name = string
 /**
  * None = not statically determinable (P10)
@@ -18,6 +26,10 @@ export type Nullable = boolean | null
 export type TypeName = string | null
 export type Fields = DataModelField[]
 export type Id = string
+/**
+ * 1.26.0: the `@Entity(name=...)` value when set — the name JPQL uses
+ */
+export type JpqlName = string | null
 /**
  * e.g. 'spring-data-mongodb'
  */
@@ -33,26 +45,37 @@ export type SchemaVersion = string
 export type ServiceId = string
 export type SnapshotId = string
 /**
- * Collection/table name where recoverable
+ * Collection/table name where recoverable: `@Table(name=)` or `@Document`. Populated since 1.26.0; native SQL resolves its table names through it (§5.2.17)
  */
 export type StorageName = string | null
+/**
+ * 1.26.0: the qualified class name, e.g. 'com.acme.orders.Order'. `id` derives from it when the export carries it, so two classes sharing a simple name in one service get two ids (C2). None on a pre-1.26.0 document
+ */
+export type TypeFullName = string | null
 
 /**
  * One persisted entity of one service.
  */
 export interface DataModel {
   created_at?: CreatedAt
+  /**
+   * 1.26.0: how this type came to be an entity — `annotation` (@Entity/@Document) or `repository-argument` (a repository's type argument names it and it carries no annotation, Q1). None = a pre-1.26.0 document, which recorded neither
+   */
+  declared_by?: EntityDeclaredBy | null
   entity: Entity
   fields?: Fields
   id: Id
+  jpql_name?: JpqlName
   persistence_framework: PersistenceFramework
   relations?: Relations
   schema_version?: SchemaVersion
   service_id: ServiceId
   snapshot_id: SnapshotId
   storage_name?: StorageName
+  type_full_name?: TypeFullName
 }
 export interface DataModelField {
+  declared_type?: DeclaredType
   name: Name
   nullable?: Nullable
   type_name?: TypeName

@@ -6,6 +6,7 @@ from wadi_contracts.boundary import ServiceBoundary
 from wadi_contracts.comms import MqInteraction, RemoteCall
 from wadi_contracts.datamodel import DataModel
 from wadi_contracts.endpoint import Endpoint
+from wadi_contracts.entity_access import EntityUsageView
 from wadi_contracts.export import ExportManifest
 from wadi_contracts.icfg import Icfg
 from wadi_contracts.jobs import ExtractionJob
@@ -43,6 +44,7 @@ CONTRACT_MODELS: dict[str, type[BaseModel]] = {
     "source_view": SourceView,
     "system_graph": SystemGraphView,
     "system_auth": SystemAuthView,
+    "entity_usage": EntityUsageView,
     # Export-bundle trailer (derived at export time, never stored — §14):
     "export_manifest": ExportManifest,
 }

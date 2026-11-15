@@ -22,6 +22,7 @@ from wadi_contracts.endpoint import (
     EndpointParam,
     EndpointStatus,
 )
+from wadi_contracts.entity_access import EndpointEntityAccess
 from wadi_contracts.enums import (
     CalleeUnboundReason,
     Confidence,
@@ -310,6 +311,14 @@ class EndpointSummary(ArtifactEnvelope):
     response_type: str | None = None
     declared_statuses: list[EndpointStatus] = Field(default_factory=list[EndpointStatus])
     auth: EndpointAuth = Field(default_factory=EndpointAuth)
+    entity_access: list[EndpointEntityAccess] | None = Field(
+        default=None,
+        description=(
+            "The endpoint's entity summary (§5.2.17), carried on the row because "
+            "it is small — one row per entity. None = the snapshot predates "
+            "entity facts; [] = analyzed, no repository call found (R1-6)"
+        ),
+    )
     handler: MethodRef
     trigger: TriggerKind = TriggerKind.HTTP
 
