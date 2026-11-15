@@ -79,6 +79,7 @@ from wadi_worker.entity_access import (
     account_entity_access,
     carries_entity_facts,
     classify_db_sinks,
+    export_rules_version,
 )
 from wadi_worker.query_reader import EntityCatalog
 
@@ -238,10 +239,14 @@ class Assembler:
         # site goes on the ICFG node of its statement, in every endpoint graph
         # that inlines the method. A pre-2.14.0 export states no entity facts,
         # so nothing is classified and nothing is claimed (R1-6).
+        # The version is the export's own: its Scala save rules are part of
+        # it, so a flag scored on another export's rules publishes nothing.
+        rules_version = export_rules_version(export)
         db_calls = (
             classify_db_sinks(
                 export.sinks,
                 entities=EntityCatalog(artifacts.data_models),
+                rules_version=rules_version,
                 gate_flags=self._gate_flags,
             )
             if carries_entity_facts(export)
@@ -349,6 +354,7 @@ class Assembler:
                     for call in db_calls
                     if f"m{call.method_id}:n{call.node_id}" in stored_nodes
                 },
+                rules_version=rules_version,
                 gate_flags=self._gate_flags,
             )
         return artifacts
@@ -783,6 +789,8 @@ class Assembler:
                 ],
                 persistence_framework=model.persistence_framework,
                 storage_name=model.storage_name,
+                storage_schema=model.storage_schema,
+                delete_rewritten_by=model.delete_rewritten_by,
                 declared_by=_DECLARED_BY[model.declared_by],
             )
             for model in export.data_models

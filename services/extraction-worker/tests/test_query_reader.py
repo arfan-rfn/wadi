@@ -8,6 +8,8 @@ what it says when a name does not resolve. Every site is on the ``query-text``
 basis, which no gate flag holds back: its verbs publish directly.
 """
 
+import pytest
+
 from wadi_contracts import (
     DataModel,
     DataModelField,
@@ -42,6 +44,7 @@ def _model(
     *,
     jpql_name: str | None = None,
     storage_name: str | None = None,
+    storage_schema: str | None = None,
     fields: tuple[tuple[str, str, str], ...] = (),
 ) -> DataModel:
     """An entity record; each field is (name, erased type_name, declared_type)."""
@@ -53,6 +56,7 @@ def _model(
         type_full_name=full_name,
         jpql_name=jpql_name,
         storage_name=storage_name,
+        storage_schema=storage_schema,
         fields=[
             DataModelField(name=name, type_name=type_name, declared_type=declared)
             for name, type_name, declared in fields
@@ -77,6 +81,28 @@ SHOP_ENTITIES = EntityCatalog(
         _model(INVOICE, storage_name="invoices", fields=(("customer", CUSTOMER, "Customer"),)),
     ]
 )
+
+
+ELEMENTS = EntityCatalog(
+    [
+        _model(
+            ORDER,
+            fields=(
+                ("tags", "java.util.Set", "Set<String>"),
+                ("items", "java.util.List", "List<LineItem>"),
+                ("address", f"{SHOP}.Address", "Address"),
+                ("notes", "java.util.Map", "Map<String, java.lang.String>"),
+                ("raw", "java.util.List", "List"),
+                ("qualified_raw", "java.util.Set", "java.util.Set"),
+                ("wild", "java.util.List", "List<?>"),
+                ("lines", "java.util.List", "List<OrderLine>"),
+            ),
+        ),
+        _model(ORDER_LINE),
+    ]
+)
+"""Order's paths to things that are not entities: basic values, an
+embeddable `LineItem`, an embedded `Address`."""
 
 
 def _query(
@@ -312,10 +338,71 @@ class TestNativeSql:
 
         assert _accesses(site) == [(ORDER, U), (CUSTOMER, R)]
 
-    def test_a_schema_prefix_matches_on_the_table_name(self) -> None:
-        site = _read(_query("select o.* from public.orders o join shop.invoices i", native=True))
+    def test_a_schema_prefix_matches_the_schema_the_entity_declares(self) -> None:
+        # Review B2: the qualifier is part of the name. It binds the entity
+        # whose `@Table(schema=)` it names, case-folded unless quoted.
+        entities = EntityCatalog(
+            [
+                _model(ORDER, storage_name="orders", storage_schema="public"),
+                _model(INVOICE, storage_name="invoices", storage_schema="Shop"),
+            ]
+        )
+        site = _read(
+            _query("select o.* from public.orders o join shop.invoices i", native=True), entities
+        )
 
         assert _accesses(site) == [(ORDER, R), (INVOICE, R)]
+        quoted = _read(_query('select * from "Shop"."invoices"', native=True), entities)
+        assert _accesses(quoted) == [(INVOICE, R)]
+        miscased = _read(_query('select * from "shop".invoices', native=True), entities)
+        assert _accesses(miscased) == [(None, R)]
+
+    def test_another_schema_leaves_the_entity_undetermined_and_keeps_the_verb(self) -> None:
+        entities = EntityCatalog([_model(ORDER, storage_name="orders", storage_schema="shop")])
+
+        archived = _read(
+            _query("delete from archive.orders where created < ?1", native=True), entities
+        )
+        assert _accesses(archived) == [(None, D)]
+        assert archived.entity_type_text == "archive.orders"
+        copied = _read(
+            _query(
+                "insert into audit.orders select * from public.orders where id = ?1", native=True
+            ),
+            entities,
+        )
+        assert _accesses(copied) == [(None, C), (None, R)]
+        assert copied.entity_type_text == "audit.orders, public.orders"
+
+    def test_a_schema_on_an_entity_that_declares_none_is_undetermined(self) -> None:
+        # `public` may well be the default schema, but the entity does not say
+        # it lives there, and a reader that assumed so would bind
+        # `audit.orders` the same way.
+        for text in ("update shop.orders set status = 'X'", 'select * from "shop"."orders"'):
+            assert _accesses(_read(_query(text, native=True)))[0][0] is None, text
+
+    def test_a_three_part_name_is_undetermined(self) -> None:
+        entities = EntityCatalog([_model(ORDER, storage_name="orders", storage_schema="shop")])
+        site = _read(_query("select * from sales.shop.orders", native=True), entities)
+
+        assert _accesses(site) == [(None, R)]
+
+    def test_one_table_name_in_two_schemas_binds_by_its_qualifier(self) -> None:
+        audit_order = f"{SHOP}.audit.Order"
+        entities = EntityCatalog(
+            [
+                _model(ORDER, storage_name="orders", storage_schema="shop"),
+                _model(audit_order, storage_name="orders", storage_schema="audit"),
+            ]
+        )
+
+        assert _accesses(_read(_query("select * from audit.orders", native=True), entities)) == [
+            (audit_order, R)
+        ]
+        # Unqualified, two entities answer to it: not resolved by picking one.
+        assert _accesses(_read(_query("select * from orders", native=True), entities)) == [
+            (None, R)
+        ]
 
     def test_an_unquoted_table_name_folds_case(self) -> None:
         site = _read(_query("SELECT * FROM ORDERS", native=True))
@@ -327,6 +414,31 @@ class TestNativeSql:
         site = _read(_query('select * from "Orders"', native=True))
         assert _accesses(site) == [(None, R)]
         assert site.entity_type_text == '"Orders"'
+
+    @pytest.mark.parametrize(
+        ("text", "verb"),
+        [
+            ("insert ignore into orders (id) values (?1)", C),
+            ("INSERT LOW_PRIORITY INTO orders (id) values (?1)", C),
+            ("insert delayed into orders (id) values (?1)", C),
+            ("insert high_priority ignore into orders (id) values (?1)", C),
+            ("update low_priority ignore orders set status = 'X'", U),
+            ("update only orders set status = 'X'", U),
+            ("delete low_priority quick ignore from orders where id = ?1", D),
+            ("delete from only orders where id = ?1", D),
+            ("select * from only orders o join only customers c on c.id = o.customer_id", R),
+        ],
+    )
+    def test_a_modifier_before_the_target_is_not_its_name(
+        self, text: str, verb: EntityOperation
+    ) -> None:
+        # Review B6: MySQL's `ignore`, `low_priority`, `delayed`,
+        # `high_priority` (and delete's `quick`), PostgreSQL's `only`. On the
+        # base reader each became the target, with its word as the evidence.
+        site = _read(_query(text, native=True))
+
+        assert _accesses(site)[0] == (ORDER, verb)
+        assert site.entity_type_text is None
 
     def test_sql_does_not_resolve_an_entity_name(self) -> None:
         # OrderLine stores in a table no annotation names: SQL cannot reach it
@@ -374,6 +486,35 @@ class TestWhatIsNotRead:
         ):
             assert _accesses(_read(_query(text, native=True))) == [(ORDER, UNK)], text
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "select archive_orders(?1)",
+            "SELECT archive_orders(?1), (select count(*) from orders)",
+            "select archive_orders(?1) from dual",
+            "SELECT next_order_id() FROM DUAL",
+            "select * from archive_orders(?1)",
+            "select * into orders_backup from orders",
+        ],
+    )
+    def test_a_native_select_that_reads_no_table_is_not_read(self, text: str) -> None:
+        # Review B2: a select with no from, or `from dual`, or only a function
+        # in its from, is calling a function, and the function may write.
+        # `select ... into` writes the table it names.
+        assert _accesses(_read(_query(text, native=True))) == [(ORDER, UNK)]
+
+    def test_a_native_select_from_a_table_or_a_derived_table_is_read(self) -> None:
+        for text in (
+            "select count(*) from orders",
+            "select * from (select * from orders where status = ?1) recent",
+        ):
+            assert _accesses(_read(_query(text, native=True))) == [(ORDER, R)], text
+
+    def test_a_parenthesized_select_is_the_statement_not_a_subquery(self) -> None:
+        site = _read(_query("(select * from orders) union (select * from invoices)", native=True))
+
+        assert _accesses(site) == [(ORDER, R), (INVOICE, R)]
+
     def test_an_insert_that_does_nothing_on_conflict_still_creates(self) -> None:
         text = "insert into orders (id) values (?1) on conflict do nothing"
 
@@ -401,6 +542,42 @@ class TestTextThatIsNotStatement:
         ):
             assert _accesses(_read(_query(text, native=False))) == [(ORDER, R)], text
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A MySQL `#` comment.
+            "select * from orders # delete from invoices\n where id = ?1",
+            # A backslash-escaped quote.
+            "select * from orders where note = 'it\\'s from invoices' and id = ?1",
+            # PostgreSQL dollar-quoted strings.
+            "select * from orders where note = $$ from invoices $$",
+            "select * from orders where note = $note$ from invoices $note$",
+            # A nested comment (PostgreSQL nests them; MySQL does not).
+            "select * from orders /* a /* b */ join invoices */",
+            # A second statement.
+            "delete from order_lines where order_id = ?1; delete from orders where id = ?1",
+        ],
+    )
+    def test_text_holding_a_construct_the_lexer_does_not_model_is_not_read(self, text: str) -> None:
+        # Review B2: each of these hides text from a lexer that does not know
+        # it, and the hidden part then reads as statement (a phantom Invoice
+        # read on the base reader). Not read, so the site stays unknown.
+        assert _accesses(_read(_query(text, native=True))) == [(ORDER, UNK)]
+
+    def test_a_backslash_in_a_jpql_literal_is_not_read_either(self) -> None:
+        text = "select o from Order o where o.note = 'it\\'s from Invoice'"
+
+        assert _accesses(_read(_query(text))) == [(ORDER, UNK)]
+
+    def test_what_the_lexer_does_model_is_still_read(self) -> None:
+        for text in (
+            "select * from orders;",
+            "select * from orders ; -- done",
+            "select o.total$ from orders o where o.id = ?1",
+            "select * from orders where id = ?#{[0]} and owner = :#{principal.id}",
+        ):
+            assert _accesses(_read(_query(text, native=True))) == [(ORDER, R)], text
+
     def test_a_named_parameter_is_not_a_keyword(self) -> None:
         site = _read(_query("select o from Order o where o.created between :from and :to"))
 
@@ -426,6 +603,40 @@ class TestSpel:
 
         assert _accesses(site) == [(None, R)]
         assert site.entity_type_text == "E"
+
+    @pytest.mark.parametrize(
+        ("text", "written", "verb"),
+        [
+            ("delete from #{#entityName}_archive where id = ?1", "#{#entityName}_archive", D),
+            ("select * from archive_#{#entityName}", "archive_#{#entityName}", R),
+            ("insert into #{#entityName}2 (id) values (?1)", "#{#entityName}2", C),
+        ],
+    )
+    def test_spel_joined_to_a_name_is_another_table_and_is_undetermined(
+        self, text: str, written: str, verb: EntityOperation
+    ) -> None:
+        # Review B2: `#{#entityName}_archive` is the archive table, not the
+        # entity's; the verb stays, on an entity nobody determined.
+        site = _read(_query(text, native=True))
+
+        assert _accesses(site) == [(None, verb)]
+        assert site.entity_type_text == written
+
+    def test_other_spel_in_a_name_position_is_an_undetermined_entity(self) -> None:
+        site = _read(_query("select e from #{#root.domain} e where e.id = ?1"))
+
+        assert _accesses(site) == [(None, R)]
+        assert site.entity_type_text == "#{#root.domain}"
+
+    def test_a_write_to_a_spel_target_keeps_its_verb_beside_what_it_reads(self) -> None:
+        site = _read(
+            _query(
+                "delete from #{#root.table} where id in (select order_id from orders)",
+                native=True,
+            )
+        )
+
+        assert _accesses(site) == [(None, D), (ORDER, R)]
 
     def test_spel_in_a_parameter_is_not_a_name(self) -> None:
         site = _read(_query("select o from Order o where o.owner = :#{principal.from}"))
@@ -460,6 +671,37 @@ class TestJpqlJoins:
         )
 
         assert _accesses(site) == [(ORDER, R), (ORDER_LINE, R)]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "select o from Order o join o.tags t where t = ?1",
+            "select o from Order o join o.items i where i.sku = ?1",
+            "select o from Order o, in(o.tags) t",
+            "select o from Order o left join o.address a",
+            "select o from Order o join o.notes n",
+        ],
+    )
+    def test_a_join_over_a_path_to_a_non_entity_adds_no_access(self, text: str) -> None:
+        # Review B6: an @ElementCollection of strings, a list of embeddables,
+        # an embedded value. The base reader added an undetermined read for
+        # each, so the site counted as entity_undetermined.
+        site = _read(_query(text), ELEMENTS)
+
+        assert _accesses(site) == [(ORDER, R)]
+        assert site.entity_type_text is None
+
+    def test_a_path_whose_type_cannot_be_resolved_stays_undetermined(self) -> None:
+        for text in (
+            # A raw collection, and a wildcard: the element type is not written.
+            "select o from Order o join o.raw r",
+            "select o from Order o join o.qualified_raw r",
+            "select o from Order o join o.wild w",
+            # Through a non-entity, whose fields the catalog does not hold.
+            "select o from Order o join o.address.country c",
+            "select o from Order o join o.items i join i.product p",
+        ):
+            assert _accesses(_read(_query(text), ELEMENTS)) == [(ORDER, R), (None, R)], text
 
     def test_an_entity_join_names_its_entity_directly(self) -> None:
         site = _read(_query("select o from Order o join Client c on c.id = o.customer.id"))

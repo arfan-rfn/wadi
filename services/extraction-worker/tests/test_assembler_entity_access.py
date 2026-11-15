@@ -39,7 +39,7 @@ from wadi_joern_client.export import (
     ServiceExport,
 )
 from wadi_worker.assembler import AssembledArtifacts, Assembler
-from wadi_worker.entity_access import RULES_VERSION, SHIPPED_GATE_FLAGS
+from wadi_worker.entity_access import RULES_VERSION, SHIPPED_GATE_FLAGS, export_rules_version
 
 SNAP = "snap_" + "a" * 16
 SVC = "svc_" + "b" * 16
@@ -259,6 +259,37 @@ class TestSites:
 
         assert controller_call.entity_access_sites == []
 
+    def test_a_db_row_without_facts_is_a_site_whose_entity_is_undetermined(self) -> None:
+        # Review C8: a call the pass saw and did not describe is still a
+        # repository call. Neither the row nor the node says which call it is
+        # (the node's `call` is the statement's primary call, which for
+        # `repo.findById(id).get()` is `get`), so its names are "unknown"
+        # rather than borrowed from a call that may be another one.
+        export = crud_export().model_copy(update={"sinks": [_sink(SAVE_NEW, 3204, SERVICE, None)]})
+
+        artifacts = Assembler(snapshot_id=SNAP, service_id=SVC).assemble(export)
+
+        sites = _node(artifacts, SERVICE, SAVE_NEW).entity_access_sites
+        assert [(s.repository, s.method_name, s.basis) for s in sites] == [
+            ("unknown", "unknown", EntityAccessBasis.METHOD_NAME)
+        ]
+        assert [(a.entity, a.data_model_id, a.operation) for a in sites[0].accesses] == [
+            (None, None, EntityOperation.UNKNOWN)
+        ]
+        # The endpoint reads "undetermined", never "no repository call found".
+        assert artifacts.endpoints[0].entity_access == [
+            EndpointEntityAccess(
+                entity=None,
+                data_model_id=None,
+                operations=[EntityOperation.UNKNOWN],
+                call_sites=1,
+                call_sites_by_operation={"unknown": 1},
+            )
+        ]
+        accounting = artifacts.entity_access_accounting
+        assert accounting is not None
+        assert (accounting.call_sites, accounting.entity_undetermined) == (1, 1)
+
 
 class TestEndpointSummary:
     def test_the_summary_folds_every_site_in_the_endpoint_graph(
@@ -266,19 +297,22 @@ class TestEndpointSummary:
     ) -> None:
         # Pet: findById (read) and two saves the gate demoted; Audit: one save
         # whose origin the split cannot read. flush adds nothing, and the
-        # lambda's deleteById is in no endpoint graph (A1).
+        # lambda's deleteById is in no endpoint graph (A1). Since 1.27.0 each
+        # row also counts its sites per operation: one read, two saves.
         assert assembled.endpoints[0].entity_access == [
             EndpointEntityAccess(
                 entity=AUDIT,
                 data_model_id=data_model_id(SVC, AUDIT),
                 operations=[EntityOperation.CREATE_OR_UPDATE],
                 call_sites=1,
+                call_sites_by_operation={"create-or-update": 1},
             ),
             EndpointEntityAccess(
                 entity=PET,
                 data_model_id=data_model_id(SVC, PET),
                 operations=[EntityOperation.READ, EntityOperation.CREATE_OR_UPDATE],
                 call_sites=3,
+                call_sites_by_operation={"read": 1, "create-or-update": 2},
             ),
         ]
 
@@ -333,6 +367,21 @@ class TestEndpointSummary:
         endpoint = Assembler(snapshot_id=SNAP, service_id=SVC).assemble(export).endpoints[0]
 
         assert endpoint.entity_access == []
+
+    def test_a_delete_of_a_soft_deleted_entity_reads_unknown(self) -> None:
+        # Review B1: the record's rewrite reaches the classifier, so the
+        # summary never says this endpoint deletes Pet.
+        export = crud_export()
+        export.data_models[0].delete_rewritten_by = "org.hibernate.annotations.SoftDelete"
+        export = export.model_copy(
+            update={"sinks": [_sink(SAVE_NEW, 3204, SERVICE, _db(PET_REPO, "deleteById", PET))]}
+        )
+
+        endpoint = Assembler(snapshot_id=SNAP, service_id=SVC).assemble(export).endpoints[0]
+
+        assert [(r.entity, r.operations) for r in endpoint.entity_access or []] == [
+            (PET, [EntityOperation.UNKNOWN])
+        ]
 
     def test_a_lambda_hosted_call_is_in_no_summary(self, assembled: AssembledArtifacts) -> None:
         rows = assembled.endpoints[0].entity_access or []
@@ -394,6 +443,8 @@ class TestEntityRecords:
     def test_the_record_carries_every_entity_name_and_how_it_was_declared(self) -> None:
         export = crud_export()
         export.data_models[0].jpql_name = "PetEntity"
+        export.data_models[0].storage_schema = "zoo"
+        export.data_models[0].delete_rewritten_by = "org.hibernate.annotations.SQLDelete"
         pet = next(
             m
             for m in Assembler(snapshot_id=SNAP, service_id=SVC).assemble(export).data_models
@@ -405,6 +456,12 @@ class TestEntityRecords:
             "PetEntity",
             "pets",
             EntityDeclaredBy.ANNOTATION,
+        )
+        # 2.15.0 / 1.27.0: what native SQL's schema check and a rewritten
+        # delete read (§5.2.17 hardening).
+        assert (pet.storage_schema, pet.delete_rewritten_by) == (
+            "zoo",
+            "org.hibernate.annotations.SQLDelete",
         )
         assert [(f.name, f.type_name, f.declared_type) for f in pet.fields] == [
             ("id", "java.lang.Long", "Long"),
@@ -466,6 +523,39 @@ class TestAccounting:
             (f.basis, f.operation, f.enabled, f.scored_rules_version) for f in accounting.gate_flags
         ] == [(f.basis, f.operation, False, None) for f in SHIPPED_GATE_FLAGS]
 
+    def test_it_records_the_version_of_the_export_it_classified(self) -> None:
+        # Review B4: the export's save_origin_rules are part of the version.
+        export = crud_export().model_copy(update={"save_origin_rules": "d" * 64})
+
+        accounting = (
+            Assembler(snapshot_id=SNAP, service_id=SVC).assemble(export).entity_access_accounting
+        )
+
+        assert accounting is not None
+        assert accounting.rules_version == export_rules_version(export)
+        assert accounting.rules_version != RULES_VERSION
+
+    def test_a_flag_scored_on_another_exports_rules_publishes_nothing(self) -> None:
+        # E4 per export: flags scored against the rules of an export whose
+        # Scala save derivation is "e..." are stale for one whose is "f...".
+        scored_on = crud_export().model_copy(update={"save_origin_rules": "e" * 64})
+        moved = crud_export().model_copy(update={"save_origin_rules": "f" * 64})
+        flags = tuple(
+            replace(flag, enabled=True, scored_rules_version=export_rules_version(scored_on))
+            for flag in SHIPPED_GATE_FLAGS
+        )
+        assembler = Assembler(snapshot_id=SNAP, service_id=SVC, gate_flags=flags)
+
+        current = assembler.assemble(scored_on).entity_access_accounting
+        stale = assembler.assemble(moved).entity_access_accounting
+
+        assert current is not None
+        assert stale is not None
+        assert (current.create_or_update, current.bound) == (1, 4)
+        assert (stale.create_or_update, stale.bound) == (3, 2)
+        assert stale.rules_version != current.rules_version
+        assert {f.scored_rules_version for f in stale.gate_flags} == {current.rules_version}
+
     def test_with_flags_on_split_saves_count_as_bound(self) -> None:
         artifacts = Assembler(snapshot_id=SNAP, service_id=SVC, gate_flags=ALL_FLAGS_ON).assemble(
             crud_export()
@@ -516,8 +606,11 @@ class TestAccounting:
             accounting.entity_undetermined,
             accounting.unknown_operation,
         ) == (4, 1, 2, 1)
-        assert accounting.sites_by_basis == _zero_bases(method_name=2, query_text=1)
-        assert accounting.accesses_by_operation == _zero_operations(unknown=3)
+        # Review C8: the undescribed row is a site too (an undetermined entity,
+        # unknown, on the method-name basis), so the basis counts cover every
+        # non-flush site, as 1.27.0's validator requires.
+        assert accounting.sites_by_basis == _zero_bases(method_name=3, query_text=1)
+        assert accounting.accesses_by_operation == _zero_operations(unknown=4)
 
     def test_an_export_without_repository_calls_accounts_for_zero(self) -> None:
         export = crud_export().model_copy(update={"sinks": []})

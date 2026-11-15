@@ -22,40 +22,107 @@ What it reads:
   ``in(o.lines)``. That holds in the statement and in every subquery. An
   entity named like a keyword (``Order``) is an entity in those positions and
   nowhere else. A ``from`` inside a function's parentheses (``extract(year
-  from d)``) names nothing.
+  from d)``) names nothing. SQL's statement modifiers before a name (MySQL's
+  ``ignore``, ``low_priority``, ``delayed``, ``high_priority``, ``quick``,
+  PostgreSQL's ``only``) are skipped, never read as one (review B6).
 * **JPQL names** match the service's own entities case-sensitively, the
   ``@Entity(name=)`` value first and the simple class name second. A join over
   an association path (``o.lines l``) resolves through the field's declared
-  type, the element type of a collection. **SQL tables** match the storage
-  name, case-insensitively unless quoted, on the last segment of a
-  schema-qualified name. ``#{#entityName}`` is the repository's own entity.
+  type, the element type of a collection; a path whose type is written and is
+  no entity's (an ``@ElementCollection`` of strings, an embeddable) adds no
+  access (review B6). **SQL tables** match the storage name,
+  case-insensitively unless quoted. A schema-qualified name binds only the
+  entity whose ``@Table(schema=)`` is that qualifier (review B2).
+  ``#{#entityName}``, written alone, is the repository's own entity.
 * **One access per entity (rule 6, C1).** The verb applies to the target of a
   write statement, or to every entity a select names. Every other entity a
   write statement names is read. One entity with two operations keeps both.
   A name that resolves to nothing keeps the verb, on an undetermined entity.
 
+What it does not read, so the site stays ``unknown`` on the repository's own
+entity:
+
+* A CTE, ``merge``, or a stored procedure call.
+* A native select that reads no table of its own: no ``from``, ``from dual``,
+  only a function in its from clause, or ``select ... into``. The function it
+  calls may write, and ``into`` writes the table it names (review B2).
+* Text holding a construct the lexer does not model: a ``#`` outside a
+  literal (a MySQL comment, or a PostgreSQL operator), a backslash inside a
+  literal, a dollar-quoted string, a nested comment, or a second statement
+  after a ``;`` (review B2). Read on regardless, the hidden part would read as
+  statement.
+
+What it reads as undetermined, keeping the verb:
+
+* A schema qualifier the entity does not declare (``audit.orders`` for an
+  entity in no schema, or in another), and any three-part name.
+* SpEL in a name position other than a bare ``#{#entityName}``, including one
+  joined to a name (``#{#entityName}_archive``).
+* A join path whose type cannot be read: an owner or field the catalog lacks,
+  a raw collection, a wildcard, or a name two entities share.
+
 What it does not see, and therefore does not claim:
 
 * An implicit join through a path outside a declaration: ``where
   o.customer.vip = true`` reads Customer, and only Order is claimed.
-* A CTE, ``merge``, or a stored procedure call: not followed, so the site
-  stays ``unknown`` on the repository's entity.
-* SpEL other than ``#{#entityName}`` in a name position: undetermined.
 * Text it was not given: a query built at runtime, or a concatenation the
   export could not read back from the annotation (§5.2.17, M0).
-* PostgreSQL's ``delete ... using``, the subtype of a ``treat(...)`` join, a
-  table-valued function, dollar-quoted strings, and a table whose name only a
-  naming strategy derives: an entity without a storage name matches no table.
+* PostgreSQL's ``delete ... using``, MySQL's multi-table ``delete o, l from``
+  (its targets read as reads), ``straight_join``, the subtype of a
+  ``treat(...)`` join, a table-valued function beside a table, and a table
+  whose name only a naming strategy derives: an entity without a storage name
+  matches no table.
+* A type variable as a collection's element (``List<T>``) reads as a class
+  that is not an entity, so a join over it adds no access.
 * Entity inheritance: a query on a superclass entity claims that entity only.
 """
 
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Literal, NamedTuple
 
 from wadi_contracts import DataModel, EntityOperation
 from wadi_joern_client.export import ExportDbAccess, RepositoryKind
+
+
+class NotAnEntity(Enum):
+    """A join path that resolved to a type no entity of the service has."""
+
+    TYPE = "not-an-entity"
+
+
+NOT_AN_ENTITY = NotAnEntity.TYPE
+
+_CONTAINERS: frozenset[str] = frozenset(
+    f"java.util.{name}"
+    for name in (
+        "Collection",
+        "List",
+        "Set",
+        "SortedSet",
+        "NavigableSet",
+        "Queue",
+        "Deque",
+        "Map",
+        "SortedMap",
+        "NavigableMap",
+        "ArrayList",
+        "LinkedList",
+        "HashSet",
+        "LinkedHashSet",
+        "TreeSet",
+        "HashMap",
+        "LinkedHashMap",
+        "TreeMap",
+    )
+) | {"java.lang.Iterable"}
+"""Erased collection types: their element is only in the declared type."""
+
+_CONTAINER_NAMES: frozenset[str] = frozenset(name.rsplit(".", 1)[-1] for name in _CONTAINERS)
+"""A raw collection's declared type is its own name, simple or qualified:
+the element is unknown."""
 
 
 class EntityCatalog:
@@ -76,6 +143,11 @@ class EntityCatalog:
         """The ``dm_`` id of a qualified entity type; None when it has no record."""
         model = self._models.get(entity) if entity else None
         return model.id if model else None
+
+    def delete_rewritten_by(self, entity: str | None) -> str | None:
+        """The Hibernate annotation that replaces the entity's DELETE, if any."""
+        model = self._models.get(entity) if entity else None
+        return model.delete_rewritten_by if model else None
 
     def jpql_entity(self, name: str) -> str | None:
         """The entity a JPQL entity name denotes; None unless exactly one does.
@@ -99,23 +171,36 @@ class EntityCatalog:
             if model.jpql_name is None and model.entity == name
         )
 
-    def table_entity(self, name: str, *, quoted: bool) -> str | None:
+    def table_entity(
+        self,
+        name: str,
+        *,
+        quoted: bool,
+        schema: str | None = None,
+        schema_quoted: bool = False,
+    ) -> str | None:
         """The entity stored in a SQL table; None unless exactly one is.
 
         An unquoted SQL identifier folds case, so it matches the storage name
         case-insensitively; a quoted one keeps its case and matches exactly.
         An entity without a storage name matches no table: the reader does not
-        guess the naming strategy that would have derived one.
+        guess the naming strategy that would have derived one. A ``schema``
+        qualifier is matched the same way against the entity's
+        ``storage_schema``, and an entity that declares none matches no
+        qualified name (review B2): ``audit.orders`` is not ``orders`` because
+        both end in the same word.
         """
-        folded = name if quoted else name.lower()
         return _only(
             full
             for full, model in self._models.items()
-            if model.storage_name
-            and (model.storage_name if quoted else model.storage_name.lower()) == folded
+            if _same_identifier(model.storage_name, name, quoted=quoted)
+            and (
+                schema is None
+                or _same_identifier(model.storage_schema, schema, quoted=schema_quoted)
+            )
         )
 
-    def field_target(self, owner: str | None, field_name: str) -> str | None:
+    def field_target(self, owner: str | None, field_name: str) -> str | NotAnEntity | None:
         """The entity a field of ``owner`` reaches, for a join over it.
 
         The erased ``type_name`` is qualified and answers a to-one field. A
@@ -123,6 +208,13 @@ class EntityCatalog:
         declared type (``List<OrderLine>`` is ``OrderLine``), then resolved as
         a Java type name: a qualified name exactly, a simple name only when one
         entity has it.
+
+        :data:`NOT_AN_ENTITY` when the type is written and no entity of the
+        service has it: a basic value (``Set<String>``), an embeddable, an
+        embedded value (review B6). The catalog holds every entity, so a type
+        it lacks is not one. None when the type cannot be read: an owner or
+        field the catalog does not have, a raw collection, a wildcard, or a
+        name two entities share.
         """
         model = self._models.get(owner) if owner else None
         found = next((f for f in model.fields if f.name == field_name), None) if model else None
@@ -131,11 +223,27 @@ class EntityCatalog:
         if found.type_name in self._models:
             return found.type_name
         element = _element_type(found.declared_type)
-        if element is None:
+        raw = found.type_name in _CONTAINERS and (
+            element in _CONTAINERS or element in _CONTAINER_NAMES
+        )
+        if element is None or raw:
             return None
         if element in self._models:
             return element
-        return _only(full for full, model in self._models.items() if model.entity == element)
+        named = list(
+            dict.fromkeys(full for full, model in self._models.items() if model.entity == element)
+        )
+        if not named:
+            return NOT_AN_ENTITY
+        return named[0] if len(named) == 1 else None
+
+
+def _same_identifier(declared: str | None, written: str, *, quoted: bool) -> bool:
+    """Whether a SQL identifier as written names ``declared``: exactly when
+    quoted, case-folded otherwise. Nothing declared matches nothing."""
+    if not declared:
+        return False
+    return declared == written if quoted else declared.lower() == written.lower()
 
 
 def _element_type(declared: str | None) -> str | None:
@@ -153,7 +261,8 @@ def _element_type(declared: str | None) -> str | None:
                 last = index + 1
         text = arguments[last:].strip()
     text = text.split("<", 1)[0].removeprefix("? extends ").strip()
-    return text or None
+    # `?` and `? super X` say nothing exact about the element.
+    return text if text and not text.startswith("?") else None
 
 
 def _only(candidates: Iterable[str]) -> str | None:
@@ -204,8 +313,12 @@ def read_repository_query(db: ExportDbAccess, entities: EntityCatalog) -> QueryR
         return None
     else:
         language = _Language.JPQL
+    try:
+        tokens = _tokenize(query.text)
+    except _UnmodeledTextError:
+        return None
     return _Statement(
-        _tokenize(query.text),
+        tokens,
         language,
         entities,
         repository_entity=db.entity_type_full_name,
@@ -233,7 +346,23 @@ class _Token:
 
     kind: Literal["name", "spel", "param", "literal", "other"]
     text: str
+    start: int
+    """Offset in the query text: two tokens with no space between them are
+    one name to SQL (``#{#entityName}_archive``)."""
     segments: tuple[_Segment, ...] = ()
+
+    @property
+    def end(self) -> int:
+        return self.start + len(self.text)
+
+    @property
+    def name_like(self) -> bool:
+        """A piece a name can be glued together from."""
+        return (
+            self.kind in ("name", "spel")
+            or (self.kind == "literal" and self.text[:1].isdigit())
+            or self.text == "."
+        )
 
     @property
     def keyword(self) -> str | None:
@@ -248,8 +377,25 @@ _QUOTES = {'"': '"', "`": "`"}
 """SQL's quoted identifier and MySQL's."""
 
 
+class _UnmodeledTextError(Exception):
+    """The text holds a construct this lexer does not model (review B2).
+
+    Each one hides text from a lexer that does not know it: a MySQL ``#``
+    comment, a backslash-escaped quote, a PostgreSQL dollar-quoted string or
+    nested comment, or a second statement. Read on regardless, the hidden
+    part becomes statement, so the query is not read at all.
+    """
+
+
+_DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
+"""PostgreSQL's ``$$`` or ``$tag$`` opening a dollar-quoted string."""
+
+
 def _tokenize(text: str) -> list[_Token]:
-    """The statement's tokens, with comments dropped and literals opaque."""
+    """The statement's tokens, with comments dropped and literals opaque.
+
+    Raises :class:`_UnmodeledTextError` for text it cannot split reliably.
+    """
     tokens: list[_Token] = []
     i = 0
     while i < len(text):
@@ -263,25 +409,35 @@ def _tokenize(text: str) -> list[_Token]:
             continue
         if pair == "/*":
             i = _end_of(text, "*/", i + 2)
+            if "/*" in text[start + 2 : i]:
+                raise _UnmodeledTextError("a nested comment")
             continue
+        if char == "#" and pair != "#{":
+            raise _UnmodeledTextError("a # outside a literal")
+        if char == "$" and _DOLLAR_QUOTE.match(text, i):
+            raise _UnmodeledTextError("a dollar-quoted string")
+        if tokens and tokens[-1].text == ";":
+            raise _UnmodeledTextError("a second statement")
         if char == "'":
             i = _end_of_literal(text, i + 1)
-            tokens.append(_Token("literal", text[start:i]))
+            if "\\" in text[start:i]:
+                raise _UnmodeledTextError("a backslash inside a literal")
+            tokens.append(_Token("literal", text[start:i], start))
         elif pair == "#{":
             i = _end_of_spel(text, i + 1)
-            tokens.append(_Token("spel", text[start:i]))
+            tokens.append(_Token("spel", text[start:i], start))
         elif char in "?:" and text[i + 1 : i + 3] == "#{":
             i = _end_of_spel(text, i + 2)
-            tokens.append(_Token("param", text[start:i]))
+            tokens.append(_Token("param", text[start:i], start))
         elif char == "?" or (char == ":" and i + 1 < len(text) and _starts_word(text[i + 1])):
             i += 1
             while i < len(text) and (text[i].isalnum() or text[i] == "_"):
                 i += 1
-            tokens.append(_Token("param", text[start:i]))
+            tokens.append(_Token("param", text[start:i], start))
         elif char.isdigit():
             while i < len(text) and (text[i].isalnum() or text[i] == "."):
                 i += 1
-            tokens.append(_Token("literal", text[start:i]))
+            tokens.append(_Token("literal", text[start:i], start))
         elif _starts_word(char) or char in _QUOTES:
             segments: list[_Segment] = []
             while True:
@@ -295,10 +451,10 @@ def _tokenize(text: str) -> list[_Token]:
                     i += 1
                     continue
                 break
-            tokens.append(_Token("name", text[start:i], tuple(segments)))
+            tokens.append(_Token("name", text[start:i], start, tuple(segments)))
         else:
             i += 2 if pair == "::" else 1
-            tokens.append(_Token("other", text[start:i]))
+            tokens.append(_Token("other", text[start:i], start))
     return tokens
 
 
@@ -398,6 +554,13 @@ class _Statement:
         self._repository_entity_text = repository_entity_text
         self._mentions: list[_Mention] = []
         self._frames = [_Frame(query=True)]
+        # What the statement's own from clause declares, for a native select
+        # that may only be calling a function (review B2).
+        self._top_depth = 1
+        self._top_from = False
+        self._top_tables: list[str] = []
+        self._top_derived = False
+        self._top_into = False
 
     def read(self) -> QueryReading | None:
         first = next((i for i, t in enumerate(self._tokens) if t.text != "("), None)
@@ -405,6 +568,9 @@ class _Statement:
         if first is None or verb is None or self._is_upsert(verb):
             return None
         frames = self._frames
+        # `(select ...) union (select ...)`: the leading parentheses hold the
+        # statement itself, so their frames are its top level.
+        self._top_depth = first + 1
         i = 0
         while i < len(self._tokens):
             if i == first:
@@ -420,6 +586,7 @@ class _Statement:
                 token.keyword == "from" or (token.text == "," and frames[-1].in_from)
             ):
                 frames[-1].in_from = True
+                self._top_from = self._top_from or self._at_top()
                 i = self._declaration(i + 1, target=False)
                 continue
             elif frames[-1].query and token.keyword == "join":
@@ -429,7 +596,11 @@ class _Statement:
                 continue
             elif token.keyword in _CLAUSES:
                 frames[-1].in_from = False
+            elif token.keyword == "into" and self._at_top():
+                self._top_into = True
             i += 1
+        if self._language is _Language.SQL and verb is EntityOperation.READ and self._calls_only():
+            return None
         accesses = tuple(
             dict.fromkeys(
                 (m.entity, verb if m.target else EntityOperation.READ) for m in self._mentions
@@ -440,23 +611,52 @@ class _Statement:
         # verb: it keeps it, on an undetermined entity (rule 6).
         return QueryReading(accesses=accesses or ((None, verb),), unresolved=unresolved)
 
+    def _at_top(self) -> bool:
+        """Whether the current frame is the statement's own, not a subquery's."""
+        return len(self._frames) <= self._top_depth
+
+    def _calls_only(self) -> bool:
+        """Whether a native select reads no table of its own: no from, only
+        ``dual`` or a function there, or ``select ... into``, which writes.
+        A function a select calls may write, and nothing here reads its body.
+        A derived table (``from (select ...) x``) is read like any subquery."""
+        if self._top_into or not self._top_from:
+            return True
+        tables = [name for name in self._top_tables if name.lower() != "dual"]
+        return not tables and not self._top_derived
+
     def _head(self, i: int, verb: EntityOperation) -> int:
         """Past the first keyword; a write statement's target is declared here."""
         if verb is EntityOperation.READ:
             return i + 1
-        i += 1
+        i = self._past_modifiers(i + 1)
         if self._keyword(i) in ("from", "into"):
             i += 1
         return self._declaration(i, target=True)
 
+    def _past_modifiers(self, i: int) -> int:
+        """Past SQL's statement modifiers, which are never a name (review B6)."""
+        while self._language is _Language.SQL and self._keyword(i) in _SQL_MODIFIERS:
+            i += 1
+        return i
+
     def _declaration(self, i: int, *, target: bool) -> int:
         """One entity declaration at ``i``: its name and optional alias."""
+        i = self._past_modifiers(i)
         if i >= len(self._tokens):
             return i
         name = self._tokens[i]
         called = i + 1 < len(self._tokens) and self._tokens[i + 1].text == "("
-        if name.kind == "spel" and "".join(name.text.split()) == _ENTITY_NAME_SPEL:
-            entity, written = self._repository_entity, self._repository_entity_text
+        glued = self._glued_name(i)
+        if any(token.kind == "spel" for token in glued):
+            # Only a bare `#{#entityName}` is the repository's entity. Any
+            # other SpEL, or one joined to a name (`#{#entityName}_archive`),
+            # names a table nothing here can evaluate (review B2).
+            if len(glued) == 1 and "".join(name.text.split()) == _ENTITY_NAME_SPEL:
+                entity, written = self._repository_entity, self._repository_entity_text
+            else:
+                entity, written = None, "".join(token.text for token in glued)
+            i += len(glued) - 1
         elif (
             self._language is _Language.JPQL
             and name.keyword == "in"
@@ -475,32 +675,61 @@ class _Statement:
             # A function (`treat(...)`, `generate_series(...)`), `lateral`, or
             # a derived table: the main loop reads any subquery inside it. A
             # write target followed by `(` is its column list, not a call.
+            if self._at_top() and (name.text == "(" or name.keyword == "lateral"):
+                self._top_derived = True
             return i
-        self._mentions.append(_Mention(entity, written, target))
+        if self._at_top():
+            self._top_tables.append(written)
+        # A join over a path to a value or an embeddable touches no entity
+        # (review B6); its alias still ranges over something, unresolved.
+        if entity is not NOT_AN_ENTITY:
+            self._mentions.append(_Mention(entity, written, target))
         i += 1
         if self._keyword(i) == "as":
             i += 1
         alias = self._keyword(i)
         if alias is not None and alias not in _NOT_AN_ALIAS:
-            self._frames[-1].aliases[alias] = entity
+            self._frames[-1].aliases[alias] = entity if isinstance(entity, str) else None
             i += 1
         return i
 
-    def _resolve(self, name: _Token) -> str | None:
+    def _glued_name(self, i: int) -> list[_Token]:
+        """The token at ``i`` and every name piece written against it."""
+        run = [self._tokens[i]]
+        for token in self._tokens[i + 1 :]:
+            if token.start != run[-1].end or not token.name_like:
+                break
+            run.append(token)
+        return run
+
+    def _resolve(self, name: _Token) -> str | NotAnEntity | None:
         """An entity name, or a path over an alias in scope (``o.lines``); in
-        SQL a table name, whose schema prefix does not decide (``public.orders``)."""
+        SQL a table name, whose schema qualifier must be the one the entity
+        declares (``shop.orders``). A catalog qualifier (``db.shop.orders``)
+        is never declared, so a three-part name resolves to nothing."""
         if self._language is _Language.SQL:
-            table = name.segments[-1]
-            return self._entities.table_entity(table.text, quoted=table.quoted)
+            *qualifiers, table = name.segments
+            if len(qualifiers) > 1:
+                return None
+            schema = qualifiers[0] if qualifiers else None
+            return self._entities.table_entity(
+                table.text,
+                quoted=table.quoted,
+                schema=schema.text if schema else None,
+                schema_quoted=schema.quoted if schema else False,
+            )
         head, *path = (segment.text for segment in name.segments)
         if not path:
             return self._entities.jpql_entity(head)
         scope = next((f.aliases for f in reversed(self._frames) if head.lower() in f.aliases), None)
         if scope is None:
             return self._entities.jpql_entity(name.text)
-        entity = scope[head.lower()]
+        entity: str | NotAnEntity | None = scope[head.lower()]
         for field_name in path:
-            entity = self._entities.field_target(entity, field_name)
+            # Past a non-entity the catalog holds no fields: unresolved.
+            entity = (
+                self._entities.field_target(entity, field_name) if isinstance(entity, str) else None
+            )
         return entity
 
     def _is_upsert(self, verb: EntityOperation) -> bool:
@@ -541,6 +770,14 @@ _CLAUSES: frozenset[str] = frozenset(
     }
 )
 """Words that end a from clause: a comma after one is not a declaration."""
+
+_SQL_MODIFIERS: frozenset[str] = frozenset(
+    {"ignore", "low_priority", "delayed", "high_priority", "quick", "only"}
+)
+"""Words SQL writes between a verb (or ``from``) and the table: MySQL's
+insert/update/delete modifiers and PostgreSQL's ``only`` (no inheritance
+children). Skipped in SQL only, because JPQL has none of them and an entity
+may be named ``Only``."""
 
 _NOT_AN_ALIAS: frozenset[str] = _CLAUSES | {
     "from",
