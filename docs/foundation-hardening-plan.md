@@ -1169,7 +1169,7 @@ def _has_java_sources(module_dir: Path) -> bool:
     main = module_dir / "src" / "main" / "java"
     return main.is_dir() and any(main.rglob("*.java"))
 ```
-```python
+```text
 build_system="maven",
 languages=["java"],     # both literals, not derived
 ```
@@ -1179,10 +1179,10 @@ this path:
 
 ```python
 if not discovered:
-    logger.warning("no analyzable services found in %s", normalized)   # log only
+    logger.warning("no analyzable services found in %s", normalized)  # log only
 ...
-if service_count > 0 and extracted_count == 0:                          # never fires:
-    raise RuntimeError(...)                                             # service_count == 0
+if service_count > 0 and extracted_count == 0:  # never fires:
+    raise RuntimeError(...)  # service_count == 0
 ```
 
 `service_count` stays 0, so the all-services-failed guard is skipped, the job completes without
