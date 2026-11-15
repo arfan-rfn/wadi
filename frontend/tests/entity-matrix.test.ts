@@ -6,43 +6,55 @@
 import { describe, expect, test } from "vitest"
 
 import type {
-  EntityAccessAccounting,
+  EntityOperation,
+  EntityUsageEndpoint,
   EntityUsageRow,
   EntityUsageView,
 } from "@/lib/generated/entity_usage.schema"
-import { deriveEntityMatrixState } from "@/lib/wadi/entity-access"
+import {
+  deriveEntityMatrixState,
+  OUTCOME_BUCKETS,
+  withheldColumns,
+} from "@/lib/wadi/entity-access"
 
-const accounting = {
-  call_sites: 20,
-  in_endpoint_flow: 15,
-  in_no_endpoint_flow: 5,
-  flush: 0,
-  implemented_in_project: 1,
-  entity_undetermined: 2,
-  unknown_operation: 3,
-  create_or_update: 4,
-  bound: 10,
-  accesses_by_operation: {},
-  sites_by_basis: {},
-  rules_version: "r1",
-  gate_flags: [],
-} as EntityAccessAccounting
+import {
+  CRUD_MATRIX_ENTITIES,
+  CRUD_MATRIX_ENTITY_COVERAGE,
+} from "./fixtures/crud-matrix-entities"
+import {
+  SYNTHETIC_ACCOUNTING as accounting,
+  accountingViolations,
+} from "./fixtures/entity-accounting"
 
-const endpoint = (id: string, method: string, uri: string) => ({
+const endpoint = (
+  id: string,
+  method: EntityUsageEndpoint["http_method"],
+  uri: string
+): EntityUsageEndpoint => ({
   endpoint_id: id,
   http_method: method,
   full_uri: uri,
   call_sites: 1,
 })
 
-/** Rows carry all six operations; this fixture lists them deliberately OUT
- * of enum order, so a column that read the API's order would show it. */
-function row(
-  partial: Partial<EntityUsageRow> & {
-    ops?: Partial<Record<string, ReturnType<typeof endpoint>[]>>
-  }
-): EntityUsageRow {
-  const ops = partial.ops ?? {}
+/** The API lists all six operations in enum order (the contract's validator).
+ * This fixture lists them deliberately OUT of it, so a column that read the
+ * API's order instead of the one vocabulary would show it. */
+const SHUFFLED: EntityOperation[] = [
+  "unknown",
+  "delete",
+  "create-or-update",
+  "update",
+  "read",
+  "create",
+]
+
+function row({
+  ops = {},
+  ...fields
+}: Partial<Omit<EntityUsageRow, "operations">> & {
+  ops?: Partial<Record<EntityOperation, EntityUsageEndpoint[]>>
+}): EntityUsageRow {
   return {
     service_id: "svc_order",
     entity: "com.acme.order.Order",
@@ -50,16 +62,12 @@ function row(
     data_model_id: null,
     storage_name: null,
     declared_by: "annotation",
-    operations: [
-      "unknown",
-      "delete",
-      "create-or-update",
-      "update",
-      "read",
-      "create",
-    ].map((operation) => ({ operation, endpoints: ops[operation] ?? [] })),
-    ...partial,
-  } as EntityUsageRow
+    operations: SHUFFLED.map((operation) => ({
+      operation,
+      endpoints: ops[operation] ?? [],
+    })),
+    ...fields,
+  }
 }
 
 function view(partial: Partial<EntityUsageView>): EntityUsageView {
@@ -72,19 +80,58 @@ function view(partial: Partial<EntityUsageView>): EntityUsageView {
       {
         service_id: "svc_order",
         service_name: "ts-order-service",
+        status: "reporting",
         accounting,
       },
       {
         service_id: "svc_old",
         service_name: "ts-old-service",
+        status: "predating",
         accounting: null,
       },
     ],
     ...partial,
-  } as EntityUsageView
+  }
 }
 
 describe("entity matrix", () => {
+  test("every accounting fixture is accounting the API can send (C9)", () => {
+    const real = CRUD_MATRIX_ENTITIES.services.flatMap((s) =>
+      s.accounting ? [s.accounting] : []
+    )
+    expect(real).toHaveLength(1)
+    for (const a of [accounting, ...real])
+      expect(accountingViolations(a)).toEqual([])
+  })
+
+  test("on the crud-matrix payload the outcome buckets sum to the repository calls", () => {
+    const state = deriveEntityMatrixState({
+      data: CRUD_MATRIX_ENTITIES,
+      error: null,
+    })
+    if (state.kind !== "populated") throw new Error(state.kind)
+    // The live accounting: 68 calls, of which 1 is flush() and 2 call a
+    // method with a body in the project. 1.26.0's strip left both out and
+    // showed buckets summing to 65 (review C2).
+    expect(state.totals).toEqual({
+      callSites: 68,
+      bound: 33,
+      createOrUpdate: 18,
+      unknownVerb: 13,
+      implementedInProject: 2,
+      undeterminedEntity: 1,
+      flush: 1,
+      inNoEndpointFlow: 1,
+    })
+    const totals = state.totals
+    if (!totals) throw new Error("no totals")
+    expect(
+      OUTCOME_BUCKETS.reduce((sum, bucket) => sum + totals[bucket.key], 0)
+    ).toBe(68)
+    // The other partition is not an outcome: adding it would count a call twice.
+    expect(OUTCOME_BUCKETS.map((b) => b.key)).not.toContain("inNoEndpointFlow")
+  })
+
   test("cells follow the operation enum, whatever order the rows arrive in", () => {
     const state = deriveEntityMatrixState({
       data: view({
@@ -129,9 +176,12 @@ describe("entity matrix", () => {
     })
     if (state.kind !== "populated") throw new Error(state.kind)
     expect(state.rows[0].notes).toEqual(["no detected delete call"])
+    // Both buckets whose verb was not read travel with the note: a custom
+    // method with a body in the project is exactly where a delete can hide.
     expect(state.rows[0].unresolved).toEqual({
       kind: "counted",
       unknownVerb: 3,
+      implementedInProject: 1,
       undeterminedEntity: 2,
       inNoEndpointFlow: 5,
     })
@@ -219,10 +269,59 @@ describe("entity matrix", () => {
       bound: 10,
       createOrUpdate: 4,
       unknownVerb: 3,
+      implementedInProject: 1,
       undeterminedEntity: 2,
+      flush: 0,
       inNoEndpointFlow: 5,
-      servicesPredating: 1,
     })
+    expect(state.servicesPredating).toBe(1)
+  })
+
+  test("services without accounting are counted by why: predating and failed apart, libraries not at all (C3)", () => {
+    const base = view({})
+    const state = deriveEntityMatrixState({
+      data: view({
+        services: [
+          ...base.services,
+          {
+            service_id: "svc_broken",
+            service_name: "ts-broken-service",
+            status: "extraction-failed",
+            accounting: null,
+          },
+          {
+            service_id: "svc_common",
+            service_name: "ts-common",
+            status: "library",
+            accounting: null,
+          },
+        ],
+        entities: [
+          row({
+            service_id: "svc_broken",
+            ops: { read: [endpoint("ep_1", "GET", "/x")] },
+          }),
+          row({
+            service_id: "svc_common",
+            entity: "com.acme.common.Audit",
+            name: "Audit",
+            ops: { read: [endpoint("ep_2", "GET", "/y")] },
+          }),
+        ],
+      }),
+      error: null,
+    })
+    if (state.kind !== "populated") throw new Error(state.kind)
+    // Four services listed, one reporting: 1.26.0's UI said "3 not counted,
+    // their accounting predates entity facts", true of one of the three.
+    expect(state.servicesPredating).toBe(1)
+    expect(state.servicesFailed).toBe(1)
+    // The totals are the reporting service's alone either way.
+    expect(state.totals?.callSites).toBe(20)
+    expect(state.rows.map((r) => r.unresolved)).toEqual([
+      { kind: "extraction-failed" },
+      { kind: "library" },
+    ])
   })
 
   test("analyzed=false is 'predates', never an empty matrix (R1-6)", () => {
@@ -240,6 +339,50 @@ describe("entity matrix", () => {
     ).toEqual({ kind: "fetch-failed", message: "503: x" })
     expect(deriveEntityMatrixState({ data: undefined, error: null })).toEqual({
       kind: "pending",
+    })
+  })
+})
+
+describe("withheld columns (C6)", () => {
+  test("the coverage report names the operations no save may publish", () => {
+    // Every gate flag in the crud-matrix run is off: a save publishes as
+    // create-or-update, so create and update hold only what query text says.
+    expect(
+      withheldColumns({ entity_coverage: CRUD_MATRIX_ENTITY_COVERAGE })
+    ).toEqual({ kind: "read", operations: ["create", "update"] })
+  })
+
+  test("they come back in column order, whatever order the report lists", () => {
+    expect(
+      withheldColumns({
+        entity_coverage: {
+          ...CRUD_MATRIX_ENTITY_COVERAGE,
+          gated_operations: ["update", "create"],
+        },
+      })
+    ).toEqual({ kind: "read", operations: ["create", "update"] })
+  })
+
+  test("a scored split withholds nothing", () => {
+    expect(
+      withheldColumns({
+        entity_coverage: {
+          ...CRUD_MATRIX_ENTITY_COVERAGE,
+          gated_operations: [],
+        },
+      })
+    ).toEqual({ kind: "read", operations: [] })
+  })
+
+  test("no report, no section, or a report from before the field: not known", () => {
+    const { gated_operations: _omitted, ...before127 } =
+      CRUD_MATRIX_ENTITY_COVERAGE
+    expect(withheldColumns(undefined)).toEqual({ kind: "unread" })
+    expect(withheldColumns({ entity_coverage: null })).toEqual({
+      kind: "unread",
+    })
+    expect(withheldColumns({ entity_coverage: before127 })).toEqual({
+      kind: "unread",
     })
   })
 })

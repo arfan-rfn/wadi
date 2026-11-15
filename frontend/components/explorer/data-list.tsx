@@ -251,7 +251,7 @@ export function DataList({
           <ul>
             {state.rows.map((row) => (
               <Row
-                key={row.key}
+                key={row.id}
                 row={row}
                 selected={row.key === selectedEntity}
                 sites={row.key === selectedEntity ? sitesOf(row.key) : []}

@@ -9,9 +9,14 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { EntityUsageView } from "@/lib/generated/entity_usage.schema"
 import { DataPane } from "@/components/home/data-pane"
 
+import {
+  CRUD_MATRIX_ENTITIES,
+  CRUD_MATRIX_ENTITY_COVERAGE,
+} from "./fixtures/crud-matrix-entities"
+import { SYNTHETIC_ACCOUNTING } from "./fixtures/entity-accounting"
 import { renderWithQuery } from "./utils"
 
-const usage = {
+const usage: EntityUsageView = {
   snapshot_id: "snap_x",
   analyzed: true,
   endpoints_predating: 0,
@@ -63,32 +68,21 @@ const usage = {
     {
       service_id: "svc_order",
       service_name: "ts-order-service",
-      accounting: {
-        call_sites: 20,
-        in_endpoint_flow: 15,
-        in_no_endpoint_flow: 5,
-        flush: 0,
-        implemented_in_project: 1,
-        entity_undetermined: 2,
-        unknown_operation: 3,
-        create_or_update: 4,
-        bound: 10,
-        accesses_by_operation: {},
-        sites_by_basis: {},
-        rules_version: "r1",
-        gate_flags: [],
-      },
+      status: "reporting",
+      accounting: SYNTHETIC_ACCOUNTING,
     },
   ],
-} as unknown as EntityUsageView
+}
 
 const query = vi.hoisted(() => ({
   current: {} as Record<string, unknown>,
+  coverage: {} as Record<string, unknown>,
   refetch: (() => undefined) as () => unknown,
 }))
 
 vi.mock("@/lib/wadi/hooks", () => ({
   useEntityUsage: () => query.current,
+  useCoverage: () => query.coverage,
 }))
 
 beforeEach(() => {
@@ -100,6 +94,9 @@ beforeEach(() => {
     isPending: false,
     refetch: query.refetch,
   }
+  // The coverage report still loading: which columns are withheld is not
+  // known yet, so no header is marked.
+  query.coverage = { data: undefined, isPending: true, isError: false }
 })
 
 function renderPane() {
@@ -122,6 +119,41 @@ describe("DataPane", () => {
         "Verb not read",
         "Notes",
       ]
+    )
+  })
+
+  test("a gated operation's column says withheld, and its zeros are not called measured (C6)", () => {
+    query.current = { ...query.current, data: CRUD_MATRIX_ENTITIES }
+    query.coverage = {
+      data: { entity_coverage: CRUD_MATRIX_ENTITY_COVERAGE },
+      isPending: false,
+      isError: false,
+    }
+    const view = renderPane()
+    const headers = view.getAllByRole("columnheader")
+    expect(headers.map((h) => h.textContent)).toEqual([
+      "Entity",
+      "Service",
+      "Create · withheld",
+      "Read",
+      "Update · withheld",
+      "Delete",
+      "Create or update",
+      "Verb not read",
+      "Notes",
+    ])
+    expect(headers[2].getAttribute("title")).toMatch(
+      /saves are published as create or update until the split is scored/
+    )
+    const footer = view.getByText(/A zero is measured/)
+    expect(footer).toHaveTextContent(/not in a withheld column/)
+    expect(footer).toHaveTextContent(/create, update/)
+  })
+
+  test("with no coverage report, the footer does not vouch for create or update zeros", () => {
+    const view = renderPane()
+    expect(view.getByText(/A zero is measured/)).toHaveTextContent(
+      /a zero under create or update is not measured/
     )
   })
 
@@ -151,6 +183,60 @@ describe("DataPane", () => {
     expect(view.queryByRole("link", { name: /PUT/ })).toBeNull()
   })
 
+  test("under an operation, an endpoint's count is that operation's calls (C1)", () => {
+    // POST /crud/inherited-method-table touches Order at 11 calls: 5 read, 3
+    // delete, 3 save. Under delete it is 3, never the entity's 11.
+    query.current = { ...query.current, data: CRUD_MATRIX_ENTITIES }
+    const view = renderPane()
+    fireEvent.click(
+      view.getByRole("button", { name: "Order, delete: 4 endpoints" })
+    )
+    const item = view
+      .getByRole("link", { name: /\/crud\/inherited-method-table/ })
+      .closest("li")
+    expect(item).toHaveTextContent(/3 calls$/)
+    expect(item).not.toHaveTextContent(/11/)
+  })
+
+  test("a count written before 1.27.0 shows no number, and says to re-analyze", () => {
+    const [order] = usage.entities
+    query.current = {
+      ...query.current,
+      data: {
+        ...usage,
+        entities: [
+          {
+            ...order,
+            operations: order.operations.map((usage) =>
+              usage.operation === "read"
+                ? {
+                    ...usage,
+                    endpoints: usage.endpoints.map((endpoint) => ({
+                      ...endpoint,
+                      call_sites: null,
+                    })),
+                  }
+                : usage
+            ),
+          },
+        ],
+      },
+    }
+    const view = renderPane()
+    fireEvent.click(
+      view.getByRole("button", { name: "Order, read: 2 endpoints" })
+    )
+    const item = view
+      .getByRole("link", { name: /\/orders\/\{id\}/ })
+      .closest("li")
+    if (!item) throw new Error("the endpoint is not in a list item")
+    expect(item).not.toHaveTextContent(/\d/)
+    expect(item).not.toHaveTextContent(/null/)
+    expect(
+      within(item).getByTitle(/count not recorded; re-analyze/)
+    ).toBeInTheDocument()
+  })
+
   test("notes carry the service's unresolved counts beside an absence", () => {
     const view = renderPane()
     const order = view.getByRole("row", { name: /Order/ })
@@ -159,6 +245,85 @@ describe("DataPane", () => {
     expect(notes).toHaveTextContent("3 verb unknown")
     expect(notes).toHaveTextContent("2 entity undetermined")
     expect(notes).toHaveTextContent("5 in no endpoint flow")
+  })
+
+  test("the absence note names both buckets whose verb was not read (C2)", () => {
+    // On the crud-matrix payload, OrderRepository.archiveOld and findAndTouch
+    // have bodies in the project: 2 calls that publish `unknown` outside the
+    // 13 "verb unknown" ones, and either could be the delete not detected.
+    query.current = { ...query.current, data: CRUD_MATRIX_ENTITIES }
+    const view = renderPane()
+    const [account] = view.getAllByRole("row", { name: /^Account/ })
+    const note = within(account).getByText(/spring-data-crud-matrix:/)
+    expect(note).toHaveTextContent("13 verb unknown")
+    expect(note).toHaveTextContent("2 body in the project, verb not read")
+    expect(note.getAttribute("title")).toMatch(/verb unknown/)
+    expect(note.getAttribute("title")).toMatch(/body in the project/)
+  })
+
+  test("the strip's outcome buckets sum to its repository calls, on a real payload", () => {
+    query.current = { ...query.current, data: CRUD_MATRIX_ENTITIES }
+    const view = renderPane()
+    expect(view.getByText("Repository calls").parentElement).toHaveTextContent(
+      "Repository calls 68"
+    )
+    const outcomes = view.getByRole("list", {
+      name: "What each repository call became",
+    })
+    const counts = within(outcomes)
+      .getAllByRole("listitem")
+      .map((item) => Number(/(\d+)$/.exec(item.textContent ?? "")?.[1]))
+    // bound, create or update, verb unknown, body in the project, entity
+    // undetermined, flush: 33 + 18 + 13 + 2 + 1 + 1.
+    expect(counts).toEqual([33, 18, 13, 2, 1, 1])
+    expect(counts.reduce((sum, n) => sum + n, 0)).toBe(68)
+    // Flow membership is the other partition of the same 68: shown, but
+    // apart, so nobody adds it to the outcomes.
+    expect(within(outcomes).queryByText(/endpoint flow/)).toBeNull()
+    expect(view.getByText(/of these, in no endpoint flow/)).toHaveTextContent(
+      /1$/
+    )
+  })
+
+  test("the strip says why a service has no accounting, and never blames a library (C3)", () => {
+    query.current = {
+      ...query.current,
+      data: {
+        ...usage,
+        services: [
+          ...usage.services,
+          {
+            service_id: "svc_old",
+            service_name: "ts-old-service",
+            status: "predating",
+            accounting: null,
+          },
+          {
+            service_id: "svc_broken",
+            service_name: "ts-broken-service",
+            status: "extraction-failed",
+            accounting: null,
+          },
+          {
+            service_id: "svc_common",
+            service_name: "ts-common",
+            status: "library",
+            accounting: null,
+          },
+        ],
+      },
+    }
+    const view = renderPane()
+    expect(view.getByText("1 service predates entity facts")).toHaveClass(
+      "text-warn"
+    )
+    expect(
+      view.getByText(
+        "1 service failed extraction; its data access was never examined"
+      )
+    ).toHaveClass("text-warn")
+    expect(view.queryByText(/not counted/)).toBeNull()
+    expect(view.queryByText(/3 services/)).toBeNull()
   })
 
   test("a snapshot that predates entity facts says so, with no matrix", () => {

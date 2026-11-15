@@ -2,6 +2,7 @@
 // one ordered operation vocabulary every entity surface renders from. Pure, so
 // the states are pinned by unit tests rather than by reading markup.
 
+import type { CoverageReport } from "@/lib/generated/coverage_report.schema"
 import type {
   EndpointDetailView,
   EndpointEntityAccess,
@@ -11,6 +12,7 @@ import type {
   EntityAccessAccounting,
   EntityOperation,
   EntityUsageEndpoint,
+  EntityUsageService,
   EntityUsageView,
 } from "@/lib/generated/entity_usage.schema"
 import type { EntityAccessBasis, Icfg } from "@/lib/generated/icfg.schema"
@@ -81,6 +83,10 @@ export function entityKeyOf(entity: string | null): string {
 }
 
 export interface DataListRow {
+  /** Unique within the list: the entity and its model id together. The
+   * summary groups by both, so one type can arrive as two rows, one with a
+   * model id and one without, and `key` alone collided (review C7). */
+  id: string
   /** `entity=` value: qualified type name or `~undetermined`. */
   key: string
   entity: string | null
@@ -114,6 +120,7 @@ export type DataListState =
 
 function rowOf(access: EndpointEntityAccess): DataListRow {
   return {
+    id: `${entityKeyOf(access.entity)}#${access.data_model_id ?? "no-model"}`,
     key: entityKeyOf(access.entity),
     entity: access.entity,
     name:
@@ -254,15 +261,24 @@ export interface MatrixCell {
 
 /** A service's calls the matrix cannot attribute, from its accounting. They
  * sit beside an absence note because each could be the missing operation
- * (C6). `predates` = the service's boundary was written before accounting. */
+ * (C6). Two buckets publish a verb that was not read: `unknownVerb` and
+ * `implementedInProject`, a method with a body in the project such as
+ * `archiveOld`, which is exactly where a delete can hide (review C2).
+ * Without accounting, the service's `status` says why (review C3):
+ * `predates` = its boundary was written before accounting, `extraction-failed`
+ * = nothing in it was examined, `library` = its calls count in the services
+ * that depend on it (§5.2.14). */
 export type UnresolvedCounts =
   | {
       kind: "counted"
       unknownVerb: number
+      implementedInProject: number
       undeterminedEntity: number
       inNoEndpointFlow: number
     }
   | { kind: "predates" }
+  | { kind: "extraction-failed" }
+  | { kind: "library" }
 
 export interface MatrixRow {
   /** Unique across the matrix: the same entity name can live in two services. */
@@ -282,16 +298,65 @@ export interface MatrixRow {
   unresolved: UnresolvedCounts | null
 }
 
+/** The reporting services' accounting, summed. */
 export interface MatrixTotals {
   callSites: number
   bound: number
   createOrUpdate: number
   unknownVerb: number
+  implementedInProject: number
   undeterminedEntity: number
+  flush: number
+  /** The flow partition: a second split of the same `callSites`, not an
+   * outcome, so it is never added to {@link OUTCOME_BUCKETS}. */
   inNoEndpointFlow: number
-  /** Services whose accounting predates the phase, so are in no sum above. */
-  servicesPredating: number
 }
+
+export interface OutcomeBucket {
+  key: Exclude<keyof MatrixTotals, "callSites" | "inNoEndpointFlow">
+  label: string
+  hint: string
+}
+
+/**
+ * The outcome partition of the accounting, in the order the home strip shows
+ * it. Every repository call has exactly one outcome, so these sum to
+ * `callSites` (review C2). The strip once showed four of the six, and its
+ * numbers added up to 65 of 68 on the crud-matrix fixture: what was missing
+ * was `flush()` and the calls whose method has a body in the project.
+ */
+export const OUTCOME_BUCKETS = [
+  {
+    key: "bound",
+    label: "bound to an entity and a verb",
+    hint: "Every access has an entity and a single create, read, update or delete",
+  },
+  {
+    key: "createOrUpdate",
+    label: "create or update",
+    hint: "A save the analysis could not split into create or update",
+  },
+  {
+    key: "unknownVerb",
+    label: "verb unknown",
+    hint: "A repository call whose verb was not read, such as a query wadi does not parse",
+  },
+  {
+    key: "implementedInProject",
+    label: "body in the project, verb not read",
+    hint: "The called repository method has a body in this project (a default method or a custom fragment such as archiveOld). Its verb is not read, so it publishes as verb unknown",
+  },
+  {
+    key: "undeterminedEntity",
+    label: "entity undetermined",
+    hint: "The verb was read but the entity type could not be bound to a class",
+  },
+  {
+    key: "flush",
+    label: "flush, not an entity operation",
+    hint: "flush() writes pending changes and names no entity",
+  },
+] as const satisfies readonly OutcomeBucket[]
 
 export type EntityMatrixState =
   | { kind: "pending" }
@@ -303,24 +368,66 @@ export type EntityMatrixState =
       rows: MatrixRow[]
       /** Null when no service reports accounting. */
       totals: MatrixTotals | null
+      /** Services whose boundary predates entity facts, so are in no sum. */
+      servicesPredating: number
+      /** Services whose extraction failed: in no sum, and never examined. A
+       * library is neither; it is analyzed inside its dependents (C3). */
+      servicesFailed: number
       endpointsPredating: number
     }
+
+/**
+ * Which matrix columns a save is withheld from (review C6).
+ *
+ * While a gate flag is off, the save split's verb is evidence only and the
+ * save publishes as create-or-update (rule 5). So in a gated column a zero is
+ * not a measured absence: the save that creates is counted under
+ * create-or-update instead.
+ * The coverage report names those operations; this reads them. `unread` is
+ * every case where it cannot say: the report has not loaded or failed, no
+ * service reports accounting, or the report predates the field (1.27.0).
+ */
+export type WithheldColumns =
+  { kind: "read"; operations: EntityOperation[] } | { kind: "unread" }
+
+export function withheldColumns(
+  report: Pick<CoverageReport, "entity_coverage"> | undefined
+): WithheldColumns {
+  const gated = report?.entity_coverage?.gated_operations
+  if (gated === undefined) return { kind: "unread" }
+  const set = new Set<EntityOperation>(gated)
+  return {
+    kind: "read",
+    operations: ENTITY_OPERATIONS.filter((op) => set.has(op)),
+  }
+}
 
 const NO_DELETE = "no detected delete call"
 const NO_ACCESS = "declared, no detected access"
 const REPOSITORY_ONLY = "repository only, no annotation"
 
 function unresolvedOf(
-  accounting: EntityAccessAccounting | null | undefined
+  service: EntityUsageService | undefined
 ): UnresolvedCounts {
-  return accounting
-    ? {
-        kind: "counted",
-        unknownVerb: accounting.unknown_operation,
-        undeterminedEntity: accounting.entity_undetermined,
-        inNoEndpointFlow: accounting.in_no_endpoint_flow,
-      }
-    : { kind: "predates" }
+  const accounting = service?.accounting
+  if (accounting)
+    return {
+      kind: "counted",
+      unknownVerb: accounting.unknown_operation,
+      implementedInProject: accounting.implemented_in_project,
+      undeterminedEntity: accounting.entity_undetermined,
+      inNoEndpointFlow: accounting.in_no_endpoint_flow,
+    }
+  switch (service?.status) {
+    case "extraction-failed":
+      return { kind: "extraction-failed" }
+    case "library":
+      return { kind: "library" }
+    default:
+      // `predating`, or a service the view does not list: nothing says it
+      // was examined, which is what "predates" claims.
+      return { kind: "predates" }
+  }
 }
 
 /**
@@ -376,7 +483,7 @@ export function deriveEntityMatrixState({
       undetermined,
       cells,
       notes,
-      unresolved: claimsAbsence ? unresolvedOf(service?.accounting) : null,
+      unresolved: claimsAbsence ? unresolvedOf(service) : null,
     }
   })
 
@@ -393,15 +500,23 @@ export function deriveEntityMatrixState({
           bound: sum((a) => a.bound),
           createOrUpdate: sum((a) => a.create_or_update),
           unknownVerb: sum((a) => a.unknown_operation),
+          implementedInProject: sum((a) => a.implemented_in_project),
           undeterminedEntity: sum((a) => a.entity_undetermined),
+          flush: sum((a) => a.flush),
           inNoEndpointFlow: sum((a) => a.in_no_endpoint_flow),
-          servicesPredating: data.services.length - reporting.length,
         }
 
   return {
     kind: "populated",
     rows,
     totals,
+    // Counted by status, never as `services - reporting`: `/entities` lists
+    // libraries and failed extractions too, and neither predates anything.
+    servicesPredating: data.services.filter((s) => s.status === "predating")
+      .length,
+    servicesFailed: data.services.filter(
+      (s) => s.status === "extraction-failed"
+    ).length,
     endpointsPredating: data.endpoints_predating,
   }
 }
