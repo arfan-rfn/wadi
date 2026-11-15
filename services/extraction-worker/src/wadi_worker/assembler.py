@@ -12,6 +12,7 @@ down). Unresolved callees stay as honest call nodes with no interior (P10).
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from wadi_contracts import (
@@ -25,6 +26,9 @@ from wadi_contracts import (
     EndpointCollision,
     EndpointParam,
     EndpointStatus,
+    EntityAccessAccounting,
+    EntityAccessSite,
+    EntityDeclaredBy,
     FieldShape,
     HttpMethod,
     Icfg,
@@ -47,14 +51,17 @@ from wadi_contracts import (
     StatusOrigin,
     TokenPropagation,
     TypeShape,
+    data_model_id,
     method_id,
     mq_interaction_id,
     remote_call_id,
+    summarize_entity_access,
 )
 from wadi_joern_client.export import (
     CfgNodeKind,
     ExportCfg,
     ExportCfgEdgeLabel,
+    ExportDeclaredBy,
     ExportMethod,
     ExportSink,
     ExportTypeShape,
@@ -66,6 +73,13 @@ from wadi_joern_client.export import (
 )
 from wadi_worker.auth_merge import merge_endpoint_auth
 from wadi_worker.cfg_invariants import aggregate_anomalies, arms_leaving_method, check_cfg
+from wadi_worker.entity_access import (
+    SHIPPED_GATE_FLAGS,
+    GateFlag,
+    account_entity_access,
+    carries_entity_facts,
+    classify_db_sinks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +117,12 @@ _EDGE_LABEL_TO_KIND = {
     ExportCfgEdgeLabel.EXCEPTION: IcfgEdgeKind.EXCEPTION,
 }
 
+_DECLARED_BY = {
+    ExportDeclaredBy.ANNOTATION: EntityDeclaredBy.ANNOTATION,
+    ExportDeclaredBy.REPOSITORY_ARGUMENT: EntityDeclaredBy.REPOSITORY_ARGUMENT,
+    None: None,
+}
+
 _CONFIDENCE_MAP = {
     SinkValueConfidence.EXACT: Confidence.EXACT,
     SinkValueConfidence.HIGH: Confidence.HIGH,
@@ -120,6 +140,8 @@ class AssembledArtifacts:
     data_models: list[DataModel] = field(default_factory=list[DataModel])
     cfg_anomalies: list[CfgAnomaly] = field(default_factory=list[CfgAnomaly])
     endpoint_collisions: list[EndpointCollision] = field(default_factory=list[EndpointCollision])
+    entity_access_accounting: EntityAccessAccounting | None = None
+    """None when the export predates entity facts (B5), never a zero."""
 
 
 class ExportIncompatibleError(RuntimeError):
@@ -186,11 +208,13 @@ class Assembler:
         service_id: str,
         config_env: dict[str, str] | None = None,
         config_structured: dict[str, list[dict[str, object]]] | None = None,
+        gate_flags: Sequence[GateFlag] = SHIPPED_GATE_FLAGS,
     ) -> None:
         self._snapshot_id = snapshot_id
         self._service_id = service_id
         self._config_env = config_env or {}
         self._config_structured = config_structured or {}
+        self._gate_flags = gate_flags
 
     def assemble(self, export: ServiceExport) -> AssembledArtifacts:
         if not export.compatible_with_reader():
@@ -209,6 +233,27 @@ class Assembler:
         artifacts.remote_calls = self._build_remote_calls(export, methods)
         artifacts.mq_interactions = self._build_mq_interactions(export, methods)
         artifacts.data_models = self._build_data_models(export)
+        # §5.2.17: the worker classifies every repository call once, here. Its
+        # site goes on the ICFG node of its statement, in every endpoint graph
+        # that inlines the method. A pre-2.14.0 export states no entity facts,
+        # so nothing is classified and nothing is claimed (R1-6).
+        db_calls = (
+            classify_db_sinks(
+                export.sinks,
+                data_model_ids={
+                    model.type_full_name: model.id
+                    for model in artifacts.data_models
+                    if model.type_full_name is not None
+                },
+                gate_flags=self._gate_flags,
+            )
+            if carries_entity_facts(export)
+            else None
+        )
+        sites_by_node: dict[int, list[EntityAccessSite]] = {}
+        for db_call in db_calls or []:
+            if db_call.site is not None:
+                sites_by_node.setdefault(db_call.node_id, []).append(db_call.site)
         # §5.2.8 M2: structural invariants over every RAW method CFG, once per
         # method (an ICFG inlines a method into many endpoints; the invariant
         # is a per-method fact). Pre-patch by construction — this runs on the
@@ -279,11 +324,36 @@ class Assembler:
                     authority_models=export.auth_authorities,
                 ),
             )
-            artifacts.endpoints.append(endpoint)
-            artifacts.icfgs.append(
-                self._assemble_icfg(endpoint, handler, methods, cfgs, sinks_by_node)
+            icfg = self._assemble_icfg(
+                endpoint, handler, methods, cfgs, sinks_by_node, sites_by_node
             )
+            if db_calls is not None:
+                # The summary is a fold of the graph's own sites, by the one
+                # contracts function every reader shares (R1-22). Each method
+                # appears once in an ICFG, so each site is passed once.
+                endpoint = endpoint.model_copy(
+                    update={
+                        "entity_access": summarize_entity_access(
+                            site for node in icfg.nodes for site in node.entity_access_sites
+                        )
+                    }
+                )
+            artifacts.endpoints.append(endpoint)
+            artifacts.icfgs.append(icfg)
         resolve_id_collisions(artifacts)
+        if db_calls is not None:
+            # After the collision drop: a site only a dropped endpoint reached
+            # is in no stored endpoint flow, and the accounting says so.
+            stored_nodes = {node.id for icfg in artifacts.icfgs for node in icfg.nodes}
+            artifacts.entity_access_accounting = account_entity_access(
+                db_calls,
+                in_endpoint_flow={
+                    call.call_id
+                    for call in db_calls
+                    if f"m{call.method_id}:n{call.node_id}" in stored_nodes
+                },
+                gate_flags=self._gate_flags,
+            )
         return artifacts
 
     # --- ICFG construction -----------------------------------------------------
@@ -295,6 +365,7 @@ class Assembler:
         methods: dict[int, ExportMethod],
         cfgs: dict[int, ExportCfg],
         sinks_by_node: dict[int, list[ExportSink]],
+        sites_by_node: dict[int, list[EntityAccessSite]],
     ) -> Icfg:
         closure = self._reachable_closure(handler.id, methods, cfgs)
         nodes: list[IcfgNode] = []
@@ -303,7 +374,9 @@ class Assembler:
         for included_id in closure:
             method = methods[included_id]
             cfg = cfgs.get(included_id)
-            self._emit_method_subgraph(method, cfg, sinks_by_node, methods, closure, nodes, edges)
+            self._emit_method_subgraph(
+                method, cfg, sinks_by_node, sites_by_node, methods, closure, nodes, edges
+            )
 
         return Icfg(
             snapshot_id=self._snapshot_id,
@@ -349,6 +422,7 @@ class Assembler:
         method: ExportMethod,
         cfg: ExportCfg | None,
         sinks_by_node: dict[int, list[ExportSink]],
+        sites_by_node: dict[int, list[EntityAccessSite]],
         methods: dict[int, ExportMethod],
         closure: list[int],
         nodes: list[IcfgNode],
@@ -449,6 +523,8 @@ class Assembler:
                     remote_call_id=remote_ids[0] if remote_ids else None,
                     remote_call_ids=remote_ids,
                     mq_interaction_id=mq_id,
+                    # R1-2: one site per repository call this statement makes.
+                    entity_access_sites=sites_by_node.get(cfg_node.id, []),
                 )
             )
 
@@ -687,17 +763,30 @@ class Assembler:
         return interactions
 
     def _build_data_models(self, export: ServiceExport) -> list[DataModel]:
-        from wadi_contracts import data_model_id
+        """The entity records (§5.2.17), one per ``data_models`` row.
 
+        The id derives from the qualified name when the export carries it, so
+        two classes sharing a simple name in one service are two entities
+        (C2); a pre-2.14.0 export has only the simple name, and its ids stay
+        what they always were.
+        """
         return [
             DataModel(
                 snapshot_id=self._snapshot_id,
                 service_id=self._service_id,
-                id=data_model_id(self._service_id, model.entity),
+                id=data_model_id(self._service_id, model.type_full_name or model.entity),
                 entity=model.entity,
-                fields=[DataModelField(name=f.name, type_name=f.type_name) for f in model.fields],
+                type_full_name=model.type_full_name,
+                jpql_name=model.jpql_name,
+                fields=[
+                    DataModelField(
+                        name=f.name, type_name=f.type_name, declared_type=f.declared_type
+                    )
+                    for f in model.fields
+                ],
                 persistence_framework=model.persistence_framework,
                 storage_name=model.storage_name,
+                declared_by=_DECLARED_BY[model.declared_by],
             )
             for model in export.data_models
         ]
