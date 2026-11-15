@@ -364,6 +364,22 @@ default (`CamelCaseToUnderscoresNamingStrategy`) maps `TrainType`, `Contacts`, `
 default when the service's config sets no physical strategy, and record it as a decision in
 §5.2.17 first. Measure the effect on yas and ICPC the same way.
 
+The 2026-11-15 blind check put a number on it: all 4 endpoint errors in the hard stratum, and the
+one withheld pair in the random stratum, are this case (`Contacts` and `Station`), because the
+read lands on an undetermined entity instead of the entity's own row
+(`docs/measurements/entity-access/2026-11-15-train-ticket.md`).
+
+### The identity rule knows only Spring's id methods
+**Priority:** P2 (before M5 scores `existence-guard:update`)
+**Opened:** v0.9.0
+
+The found arm of an existence check gives an `update` candidate only when the lookup is
+`findById`, `getById`, `getReferenceById` or `existsById` (review B5). A derived finder on the
+entity's `@Id` field is an identity lookup too: `ts-security-service`'s `Config.update` tests
+`findByName` where `name` is the `@Id`, and lost a correct candidate on 2026-11-15. Recognizing
+it needs the entity's id field in the export, which `data_models` does not carry yet. Nothing
+false is published either way; the cost is a candidate M5 would have scored.
+
 ### The query reader leaves HQL selects that start at `from` unread
 **Priority:** P3
 **Opened:** v0.9.0

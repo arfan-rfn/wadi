@@ -1,0 +1,546 @@
+{
+  "blind_format": "1",
+  "labels": "labels.json: {\"<id>\": [{\"entity\": \"<simple or qualified class>\", \"operations\": [\"create\" | \"read\" | \"update\" | \"delete\", ...]}, ...]}; [] when the endpoint touches no entity. Read the source only.",
+  "endpoints": [
+    {
+      "id": "b001",
+      "service": "ts-admin-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/adminbasicservice/adminbasic/configs",
+      "handler_class": "com.cloudhubs.trainticket.adminservice.controller.AdminBasicInfoController",
+      "handler_method": "getAllConfigs",
+      "source_file": "ts-admin-service/src/main/java/com/cloudhubs/trainticket/adminservice/controller/AdminBasicInfoController.java",
+      "line": 118
+    },
+    {
+      "id": "b002",
+      "service": "ts-admin-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/adminbasicservice/adminbasic/prices",
+      "handler_class": "com.cloudhubs.trainticket.adminservice.controller.AdminBasicInfoController",
+      "handler_method": "addPrice",
+      "source_file": "ts-admin-service/src/main/java/com/cloudhubs/trainticket/adminservice/controller/AdminBasicInfoController.java",
+      "line": 167
+    },
+    {
+      "id": "b003",
+      "service": "ts-auth-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/users/hello",
+      "handler_class": "com.cloudhubs.trainticket.auth.controller.AuthUserController",
+      "handler_method": "getHello",
+      "source_file": "ts-auth-service/src/main/java/com/cloudhubs/trainticket/auth/controller/AuthUserController.java",
+      "line": 32
+    },
+    {
+      "id": "b004",
+      "service": "ts-config-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/paymentservice/payment",
+      "handler_class": "com.cloudhubs.trainticket.config.controller.PaymentController",
+      "handler_method": "query",
+      "source_file": "ts-config-service/src/main/java/com/cloudhubs/trainticket/config/controller/PaymentController.java",
+      "line": 44
+    },
+    {
+      "id": "b005",
+      "service": "ts-config-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "handler_class": "com.cloudhubs.trainticket.config.controller.UserController",
+      "handler_method": "updateUser",
+      "source_file": "ts-config-service/src/main/java/com/cloudhubs/trainticket/config/controller/UserController.java",
+      "line": 66
+    },
+    {
+      "id": "b006",
+      "service": "ts-consign-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/consignpriceservice/consignprice",
+      "handler_class": "com.cloudhubs.trainticket.consign.controller.ConsignPriceController",
+      "handler_method": "modifyPriceConfig",
+      "source_file": "ts-consign-service/src/main/java/com/cloudhubs/trainticket/consign/controller/ConsignPriceController.java",
+      "line": 51
+    },
+    {
+      "id": "b007",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/consignpriceservice/consignprice/price",
+      "handler_class": "com.cloudhubs.trainticket.consign.controller.ConsignPriceController",
+      "handler_method": "getPriceInfo",
+      "source_file": "ts-consign-service/src/main/java/com/cloudhubs/trainticket/consign/controller/ConsignPriceController.java",
+      "line": 39
+    },
+    {
+      "id": "b008",
+      "service": "ts-consign-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/consignservice/consigns",
+      "handler_class": "com.cloudhubs.trainticket.consign.controller.ConsignController",
+      "handler_method": "updateConsign",
+      "source_file": "ts-consign-service/src/main/java/com/cloudhubs/trainticket/consign/controller/ConsignController.java",
+      "line": 40
+    },
+    {
+      "id": "b009",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/consignservice/consigns/{consignee}",
+      "handler_class": "com.cloudhubs.trainticket.consign.controller.ConsignController",
+      "handler_method": "findByConsignee",
+      "source_file": "ts-consign-service/src/main/java/com/cloudhubs/trainticket/consign/controller/ConsignController.java",
+      "line": 60
+    },
+    {
+      "id": "b010",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/executeservice/welcome",
+      "handler_class": "com.cloudhubs.trainticket.consign.controller.ExecuteControlller",
+      "handler_method": "home",
+      "source_file": "ts-consign-service/src/main/java/com/cloudhubs/trainticket/consign/controller/ExecuteControlller.java",
+      "line": 25
+    },
+    {
+      "id": "b011",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts",
+      "handler_class": "com.cloudhubs.trainticket.contacts.controller.ContactsController",
+      "handler_method": "createNewContacts",
+      "source_file": "ts-contacts-service/src/main/java/com/cloudhubs/trainticket/contacts/controller/ContactsController.java",
+      "line": 44
+    },
+    {
+      "id": "b012",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts/admin",
+      "handler_class": "com.cloudhubs.trainticket.contacts.controller.ContactsController",
+      "handler_method": "createNewContactsAdmin",
+      "source_file": "ts-contacts-service/src/main/java/com/cloudhubs/trainticket/contacts/controller/ContactsController.java",
+      "line": 52
+    },
+    {
+      "id": "b013",
+      "service": "ts-contacts-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/contactservice/contacts/welcome",
+      "handler_class": "com.cloudhubs.trainticket.contacts.controller.ContactsController",
+      "handler_method": "home",
+      "source_file": "ts-contacts-service/src/main/java/com/cloudhubs/trainticket/contacts/controller/ContactsController.java",
+      "line": 32
+    },
+    {
+      "id": "b014",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/stationservice/stations/idlist",
+      "handler_class": "com.cloudhubs.trainticket.contacts.controller.StationController",
+      "handler_method": "queryForIdBatch",
+      "source_file": "ts-contacts-service/src/main/java/com/cloudhubs/trainticket/contacts/controller/StationController.java",
+      "line": 68
+    },
+    {
+      "id": "b015",
+      "service": "ts-delivery-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment",
+      "handler_class": "com.cloudhubs.trainticket.delivery.controller.InsidePaymentController",
+      "handler_method": "pay",
+      "source_file": "ts-delivery-service/src/main/java/com/cloudhubs/trainticket/delivery/controller/InsidePaymentController.java",
+      "line": 32
+    },
+    {
+      "id": "b016",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/account",
+      "handler_class": "com.cloudhubs.trainticket.delivery.controller.InsidePaymentController",
+      "handler_method": "queryAccount",
+      "source_file": "ts-delivery-service/src/main/java/com/cloudhubs/trainticket/delivery/controller/InsidePaymentController.java",
+      "line": 57
+    },
+    {
+      "id": "b017",
+      "service": "ts-delivery-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/difference",
+      "handler_class": "com.cloudhubs.trainticket.delivery.controller.InsidePaymentController",
+      "handler_method": "payDifference",
+      "source_file": "ts-delivery-service/src/main/java/com/cloudhubs/trainticket/delivery/controller/InsidePaymentController.java",
+      "line": 69
+    },
+    {
+      "id": "b018",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/drawback/{userId}/{money}",
+      "handler_class": "com.cloudhubs.trainticket.delivery.controller.InsidePaymentController",
+      "handler_method": "drawBack",
+      "source_file": "ts-delivery-service/src/main/java/com/cloudhubs/trainticket/delivery/controller/InsidePaymentController.java",
+      "line": 63
+    },
+    {
+      "id": "b019",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/trainfoodservice/trainfoods",
+      "handler_class": "com.cloudhubs.trainticket.delivery.controller.TrainFoodController",
+      "handler_method": "getAllTrainFood",
+      "source_file": "ts-delivery-service/src/main/java/com/cloudhubs/trainticket/delivery/controller/TrainFoodController.java",
+      "line": 27
+    },
+    {
+      "id": "b020",
+      "service": "ts-food-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/foodservice/createOrderBatch",
+      "handler_class": "com.cloudhubs.trainticket.food.controller.FoodController",
+      "handler_method": "createFoodBatches",
+      "source_file": "ts-food-service/src/main/java/com/cloudhubs/trainticket/food/controller/FoodController.java",
+      "line": 63
+    },
+    {
+      "id": "b021",
+      "service": "ts-notification-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/notifyservice/notification/preserve_success",
+      "handler_class": "com.cloudhubs.trainticket.notification.controller.NotificationController",
+      "handler_method": "preserve_success",
+      "source_file": "ts-notification-service/src/main/java/com/cloudhubs/trainticket/notification/controller/NotificationController.java",
+      "line": 57
+    },
+    {
+      "id": "b022",
+      "service": "ts-order-related-service",
+      "http_method": "PATCH",
+      "full_uri": "/api/v1/assuranceservice/assurances/{assuranceId}/{orderId}/{typeIndex}",
+      "handler_class": "com.cloudhubs.trainticket.orderrelated.controller.AssuranceController",
+      "handler_method": "modifyAssurance",
+      "source_file": "ts-order-related-service/src/main/java/com/cloudhubs/trainticket/orderrelated/controller/AssuranceController.java",
+      "line": 60
+    },
+    {
+      "id": "b023",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/orderOther/status/{orderId}/{status}",
+      "handler_class": "com.cloudhubs.trainticket.preserve.controller.OrderOtherController",
+      "handler_method": "modifyOrder",
+      "source_file": "ts-preserve-service/src/main/java/com/cloudhubs/trainticket/preserve/controller/OrderOtherController.java",
+      "line": 103
+    },
+    {
+      "id": "b024",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/welcome",
+      "handler_class": "com.cloudhubs.trainticket.preserve.controller.OrderOtherController",
+      "handler_method": "home",
+      "source_file": "ts-preserve-service/src/main/java/com/cloudhubs/trainticket/preserve/controller/OrderOtherController.java",
+      "line": 29
+    },
+    {
+      "id": "b025",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderservice/order/status/{orderId}/{status}",
+      "handler_class": "com.cloudhubs.trainticket.preserve.controller.OrderController",
+      "handler_method": "modifyOrder",
+      "source_file": "ts-preserve-service/src/main/java/com/cloudhubs/trainticket/preserve/controller/OrderController.java",
+      "line": 104
+    },
+    {
+      "id": "b026",
+      "service": "ts-preserve-service",
+      "http_method": "DELETE",
+      "full_uri": "/api/v1/orderservice/order/{orderId}",
+      "handler_class": "com.cloudhubs.trainticket.preserve.controller.OrderController",
+      "handler_method": "deleteOrder",
+      "source_file": "ts-preserve-service/src/main/java/com/cloudhubs/trainticket/preserve/controller/OrderController.java",
+      "line": 140
+    },
+    {
+      "id": "b027",
+      "service": "ts-price-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/priceservice/prices",
+      "handler_class": "com.cloudhubs.trainticket.price.controller.PriceController",
+      "handler_method": "create",
+      "source_file": "ts-price-service/src/main/java/com/cloudhubs/trainticket/price/controller/PriceController.java",
+      "line": 55
+    },
+    {
+      "id": "b028",
+      "service": "ts-price-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/priceservice/prices",
+      "handler_class": "com.cloudhubs.trainticket.price.controller.PriceController",
+      "handler_method": "update",
+      "source_file": "ts-price-service/src/main/java/com/cloudhubs/trainticket/price/controller/PriceController.java",
+      "line": 68
+    },
+    {
+      "id": "b029",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/admintravelservice/admintravel",
+      "handler_class": "com.cloudhubs.trainticket.rebook.controller.AdminTravelController",
+      "handler_method": "addTravel",
+      "source_file": "ts-rebook-service/src/main/java/com/cloudhubs/trainticket/rebook/controller/AdminTravelController.java",
+      "line": 37
+    },
+    {
+      "id": "b030",
+      "service": "ts-rebook-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/admintravelservice/admintravel",
+      "handler_class": "com.cloudhubs.trainticket.rebook.controller.AdminTravelController",
+      "handler_method": "updateTravel",
+      "source_file": "ts-rebook-service/src/main/java/com/cloudhubs/trainticket/rebook/controller/AdminTravelController.java",
+      "line": 44
+    },
+    {
+      "id": "b031",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/routeplanservice/routePlan/cheapestRoute",
+      "handler_class": "com.cloudhubs.trainticket.rebook.controller.RoutePlanController",
+      "handler_method": "getCheapestRoutes",
+      "source_file": "ts-rebook-service/src/main/java/com/cloudhubs/trainticket/rebook/controller/RoutePlanController.java",
+      "line": 30
+    },
+    {
+      "id": "b032",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/travel2service/trip_detail",
+      "handler_class": "com.cloudhubs.trainticket.rebook.controller.Travel2Controller",
+      "handler_method": "getTripAllDetailInfo",
+      "source_file": "ts-rebook-service/src/main/java/com/cloudhubs/trainticket/rebook/controller/Travel2Controller.java",
+      "line": 126
+    },
+    {
+      "id": "b033",
+      "service": "ts-rebook-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/travel2service/trips",
+      "handler_class": "com.cloudhubs.trainticket.rebook.controller.Travel2Controller",
+      "handler_method": "queryAll",
+      "source_file": "ts-rebook-service/src/main/java/com/cloudhubs/trainticket/rebook/controller/Travel2Controller.java",
+      "line": 133
+    },
+    {
+      "id": "b034",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/travelservice/trips",
+      "handler_class": "com.cloudhubs.trainticket.rebook.controller.TravelController",
+      "handler_method": "createTrip",
+      "source_file": "ts-rebook-service/src/main/java/com/cloudhubs/trainticket/rebook/controller/TravelController.java",
+      "line": 63
+    },
+    {
+      "id": "b035",
+      "service": "ts-route-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/assuranceservice/assurances/types",
+      "handler_class": "com.cloudhubs.trainticket.route.controller.AssuranceController",
+      "handler_method": "getAllAssuranceType",
+      "source_file": "ts-route-service/src/main/java/com/cloudhubs/trainticket/route/controller/AssuranceController.java",
+      "line": 39
+    },
+    {
+      "id": "b036",
+      "service": "ts-route-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/routeservice/routes",
+      "handler_class": "com.cloudhubs.trainticket.route.controller.RouteController",
+      "handler_method": "createAndModifyRoute",
+      "source_file": "ts-route-service/src/main/java/com/cloudhubs/trainticket/route/controller/RouteController.java",
+      "line": 33
+    },
+    {
+      "id": "b037",
+      "service": "ts-route-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/routeservice/routes/{routeId}",
+      "handler_class": "com.cloudhubs.trainticket.route.controller.RouteController",
+      "handler_method": "queryById",
+      "source_file": "ts-route-service/src/main/java/com/cloudhubs/trainticket/route/controller/RouteController.java",
+      "line": 45
+    },
+    {
+      "id": "b038",
+      "service": "ts-route-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "handler_class": "com.cloudhubs.trainticket.route.controller.UserController",
+      "handler_method": "updateUser",
+      "source_file": "ts-route-service/src/main/java/com/cloudhubs/trainticket/route/controller/UserController.java",
+      "line": 66
+    },
+    {
+      "id": "b039",
+      "service": "ts-route-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/userservice/users/register",
+      "handler_class": "com.cloudhubs.trainticket.route.controller.UserController",
+      "handler_method": "registerUser",
+      "source_file": "ts-route-service/src/main/java/com/cloudhubs/trainticket/route/controller/UserController.java",
+      "line": 51
+    },
+    {
+      "id": "b040",
+      "service": "ts-security-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/consignpriceservice/consignprice",
+      "handler_class": "com.cloudhubs.trainticket.security.controller.ConsignPriceController",
+      "handler_method": "modifyPriceConfig",
+      "source_file": "ts-security-service/src/main/java/com/cloudhubs/trainticket/security/controller/ConsignPriceController.java",
+      "line": 51
+    },
+    {
+      "id": "b041",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts",
+      "handler_class": "com.cloudhubs.trainticket.station.controller.ContactsController",
+      "handler_method": "createNewContacts",
+      "source_file": "ts-station-service/src/main/java/com/cloudhubs/trainticket/station/controller/ContactsController.java",
+      "line": 44
+    },
+    {
+      "id": "b042",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts/admin",
+      "handler_class": "com.cloudhubs.trainticket.station.controller.ContactsController",
+      "handler_method": "createNewContactsAdmin",
+      "source_file": "ts-station-service/src/main/java/com/cloudhubs/trainticket/station/controller/ContactsController.java",
+      "line": 52
+    },
+    {
+      "id": "b043",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/stationservice/stations/namelist",
+      "handler_class": "com.cloudhubs.trainticket.station.controller.StationController",
+      "handler_method": "queryForNameBatch",
+      "source_file": "ts-station-service/src/main/java/com/cloudhubs/trainticket/station/controller/StationController.java",
+      "line": 86
+    },
+    {
+      "id": "b044",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderOtherService/orderOther",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.OrderOtherController",
+      "handler_method": "saveOrderInfo",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/OrderOtherController.java",
+      "line": 118
+    },
+    {
+      "id": "b045",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderOtherService/orderOther/admin",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.OrderOtherController",
+      "handler_method": "updateOrder",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/OrderOtherController.java",
+      "line": 127
+    },
+    {
+      "id": "b046",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/orderOther/status/{orderId}/{status}",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.OrderOtherController",
+      "handler_method": "modifyOrder",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/OrderOtherController.java",
+      "line": 103
+    },
+    {
+      "id": "b047",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderservice/order",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.OrderController",
+      "handler_method": "saveOrderInfo",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/OrderController.java",
+      "line": 122
+    },
+    {
+      "id": "b048",
+      "service": "ts-travel-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/orderservice/order/refresh",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.OrderController",
+      "handler_method": "queryOrdersForRefresh",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/OrderController.java",
+      "line": 63
+    },
+    {
+      "id": "b049",
+      "service": "ts-travel-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/orderservice/order/tickets",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.OrderController",
+      "handler_method": "getTicketListByDateAndTripId",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/OrderController.java",
+      "line": 36
+    },
+    {
+      "id": "b050",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/travel2service/routes/{tripId}",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.Travel2Controller",
+      "handler_method": "getRouteByTripId",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/Travel2Controller.java",
+      "line": 43
+    },
+    {
+      "id": "b051",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/waitorderservice/welcome",
+      "handler_class": "com.cloudhubs.trainticket.travel.controller.WaitListOrderController",
+      "handler_method": "home",
+      "source_file": "ts-travel-service/src/main/java/com/cloudhubs/trainticket/travel/controller/WaitListOrderController.java",
+      "line": 27
+    },
+    {
+      "id": "b052",
+      "service": "ts-user-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/cancelservice/cancel/refound/{orderId}",
+      "handler_class": "com.cloudhubs.trainticket.user.controller.CancelController",
+      "handler_method": "calculate",
+      "source_file": "ts-user-service/src/main/java/com/cloudhubs/trainticket/user/controller/CancelController.java",
+      "line": 31
+    },
+    {
+      "id": "b053",
+      "service": "ts-user-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "handler_class": "com.cloudhubs.trainticket.user.controller.UserController",
+      "handler_method": "updateUser",
+      "source_file": "ts-user-service/src/main/java/com/cloudhubs/trainticket/user/controller/UserController.java",
+      "line": 66
+    },
+    {
+      "id": "b054",
+      "service": "ts-user-service",
+      "http_method": "DELETE",
+      "full_uri": "/api/v1/userservice/users/{userId}",
+      "handler_class": "com.cloudhubs.trainticket.user.controller.UserController",
+      "handler_method": "deleteUserById",
+      "source_file": "ts-user-service/src/main/java/com/cloudhubs/trainticket/user/controller/UserController.java",
+      "line": 58
+    }
+  ]
+}

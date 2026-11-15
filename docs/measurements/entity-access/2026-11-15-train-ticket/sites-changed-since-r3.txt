@@ -1,0 +1,10 @@
+distinct in-flow sites: R3 353 R4 353
+changed 6
+ts-config-service UserServiceImpl.java:168 save | ('existence-guard', ('User:create-or-update:update',)) -> ('argument-origin', ('User:create-or-update',))
+ts-delivery-service InsidePaymentServiceImpl.java:172 save | ('existence-guard', ('InsidePaymentMoney:create-or-update:update',)) -> ('argument-origin', ('InsidePaymentMoney:create-or-update',))
+ts-delivery-service InsidePaymentServiceImpl.java:259 save | ('existence-guard', ('InsidePaymentMoney:create-or-update:update',)) -> ('argument-origin', ('InsidePaymentMoney:create-or-update',))
+ts-route-service UserServiceImpl.java:168 save | ('existence-guard', ('User:create-or-update:update',)) -> ('argument-origin', ('User:create-or-update',))
+ts-security-service ConfigServiceImpl.java:52 save | ('existence-guard', ('Config:create-or-update:update',)) -> ('argument-origin', ('Config:create-or-update',))
+ts-user-service UserServiceImpl.java:168 save | ('existence-guard', ('User:create-or-update:update',)) -> ('argument-origin', ('User:create-or-update',))
+candidates R4 Counter({('argument-origin', None): 39, ('argument-origin', 'update'): 28, ('existence-guard', 'create'): 13, ('argument-origin', 'create'): 4, ('existence-guard', 'update'): 1})
+candidates R3 Counter({('argument-origin', None): 33, ('argument-origin', 'update'): 28, ('existence-guard', 'create'): 13, ('existence-guard', 'update'): 7, ('argument-origin', 'create'): 4})

@@ -1,0 +1,399 @@
+{
+ "b001": [],
+ "b002": [],
+ "b003": [],
+ "b004": [
+  {
+   "entity": "Payment",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b005": [
+  {
+   "entity": "User",
+   "operations": [
+    "read",
+    "delete",
+    "update"
+   ]
+  }
+ ],
+ "b006": [
+  {
+   "entity": "ConsignPrice",
+   "operations": [
+    "read",
+    "create",
+    "update"
+   ]
+  }
+ ],
+ "b007": [
+  {
+   "entity": "ConsignPrice",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b008": [
+  {
+   "entity": "ConsignRecord",
+   "operations": [
+    "read",
+    "create",
+    "update"
+   ]
+  }
+ ],
+ "b009": [
+  {
+   "entity": "ConsignRecord",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b010": [],
+ "b011": [
+  {
+   "entity": "Contacts",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b012": [
+  {
+   "entity": "Contacts",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b013": [],
+ "b014": [
+  {
+   "entity": "Station",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b015": [
+  {
+   "entity": "InsidePayment",
+   "operations": [
+    "read",
+    "create"
+   ]
+  },
+  {
+   "entity": "InsidePaymentMoney",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b016": [
+  {
+   "entity": "InsidePaymentMoney",
+   "operations": [
+    "read"
+   ]
+  },
+  {
+   "entity": "InsidePayment",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b017": [
+  {
+   "entity": "InsidePayment",
+   "operations": [
+    "read",
+    "create"
+   ]
+  },
+  {
+   "entity": "InsidePaymentMoney",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b018": [
+  {
+   "entity": "InsidePaymentMoney",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b019": [
+  {
+   "entity": "TrainFood",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b020": [
+  {
+   "entity": "FoodOrder",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b021": [],
+ "b022": [
+  {
+   "entity": "Assurance",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b023": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b024": [],
+ "b025": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b026": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read",
+    "delete"
+   ]
+  }
+ ],
+ "b027": [
+  {
+   "entity": "PriceConfig",
+   "operations": [
+    "create",
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b028": [
+  {
+   "entity": "PriceConfig",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b029": [],
+ "b030": [],
+ "b031": [],
+ "b032": [
+  {
+   "entity": "Trip",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b033": [
+  {
+   "entity": "Trip",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b034": [
+  {
+   "entity": "Trip",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b035": [],
+ "b036": [
+  {
+   "entity": "Route",
+   "operations": [
+    "read",
+    "create",
+    "update"
+   ]
+  }
+ ],
+ "b037": [
+  {
+   "entity": "Route",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b038": [
+  {
+   "entity": "User",
+   "operations": [
+    "read",
+    "delete",
+    "create",
+    "update"
+   ]
+  }
+ ],
+ "b039": [
+  {
+   "entity": "User",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b040": [
+  {
+   "entity": "ConsignPrice",
+   "operations": [
+    "read",
+    "create",
+    "update"
+   ]
+  }
+ ],
+ "b041": [
+  {
+   "entity": "Contacts",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b042": [
+  {
+   "entity": "Contacts",
+   "operations": [
+    "read",
+    "create"
+   ]
+  }
+ ],
+ "b043": [
+  {
+   "entity": "Station",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b044": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b045": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b046": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b047": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read",
+    "update"
+   ]
+  }
+ ],
+ "b048": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b049": [
+  {
+   "entity": "Order",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b050": [
+  {
+   "entity": "Trip",
+   "operations": [
+    "read"
+   ]
+  }
+ ],
+ "b051": [],
+ "b052": [],
+ "b053": [
+  {
+   "entity": "User",
+   "operations": [
+    "read",
+    "delete",
+    "create",
+    "update"
+   ]
+  }
+ ],
+ "b054": [
+  {
+   "entity": "User",
+   "operations": [
+    "read",
+    "delete"
+   ]
+  }
+ ]
+}

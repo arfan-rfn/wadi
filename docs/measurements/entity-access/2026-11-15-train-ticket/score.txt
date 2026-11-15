@@ -1,0 +1,8 @@
+random: 40 endpoints, 26 in full agreement, 0 with an error, error rate <= 7.2% (95%, one-sided)
+  pairs: over-claim 0   miss 0   withheld 1   less-specific 13   exact 13
+hard: 14 endpoints, 1 in full agreement, 4 with an error, error rate <= 54.0% (95%, one-sided)
+  pairs: over-claim 0   miss 4   withheld 4   less-specific 9   exact 4
+  error b011 POST /api/v1/contactservice/contacts: Contacts miss, undetermined withheld
+  error b012 POST /api/v1/contactservice/contacts/admin: Contacts miss, undetermined withheld
+  error b041 POST /api/v1/contactservice/contacts: Contacts miss, undetermined withheld
+  error b042 POST /api/v1/contactservice/contacts/admin: Contacts miss, undetermined withheld
