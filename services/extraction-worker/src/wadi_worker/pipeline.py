@@ -270,6 +270,10 @@ class ExtractionPipeline:
                         # here because the loss itself happens at the
                         # storage key, past every other counter.
                         "endpoint_collisions": assembled.endpoint_collisions,
+                        # §5.2.17 B5: every repository call site, a sibling
+                        # of analysis_coverage rather than part of it (E2).
+                        # None from a pre-2.14.0 export, never zeros (R1-6).
+                        "entity_access_accounting": assembled.entity_access_accounting,
                     }
                 )
                 # §5.2.10: the independent oracle runs against the STAGED tree

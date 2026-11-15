@@ -15,10 +15,13 @@ from wadi_joern_client.export import (
     ExportCfgEdgeLabel,
     ExportCfgNode,
     ExportDataModel,
+    ExportDbAccess,
+    ExportDeclaredBy,
     ExportEndpoint,
     ExportMethod,
     ExportParam,
     ExportSink,
+    RepositoryKind,
     ServiceExport,
     SinkValueConfidence,
 )
@@ -156,6 +159,16 @@ def petstore_like_export() -> ServiceExport:
             call_id=REPO_CALL_ID,
             method_id=SERVICE_IMPL,
             kind="db",
+            # 2.14.0 (§5.2.17): an inherited call is named by the receiver's
+            # interface, and the chain binds the entity (plan M0).
+            db=ExportDbAccess(
+                repository="com.acme.pets.PetRepository",
+                method_name="findById",
+                entity_type_text="Pet",
+                entity_type_full_name="com.acme.pets.Pet",
+                repository_kind=RepositoryKind.MONGO,
+                implemented_in_project=False,
+            ),
         ),
         # Honest Phase-1 recovery: the field-held host is lost, only the
         # concatenation template survives (matches the real Scala output —
@@ -174,6 +187,8 @@ def petstore_like_export() -> ServiceExport:
     data_models = [
         ExportDataModel(
             entity="Pet",
+            type_full_name="com.acme.pets.Pet",
+            declared_by=ExportDeclaredBy.ANNOTATION,
             fields=[
                 ExportParam(name="id", type_name="java.lang.String"),
                 ExportParam(name="name", type_name="java.lang.String"),

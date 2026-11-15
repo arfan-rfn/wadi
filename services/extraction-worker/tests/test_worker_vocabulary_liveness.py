@@ -9,9 +9,10 @@ The check lives in the *service*, not in wadi-contracts: contracts must not
 import a service (P1), so the dependency has to point this way.
 """
 
+from wadi_contracts import EntityAccessBasis, EntityDeclaredBy, EntityOperation
 from wadi_contracts.enums import AuthGapCode, CfgAnomalyCode, ClientLibrary
 from wadi_testing.vocabulary import assert_registry_is_live
-from wadi_worker import auth_oracle, boundary, cfg_invariants
+from wadi_worker import assembler, auth_oracle, boundary, cfg_invariants, entity_access
 
 
 def test_every_cfg_anomaly_code_is_emitted() -> None:
@@ -24,3 +25,19 @@ def test_every_client_library_is_detected() -> None:
 
 def test_every_auth_gap_code_is_emitted() -> None:
     assert_registry_is_live(AuthGapCode, auth_oracle)
+
+
+# §5.2.17 E8: the entity vocabularies join the check, so an operation or basis
+# the classifier never produces cannot sit in the contract looking measured.
+
+
+def test_every_entity_operation_is_produced() -> None:
+    assert_registry_is_live(EntityOperation, entity_access)
+
+
+def test_every_entity_access_basis_is_produced() -> None:
+    assert_registry_is_live(EntityAccessBasis, entity_access)
+
+
+def test_every_entity_declared_by_is_mapped() -> None:
+    assert_registry_is_live(EntityDeclaredBy, assembler)
