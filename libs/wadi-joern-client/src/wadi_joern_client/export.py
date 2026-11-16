@@ -505,8 +505,8 @@ class ExportSink(ExportModelBase):
     for every sink call it owns, of every kind, so rows sharing ``node_id``
     are that statement's sink calls, told apart by ``call_id`` and read by
     ``kind`` (§5.2.17). The rows for the statement's primary call come first.
-    2.15.0 had not shipped when per-kind rows were added, so every 2.15.0
-    export carries them.
+    2.15.0 had not shipped when per-kind rows were added, so every released
+    2.15.0 export carries them.
     """
 
     node_id: int = Field(description="The coarsened statement cfg node id of the sink site")

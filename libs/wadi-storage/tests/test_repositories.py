@@ -343,9 +343,9 @@ class TestArtifactRepository:
             snapshot, boundary, endpoint, statement_count=200, statement_text="x" * 70_000
         )
         await artifacts.write_icfg(big)
-        assert (await database.collection("icfgs").find_one({"endpoint_id": endpoint.id}))[
-            "chunked"
-        ] is True
+        manifest = await database.collection("icfgs").find_one({"endpoint_id": endpoint.id})
+        assert manifest is not None
+        assert manifest["chunked"] is True
         await database.collection("icfg_parts").delete_one({"endpoint_id": endpoint.id, "part": 1})
 
         with pytest.raises(RuntimeError, match="is incomplete"):
