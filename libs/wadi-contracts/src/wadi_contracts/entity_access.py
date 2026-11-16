@@ -471,12 +471,13 @@ class EntityCoverageSection(WadiModel):
     gated_operations: list[EntityOperation] | None = Field(
         default=None,
         description=(
-            "1.27.0: operations the save split computes that no reporting service may "
-            "publish from a save, because every flag for that verb is off or stale. Its "
-            "count still includes what the query text published; a save that would have "
-            "been one is withheld as create-or-update, so the count is not every such "
-            "access. Enum order. None = the report predates this field, so whether a zero "
-            "is withheld is not known; [] = computed, nothing withheld"
+            "1.27.0: operations the save split computes that a save may have been "
+            "withheld from: on at least one reporting service a flag for that verb is "
+            "off or stale, or missing, so the saves its basis decides publish "
+            "create-or-update. Its count still includes what the query text and any "
+            "current flag published, so it is not every such access. Enum order. None = "
+            "the report predates this field, so whether a zero is withheld is not known; "
+            "[] = computed, nothing withheld"
         ),
     )
 

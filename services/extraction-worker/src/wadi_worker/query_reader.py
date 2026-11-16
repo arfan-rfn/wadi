@@ -49,8 +49,9 @@ entity:
   calls may write, and ``into`` writes the table it names (review B2).
 * Text holding a construct the lexer does not model: a ``#`` outside a
   literal (a MySQL comment, or a PostgreSQL operator), a backslash inside a
-  literal, a dollar-quoted string, a nested comment, or a second statement
-  after a ``;`` (review B2). Read on regardless, the hidden part would read as
+  literal, a dollar-quoted string, a nested comment, a MySQL executable
+  comment (``/*! ... */``, whose text MySQL runs), or a second statement after
+  a ``;`` (review B2). Read on regardless, the hidden part would read as
   statement.
 
 What it reads as undetermined, keeping the verb:
@@ -388,9 +389,10 @@ class _UnmodeledTextError(Exception):
     """The text holds a construct this reader does not model (review B2).
 
     Each one hides text from a lexer that does not know it: a MySQL ``#``
-    comment, a backslash-escaped quote, a PostgreSQL dollar-quoted string or
-    nested comment, or a second statement. Read on regardless, the hidden
-    part becomes statement, so the query is not read at all.
+    comment or executable comment, a backslash-escaped quote, a PostgreSQL
+    dollar-quoted string or nested comment, or a second statement. Read on
+    regardless, the hidden part becomes statement, so the query is not read
+    at all.
     """
 
 
@@ -415,6 +417,9 @@ def _tokenize(text: str) -> list[_Token]:
             i = _end_of(text, "\n", i + 2)
             continue
         if pair == "/*":
+            if text[i + 2 : i + 3] == "!":
+                # MySQL runs what an executable comment holds (§5.2.17).
+                raise _UnmodeledTextError("a MySQL executable comment")
             i = _end_of(text, "*/", i + 2)
             if "/*" in text[start + 2 : i]:
                 raise _UnmodeledTextError("a nested comment")

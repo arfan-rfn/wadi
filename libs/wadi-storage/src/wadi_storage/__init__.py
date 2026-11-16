@@ -1,6 +1,6 @@
 """Wadi storage seam — the ONLY package importing DB drivers (architecture.md §9)."""
 
-from wadi_storage.artifacts import ArtifactRepository, FlowMarks
+from wadi_storage.artifacts import ArtifactRepository, FlowMarks, IncompleteIcfgError
 from wadi_storage.chunking import (
     MONGO_MAX_DOC_BYTES,
     SAFE_PART_BYTES,
@@ -37,6 +37,7 @@ __all__ = [
     "GraphRepository",
     "GraphStore",
     "GraphStoreError",
+    "IncompleteIcfgError",
     "JobQueue",
     "OutboundUnavailable",
     "OversizedItemError",

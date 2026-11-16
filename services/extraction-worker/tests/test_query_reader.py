@@ -558,6 +558,8 @@ class TestTextThatIsNotStatement:
     def test_a_comment_is_neither_verb_nor_name(self) -> None:
         for text in (
             "/* delete stale rows */ select o from Order o",
+            # An optimizer hint is not run as statement, so it stays a comment.
+            "select /*+ index(o idx_orders) */ o from Order o",
             "-- update the status\nselect o from Order o -- from Invoice",
         ):
             assert _accesses(_read(_query(text, native=False))) == [(ORDER, R)], text
@@ -574,6 +576,9 @@ class TestTextThatIsNotStatement:
             "select * from orders where note = $note$ from invoices $note$",
             # A nested comment (PostgreSQL nests them; MySQL does not).
             "select * from orders /* a /* b */ join invoices */",
+            # MySQL executable comments: MySQL runs the text inside them.
+            "select * from orders /*! join invoices on 1 = 1 */ where id = ?1",
+            "delete from orders /*!50000 , invoices */ where id = ?1",
             # A second statement.
             "delete from order_lines where order_id = ?1; delete from orders where id = ?1",
         ],

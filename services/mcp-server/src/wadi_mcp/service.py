@@ -9,7 +9,7 @@ dicts at the boundary.
 import asyncio
 from collections import Counter
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from wadi_contracts import (
     UNDETERMINED_ENTITY_NAME,
@@ -29,6 +29,7 @@ from wadi_storage import (
     EndpointOutbound,
     FlowMarks,
     GraphRepository,
+    IncompleteIcfgError,
     OutboundUnavailable,
     SnapshotRepository,
     StitchRepository,
@@ -215,8 +216,18 @@ def _say_unrecorded_counts(result: dict[str, Any]) -> None:
                     endpoint["call_sites_note"] = CALL_SITES_NOT_RECORDED_NOTE
 
 
+class _FlowUnreadable(NamedTuple):
+    """An endpoint's flow graph is stored but cannot be read whole (§5.2.17).
+
+    What :class:`~wadi_storage.IncompleteIcfgError` refused, kept apart from
+    ``None`` (no graph stored), so neither reads as the other.
+    """
+
+    reason: str
+
+
 def _entity_facts(
-    summary: list[EndpointEntityAccess] | None, marks: FlowMarks | None
+    summary: list[EndpointEntityAccess] | None, marks: FlowMarks | _FlowUnreadable | None
 ) -> dict[str, str]:
     """Which of the two answers an endpoint's entity summary is (§5.2.17, R1-6).
 
@@ -230,6 +241,10 @@ def _entity_facts(
     """
     if summary is None:
         return {"entity_facts": "predates-phase", "entity_facts_note": ENTITY_FACTS_PREDATE_NOTE}
+    if isinstance(marks, _FlowUnreadable):
+        if summary:
+            return {"entity_facts": "analyzed"}
+        return {"entity_facts": "analyzed", "entity_facts_note": _flow_unreadable_note(marks)}
     if summary or marks is None:
         return {"entity_facts": "analyzed"}
     unopened = {
@@ -259,6 +274,16 @@ def _flow_stops_note(unopened: dict[str, int]) -> str:
     )
 
 
+def _flow_unreadable_note(flow: _FlowUnreadable) -> str:
+    """`entity_access: []` when the calls its flow stops at cannot be counted."""
+    return (
+        "No repository call was found when this endpoint was analyzed, but its stored flow "
+        f"graph cannot be read now ({flow.reason}), so whether that flow stops at a call wadi "
+        "could not open is not known: entity_access [] is not evidence that this endpoint "
+        "touches no data. Re-analyze the system to write the graph again."
+    )
+
+
 def _marks_of(icfg: Icfg) -> FlowMarks:
     """The marks :meth:`ArtifactRepository.endpoint_flow_marks` reads, from a
     graph already loaded, so `endpoint_icfg` and `endpoint_detail` agree."""
@@ -272,6 +297,27 @@ def _marks_of(icfg: Icfg) -> FlowMarks:
             )
         ),
     )
+
+
+def _outbound_without_flow(flow: _FlowUnreadable, *, stitched: bool) -> dict[str, Any]:
+    """`outbound` when the flow's remote-call ids cannot be read (§5.2.17).
+
+    Before stitching it is the usual "not yet", because no snapshot has edges
+    then. After it the edges exist and which of them this flow reaches is
+    unknown, so `outbound` is null, never `[]`, which reads as "calls nothing".
+    """
+    if not stitched:
+        return {"outbound": [], "stitched": False}
+    return {
+        "outbound": None,
+        "stitched": True,
+        "outbound_note": (
+            "Where this endpoint's calls go is not known: its flow graph could not be read "
+            f"({flow.reason}), so the calls it makes are unknown and outbound is null, not "
+            "empty. The rest of this answer does not depend on it. Re-analyze the system to "
+            "write the graph again, or call remote_edges for the service to see all its edges."
+        ),
+    }
 
 
 def _outbound_facts(joined: EndpointOutbound | OutboundUnavailable) -> dict[str, Any]:
@@ -378,25 +424,34 @@ class WadiMcpService:
         cannot be read: the contract is this tool's reason to exist
         (§5.2.16), so a graph failure costs the edges, never the answer
         (review #6). The flow's remote-call ids and unbound callees come from
-        a projection, not the assembled ICFG (§5.2.15).
+        a projection, not the assembled ICFG (§5.2.15). A flow graph stored in
+        parts that are not all there costs the same, the edges and the
+        flow-stops note, and both notes say so (§5.2.17).
         """
         endpoint, marks = await asyncio.gather(
             self._artifacts.get_endpoint(snapshot_id, endpoint_id),
-            self._artifacts.endpoint_flow_marks(snapshot_id, endpoint_id),
+            self._flow_marks(snapshot_id, endpoint_id),
         )
         if endpoint is None:
             raise NotFoundError(
                 f"endpoint {endpoint_id!r} not found in snapshot {snapshot_id!r}; "
                 "use list_endpoints to find endpoint ids"
             )
-        joined = await endpoint_outbound_or_unavailable(
-            self._stitch,
-            self._graph,
-            snapshot_id=snapshot_id,
-            service_id=endpoint.service_id,
-            remote_call_ids=marks.remote_call_ids if marks is not None else set[str](),
-            timeout_seconds=self._graph_timeout_seconds,
-        )
+        if isinstance(marks, _FlowUnreadable):
+            outbound = _outbound_without_flow(
+                marks, stitched=await self._stitch.coverage_report_exists(snapshot_id)
+            )
+        else:
+            outbound = _outbound_facts(
+                await endpoint_outbound_or_unavailable(
+                    self._stitch,
+                    self._graph,
+                    snapshot_id=snapshot_id,
+                    service_id=endpoint.service_id,
+                    remote_call_ids=marks.remote_call_ids if marks is not None else set[str](),
+                    timeout_seconds=self._graph_timeout_seconds,
+                )
+            )
         if resolve_shapes and endpoint.type_defs:
             endpoint = endpoint.model_copy(
                 update={
@@ -417,9 +472,18 @@ class WadiMcpService:
             )
         return {
             **endpoint.model_dump(mode="json"),
-            **_outbound_facts(joined),
+            **outbound,
             **_entity_facts(endpoint.entity_access, marks),
         }
+
+    async def _flow_marks(
+        self, snapshot_id: str, endpoint_id: str
+    ) -> FlowMarks | _FlowUnreadable | None:
+        """The flow's marks, or why its stored graph cannot be read whole."""
+        try:
+            return await self._artifacts.endpoint_flow_marks(snapshot_id, endpoint_id)
+        except IncompleteIcfgError as exc:
+            return _FlowUnreadable(reason=str(exc))
 
     async def entity_usage(
         self, snapshot_id: str, entity: str | None = None, service_id: str | None = None

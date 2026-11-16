@@ -260,25 +260,34 @@ _SPLIT_OPERATIONS = (EntityOperation.CREATE, EntityOperation.UPDATE)
 
 
 def _gated_operations(accountings: Sequence[EntityAccessAccounting]) -> list[EntityOperation]:
-    """The split verbs no reporting service may publish from a save (review C6).
+    """The split verbs some save may have been withheld from (review C6, §5.2.17).
 
-    A verb is gated when no service has a flag for it that is on AND scored
-    against the rules version that service ran (E4): a flag on for another
-    version is a stale score, and the worker holds its basis back exactly as
-    if it were off. One current flag on one service is enough to ungate the
-    verb, because that service's saves can then publish it.
+    A save's verb is published only through its basis's flag for that verb,
+    and only while that flag is on AND scored against the rules version the
+    service ran (E4): a flag on for another version is a stale score, and the
+    worker holds its basis back exactly as if it were off. A held-back save
+    publishes ``create-or-update`` instead, so the verb's count misses it.
+
+    So a verb is gated unless every reporting service has a flag for it and
+    every such flag is current: one service, or one basis, still holding
+    saves back makes a zero in that column unmeasured. Gating only the verbs
+    no service could publish at all let one current flag on one service vouch
+    for every other service's saves (re-read of the final tree, §5.2.17).
     """
     return [
         operation
         for operation in _SPLIT_OPERATIONS
-        if not any(
-            flag.operation is operation
-            and flag.enabled
-            and flag.scored_rules_version == accounting.rules_version
-            for accounting in accountings
-            for flag in accounting.gate_flags
-        )
+        if any(_holds_saves_back(accounting, operation) for accounting in accountings)
     ]
+
+
+def _holds_saves_back(accounting: EntityAccessAccounting, operation: EntityOperation) -> bool:
+    """Whether a save this service ran could have been withheld from ``operation``."""
+    flags = [flag for flag in accounting.gate_flags if flag.operation is operation]
+    return not flags or any(
+        not (flag.enabled and flag.scored_rules_version == accounting.rules_version)
+        for flag in flags
+    )
 
 
 def build_entity_coverage(
@@ -299,9 +308,10 @@ def build_entity_coverage(
     a library has no export of its own (§5.2.6), so its accounting is always
     ``None`` and counting it would read as a stale service.
 
-    ``gated_operations`` names the split verbs no service could publish from
-    a save, so a zero under ``create`` or ``update`` reads as withheld while
-    the flags are off, not as a measured absence (review C6).
+    ``gated_operations`` names the split verbs a save may have been withheld
+    from on some service, so a zero under ``create`` or ``update`` reads as
+    withheld while any flag for it is off, not as a measured absence (review
+    C6).
 
     ``None`` when no service reports accounting, which is every snapshot from
     before the phase: a section of zeros would claim the calls were counted.

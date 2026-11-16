@@ -681,9 +681,10 @@ class TestEntityCoverage:
             EntityAccessBasis.ARGUMENT_ORIGIN,
             EntityOperation.CREATE,
         )
-        # That one current flag on one service is enough: its saves can publish
-        # `create`, so only `update` is withheld snapshot-wide (review C6).
-        assert section.gated_operations == [EntityOperation.UPDATE]
+        # One current flag on one service vouches for no other save: orders
+        # holds every save back, and pets still holds back the saves its
+        # existence guard decides, so both verbs stay withheld (§5.2.17).
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
 
     def test_a_service_written_before_the_phase_is_counted_never_summed_as_zero(self) -> None:
         snapshot = make_snapshot(make_system())
@@ -852,7 +853,10 @@ class TestEntityCoverage:
         assert section is not None
         assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
 
-    def test_one_current_flag_per_service_ungates_its_verb_only(self) -> None:
+    def test_one_basis_on_leaves_the_verb_withheld_by_the_other(self) -> None:
+        # The existence guard may publish `create` on both services, but the
+        # saves argument origin decides are still held back as
+        # create-or-update, so a zero under `create` is not measured (§5.2.17).
         snapshot = make_snapshot(make_system())
         guard_create = frozenset({(EntityAccessBasis.EXISTENCE_GUARD, EntityOperation.CREATE)})
         boundaries = [
@@ -872,7 +876,70 @@ class TestEntityCoverage:
         section = build_entity_coverage(boundaries)
 
         assert section is not None
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
+
+    def test_a_verb_is_measured_only_when_every_service_runs_every_basis_for_it(self) -> None:
+        snapshot = make_snapshot(make_system())
+        every_create = frozenset(
+            {
+                (EntityAccessBasis.ARGUMENT_ORIGIN, EntityOperation.CREATE),
+                (EntityAccessBasis.EXISTENCE_GUARD, EntityOperation.CREATE),
+            }
+        )
+        boundaries = [
+            make_service(snapshot, f"services/{name}").model_copy(
+                update={
+                    "entity_access_accounting": _accounting(
+                        bound=1,
+                        accesses={EntityOperation.CREATE: 1},
+                        sites={EntityAccessBasis.EXISTENCE_GUARD: 1},
+                        enabled=every_create,
+                    )
+                }
+            )
+            for name in ("orders", "pets")
+        ]
+
+        section = build_entity_coverage(boundaries)
+
+        assert section is not None
         assert section.gated_operations == [EntityOperation.UPDATE]
+
+    def test_a_service_with_no_flag_for_a_verb_withholds_it(self) -> None:
+        # A service whose run recorded no flag for a verb published none of its
+        # saves as that verb, so every other service's flags cannot vouch for it.
+        snapshot = make_snapshot(make_system())
+        every_flag = frozenset(
+            (basis, operation)
+            for basis in (EntityAccessBasis.ARGUMENT_ORIGIN, EntityAccessBasis.EXISTENCE_GUARD)
+            for operation in (EntityOperation.CREATE, EntityOperation.UPDATE)
+        )
+        on = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=1,
+                    accesses={EntityOperation.CREATE: 1},
+                    sites={EntityAccessBasis.EXISTENCE_GUARD: 1},
+                    enabled=every_flag,
+                )
+            }
+        )
+        unflagged = _accounting(
+            create_or_update=1,
+            accesses={EntityOperation.CREATE_OR_UPDATE: 1},
+            sites={EntityAccessBasis.ARGUMENT_ORIGIN: 1},
+        ).model_copy(update={"gate_flags": []})
+        off = make_service(snapshot, "services/pets").model_copy(
+            update={"entity_access_accounting": unflagged}
+        )
+
+        only_on = build_entity_coverage([on])
+        assert only_on is not None
+        assert only_on.gated_operations == []
+        section = build_entity_coverage([on, off])
+
+        assert section is not None
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
 
     def test_a_flag_scored_against_another_rules_version_still_gates(self) -> None:
         # E4: the worker publishes nothing through a flag scored against a

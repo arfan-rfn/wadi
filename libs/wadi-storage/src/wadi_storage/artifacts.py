@@ -77,6 +77,18 @@ _UNBOUND_REASONS: MongoDocument = {
 }
 
 
+class IncompleteIcfgError(RuntimeError):
+    """A chunked ICFG whose parts are not all stored (§5.2.17).
+
+    A write that died between deleting a graph's parts and inserting the new
+    ones leaves the old manifest with fewer parts than it names. Reading what
+    is there would give part of a flow as if it were all of it, so both
+    :meth:`ArtifactRepository.get_icfg` and
+    :meth:`ArtifactRepository.endpoint_flow_marks` refuse it. A subclass of
+    ``RuntimeError``, which is what both raised before the refusal had a name.
+    """
+
+
 class FlowMarks(NamedTuple):
     """What one endpoint's flow is marked with, read without the flow (review #6).
 
@@ -332,7 +344,7 @@ class ArtifactRepository:
             nodes.extend(cast(list[object], part_doc["nodes"]))
             edges.extend(cast(list[object], part_doc["edges"]))
         if seen_parts != part_count or len(nodes) != node_count or len(edges) != edge_count:
-            raise RuntimeError(
+            raise IncompleteIcfgError(
                 f"chunked ICFG {endpoint_id} in snapshot {snapshot_id} is incomplete: "
                 f"{seen_parts}/{part_count} parts, {len(nodes)}/{node_count} nodes, "
                 f"{len(edges)}/{edge_count} edges"
@@ -429,7 +441,7 @@ class ArtifactRepository:
             part_count = cast(int, manifest.get("part_count"))
             node_count = cast(int, manifest.get("node_count"))
             if seen_parts != part_count or seen_nodes != node_count:
-                raise RuntimeError(
+                raise IncompleteIcfgError(
                     f"chunked ICFG {endpoint_id} in snapshot {snapshot_id} is incomplete: "
                     f"{seen_parts}/{part_count} parts, {seen_nodes}/{node_count} nodes"
                 )
