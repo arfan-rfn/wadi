@@ -4,9 +4,11 @@
 
 import type { CoverageReport } from "@/lib/generated/coverage_report.schema"
 import type {
+  CalleeUnboundReason,
   EndpointDetailView,
   EndpointEntityAccess,
   RemoteEdgeItem,
+  UnopenableCallCount,
 } from "@/lib/generated/endpoint_detail.schema"
 import type {
   EntityAccessAccounting,
@@ -67,9 +69,56 @@ export const OPERATION_HINT = {
 } as const satisfies Record<EntityOperation, string>
 
 /** What v1 does not read, so an absence is never mistaken for a negative
- * (R1-7, C6). Shared by the Data list and the home matrix. */
+ * (R1-7, C6). Shared by the Data list and the home matrix. A repository call
+ * behind a call wadi could not open is in neither: it is not in any flow the
+ * analysis opened (pre-landing review #5). */
 export const ENTITY_ACCESS_LIMITS =
-  "Not read: persistence outside Spring Data repositories, updates through setters on a loaded entity, repository calls inside lambdas, cascades."
+  "Not read: persistence outside Spring Data repositories, updates through setters on a loaded entity, repository calls inside lambdas or behind calls wadi could not open, cascades."
+
+/**
+ * Whether a call with this unbound reason may have a project body behind it,
+ * and so a repository call wadi never saw (§5.2.17, pre-landing review #5).
+ *
+ * `false` only where the reason rules a project body out: a Lombok accessor
+ * and an enum's `values()` have no source by construction, a method declared
+ * by a framework supertype (Spring Data's `save`) is the framework's, and a
+ * third-party callee is outside every analyzed source root. Every other
+ * reason names project code wadi saw and could not connect, or a callee it
+ * could not name at all, which may be the project's (§5.4.2 T5).
+ *
+ * A `Record` over the generated union, so a reason the contract adds breaks
+ * `tsc` here until someone decides it. MCP `endpoint_detail` keeps the same
+ * table in Python (`wadi_mcp.service`); the two must agree.
+ */
+const MAY_HIDE_PROJECT_CODE = {
+  "lombok-generated": false,
+  "compiler-generated": false,
+  "inherited-external": false,
+  "third-party": false,
+  "ambiguous-overload": true,
+  "declared-not-bound": true,
+  "not-declared": true,
+  "unresolved-receiver": true,
+  "unparseable-callee": true,
+} as const satisfies Record<CalleeUnboundReason, boolean>
+
+/**
+ * How many of an endpoint's unopenable calls may hide a repository call.
+ *
+ * A reason this build does not know counts: an unread reason is not evidence
+ * that nothing is behind the call (P10).
+ */
+export function unopenedProjectCalls(
+  unopenable: readonly UnopenableCallCount[] | undefined
+): number {
+  // Widened to any string: the wire can carry a reason newer than this build.
+  const mayHide: Partial<Record<string, boolean>> = MAY_HIDE_PROJECT_CODE
+  let calls = 0
+  for (const entry of unopenable ?? []) {
+    if (mayHide[entry.reason] ?? true) calls += entry.call_count
+  }
+  return calls
+}
 
 /** `com.acme.pets.Pet` → `Pet`. */
 export function simpleTypeName(qualified: string): string {
@@ -112,10 +161,13 @@ export type DataListState =
   | { kind: "fetch-failed"; message: string }
   /** `entity_access` is null/absent: the snapshot never looked (R1-6). */
   | { kind: "predates" }
-  /** `[]` and no outbound call: looked, found no repository call (R1-7). */
-  | { kind: "no-repository-call" }
-  /** `[]` with outbound calls: the data work happens elsewhere (Q26). */
-  | { kind: "forwards-only"; forwards: ForwardTarget[] }
+  /** `[]` and no outbound call: looked, found no repository call (R1-7).
+   * `unopenedCalls` is set, and only set, when the flow stops at calls that
+   * may hide one (review #5). */
+  | { kind: "no-repository-call"; unopenedCalls?: number }
+  /** `[]` with outbound calls: the data work happens elsewhere (Q26), unless
+   * it sits behind one of `unopenedCalls`. */
+  | { kind: "forwards-only"; forwards: ForwardTarget[]; unopenedCalls?: number }
   | { kind: "populated"; rows: DataListRow[]; forwards: ForwardTarget[] }
 
 function rowOf(access: EndpointEntityAccess): DataListRow {
@@ -163,6 +215,11 @@ export function forwardTargets(
  * Detail wins over error: a cached aggregate whose background refetch failed
  * is still the fact on screen. Only with no detail at all is the failure the
  * whole story, and the list says it as a failure, never as an empty list.
+ *
+ * `[]` means no repository call in the flow wadi could open. The two empty
+ * states carry how many calls that flow stops at which may hide one, because
+ * "no repository call found" alone reads as an absence nobody measured
+ * (§5.2.17 "An empty summary says where the flow stopped").
  */
 export function deriveDataListState({
   detail,
@@ -178,10 +235,15 @@ export function deriveDataListState({
   const access = detail.endpoint.entity_access
   if (access == null) return { kind: "predates" }
   const forwards = forwardTargets(detail.outbound ?? [])
-  if (access.length === 0)
+  if (access.length === 0) {
+    const unopened = unopenedProjectCalls(detail.unopenable_calls)
+    // Absent rather than 0 when there is nothing to say, so the state reads
+    // the same as before for every flow that opened to its leaves.
+    const stops = unopened > 0 ? { unopenedCalls: unopened } : {}
     return forwards.length > 0
-      ? { kind: "forwards-only", forwards }
-      : { kind: "no-repository-call" }
+      ? { kind: "forwards-only", forwards, ...stops }
+      : { kind: "no-repository-call", ...stops }
+  }
   return { kind: "populated", rows: access.map(rowOf), forwards }
 }
 

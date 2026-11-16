@@ -231,6 +231,69 @@ describe("Data list", () => {
     expect(view.getByText(/Not read:/)).toHaveTextContent(/setters/)
     expect(view.getByText(/Not read:/)).toHaveTextContent(/lambdas/)
     expect(view.getByText(/Not read:/)).toHaveTextContent(/cascades/)
+    expect(view.getByText(/Not read:/)).toHaveTextContent(
+      /behind calls wadi could not open/
+    )
+    // A flow that opened to its leaves has nowhere it stopped.
+    expect(view.queryByText(/The flow stops at/)).toBeNull()
+  })
+
+  test("no repository call found, where the flow stops at calls wadi could not open (review #5)", () => {
+    const { view } = renderList({
+      state: { kind: "no-repository-call", unopenedCalls: 3 },
+    })
+    expect(view.getByText("No repository call found.")).toBeInTheDocument()
+    expect(
+      view.getByText(
+        "The flow stops at 3 calls wadi could not open, so a repository call may sit behind one of them."
+      )
+    ).toBeInTheDocument()
+    expect(view.getByText(/Not read:/)).toBeInTheDocument()
+  })
+
+  test("one call wadi could not open is said in the singular", () => {
+    const { view } = renderList({
+      state: { kind: "no-repository-call", unopenedCalls: 1 },
+    })
+    expect(
+      view.getByText(
+        "The flow stops at 1 call wadi could not open, so a repository call may sit behind it."
+      )
+    ).toBeInTheDocument()
+  })
+
+  test("forwards only, where the flow also stops at calls wadi could not open", () => {
+    const { view } = renderList({
+      state: {
+        kind: "forwards-only",
+        forwards: [
+          {
+            key: "edge_1",
+            label: "PUT ts-station-service /api/v1/stationservice/stations",
+          },
+        ],
+        unopenedCalls: 2,
+      },
+    })
+    expect(view.getByText(/No local entities/)).toBeInTheDocument()
+    expect(
+      view.getByText("PUT ts-station-service /api/v1/stationservice/stations")
+    ).toBeInTheDocument()
+    expect(
+      view.getByText(
+        "The flow stops at 2 calls wadi could not open, so a repository call may sit behind one of them."
+      )
+    ).toBeInTheDocument()
+  })
+
+  test("forwards only, with nothing unopened, makes no such claim", () => {
+    const { view } = renderList({
+      state: {
+        kind: "forwards-only",
+        forwards: [{ key: "edge_1", label: "GET ts-station-service /x" }],
+      },
+    })
+    expect(view.queryByText(/The flow stops at/)).toBeNull()
   })
 
   test("predates: says the snapshot never looked, and nothing that reads as a finding", () => {

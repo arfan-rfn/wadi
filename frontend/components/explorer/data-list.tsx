@@ -10,7 +10,8 @@
 // never looked (re-analyze), it looked and found nothing (read the limits),
 // the work happens in another service (follow the call), or the request
 // failed (retry, since nothing is known). Rendering any two alike states a
-// finding that was never made (P10).
+// finding that was never made (P10). The two that looked also say when the
+// flow they looked at stops at calls wadi could not open (review #5).
 import { Database, Forward } from "lucide-react"
 
 import type { EntityOperation } from "@/lib/generated/entity_usage.schema"
@@ -53,6 +54,19 @@ export function OperationChip({ operation }: { operation: EntityOperation }) {
 function Limits() {
   return (
     <p className="text-2xs text-subtle-foreground">{ENTITY_ACCESS_LIMITS}</p>
+  )
+}
+
+/** Beside an empty state whose flow stops at calls that may hide a
+ * repository call (§5.2.17): `[]` covers only the flow wadi could open. */
+function StopsAt({ calls }: { calls: number | undefined }) {
+  if (!calls) return null
+  return (
+    <p className="text-2xs text-muted-foreground">
+      {calls === 1
+        ? "The flow stops at 1 call wadi could not open, so a repository call may sit behind it."
+        : `The flow stops at ${calls} calls wadi could not open, so a repository call may sit behind one of them.`}
+    </p>
   )
 }
 
@@ -230,6 +244,7 @@ export function DataList({
             <Database aria-hidden className="size-3.5 text-muted-foreground" />
             No repository call found.
           </p>
+          <StopsAt calls={state.unopenedCalls} />
           <Limits />
         </div>
       )
@@ -243,6 +258,7 @@ export function DataList({
           <p className="text-2xs text-subtle-foreground">
             What those services touch is listed on their own endpoints.
           </p>
+          <StopsAt calls={state.unopenedCalls} />
         </div>
       )
     case "populated":
