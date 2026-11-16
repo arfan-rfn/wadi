@@ -72,8 +72,17 @@ def create_server(service: WadiMcpService) -> MCPServer:
         Also here: `entity_access` (the entities it may touch, and how),
         `entity_facts` ("analyzed", or "predates-phase" with a note to
         re-analyze), and `outbound` with `stitched`, the stitched calls this
-        endpoint's flow makes. An endpoint with no entity access but outbound
-        calls forwards the work to another service.
+        endpoint's flow makes.
+
+        `entity_access: []` means no repository call was found in the flow
+        wadi could open. With outbound calls, the data work may happen in the
+        services it calls. When `entity_facts_note` says the flow stops at
+        calls wadi could not open, a repository call may sit behind one of
+        them, so `[]` is not evidence that the endpoint touches no data.
+
+        `outbound: null` with an `outbound_note` means the stitched graph
+        could not be read: where the calls go is unknown, not none. The rest
+        of the answer does not depend on it.
 
         `resolve_shapes=True` (default) gives a plain tree. Pass False for the
         shared form: each type defined once in `type_defs` and referenced

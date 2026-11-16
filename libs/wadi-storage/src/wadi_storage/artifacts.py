@@ -9,8 +9,9 @@ ICFG documents are chunk-aware: oversized graphs become a manifest in
 :class:`~wadi_contracts.Icfg` back (§6).
 """
 
+from collections import Counter
 from collections.abc import Sequence
-from typing import cast
+from typing import NamedTuple, cast
 
 from pymongo import ReplaceOne
 
@@ -48,6 +49,44 @@ _ENTITY_ACCESS_PROJECTION: MongoDocument = {
     "full_uri": 1,
     "entity_access": 1,
 }
+
+
+#: Every remote-call id on a graph document's nodes: an array of arrays
+#: (`nodes.remote_call_ids`) flattened, then deduped by the set union.
+_CALL_IDS_UNION: MongoDocument = {
+    "$setUnion": [
+        {
+            "$reduce": {
+                "input": {"$ifNull": ["$nodes.remote_call_ids", []]},
+                "initialValue": [],
+                "in": {"$concatArrays": ["$$value", {"$ifNull": ["$$this", []]}]},
+            }
+        },
+        [],
+    ]
+}
+
+#: The unbound reason of every node that has one, one entry per node. The
+#: codec writes `None` for a bound call, so the nulls are filtered out.
+_UNBOUND_REASONS: MongoDocument = {
+    "$filter": {
+        "input": {"$ifNull": ["$nodes.callee_unbound_reason", []]},
+        "as": "reason",
+        "cond": {"$ne": ["$$reason", None]},
+    }
+}
+
+
+class FlowMarks(NamedTuple):
+    """What one endpoint's flow is marked with, read without the flow (review #6).
+
+    ``unbound_reasons`` counts the call nodes whose callee has no interior, by
+    the reason's wire value (§5.4.2 T5). Wire values rather than the enum, so
+    a reason newer than this reader is counted instead of failing the read.
+    """
+
+    remote_call_ids: set[str]
+    unbound_reasons: dict[str, int]
 
 
 def _entity_access_row(doc: MongoDocument) -> EndpointEntityAccessRow:
@@ -321,25 +360,11 @@ class ArtifactRepository:
         manifest, so they contribute an empty set from the first pass and are
         picked up by the second — the two are merged, never one or the other.
         """
-        # An array-of-arrays (`nodes.remote_call_ids`) flattened, then deduped.
-        union_stage: MongoDocument = {
-            "$setUnion": [
-                {
-                    "$reduce": {
-                        "input": {"$ifNull": ["$nodes.remote_call_ids", []]},
-                        "initialValue": [],
-                        "in": {"$concatArrays": ["$$value", {"$ifNull": ["$$this", []]}]},
-                    }
-                },
-                [],
-            ]
-        }
-
         by_endpoint: dict[str, set[str]] = {}
         chunked: list[str] = []
         manifest_pipeline: list[MongoDocument] = [
             {"$match": {"snapshot_id": snapshot_id, "service_id": service_id}},
-            {"$project": {"endpoint_id": 1, "chunked": 1, "call_ids": union_stage}},
+            {"$project": {"endpoint_id": 1, "chunked": 1, "call_ids": _CALL_IDS_UNION}},
         ]
         async for row in await self._db.collection(ICFGS).aggregate(manifest_pipeline):
             endpoint_id = str(row["endpoint_id"])  # type: ignore[index]
@@ -352,7 +377,7 @@ class ArtifactRepository:
         if chunked:
             parts_pipeline: list[MongoDocument] = [
                 {"$match": {"snapshot_id": snapshot_id, "endpoint_id": {"$in": chunked}}},
-                {"$project": {"endpoint_id": 1, "call_ids": union_stage}},
+                {"$project": {"endpoint_id": 1, "call_ids": _CALL_IDS_UNION}},
                 {"$unwind": "$call_ids"},
                 {"$group": {"_id": "$endpoint_id", "call_ids": {"$addToSet": "$call_ids"}}},
             ]
@@ -361,6 +386,45 @@ class ArtifactRepository:
                 if ids:
                     by_endpoint.setdefault(str(row["_id"]), set()).update(ids)  # type: ignore[index]
         return by_endpoint
+
+    async def endpoint_flow_marks(self, snapshot_id: str, endpoint_id: str) -> FlowMarks | None:
+        """One endpoint's remote-call ids and unbound callees, WITHOUT its ICFG.
+
+        MCP `endpoint_detail` needs these two facts and nothing else of the
+        flow, and it used to assemble the whole graph for them: every chunk
+        read and validated, the cost §5.2.15 took out of the endpoint list
+        (pre-landing review #6). The answers are the ones a reader of the
+        assembled graph would compute, from the same two collections.
+
+        None when the endpoint has no ICFG: not known, which an empty set
+        would not say (P10).
+        """
+        key: MongoDocument = {"snapshot_id": snapshot_id, "endpoint_id": endpoint_id}
+        marks: MongoDocument = {"call_ids": _CALL_IDS_UNION, "reasons": _UNBOUND_REASONS}
+        rows: list[MongoDocument] = []
+        manifest_pipeline: list[MongoDocument] = [
+            {"$match": key},
+            {"$project": {"_id": 0, "chunked": 1, **marks}},
+        ]
+        async for row in await self._db.collection(ICFGS).aggregate(manifest_pipeline):
+            rows.append(row)
+        if not rows:
+            return None
+        # A chunked manifest carries no nodes; they are all in its parts.
+        if rows[0].get("chunked"):
+            parts_pipeline: list[MongoDocument] = [
+                {"$match": key},
+                {"$project": {"_id": 0, **marks}},
+            ]
+            async for row in await self._db.collection(ICFG_PARTS).aggregate(parts_pipeline):
+                rows.append(row)
+
+        call_ids: set[str] = set()
+        reasons: Counter[str] = Counter()
+        for row in rows:
+            call_ids.update(str(call) for call in cast(list[object], row.get("call_ids") or []))
+            reasons.update(str(reason) for reason in cast(list[object], row.get("reasons") or []))
+        return FlowMarks(remote_call_ids=call_ids, unbound_reasons=dict(reasons))
 
     # --- remote calls / MQ / data models ---------------------------------------------
 

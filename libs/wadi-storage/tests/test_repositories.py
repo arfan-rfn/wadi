@@ -4,10 +4,18 @@ from typing import cast
 
 import pytest
 
-from wadi_contracts import Icfg, ShapeKind, SnapshotStatus, TypeShape
+from wadi_contracts import (
+    CalleeUnboundReason,
+    Icfg,
+    MethodRef,
+    ShapeKind,
+    SnapshotStatus,
+    TypeShape,
+)
 from wadi_storage import (
     ArtifactRepository,
     DuplicateSystemNameError,
+    FlowMarks,
     SnapshotRepository,
     SystemRepository,
     WadiDatabase,
@@ -227,6 +235,108 @@ class TestArtifactRepository:
 
         found = await artifacts.remote_call_ids_by_endpoint(snapshot.id, boundary.service_id)
         assert found == {endpoint.id: {"rc_chunked"}}
+
+    async def test_one_endpoints_flow_marks_come_from_a_projection(
+        self, database: WadiDatabase
+    ) -> None:
+        """MCP `endpoint_detail` reads two facts of one flow, not the flow (review #6).
+
+        It loaded the whole ICFG to collect remote-call ids, the shape
+        §5.2.15 removed from the endpoint list. The projection has to give
+        the same answers: the remote-call union, deduped across nodes, and
+        the unbound callees counted by reason. Another endpoint's marks must
+        not leak in.
+        """
+        artifacts = ArtifactRepository(database)
+        snapshot = make_snapshot(make_system())
+        boundary = make_service(snapshot)
+        mine = make_endpoint(snapshot, boundary, "/orders/{id}")
+        other = make_endpoint(snapshot, boundary, "/health")
+        await artifacts.write_endpoints([mine, other])
+        callee = MethodRef(id="m_" + "c" * 16, signature="com.acme.Orders.load()")
+
+        def marked(icfg: Icfg, calls: dict[str, list[str]], reasons: dict[str, str]) -> Icfg:
+            nodes = [
+                node.model_copy(
+                    update={
+                        "remote_call_ids": calls.get(node.id, []),
+                        "callee": callee if node.id in reasons else None,
+                        "callee_unbound_reason": (
+                            CalleeUnboundReason(reasons[node.id]) if node.id in reasons else None
+                        ),
+                    }
+                )
+                for node in icfg.nodes
+            ]
+            return icfg.model_copy(update={"nodes": nodes})
+
+        await artifacts.write_icfg(
+            marked(
+                make_icfg(snapshot, boundary, mine, statement_count=4),
+                {"s0": ["rc_aaa", "rc_bbb"], "s1": ["rc_aaa"]},
+                {"s1": "declared-not-bound", "s2": "lombok-generated", "s3": "lombok-generated"},
+            )
+        )
+        await artifacts.write_icfg(
+            marked(
+                make_icfg(snapshot, boundary, other),
+                {"s0": ["rc_zzz"]},
+                {"s0": "ambiguous-overload"},
+            )
+        )
+
+        marks = await artifacts.endpoint_flow_marks(snapshot.id, mine.id)
+        assert marks == FlowMarks(
+            remote_call_ids={"rc_aaa", "rc_bbb"},
+            unbound_reasons={"declared-not-bound": 1, "lombok-generated": 2},
+        )
+
+    async def test_flow_marks_cover_chunked_graphs(self, database: WadiDatabase) -> None:
+        """A chunked ICFG leaves no nodes on its manifest; its parts are read too."""
+        artifacts = ArtifactRepository(database)
+        snapshot = make_snapshot(make_system())
+        boundary = make_service(snapshot)
+        endpoint = make_endpoint(snapshot, boundary, "/bulk")
+        await artifacts.write_endpoints([endpoint])
+        callee = MethodRef(id="m_" + "d" * 16, signature="com.acme.Bulk.load()")
+
+        # Past SAFE_PART_BYTES (12 MB), so write_icfg takes the chunked path.
+        big = make_icfg(
+            snapshot, boundary, endpoint, statement_count=200, statement_text="x" * 70_000
+        )
+        nodes = [
+            node.model_copy(
+                update={
+                    "remote_call_ids": ["rc_chunked"] if node.id in ("s7", "s150") else [],
+                    "callee": callee if node.id in ("s3", "s190") else None,
+                    "callee_unbound_reason": (
+                        CalleeUnboundReason.UNRESOLVED_RECEIVER
+                        if node.id in ("s3", "s190")
+                        else None
+                    ),
+                }
+            )
+            for node in big.nodes
+        ]
+        await artifacts.write_icfg(big.model_copy(update={"nodes": nodes}))
+        manifest = await database.collection("icfgs").find_one({"endpoint_id": endpoint.id})
+        assert manifest is not None
+        assert manifest["chunked"] is True, "fixture must exercise the chunked path"
+
+        marks = await artifacts.endpoint_flow_marks(snapshot.id, endpoint.id)
+        assert marks == FlowMarks(
+            remote_call_ids={"rc_chunked"}, unbound_reasons={"unresolved-receiver": 2}
+        )
+
+    async def test_an_endpoint_without_a_graph_has_no_flow_marks(
+        self, database: WadiDatabase
+    ) -> None:
+        """No graph is "not known", which an empty mark set would not say (P10)."""
+        artifacts = ArtifactRepository(database)
+        snapshot = make_snapshot(make_system())
+        endpoint = make_endpoint(snapshot, make_service(snapshot))
+        await artifacts.write_endpoints([endpoint])
+        assert await artifacts.endpoint_flow_marks(snapshot.id, endpoint.id) is None
 
     async def test_empty_write_is_noop(self, database: WadiDatabase) -> None:
         artifacts = ArtifactRepository(database)
