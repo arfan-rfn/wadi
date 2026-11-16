@@ -165,6 +165,18 @@ describe("Data list states", () => {
     })
   })
 
+  // Value: protects=a forward with no resolved target says "target undetermined" (P10); fails_when=the fallback label is dropped or blanked; why_new=every pinned forward had a target or host; seam=none; no_claim=label order
+  test("a forward with no resolved target says so instead of a blank", () => {
+    const state = deriveDataListState({
+      detail: detailWith([], [{ edge_id: "edge_9" }]),
+      error: null,
+    })
+    expect(state).toEqual({
+      kind: "forwards-only",
+      forwards: [{ key: "edge_9", label: "target undetermined" }],
+    })
+  })
+
   test("no repository call found: analyzed, nothing local, nothing forwarded", () => {
     expect(
       deriveDataListState({ detail: detailWith([]), error: null })

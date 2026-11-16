@@ -587,6 +587,20 @@ class TestEntityAccessAccounting:
         with pytest.raises(ValidationError, match="counted under create-or-update"):
             EntityAccessAccounting.model_validate(_accounting(accesses_by_operation=accesses))
 
+    def test_the_unknown_bucket_needs_accesses_with_its_operation(self) -> None:
+        # Value: protects=unknown_operation sites need >= that many `unknown`
+        # accesses; fails_when=the bucket loop drops its UNKNOWN row;
+        # why_new=only the create-or-update row was pinned; seam=none;
+        # no_claim=other buckets
+        base = _accounting()
+        accesses = {**base["accesses_by_operation"]}
+        moved = accesses["unknown"]
+        accesses["unknown"] = 0
+        accesses["read"] += moved
+        assert base["unknown_operation"] > 0
+        with pytest.raises(ValidationError, match="counted under unknown"):
+            EntityAccessAccounting.model_validate(_accounting(accesses_by_operation=accesses))
+
     def test_a_negative_count_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="flush"):
             EntityAccessAccounting.model_validate(_accounting(flush=-1, bound=5))
