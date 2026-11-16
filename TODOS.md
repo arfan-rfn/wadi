@@ -479,6 +479,17 @@ still lists it (a row from the access, with no storage name), so nothing is lost
 - One type that arrives as two Data list rows (with and without a model id) shares one
   `entity=` selection key, so selecting one selects both.
 
+### A vocabulary change must keep 0.9.0 accounting readable
+**Priority:** P1 (bound to the next change to `EntityOperation` or `EntityAccessBasis`)
+**Opened:** v0.9.0
+
+Pre-landing review finding #4. `EntityAccessAccounting` requires exactly the current operation and
+basis keys (a zero is written, never left out, E8), and the model is read back from every stored
+boundary and coverage report. Adding a value (M5 is the likely first) would make every 0.9.0
+document fail to load. That change must add a read rule in the same commit: accept a document
+missing the new key and read it as "not measured by that version" (§5.2.17, "Found by the
+pre-landing review").
+
 ### `e2e/` is outside pyright's include
 **Priority:** P3
 **Opened:** v0.9.0
