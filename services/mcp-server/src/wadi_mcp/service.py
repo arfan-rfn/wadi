@@ -7,11 +7,13 @@ dicts at the boundary.
 """
 
 import asyncio
+from collections import Counter
 from collections.abc import Sequence
 from typing import Any, Literal
 
 from wadi_contracts import (
     UNDETERMINED_ENTITY_NAME,
+    CalleeUnboundReason,
     EndpointEntityAccess,
     EntityAccountingStatus,
     EntityUsageRow,
@@ -22,13 +24,17 @@ from wadi_contracts import (
 )
 from wadi_mcp.rollup import method_rollup, statement_detail
 from wadi_storage import (
+    GRAPH_READ_TIMEOUT_SECONDS,
     ArtifactRepository,
+    EndpointOutbound,
+    FlowMarks,
     GraphRepository,
+    OutboundUnavailable,
     SnapshotRepository,
     StitchRepository,
     SystemRepository,
     WadiDatabase,
-    endpoint_outbound,
+    endpoint_outbound_or_unavailable,
     entity_usage_view,
 )
 
@@ -39,6 +45,34 @@ ENTITY_FACTS_PREDATE_NOTE = (
     "This snapshot predates entity facts: entity_access is null because nothing was "
     "examined, not because the endpoint touches no data. Re-analyze the system to get them."
 )
+
+
+#: Whether a call with this unbound reason may have a project body behind it,
+#: and so a repository call wadi never saw (§5.2.17, pre-landing review #5).
+#: False only where the reason rules a project body out: a Lombok accessor and
+#: an enum's `values()` have no source by construction, a method a framework
+#: supertype declares (Spring Data's `save`) is the framework's, and a
+#: third-party callee is outside every analyzed source root. Every other
+#: reason names project code wadi saw and could not connect, or a callee it
+#: could not name at all, which may be the project's (§5.4.2 T5). The
+#: frontend's Data list keeps the same table (`lib/wadi/entity-access.ts`);
+#: the two must agree, and each is checked total over the enum.
+MAY_HIDE_PROJECT_CODE: dict[CalleeUnboundReason, bool] = {
+    CalleeUnboundReason.LOMBOK_GENERATED: False,
+    CalleeUnboundReason.COMPILER_GENERATED: False,
+    CalleeUnboundReason.INHERITED_EXTERNAL: False,
+    CalleeUnboundReason.THIRD_PARTY: False,
+    CalleeUnboundReason.AMBIGUOUS_OVERLOAD: True,
+    CalleeUnboundReason.DECLARED_NOT_BOUND: True,
+    CalleeUnboundReason.NOT_DECLARED: True,
+    CalleeUnboundReason.UNRESOLVED_RECEIVER: True,
+    CalleeUnboundReason.UNPARSEABLE_CALLEE: True,
+}
+
+#: By wire value, as the flow marks count them. A value this build does not
+#: know is absent here and counted: an unread reason is not evidence that
+#: nothing is behind the call (P10).
+_MAY_HIDE_BY_VALUE = {reason.value: hides for reason, hides in MAY_HIDE_PROJECT_CODE.items()}
 
 
 #: Beside a reverse-view count that the endpoint's summary never recorded
@@ -181,25 +215,104 @@ def _say_unrecorded_counts(result: dict[str, Any]) -> None:
                     endpoint["call_sites_note"] = CALL_SITES_NOT_RECORDED_NOTE
 
 
-def _entity_facts(summary: list[EndpointEntityAccess] | None) -> dict[str, str]:
+def _entity_facts(
+    summary: list[EndpointEntityAccess] | None, marks: FlowMarks | None
+) -> dict[str, str]:
     """Which of the two answers an endpoint's entity summary is (§5.2.17, R1-6).
 
-    `analyzed` covers `[]` too: looked, and no repository call was found. A
-    forwarding endpoint is one of those, and its `outbound` says where the
-    work went instead (Q26).
+    `analyzed` covers `[]` too: looked, and no repository call was found in
+    the flow wadi could open. When that flow stops at calls which may hide
+    one, the note says so beside the empty summary, because an agent cannot
+    open the code to find out (§5.2.17 "An empty summary says where the flow
+    stopped", review #5). A forwarding endpoint is one with `[]` too, and its
+    `outbound` says where the work went (Q26), unless it sits behind one of
+    those calls.
     """
     if summary is None:
         return {"entity_facts": "predates-phase", "entity_facts_note": ENTITY_FACTS_PREDATE_NOTE}
-    return {"entity_facts": "analyzed"}
+    if summary or marks is None:
+        return {"entity_facts": "analyzed"}
+    unopened = {
+        reason: count
+        for reason, count in marks.unbound_reasons.items()
+        if _MAY_HIDE_BY_VALUE.get(reason, True)
+    }
+    if not unopened:
+        return {"entity_facts": "analyzed"}
+    return {"entity_facts": "analyzed", "entity_facts_note": _flow_stops_note(unopened)}
+
+
+def _flow_stops_note(unopened: dict[str, int]) -> str:
+    """`entity_access: []` qualified by the calls its flow stops at (review #5)."""
+    total = sum(unopened.values())
+    # Most first, then by name, so the same flow always reads the same.
+    by_reason = ", ".join(
+        f"{count} {reason}"
+        for reason, count in sorted(unopened.items(), key=lambda item: (-item[1], item[0]))
+    )
+    calls, behind = ("1 call", "it") if total == 1 else (f"{total} calls", "one of them")
+    return (
+        "No repository call was found in the flow wadi could open, and that flow stops at "
+        f"{calls} wadi could not open ({by_reason}): a repository call may sit behind "
+        f"{behind}, so entity_access [] is not evidence that this endpoint touches no data. "
+        "endpoint_icfg shows each as a call with its callee_unbound_reason."
+    )
+
+
+def _marks_of(icfg: Icfg) -> FlowMarks:
+    """The marks :meth:`ArtifactRepository.endpoint_flow_marks` reads, from a
+    graph already loaded, so `endpoint_icfg` and `endpoint_detail` agree."""
+    return FlowMarks(
+        remote_call_ids={call for node in icfg.nodes for call in node.remote_call_ids},
+        unbound_reasons=dict(
+            Counter(
+                node.callee_unbound_reason.value
+                for node in icfg.nodes
+                if node.callee_unbound_reason is not None
+            )
+        ),
+    )
+
+
+def _outbound_facts(joined: EndpointOutbound | OutboundUnavailable) -> dict[str, Any]:
+    """`outbound` and `stitched`, or why the edges are unknown (review #6).
+
+    Unknown is `outbound: null` with a note: `[]` would read as "calls
+    nothing". Unavailable is only returned after stitching, so `stitched`
+    stays true.
+    """
+    if isinstance(joined, OutboundUnavailable):
+        return {
+            "outbound": None,
+            "stitched": True,
+            "outbound_note": (
+                f"Where this endpoint's calls go is not known: {joined.reason}, so outbound "
+                "is null, not empty. The rest of this answer does not depend on it. Retry "
+                "later, or call remote_edges for the service once the graph answers."
+            ),
+        }
+    return {
+        "outbound": [edge.model_dump(mode="json") for edge in joined.outbound],
+        "stitched": joined.stitched,
+    }
 
 
 class WadiMcpService:
-    def __init__(self, database: WadiDatabase, graph: GraphRepository) -> None:
+    def __init__(
+        self,
+        database: WadiDatabase,
+        graph: GraphRepository,
+        *,
+        graph_timeout_seconds: float = GRAPH_READ_TIMEOUT_SECONDS,
+    ) -> None:
         self._systems = SystemRepository(database)
         self._snapshots = SnapshotRepository(database)
         self._artifacts = ArtifactRepository(database)
         self._stitch = StitchRepository(database)
         self._graph = graph
+        # How long `endpoint_detail` waits on the outbound join before it
+        # answers without it (review #6).
+        self._graph_timeout_seconds = graph_timeout_seconds
 
     async def list_systems(self) -> list[dict[str, Any]]:
         return [system.model_dump(mode="json") for system in await self._systems.list_all()]
@@ -253,27 +366,36 @@ class WadiMcpService:
         shared form plus `type_defs`, which is far smaller when a shape names
         the same type repeatedly and is what a large entity model needs.
 
-        The result adds three keys to the endpoint's own fields: `outbound`
-        and `stitched`, from the same function the workspace's `/detail` calls
-        (C5), and `entity_facts`. Without the edges a forwarding endpoint reads as one
-        that does nothing: its entity summary is `[]` because the data lives
-        behind the service it calls (Q26).
+        The result adds keys to the endpoint's own fields: `outbound` and
+        `stitched`, joined the way the workspace's `/detail` joins them (C5),
+        and `entity_facts`. Without the edges a forwarding endpoint reads as
+        one that does nothing: its entity summary is `[]` because the data
+        lives behind the service it calls (Q26).
+
+        Two notes say what an answer is not. `entity_facts_note` beside an
+        empty summary whose flow stops at calls wadi could not open (review
+        #5). `outbound_note`, with `outbound: null`, when the stitched graph
+        cannot be read: the contract is this tool's reason to exist
+        (§5.2.16), so a graph failure costs the edges, never the answer
+        (review #6). The flow's remote-call ids and unbound callees come from
+        a projection, not the assembled ICFG (§5.2.15).
         """
-        endpoint, icfg = await asyncio.gather(
+        endpoint, marks = await asyncio.gather(
             self._artifacts.get_endpoint(snapshot_id, endpoint_id),
-            self._artifacts.get_icfg(snapshot_id, endpoint_id),
+            self._artifacts.endpoint_flow_marks(snapshot_id, endpoint_id),
         )
         if endpoint is None:
             raise NotFoundError(
                 f"endpoint {endpoint_id!r} not found in snapshot {snapshot_id!r}; "
                 "use list_endpoints to find endpoint ids"
             )
-        outbound, stitched = await endpoint_outbound(
+        joined = await endpoint_outbound_or_unavailable(
             self._stitch,
             self._graph,
             snapshot_id=snapshot_id,
             service_id=endpoint.service_id,
-            icfg=icfg,
+            remote_call_ids=marks.remote_call_ids if marks is not None else set[str](),
+            timeout_seconds=self._graph_timeout_seconds,
         )
         if resolve_shapes and endpoint.type_defs:
             endpoint = endpoint.model_copy(
@@ -295,9 +417,8 @@ class WadiMcpService:
             )
         return {
             **endpoint.model_dump(mode="json"),
-            "outbound": [edge.model_dump(mode="json") for edge in outbound],
-            "stitched": stitched,
-            **_entity_facts(endpoint.entity_access),
+            **_outbound_facts(joined),
+            **_entity_facts(endpoint.entity_access, marks),
         }
 
     async def entity_usage(
@@ -412,8 +533,11 @@ class WadiMcpService:
         # §5.2.17: empty `entity_access_sites` on every node reads the same on
         # a graph that predates the phase and on an endpoint that makes no
         # repository call. Only the endpoint's summary tells them apart, so
-        # both levels say which (R1-6).
-        facts = _entity_facts(summary.entity_access if summary is not None else None)
+        # both levels say which (R1-6), and where an empty flow stopped, as
+        # `endpoint_detail` does (review #5).
+        facts = _entity_facts(
+            summary.entity_access if summary is not None else None, _marks_of(icfg)
+        )
         if detail == "methods":
             rollup = method_rollup(icfg)
             if cross_service:

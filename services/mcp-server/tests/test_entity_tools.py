@@ -3,7 +3,9 @@
 An agent reads these instead of the code, so each tool has to say which of
 three things an empty answer is: analyzed and nothing found, not looked at
 because the snapshot predates the phase, or nothing local because the
-endpoint forwards the work to another service (Q26, C5). Documents are built
+endpoint forwards the work to another service (Q26, C5). "Analyzed and nothing
+found" also says when the flow stopped at calls wadi could not open, behind
+which a repository call may sit (pre-landing review #5). Documents are built
 with the contract models; a pre-phase endpoint is a raw document with no
 `entity_access` key, which is what one is.
 """
@@ -14,17 +16,20 @@ import pytest
 from mcp_support import make_accounting, make_data_model, make_site, make_two_method_icfg
 
 from wadi_contracts import (
+    CalleeUnboundReason,
     CoverageReport,
     CoverageTotals,
     Endpoint,
     EntityAccessSite,
     EntityOperation,
+    Icfg,
+    MethodRef,
     ServiceBoundary,
     ServiceKind,
     Snapshot,
     summarize_entity_access,
 )
-from wadi_mcp.service import NotFoundError, WadiMcpService
+from wadi_mcp.service import MAY_HIDE_PROJECT_CODE, NotFoundError, WadiMcpService
 from wadi_storage import (
     ArtifactRepository,
     GraphRepository,
@@ -39,6 +44,7 @@ from wadi_storage.mongo import ENDPOINTS
 from wadi_testing.builders import (
     make_analyzed_edge,
     make_endpoint,
+    make_icfg,
     make_remote_call,
     make_service,
     make_snapshot,
@@ -175,6 +181,172 @@ class TestEndpointDetailEntityFacts:
         assert [item["remote_call_id"] for item in outbound] == [call.id]
         assert outbound[0]["target_endpoint_id"] == target.id
         assert outbound[0]["target_service_id"] == callee.service_id
+
+
+def _icfg_stopping_at(
+    snapshot: Snapshot, boundary: ServiceBoundary, endpoint: Endpoint, reasons: list[str]
+) -> Icfg:
+    """A flow whose statements are calls with these unbound reasons, in order."""
+    icfg = make_icfg(snapshot, boundary, endpoint, statement_count=max(len(reasons), 1))
+    callee = MethodRef(id="m_" + "e" * 16, signature="com.acme.RouteService.load()")
+    by_node = {f"s{index}": reason for index, reason in enumerate(reasons)}
+    return icfg.model_copy(
+        update={
+            "nodes": [
+                node.model_copy(
+                    update={
+                        "callee": callee,
+                        "callee_unbound_reason": CalleeUnboundReason(by_node[node.id]),
+                    }
+                )
+                if node.id in by_node
+                else node
+                for node in icfg.nodes
+            ]
+        }
+    )
+
+
+def _refuse_whole_graphs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any read that assembles an ICFG: `endpoint_detail` needs two marks
+    of the flow, read by projection, never the flow (review #6, §5.2.15)."""
+
+    async def refuse(self: ArtifactRepository, snapshot_id: str, endpoint_id: str) -> Icfg | None:
+        raise AssertionError(f"endpoint_detail assembled the ICFG of {endpoint_id}")
+
+    monkeypatch.setattr(ArtifactRepository, "get_icfg", refuse)
+
+
+class TestEndpointDetailSaysWhereAnEmptyFlowStopped:
+    """`[]` covers only the flow wadi could open (§5.2.17, pre-landing review #5).
+
+    The tool used to answer `analyzed` and nothing else, and its docstring
+    told agents that an empty summary beside outbound calls means the
+    endpoint forwards its work. When the flow stops at project calls wadi
+    could not open, a repository call may sit behind one of them, and the
+    agent cannot open the code to find out, so the answer has to say it.
+    """
+
+    async def test_an_empty_summary_names_the_calls_its_flow_stops_at(
+        self, database: WadiDatabase, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        snapshot, boundary = await _snapshot(database)
+        endpoint = make_endpoint(snapshot, boundary).model_copy(update={"entity_access": []})
+        artifacts = ArtifactRepository(database)
+        await artifacts.write_endpoints([endpoint])
+        await artifacts.write_icfg(
+            _icfg_stopping_at(
+                snapshot,
+                boundary,
+                endpoint,
+                [
+                    "declared-not-bound",
+                    "declared-not-bound",
+                    "unresolved-receiver",
+                    # Neither can hide a repository call: not counted.
+                    "lombok-generated",
+                    "third-party",
+                ],
+            )
+        )
+        _refuse_whole_graphs(monkeypatch)
+
+        detail = await _offline_service(database).endpoint_detail(snapshot.id, endpoint.id)
+        assert detail["entity_access"] == []
+        assert detail["entity_facts"] == "analyzed"
+        note: str = detail["entity_facts_note"]
+        assert "flow stops at 3 calls wadi could not open" in note
+        assert "2 declared-not-bound, 1 unresolved-receiver" in note
+        assert "may sit behind one of them" in note
+        assert "lombok" not in note
+        assert "\n" not in note
+
+    async def test_endpoint_icfg_says_the_same_at_both_levels(self, database: WadiDatabase) -> None:
+        """Two tools, one endpoint, one answer: the graph it already loaded
+        gives the same note the projection gives `endpoint_detail` (C5)."""
+        snapshot, boundary = await _snapshot(database)
+        endpoint = make_endpoint(snapshot, boundary).model_copy(update={"entity_access": []})
+        artifacts = ArtifactRepository(database)
+        await artifacts.write_endpoints([endpoint])
+        await artifacts.write_icfg(
+            _icfg_stopping_at(
+                snapshot, boundary, endpoint, ["not-declared", "lombok-generated", "not-declared"]
+            )
+        )
+        service = _offline_service(database)
+
+        detail = await service.endpoint_detail(snapshot.id, endpoint.id)
+        methods = await service.endpoint_icfg(snapshot.id, endpoint.id)
+        statements = await service.endpoint_icfg(
+            snapshot.id, endpoint.id, detail="statements", method_id=endpoint.handler.id
+        )
+        assert (
+            "flow stops at 2 calls wadi could not open (2 not-declared)"
+            in (detail["entity_facts_note"])
+        )
+        assert methods["entity_facts_note"] == detail["entity_facts_note"]
+        assert statements["entity_facts_note"] == detail["entity_facts_note"]
+
+    async def test_one_call_is_said_in_the_singular(self, database: WadiDatabase) -> None:
+        snapshot, boundary = await _snapshot(database)
+        endpoint = make_endpoint(snapshot, boundary).model_copy(update={"entity_access": []})
+        artifacts = ArtifactRepository(database)
+        await artifacts.write_endpoints([endpoint])
+        await artifacts.write_icfg(
+            _icfg_stopping_at(snapshot, boundary, endpoint, ["ambiguous-overload"])
+        )
+
+        detail = await _offline_service(database).endpoint_detail(snapshot.id, endpoint.id)
+        note: str = detail["entity_facts_note"]
+        assert "flow stops at 1 call wadi could not open (1 ambiguous-overload)" in note
+        assert "may sit behind it" in note
+
+    async def test_calls_that_cannot_hide_project_code_add_no_note(
+        self, database: WadiDatabase
+    ) -> None:
+        snapshot, boundary = await _snapshot(database)
+        endpoint = make_endpoint(snapshot, boundary).model_copy(update={"entity_access": []})
+        artifacts = ArtifactRepository(database)
+        await artifacts.write_endpoints([endpoint])
+        await artifacts.write_icfg(
+            _icfg_stopping_at(
+                snapshot,
+                boundary,
+                endpoint,
+                ["lombok-generated", "compiler-generated", "inherited-external", "third-party"],
+            )
+        )
+
+        detail = await _offline_service(database).endpoint_detail(snapshot.id, endpoint.id)
+        assert detail["entity_facts"] == "analyzed"
+        assert "entity_facts_note" not in detail
+
+    async def test_a_populated_summary_is_not_qualified(self, database: WadiDatabase) -> None:
+        """The decision covers the empty state: rows are what was found."""
+        snapshot, boundary = await _snapshot(database)
+        endpoint = make_endpoint(snapshot, boundary).model_copy(
+            update={"entity_access": summarize_entity_access([make_site(EntityOperation.READ)])}
+        )
+        artifacts = ArtifactRepository(database)
+        await artifacts.write_endpoints([endpoint])
+        await artifacts.write_icfg(
+            _icfg_stopping_at(snapshot, boundary, endpoint, ["declared-not-bound"])
+        )
+
+        detail = await _offline_service(database).endpoint_detail(snapshot.id, endpoint.id)
+        assert "entity_facts_note" not in detail
+
+    def test_every_unbound_reason_is_decided(self) -> None:
+        """A reason the contract adds must be classified before it is counted
+        either way; the frontend's table in `lib/wadi/entity-access.ts` is
+        checked the same way by `tsc`."""
+        assert set(MAY_HIDE_PROJECT_CODE) == set(CalleeUnboundReason)
+        assert {reason for reason, hides in MAY_HIDE_PROJECT_CODE.items() if not hides} == {
+            CalleeUnboundReason.LOMBOK_GENERATED,
+            CalleeUnboundReason.COMPILER_GENERATED,
+            CalleeUnboundReason.INHERITED_EXTERNAL,
+            CalleeUnboundReason.THIRD_PARTY,
+        }
 
 
 class TestEndpointIcfgEntityFacts:

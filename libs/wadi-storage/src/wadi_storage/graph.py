@@ -31,6 +31,7 @@ from types import TracebackType
 from typing import Any, LiteralString, cast
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j.exceptions import DriverError, Neo4jError
 
 from wadi_contracts import (
     Confidence,
@@ -48,6 +49,19 @@ from wadi_contracts import (
 )
 
 _DELETE_BATCH = 5_000
+
+
+class GraphStoreError(RuntimeError):
+    """Neo4j could not answer a query: unreachable, timed out, or refused it.
+
+    The driver's exception is the ``__cause__`` and its name leads the
+    message. Services cannot import the driver (P1), so this is the type they
+    catch when a graph failure must not fail what they answer: MCP
+    `endpoint_detail` returns the endpoint's contract with `outbound` unknown
+    rather than no contract (§5.2.17, pre-landing review #6). Anything else,
+    a bug in the mapping included, keeps its own type.
+    """
+
 
 _CONSTRAINTS = (
     "CREATE CONSTRAINT wadi_service_key IF NOT EXISTS "
@@ -112,6 +126,12 @@ class GraphRepository:
     async def _run(
         self, query: str, parameters: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
+        try:
+            return await self._execute(query, parameters)
+        except (Neo4jError, DriverError) as exc:
+            raise GraphStoreError(f"{type(exc).__name__}: {exc}") from exc
+
+    async def _execute(self, query: str, parameters: dict[str, Any] | None) -> list[dict[str, Any]]:
         result = await self._store.driver.execute_query(  # pyright: ignore[reportUnknownMemberType]
             cast(LiteralString, query), parameters_=parameters or {}, database_=self._database
         )

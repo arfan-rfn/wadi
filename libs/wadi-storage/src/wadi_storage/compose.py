@@ -7,6 +7,7 @@ the package both already depend on.
 """
 
 import asyncio
+from collections.abc import Collection
 from typing import NamedTuple
 
 from wadi_contracts import (
@@ -20,8 +21,15 @@ from wadi_contracts import (
     build_entity_usage_view,
 )
 from wadi_storage.artifacts import ArtifactRepository
-from wadi_storage.graph import GraphRepository
+from wadi_storage.graph import GraphRepository, GraphStoreError
 from wadi_storage.stitch import StitchRepository
+
+#: How long MCP `endpoint_detail` waits on the outbound join before it answers
+#: without it. The driver retries an unreachable Neo4j for about a minute
+#: before it raises (measured: 57 s), and an agent waiting that long for a
+#: contract that does not depend on the graph has, in practice, been failed.
+#: Every graph read the join makes is one indexed query per service.
+GRAPH_READ_TIMEOUT_SECONDS = 10.0
 
 
 class EndpointOutbound(NamedTuple):
@@ -62,11 +70,69 @@ async def endpoint_outbound(
             remote_call_ids.update(node.remote_call_ids)
     if not stitched or not remote_call_ids:
         return EndpointOutbound(outbound=[], stitched=stitched)
-    edges_view = await graph.remote_edges(snapshot_id, service_id)
     return EndpointOutbound(
-        outbound=[edge for edge in edges_view.outbound if edge.remote_call_id in remote_call_ids],
+        outbound=await _edges_reaching(graph, snapshot_id, service_id, remote_call_ids),
         stitched=stitched,
     )
+
+
+class OutboundUnavailable(NamedTuple):
+    """The outbound join after stitching, when the stitched graph could not be read.
+
+    Only ever returned once stitching has run, so there are edges to know
+    about and they are unknown: neither ``[]``, which reads as "calls
+    nothing", nor "not stitched", which is false (P10). ``reason`` says why.
+    """
+
+    reason: str
+
+
+async def endpoint_outbound_or_unavailable(
+    stitch: StitchRepository,
+    graph: GraphRepository,
+    *,
+    snapshot_id: str,
+    service_id: str,
+    remote_call_ids: Collection[str],
+    timeout_seconds: float = GRAPH_READ_TIMEOUT_SECONDS,
+) -> EndpointOutbound | OutboundUnavailable:
+    """:func:`endpoint_outbound` for a reader that must answer without the graph.
+
+    MCP `endpoint_detail` is an agent's only route to an endpoint's request
+    and response contract (§5.2.16), and the outbound join is the one part of
+    it Neo4j answers. So a graph that fails, or does not answer within
+    ``timeout_seconds``, costs the agent the edges, never the contract
+    (§5.2.17 "MCP endpoint_detail degrades instead of failing").
+
+    It takes the flow's remote-call ids rather than its ICFG, so the caller
+    can read them with a projection (:meth:`ArtifactRepository.endpoint_flow_marks`)
+    instead of assembling the whole graph (§5.2.15). Given the ids an ICFG
+    carries, a readable graph gives exactly what :func:`endpoint_outbound`
+    gives, which is what keeps the workspace and the agent in agreement (C5).
+    The workspace's ``/detail`` keeps :func:`endpoint_outbound`: it reads the
+    ICFG anyway, for the touched files.
+    """
+    stitched = await stitch.coverage_report_exists(snapshot_id)
+    if not stitched or not remote_call_ids:
+        return EndpointOutbound(outbound=[], stitched=stitched)
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            outbound = await _edges_reaching(graph, snapshot_id, service_id, remote_call_ids)
+    except GraphStoreError as exc:
+        return OutboundUnavailable(reason=f"the stitched graph could not be read ({exc})")
+    except TimeoutError:
+        return OutboundUnavailable(
+            reason=f"the stitched graph did not answer within {timeout_seconds:g} s"
+        )
+    return EndpointOutbound(outbound=outbound, stitched=stitched)
+
+
+async def _edges_reaching(
+    graph: GraphRepository, snapshot_id: str, service_id: str, remote_call_ids: Collection[str]
+) -> list[RemoteEdgeItem]:
+    """The service's outbound edges whose call site is one of ``remote_call_ids``."""
+    edges_view = await graph.remote_edges(snapshot_id, service_id)
+    return [edge for edge in edges_view.outbound if edge.remote_call_id in remote_call_ids]
 
 
 async def entity_usage_view(
