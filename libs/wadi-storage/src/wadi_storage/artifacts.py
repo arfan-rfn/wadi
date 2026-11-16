@@ -404,20 +404,35 @@ class ArtifactRepository:
         rows: list[MongoDocument] = []
         manifest_pipeline: list[MongoDocument] = [
             {"$match": key},
-            {"$project": {"_id": 0, "chunked": 1, **marks}},
+            {"$project": {"_id": 0, "chunked": 1, "part_count": 1, "node_count": 1, **marks}},
         ]
         async for row in await self._db.collection(ICFGS).aggregate(manifest_pipeline):
             rows.append(row)
         if not rows:
             return None
-        # A chunked manifest carries no nodes; they are all in its parts.
-        if rows[0].get("chunked"):
+        # A chunked manifest carries no nodes; they are all in its parts. A
+        # graph whose parts are not all there is incomplete, exactly as
+        # get_icfg says: a partial union would read as a clean answer
+        # (pre-landing review, adversarial #2).
+        manifest = rows[0]
+        if manifest.get("chunked"):
             parts_pipeline: list[MongoDocument] = [
                 {"$match": key},
-                {"$project": {"_id": 0, **marks}},
+                {"$project": {"_id": 0, "node_n": {"$size": "$nodes"}, **marks}},
             ]
+            seen_parts = 0
+            seen_nodes = 0
             async for row in await self._db.collection(ICFG_PARTS).aggregate(parts_pipeline):
+                seen_parts += 1
+                seen_nodes += cast(int, row.get("node_n", 0))
                 rows.append(row)
+            part_count = cast(int, manifest.get("part_count"))
+            node_count = cast(int, manifest.get("node_count"))
+            if seen_parts != part_count or seen_nodes != node_count:
+                raise RuntimeError(
+                    f"chunked ICFG {endpoint_id} in snapshot {snapshot_id} is incomplete: "
+                    f"{seen_parts}/{part_count} parts, {seen_nodes}/{node_count} nodes"
+                )
 
         call_ids: set[str] = set()
         reasons: Counter[str] = Counter()

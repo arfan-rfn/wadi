@@ -328,6 +328,31 @@ class TestArtifactRepository:
             remote_call_ids={"rc_chunked"}, unbound_reasons={"unresolved-receiver": 2}
         )
 
+    async def test_flow_marks_refuse_a_chunked_graph_missing_a_part(
+        self, database: WadiDatabase
+    ) -> None:
+        # Pre-landing review (adversarial #2): get_icfg raises on a torn
+        # chunked graph, and the projection must too, or a retried write that
+        # died between deleting and inserting parts reads as a clean answer.
+        artifacts = ArtifactRepository(database)
+        snapshot = make_snapshot(make_system())
+        boundary = make_service(snapshot)
+        endpoint = make_endpoint(snapshot, boundary, "/torn")
+        await artifacts.write_endpoints([endpoint])
+        big = make_icfg(
+            snapshot, boundary, endpoint, statement_count=200, statement_text="x" * 70_000
+        )
+        await artifacts.write_icfg(big)
+        assert (await database.collection("icfgs").find_one({"endpoint_id": endpoint.id}))[
+            "chunked"
+        ] is True
+        await database.collection("icfg_parts").delete_one({"endpoint_id": endpoint.id, "part": 1})
+
+        with pytest.raises(RuntimeError, match="is incomplete"):
+            await artifacts.endpoint_flow_marks(snapshot.id, endpoint.id)
+        with pytest.raises(RuntimeError, match="is incomplete"):
+            await artifacts.get_icfg(snapshot.id, endpoint.id)
+
     async def test_an_endpoint_without_a_graph_has_no_flow_marks(
         self, database: WadiDatabase
     ) -> None:
