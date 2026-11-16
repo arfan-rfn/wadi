@@ -313,6 +313,12 @@ endpoint's id, so its ICFG passes the filter. `write_icfg` upserts on
 `(snapshot_id, endpoint_id)`, so the stored graph can belong to the dropped handler, and that
 handler's repository calls are counted as in endpoint flow. This predates Phase 2.10.
 
+The final-tree review (adversarial #1) found a second effect: the kept endpoint's
+`entity_access` is computed from its own graph before the drop, so when the loser's graph is the
+one stored, the Data list and MCP `endpoint_detail` disagree with the canvas and `endpoint_icfg`.
+The comment above the in-flow accounting says the opposite of what happens. `artifacts.endpoints`
+and `artifacts.icfgs` are built in lockstep, so the fix is to drop graphs by position, not by id.
+
 ### A custom repository fragment's body is outside the endpoint flow
 **Priority:** P3
 **Opened:** v0.9.0
@@ -322,16 +328,20 @@ The export finds the implementation to set `implemented_in_project`, so the call
 `unknown` correctly, but the ICFG dead-ends at the call and the fragment's own repository calls
 reach no endpoint.
 
-### Jar-less parses miss some Spring Data repository families
-**Priority:** P3
+### Store-specific Spring Data repositories are not detected
+**Priority:** P2
 **Opened:** v0.9.0
 
-`SpringDataRepositories.Markers` holds four bare names and three package substrings. Without
-the jar, reactive, R2DBC, Elasticsearch, Neo4j, Cassandra and Couchbase repositories match only
-when the parent's full name resolves. A call that resolves to `JpaSpecificationExecutor`
-(`repo.findAll(spec)`) is tagged by its declaring type, which has no marker parent, so it may go
-untagged. Neither shape occurs in train-ticket. Reconcile yas and ICPC with the oracle before
-deciding.
+Since export 2.15.0, `SpringDataRepositories.Markers` is an exact list of qualified names, and the
+transitive walk follows only parent types inside the project. So `interface X extends
+CassandraRepository<...>` (and the Elasticsearch, R2DBC, Neo4j and Couchbase equivalents) is
+never detected, with or without the jar, and every endpoint of such a service publishes
+`entity_access: []` with `call_sites: 0` and no note. Spring Data 2.x `RxJava2CrudRepository` and
+`RxJava2SortingRepository` matched the old package-substring rule and no longer do. A call that
+resolves to `JpaSpecificationExecutor` (`repo.findAll(spec)`) is tagged by its declaring type,
+which has no marker parent, so it may go untagged. yas uses Elasticsearch. Either add the store
+markers with a fixture, or withhold "no repository call found" for a service with store-module
+types (final-tree review, adversarial #2).
 
 ### No standing index-scan test for the older hot read paths
 **Priority:** P3
@@ -489,6 +499,54 @@ boundary and coverage report. Adding a value (M5 is the likely first) would make
 document fail to load. That change must add a read rule in the same commit: accept a document
 missing the new key and read it as "not measured by that version" (§5.2.17, "Found by the
 pre-landing review").
+
+### Review notes left open at 0.9.0
+**Priority:** P2
+**Opened:** v0.9.0
+
+Below-floor findings from the three pre-landing passes, recorded here rather than fixed in 0.9.0.
+
+- **Query text keeps Java string syntax.** `unquote` strips only the outer quotes, so a text
+  block (`"""..."""`) reads as an empty quoted identifier, `\n` glues onto the next keyword, and
+  `\"Orders\"` names a table `Orders\`. Each degrades to `unknown` or undetermined, so nothing
+  false is published, but coverage drops on Java 15+ code. No fixture uses either.
+- **MariaDB executable comments** (`/*M! ... */`) are still dropped as comments; MariaDB runs
+  their text. Refuse them as `/*!` is refused.
+- **The flow-stops note counts only each statement's primary call.** In
+  `mapper.toDto(svc.load(id))` an unbound `svc.load` gets no reason, so `[]` shows with no note.
+- **`not-declared` counts as may-hide-project-code**, though its main source is a static import
+  such as `ResponseEntity.ok`, which the T5 golden calls benign. Probably split the reason.
+- **Two HTTP calls with one URL on one line share a remote-call id** (service, file, line, URL),
+  so one is dropped and its verb lost. Not a regression; the id format would have to change.
+- **REST `/detail` still fails on the graph.** It waits about 57 s on an unreachable Neo4j and
+  returns 500, and it returns 500 on a chunked ICFG missing a part, where MCP `endpoint_detail`
+  now degrades. Statement-level chips still show only `node.sink`.
+- **MCP `endpoint_detail` reads a missing ICFG as a clean flow.** Flow marks `None` (no stored
+  graph) gives `entity_facts: analyzed` with no note and `outbound: []` with `stitched: true`.
+- **Two descriptions trail the 0.9.0 fixes.** The Data view's withheld tooltip says a withheld
+  column counts only what query text states, which is no longer so once some flags are on. The
+  `endpoint_detail` tool description gives one cause for `outbound: null`, and now there are two.
+- **`entity_usage` and `/entities` on a running snapshot.** A service whose extraction has not
+  started is absent from the view and from `unexamined`, so asking for its entity answers "not
+  declared or touched here". The UI caches that answer as immutable.
+- **The Data matrix says "predates" for every unanalyzed view**, including one whose services all
+  failed extraction, while MCP names the failure.
+- **The Data list ignores `stitched: false`.** Before stitching a forwarding endpoint with
+  `entity_access: []` reads like one that calls nothing.
+- **The stale-flag ratchet checks the wrong version.** The build-time test compares enabled gate
+  flags to `RULES_VERSION`, computed without `save_origin_rules`, while the worker gates on
+  `export_rules_version(export)`. Every shipped flag is off, so nothing publishes wrongly yet.
+- **`e2e/test_baseline_snapshot.py` reruns keep a stale named export.** `name_by_service` skips
+  the rename when `<service>.json` exists, so the reconciler reads last run's file.
+
+### Re-measure train-ticket on the shipped export
+**Priority:** P2
+**Opened:** v0.9.0
+
+The 2026-11-15 measurement ran on an earlier 2.15.0 build of this branch (`41ecddc`), before
+every sink call got its own row. Repository sites should not move, since `db` rows were already
+per call, but remote-call counts can. Re-run the measurement on 0.9.0 and update
+`docs/measurements/entity-access/` if any number changes.
 
 ### `e2e/` is outside pyright's include
 **Priority:** P3
