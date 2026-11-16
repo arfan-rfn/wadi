@@ -584,6 +584,21 @@ class TestTextThatIsNotStatement:
         # read on the base reader). Not read, so the site stays unknown.
         assert _accesses(_read(_query(text, native=True))) == [(ORDER, UNK)]
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "select o from Order o, in(:ids) x",
+            "select o from Order o join in(?1) x",
+            "select o from in('a') x",
+        ],
+    )
+    def test_a_collection_member_declaration_over_a_non_path_is_not_read(self, text: str) -> None:
+        # Pre-landing review #3: `in(...)` in a declaring position takes a
+        # path (`in(o.lines) l`). Over a parameter or a literal it raised
+        # ValueError, and assembly runs outside the per-service isolation, so
+        # one such query aborted the snapshot. Not read, like any refusal.
+        assert _accesses(_read(_query(text))) == [(ORDER, UNK)]
+
     def test_a_backslash_in_a_jpql_literal_is_not_read_either(self) -> None:
         text = "select o from Order o where o.note = 'it\\'s from Invoice'"
 

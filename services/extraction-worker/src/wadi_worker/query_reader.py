@@ -322,17 +322,16 @@ def read_repository_query(db: ExportDbAccess, entities: EntityCatalog) -> QueryR
     else:
         language = _Language.JPQL
     try:
-        tokens = _tokenize(query.text)
+        return _Statement(
+            _tokenize(query.text),
+            language,
+            entities,
+            repository_entity=db.entity_type_full_name,
+            # The evidence when the repository's entity did not bind (R1-4).
+            repository_entity_text=db.entity_type_text or _ENTITY_NAME_SPEL,
+        ).read()
     except _UnmodeledTextError:
         return None
-    return _Statement(
-        tokens,
-        language,
-        entities,
-        repository_entity=db.entity_type_full_name,
-        # The evidence when the repository's entity did not bind (R1-4).
-        repository_entity_text=db.entity_type_text or _ENTITY_NAME_SPEL,
-    ).read()
 
 
 _ENTITY_NAME_SPEL = "#{#entityName}"
@@ -386,7 +385,7 @@ _QUOTES = {'"': '"', "`": "`"}
 
 
 class _UnmodeledTextError(Exception):
-    """The text holds a construct this lexer does not model (review B2).
+    """The text holds a construct this reader does not model (review B2).
 
     Each one hides text from a lexer that does not know it: a MySQL ``#``
     comment, a backslash-escaped quote, a PostgreSQL dollar-quoted string or
@@ -675,6 +674,10 @@ class _Statement:
             # JPQL's collection member declaration, `in(o.lines) l`: a join.
             i += 2
             name = self._tokens[i]
+            if name.kind != "name":
+                # `in(:ids) x` declares nothing a path names; reading on
+                # would guess (pre-landing review #3).
+                raise _UnmodeledTextError("a collection member declaration over a non-path")
             entity, written = self._resolve(name), name.text
             i += 1
         elif name.kind == "name" and (target or not called):
