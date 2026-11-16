@@ -621,7 +621,7 @@ object TypeShapes {
   /** The member's declared type text (generics preserved) from its code:
     * `private List<Tag> tags` → `List<Tag>`.
     */
-  private def memberTypeTextOf(member: Member): Option[String] = {
+  private[`export`] def memberTypeTextOf(member: Member): Option[String] = {
     val code    = member.code.takeWhile(c => c != '=' && c != ';')
     val nameIdx = code.lastIndexOf(member.name)
     if (nameIdx <= 0) None else trailingTypeToken(code.substring(0, nameIdx))

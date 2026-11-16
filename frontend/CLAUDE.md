@@ -38,8 +38,10 @@ npm run generate-types # regenerate lib/generated from ../schemas (run `make sch
   across *all* systems (there is no global snapshot route, so the resolver
   fans out over the system list — never assume `systems[0]` has been
   analyzed); `?system=` pins it to one system;
-  `/s/[snapshotId]` is the overview home (`?view=coverage|map|services`);
+  `/s/[snapshotId]` is the overview home (`?view=coverage|map|auth|services|data`);
   `/s/[snapshotId]/e/[endpointId]` is the endpoint workspace
-  (`?node&focus&expand&lens&tab&file`). Path builders live in
+  (`?node&focus&expand&file&pane&entity`; `pane=data` shows the Data list and
+  `entity=` names its selected row by qualified type name, `~undetermined`
+  for the undetermined row, §5.2.17). Path builders live in
   `lib/wadi/routes.ts`; the workspace's state lives in a per-page zustand
   store (`components/endpoint/workspace-store.ts`).

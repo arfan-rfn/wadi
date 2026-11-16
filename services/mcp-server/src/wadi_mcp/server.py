@@ -29,7 +29,10 @@ SERVER_INSTRUCTIONS = (
     "which downstream endpoints a flow reaches (recurse into them with further "
     "endpoint_icfg calls). Every stitched edge carries confidence "
     "(exact/high/heuristic/none) and provenance (how it was determined) — "
-    "undetermined targets are explicit facts, never silently dropped."
+    "undetermined targets are explicit facts, never silently dropped. "
+    "For data, endpoint_detail's entity_access says which entities an endpoint "
+    "may touch and how, and entity_usage answers the reverse: which endpoints "
+    "may create, read, update or delete a given entity."
 )
 
 
@@ -66,6 +69,21 @@ def create_server(service: WadiMcpService) -> MCPServer:
         The shapes are NOT on `list_endpoints` rows — that list is deliberately
         light — so this is where you read what an endpoint accepts and returns.
 
+        Also here: `entity_access` (the entities it may touch, and how),
+        `entity_facts` ("analyzed", or "predates-phase" with a note to
+        re-analyze), and `outbound` with `stitched`, the stitched calls this
+        endpoint's flow makes.
+
+        `entity_access: []` means no repository call was found in the flow
+        wadi could open. With outbound calls, the data work may happen in the
+        services it calls. When `entity_facts_note` says the flow stops at
+        calls wadi could not open, a repository call may sit behind one of
+        them, so `[]` is not evidence that the endpoint touches no data.
+
+        `outbound: null` with an `outbound_note` means the stitched graph
+        could not be read: where the calls go is unknown, not none. The rest
+        of the answer does not depend on it.
+
         `resolve_shapes=True` (default) gives a plain tree. Pass False for the
         shared form: each type defined once in `type_defs` and referenced
         wherever it occurs, which is dramatically smaller when a response names
@@ -95,6 +113,37 @@ def create_server(service: WadiMcpService) -> MCPServer:
         return await service.remote_edges(snapshot_id, service_id)
 
     @mcp.tool()
+    async def entity_usage(
+        snapshot_id: str, entity: str | None = None, service_id: str | None = None
+    ) -> dict[str, Any]:
+        """Which endpoints may create, read, update, delete each entity.
+
+        One row per entity per service, with all six operations (create, read,
+        update, delete, create-or-update, unknown) and the endpoints under
+        each. "May" is the meaning: some path through the endpoint performs
+        it. `create-or-update` is one save the analysis could not split, never
+        a create plus an update. An entity no endpoint reaches is a row of
+        empty lists; accesses whose entity could not be determined have their
+        own "entity not determined" row.
+
+        Under each operation, an endpoint's `call_sites` counts its calls that
+        perform THAT operation on that entity, not all its calls on the
+        entity. It is null, with a `call_sites_note`, when the endpoint's
+        summary predates per-operation counts; re-analyze to get them.
+
+        `entity` takes a qualified type name, or a simple name that names one
+        entity. `service_id` narrows to one service.
+
+        Each service carries a `status`: `reporting` (examined; its
+        `accounting` is present), `predating` (written before entity facts;
+        re-analyze), `extraction-failed` (never examined), or `library` (its
+        calls are counted in each service that depends on it).
+        `analyzed: false` means nothing in the answer was examined, so an
+        empty list is not "no endpoint touches it". The `note` says why.
+        """
+        return await service.entity_usage(snapshot_id, entity, service_id)
+
+    @mcp.tool()
     async def endpoint_icfg(
         snapshot_id: str,
         endpoint_id: str,
@@ -111,6 +160,14 @@ def create_server(service: WadiMcpService) -> MCPServer:
         roll-up gains 'remote_targets' (stitched targets per call site) and
         'downstream' (analyzed endpoints this flow reaches — recurse into them
         with further endpoint_icfg calls).
+
+        Repository calls carry `entity_access_sites` (the entities and
+        operations each one touches) at both levels, and `entity_facts` says
+        whether the snapshot was analyzed for them: on a "predates-phase"
+        graph, no sites does not mean no repository calls. An access's
+        `operation` is the claim. A `candidate_operation` beside it is the
+        verb a gated rule computed and withheld, labelled by its
+        `candidate_note`; it is evidence, never the operation.
         """
         return await service.endpoint_icfg(
             snapshot_id, endpoint_id, detail, method_id, cross_service

@@ -1,0 +1,428 @@
+{
+  "$defs": {
+    "EntityAccessAccounting": {
+      "additionalProperties": false,
+      "description": "Every repository call site of one service, accounted for (\u00a75.2.17, R1-1).\n\nThe unit is one repository call site: one distinct ``call_id`` among the\nexport's ``db`` sink rows. The sites are partitioned twice, and each\npartition must sum to ``call_sites``, so no site can fall out of the\nreport unseen (P10):\n\n1. **Flow membership** \u2014 whether the site lies in some endpoint's ICFG.\n   A site in the export but in no endpoint flow (a call inside a lambda\n   body, finding A1) is counted rather than lost.\n2. **Outcome** \u2014 the first of these that holds, in this order:\n   ``flush`` (not an entity operation), ``implemented_in_project`` (a body\n   the verb table does not read, C3), ``entity_undetermined``,\n   ``unknown_operation``, ``create_or_update``, ``bound`` (every access has\n   an entity and a single CRUD verb).\n\n``accesses_by_operation`` counts ACCESSES (a two-entity query counts two)\nand ``sites_by_basis`` counts SITES; both list every vocabulary value, so\na zero reads as measured rather than as missing (E8).\n\nA sibling of ``ServiceBoundary.analysis_coverage``, never part of it: that\none is an in-CPG methods metric with its own invariant (E2).",
+      "properties": {
+        "accesses_by_operation": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Accesses per EntityOperation value; every value present",
+          "title": "Accesses By Operation",
+          "type": "object"
+        },
+        "bound": {
+          "description": "Every access has an entity and a single CRUD verb",
+          "minimum": 0,
+          "title": "Bound",
+          "type": "integer"
+        },
+        "call_sites": {
+          "description": "Distinct repository call sites in the export",
+          "minimum": 0,
+          "title": "Call Sites",
+          "type": "integer"
+        },
+        "create_or_update": {
+          "description": "Some access has operation create-or-update",
+          "minimum": 0,
+          "title": "Create Or Update",
+          "type": "integer"
+        },
+        "entity_undetermined": {
+          "description": "Some access has no entity",
+          "minimum": 0,
+          "title": "Entity Undetermined",
+          "type": "integer"
+        },
+        "flush": {
+          "description": "flush() \u2014 not an entity operation",
+          "minimum": 0,
+          "title": "Flush",
+          "type": "integer"
+        },
+        "gate_flags": {
+          "description": "The (basis, verb) gate flags as they were set for this run (E3)",
+          "items": {
+            "$ref": "#/$defs/EntityGateFlagState"
+          },
+          "title": "Gate Flags",
+          "type": "array"
+        },
+        "implemented_in_project": {
+          "description": "The called repository method has a body in the project (C3)",
+          "minimum": 0,
+          "title": "Implemented In Project",
+          "type": "integer"
+        },
+        "in_endpoint_flow": {
+          "minimum": 0,
+          "title": "In Endpoint Flow",
+          "type": "integer"
+        },
+        "in_no_endpoint_flow": {
+          "description": "In the export but in no endpoint ICFG (lambda bodies, A1)",
+          "minimum": 0,
+          "title": "In No Endpoint Flow",
+          "type": "integer"
+        },
+        "rules_version": {
+          "description": "The verb-table rules version (a hash) that ran",
+          "title": "Rules Version",
+          "type": "string"
+        },
+        "sites_by_basis": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Sites per EntityAccessBasis value; every value present",
+          "title": "Sites By Basis",
+          "type": "object"
+        },
+        "unknown_operation": {
+          "description": "Some access has operation unknown",
+          "minimum": 0,
+          "title": "Unknown Operation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "call_sites",
+        "in_endpoint_flow",
+        "in_no_endpoint_flow",
+        "flush",
+        "implemented_in_project",
+        "entity_undetermined",
+        "unknown_operation",
+        "create_or_update",
+        "bound",
+        "accesses_by_operation",
+        "sites_by_basis",
+        "rules_version",
+        "gate_flags"
+      ],
+      "title": "EntityAccessAccounting",
+      "type": "object"
+    },
+    "EntityAccessBasis": {
+      "description": "Which evidence decided a site's operations (\u00a75.2.17).",
+      "enum": [
+        "method-name",
+        "query-text",
+        "argument-origin",
+        "existence-guard"
+      ],
+      "title": "EntityAccessBasis",
+      "type": "string"
+    },
+    "EntityAccountingStatus": {
+      "description": "Why a service in the reverse view does or does not carry accounting (1.27.0).",
+      "enum": [
+        "reporting",
+        "predating",
+        "extraction-failed",
+        "library"
+      ],
+      "title": "EntityAccountingStatus",
+      "type": "string"
+    },
+    "EntityDeclaredBy": {
+      "description": "How an entity came to be one (Q1, Q15).",
+      "enum": [
+        "annotation",
+        "repository-argument"
+      ],
+      "title": "EntityDeclaredBy",
+      "type": "string"
+    },
+    "EntityGateFlagState": {
+      "additionalProperties": false,
+      "description": "One (basis, verb) gate flag, as it was set when the worker ran (rule 5, E3).\n\nA gated basis publishes its candidate verb only while its flag is on, and\na flag is only turned on after the basis met a precision bar on labeled\nsaves. The stitcher cannot know how the worker was configured, so the\nworker records it here.",
+      "properties": {
+        "basis": {
+          "$ref": "#/$defs/EntityAccessBasis",
+          "description": "argument-origin | existence-guard"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/$defs/EntityOperation",
+          "description": "create | update"
+        },
+        "scored_rules_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The rules version this flag was scored against; a flag on for a different version than `rules_version` is a stale score (E4)",
+          "title": "Scored Rules Version"
+        }
+      },
+      "required": [
+        "basis",
+        "operation",
+        "enabled",
+        "scored_rules_version"
+      ],
+      "title": "EntityGateFlagState",
+      "type": "object"
+    },
+    "EntityOperation": {
+      "description": "What an access may do to its entity (\u00a75.2.17).\n\n\"May\" is the whole meaning: some path through the endpoint performs it,\nnever that every path does (Q16). The vocabulary is CRUD because the\nreader is a developer; there is no ``write``.",
+      "enum": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "create-or-update",
+        "unknown"
+      ],
+      "title": "EntityOperation",
+      "type": "string"
+    },
+    "EntityOperationUsage": {
+      "additionalProperties": false,
+      "description": "The endpoints that may perform one operation on one entity.",
+      "properties": {
+        "endpoints": {
+          "description": "Sorted by full_uri, then http_method",
+          "items": {
+            "$ref": "#/$defs/EntityUsageEndpoint"
+          },
+          "title": "Endpoints",
+          "type": "array"
+        },
+        "operation": {
+          "$ref": "#/$defs/EntityOperation"
+        }
+      },
+      "required": [
+        "operation",
+        "endpoints"
+      ],
+      "title": "EntityOperationUsage",
+      "type": "object"
+    },
+    "EntityUsageEndpoint": {
+      "additionalProperties": false,
+      "description": "One endpoint that may perform one operation on one entity.",
+      "properties": {
+        "call_sites": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The endpoint's call sites that perform THIS operation on this entity; None when its summary predates per-operation counts (written before 1.27.0)",
+          "title": "Call Sites"
+        },
+        "endpoint_id": {
+          "title": "Endpoint Id",
+          "type": "string"
+        },
+        "full_uri": {
+          "title": "Full Uri",
+          "type": "string"
+        },
+        "http_method": {
+          "$ref": "#/$defs/HttpMethod"
+        }
+      },
+      "required": [
+        "endpoint_id",
+        "http_method",
+        "full_uri",
+        "call_sites"
+      ],
+      "title": "EntityUsageEndpoint",
+      "type": "object"
+    },
+    "EntityUsageRow": {
+      "additionalProperties": false,
+      "description": "One entity of one service, and which endpoints may do what to it (\u00a75.2.17).\n\n``operations`` lists all six operations in enum order whether or not any\nendpoint performs them, so an empty list is a stated \"no endpoint\", and an\nentity no endpoint reaches is a row of six empty lists (Q6) rather than a\nmissing row.",
+      "properties": {
+        "data_model_id": {
+          "anyOf": [
+            {
+              "pattern": "^dm_[0-9a-f]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Data Model Id"
+        },
+        "declared_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityDeclaredBy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "None when no data model declares the entity (or the bucket row)"
+        },
+        "entity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Qualified type name; None = this service's undetermined-entity bucket",
+          "title": "Entity"
+        },
+        "name": {
+          "description": "Simple name; 'entity not determined' for the None row",
+          "title": "Name",
+          "type": "string"
+        },
+        "operations": {
+          "description": "All six operations, in enum order; lists may be empty",
+          "items": {
+            "$ref": "#/$defs/EntityOperationUsage"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "service_id": {
+          "title": "Service Id",
+          "type": "string"
+        },
+        "storage_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Storage Name"
+        }
+      },
+      "required": [
+        "service_id",
+        "entity",
+        "name",
+        "data_model_id",
+        "storage_name",
+        "declared_by",
+        "operations"
+      ],
+      "title": "EntityUsageRow",
+      "type": "object"
+    },
+    "EntityUsageService": {
+      "additionalProperties": false,
+      "description": "One service as the reverse view lists it, with its accounting.",
+      "properties": {
+        "accounting": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityAccessAccounting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present exactly when status is `reporting`"
+        },
+        "service_id": {
+          "title": "Service Id",
+          "type": "string"
+        },
+        "service_name": {
+          "title": "Service Name",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/EntityAccountingStatus",
+          "description": "1.27.0: why accounting is or is not present; only `reporting` carries it"
+        }
+      },
+      "required": [
+        "service_id",
+        "service_name",
+        "status",
+        "accounting"
+      ],
+      "title": "EntityUsageService",
+      "type": "object"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS",
+        "TRACE"
+      ],
+      "title": "HttpMethod",
+      "type": "string"
+    }
+  },
+  "$id": "https://trywadi.com/schemas/1.27.0/entity_usage.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Which endpoints may create, read, update or delete each entity (\u00a75.2.17).\n\nThe reverse question, answered at read time by\n:func:`build_entity_usage_view` from a projection of the endpoint\ndocuments and one read of the snapshot's data models. Nothing is stored\nfor it.\n\n``analyzed=False`` means nothing in the view was examined with entity\nfacts: no listed service reports accounting and no endpoint row carries a\nsummary. ``entities`` is then empty because nothing was looked at, not\nbecause nothing is touched (R1-6).",
+  "properties": {
+    "analyzed": {
+      "description": "False when no listed service reports accounting and no endpoint row has entity_access: nothing here was examined",
+      "title": "Analyzed",
+      "type": "boolean"
+    },
+    "endpoints_predating": {
+      "description": "Endpoint rows whose entity_access is None",
+      "minimum": 0,
+      "title": "Endpoints Predating",
+      "type": "integer"
+    },
+    "entities": {
+      "description": "Sorted by service_id, then name; [] when analyzed is False",
+      "items": {
+        "$ref": "#/$defs/EntityUsageRow"
+      },
+      "title": "Entities",
+      "type": "array"
+    },
+    "services": {
+      "items": {
+        "$ref": "#/$defs/EntityUsageService"
+      },
+      "title": "Services",
+      "type": "array"
+    },
+    "snapshot_id": {
+      "title": "Snapshot Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "snapshot_id",
+    "analyzed",
+    "endpoints_predating",
+    "entities",
+    "services"
+  ],
+  "title": "EntityUsageView",
+  "type": "object"
+}

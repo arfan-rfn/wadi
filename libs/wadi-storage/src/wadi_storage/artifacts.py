@@ -9,14 +9,16 @@ ICFG documents are chunk-aware: oversized graphs become a manifest in
 :class:`~wadi_contracts.Icfg` back (§6).
 """
 
+from collections import Counter
 from collections.abc import Sequence
-from typing import cast
+from typing import NamedTuple, cast
 
 from pymongo import ReplaceOne
 
 from wadi_contracts import (
     DataModel,
     Endpoint,
+    EndpointEntityAccessRow,
     EndpointSummary,
     Icfg,
     MqInteraction,
@@ -36,6 +38,81 @@ from wadi_storage.mongo import (
     MongoDocument,
     WadiDatabase,
 )
+
+#: The five fields the entity reads name (R1-8). An inclusion projection, so a
+#: field a later contract adds to an endpoint is not read by accident.
+_ENTITY_ACCESS_PROJECTION: MongoDocument = {
+    "_id": 0,
+    "id": 1,
+    "service_id": 1,
+    "http_method": 1,
+    "full_uri": 1,
+    "entity_access": 1,
+}
+
+
+#: Every remote-call id on a graph document's nodes: an array of arrays
+#: (`nodes.remote_call_ids`) flattened, then deduped by the set union.
+_CALL_IDS_UNION: MongoDocument = {
+    "$setUnion": [
+        {
+            "$reduce": {
+                "input": {"$ifNull": ["$nodes.remote_call_ids", []]},
+                "initialValue": [],
+                "in": {"$concatArrays": ["$$value", {"$ifNull": ["$$this", []]}]},
+            }
+        },
+        [],
+    ]
+}
+
+#: The unbound reason of every node that has one, one entry per node. The
+#: codec writes `None` for a bound call, so the nulls are filtered out.
+_UNBOUND_REASONS: MongoDocument = {
+    "$filter": {
+        "input": {"$ifNull": ["$nodes.callee_unbound_reason", []]},
+        "as": "reason",
+        "cond": {"$ne": ["$$reason", None]},
+    }
+}
+
+
+class IncompleteIcfgError(RuntimeError):
+    """A chunked ICFG whose parts are not all stored (§5.2.17).
+
+    A write that died between deleting a graph's parts and inserting the new
+    ones leaves the old manifest with fewer parts than it names. Reading what
+    is there would give part of a flow as if it were all of it, so both
+    :meth:`ArtifactRepository.get_icfg` and
+    :meth:`ArtifactRepository.endpoint_flow_marks` refuse it. A subclass of
+    ``RuntimeError``, which is what both raised before the refusal had a name.
+    """
+
+
+class FlowMarks(NamedTuple):
+    """What one endpoint's flow is marked with, read without the flow (review #6).
+
+    ``unbound_reasons`` counts the call nodes whose callee has no interior, by
+    the reason's wire value (§5.4.2 T5). Wire values rather than the enum, so
+    a reason newer than this reader is counted instead of failing the read.
+    """
+
+    remote_call_ids: set[str]
+    unbound_reasons: dict[str, int]
+
+
+def _entity_access_row(doc: MongoDocument) -> EndpointEntityAccessRow:
+    # `get`, not indexing: a document written before the phase has no
+    # `entity_access` key, and that absence is the answer "predates" (R1-6).
+    return EndpointEntityAccessRow.model_validate(
+        {
+            "endpoint_id": doc["id"],
+            "service_id": doc["service_id"],
+            "http_method": doc["http_method"],
+            "full_uri": doc["full_uri"],
+            "entity_access": doc.get("entity_access"),
+        }
+    )
 
 
 class ArtifactRepository:
@@ -145,6 +222,44 @@ class ArtifactRepository:
         )
         return [from_doc(Endpoint, doc) async for doc in cursor]
 
+    async def list_endpoint_entity_access(self, snapshot_id: str) -> list[EndpointEntityAccessRow]:
+        """Every endpoint's entity summary in the snapshot, as projected rows (§5.2.17).
+
+        The reverse view's input. It names the five fields it reads instead of
+        excluding the ones it does not (R1-8): an exclusion projection would
+        carry whatever a later contract adds to an endpoint, and the wire shapes
+        alone were 124 MB of one service's documents before §5.2.15.
+
+        Sorted by the unique ``(snapshot_id, service_id, id)`` index so the
+        order costs no in-memory sort; the view sorts its own output anyway.
+
+        A document written before the phase has no ``entity_access`` key, so
+        the row reads it with ``get`` and the absence arrives as ``None``: the
+        snapshot predates entity facts, never "touches nothing" (R1-6).
+        """
+        cursor = (
+            self._db.collection(ENDPOINTS)
+            .find({"snapshot_id": snapshot_id}, projection=_ENTITY_ACCESS_PROJECTION)
+            .sort([("service_id", 1), ("id", 1)])
+        )
+        return [_entity_access_row(doc) async for doc in cursor]
+
+    async def get_endpoint_entity_access(
+        self, snapshot_id: str, endpoint_id: str
+    ) -> EndpointEntityAccessRow | None:
+        """One endpoint's entity summary, without reading the endpoint (§5.2.17).
+
+        The ICFG tools need only whether the summary is ``None``, to say
+        whether empty ``entity_access_sites`` mean "no repository call" or "not
+        looked at" (R1-6). The full document carries the wire shapes, which is
+        the cost this projection exists to avoid.
+        """
+        doc = await self._db.collection(ENDPOINTS).find_one(
+            {"snapshot_id": snapshot_id, "id": endpoint_id},
+            projection=_ENTITY_ACCESS_PROJECTION,
+        )
+        return _entity_access_row(doc) if doc is not None else None
+
     async def count_endpoints_by_service(self, snapshot_id: str) -> dict[str, int]:
         """Endpoint counts per service for one snapshot (single aggregation)."""
         pipeline = [
@@ -229,7 +344,7 @@ class ArtifactRepository:
             nodes.extend(cast(list[object], part_doc["nodes"]))
             edges.extend(cast(list[object], part_doc["edges"]))
         if seen_parts != part_count or len(nodes) != node_count or len(edges) != edge_count:
-            raise RuntimeError(
+            raise IncompleteIcfgError(
                 f"chunked ICFG {endpoint_id} in snapshot {snapshot_id} is incomplete: "
                 f"{seen_parts}/{part_count} parts, {len(nodes)}/{node_count} nodes, "
                 f"{len(edges)}/{edge_count} edges"
@@ -257,25 +372,11 @@ class ArtifactRepository:
         manifest, so they contribute an empty set from the first pass and are
         picked up by the second — the two are merged, never one or the other.
         """
-        # An array-of-arrays (`nodes.remote_call_ids`) flattened, then deduped.
-        union_stage: MongoDocument = {
-            "$setUnion": [
-                {
-                    "$reduce": {
-                        "input": {"$ifNull": ["$nodes.remote_call_ids", []]},
-                        "initialValue": [],
-                        "in": {"$concatArrays": ["$$value", {"$ifNull": ["$$this", []]}]},
-                    }
-                },
-                [],
-            ]
-        }
-
         by_endpoint: dict[str, set[str]] = {}
         chunked: list[str] = []
         manifest_pipeline: list[MongoDocument] = [
             {"$match": {"snapshot_id": snapshot_id, "service_id": service_id}},
-            {"$project": {"endpoint_id": 1, "chunked": 1, "call_ids": union_stage}},
+            {"$project": {"endpoint_id": 1, "chunked": 1, "call_ids": _CALL_IDS_UNION}},
         ]
         async for row in await self._db.collection(ICFGS).aggregate(manifest_pipeline):
             endpoint_id = str(row["endpoint_id"])  # type: ignore[index]
@@ -288,7 +389,7 @@ class ArtifactRepository:
         if chunked:
             parts_pipeline: list[MongoDocument] = [
                 {"$match": {"snapshot_id": snapshot_id, "endpoint_id": {"$in": chunked}}},
-                {"$project": {"endpoint_id": 1, "call_ids": union_stage}},
+                {"$project": {"endpoint_id": 1, "call_ids": _CALL_IDS_UNION}},
                 {"$unwind": "$call_ids"},
                 {"$group": {"_id": "$endpoint_id", "call_ids": {"$addToSet": "$call_ids"}}},
             ]
@@ -297,6 +398,60 @@ class ArtifactRepository:
                 if ids:
                     by_endpoint.setdefault(str(row["_id"]), set()).update(ids)  # type: ignore[index]
         return by_endpoint
+
+    async def endpoint_flow_marks(self, snapshot_id: str, endpoint_id: str) -> FlowMarks | None:
+        """One endpoint's remote-call ids and unbound callees, WITHOUT its ICFG.
+
+        MCP `endpoint_detail` needs these two facts and nothing else of the
+        flow, and it used to assemble the whole graph for them: every chunk
+        read and validated, the cost §5.2.15 took out of the endpoint list
+        (pre-landing review #6). The answers are the ones a reader of the
+        assembled graph would compute, from the same two collections.
+
+        None when the endpoint has no ICFG: not known, which an empty set
+        would not say (P10).
+        """
+        key: MongoDocument = {"snapshot_id": snapshot_id, "endpoint_id": endpoint_id}
+        marks: MongoDocument = {"call_ids": _CALL_IDS_UNION, "reasons": _UNBOUND_REASONS}
+        rows: list[MongoDocument] = []
+        manifest_pipeline: list[MongoDocument] = [
+            {"$match": key},
+            {"$project": {"_id": 0, "chunked": 1, "part_count": 1, "node_count": 1, **marks}},
+        ]
+        async for row in await self._db.collection(ICFGS).aggregate(manifest_pipeline):
+            rows.append(row)
+        if not rows:
+            return None
+        # A chunked manifest carries no nodes; they are all in its parts. A
+        # graph whose parts are not all there is incomplete, exactly as
+        # get_icfg says: a partial union would read as a clean answer
+        # (pre-landing review, adversarial #2).
+        manifest = rows[0]
+        if manifest.get("chunked"):
+            parts_pipeline: list[MongoDocument] = [
+                {"$match": key},
+                {"$project": {"_id": 0, "node_n": {"$size": "$nodes"}, **marks}},
+            ]
+            seen_parts = 0
+            seen_nodes = 0
+            async for row in await self._db.collection(ICFG_PARTS).aggregate(parts_pipeline):
+                seen_parts += 1
+                seen_nodes += cast(int, row.get("node_n", 0))
+                rows.append(row)
+            part_count = cast(int, manifest.get("part_count"))
+            node_count = cast(int, manifest.get("node_count"))
+            if seen_parts != part_count or seen_nodes != node_count:
+                raise IncompleteIcfgError(
+                    f"chunked ICFG {endpoint_id} in snapshot {snapshot_id} is incomplete: "
+                    f"{seen_parts}/{part_count} parts, {seen_nodes}/{node_count} nodes"
+                )
+
+        call_ids: set[str] = set()
+        reasons: Counter[str] = Counter()
+        for row in rows:
+            call_ids.update(str(call) for call in cast(list[object], row.get("call_ids") or []))
+            reasons.update(str(reason) for reason in cast(list[object], row.get("reasons") or []))
+        return FlowMarks(remote_call_ids=call_ids, unbound_reasons=dict(reasons))
 
     # --- remote calls / MQ / data models ---------------------------------------------
 
@@ -332,5 +487,20 @@ class ArtifactRepository:
             self._db.collection(DATA_MODELS)
             .find({"snapshot_id": snapshot_id, "service_id": service_id})
             .sort("entity", 1)
+        )
+        return [from_doc(DataModel, doc) async for doc in cursor]
+
+    async def list_data_models_for_snapshot(self, snapshot_id: str) -> list[DataModel]:
+        """Every service's data models in one query (§5.2.17, R1-8).
+
+        The reverse view lists each declared entity, reached or not (Q6), for
+        the whole snapshot. One query rather than one per service, ordered by
+        the unique ``(snapshot_id, service_id, id)`` index so no sort stage
+        runs.
+        """
+        cursor = (
+            self._db.collection(DATA_MODELS)
+            .find({"snapshot_id": snapshot_id})
+            .sort([("service_id", 1), ("id", 1)])
         )
         return [from_doc(DataModel, doc) async for doc in cursor]

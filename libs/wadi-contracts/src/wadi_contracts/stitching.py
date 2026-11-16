@@ -19,6 +19,7 @@ from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, SnapshotEnvelope, WadiModel
 from wadi_contracts.boundary import CfgAnomaly, EndpointCollision, QuarantinedFact
+from wadi_contracts.entity_access import EntityCoverageSection
 from wadi_contracts.enums import (
     Confidence,
     HttpMethod,
@@ -522,6 +523,14 @@ class CoverageReport(SnapshotEnvelope):
         description=(
             "What the auth layer could and could not read (§5.2.9, schema 1.13.0). "
             "None only on reports written before the enforcement model existed"
+        ),
+    )
+    entity_coverage: EntityCoverageSection | None = Field(
+        default=None,
+        description=(
+            "Every repository call site and what became of it (§5.2.17, schema "
+            "1.26.0). None when no service in the snapshot reports entity "
+            "accounting — a report written before the phase"
         ),
     )
     endpoint_collisions: list[EndpointCollision] = Field(

@@ -7,7 +7,7 @@
 import { createContext, useContext } from "react"
 import { createStore, useStore, type StoreApi } from "zustand"
 
-import type { WorkspaceParams } from "@/lib/wadi/routes"
+import type { WorkspacePane, WorkspaceParams } from "@/lib/wadi/routes"
 
 /** Expanded-method state. `default` = the entry handler only (resolved
  * against the ICFG by the canvas); explicit sets round-trip the URL. */
@@ -33,6 +33,12 @@ export interface WorkspaceState {
   sourceTarget: SourceTarget | null
   search: string
   traceEnabled: boolean
+  /** The left pane: the call tree, or the Data list (§5.2.17 UI). */
+  pane: WorkspacePane
+  /** The selected Data-list row: a qualified type name, or
+   * `UNDETERMINED_ENTITY_KEY` for "entity not determined". Its call sites
+   * take the canvas's trace highlight while the Data pane is showing. */
+  selectedEntity: string | null
 
   selectNode: (id: string | null) => void
   hoverNode: (id: string | null) => void
@@ -47,6 +53,11 @@ export interface WorkspaceState {
   revealSource: (file: string, line: number) => void
   setSearch: (query: string) => void
   setTraceEnabled: (enabled: boolean) => void
+  /** Switch the left pane. Leaving the Data pane drops the selected entity:
+   * the highlight it drives would otherwise outlive the row explaining it. */
+  setPane: (pane: WorkspacePane) => void
+  /** Select (or, with null, clear) a Data-list row; opens the Data pane. */
+  selectEntity: (entity: string | null) => void
   /** Re-hydrate the URL-backed fields (browser back/forward). */
   applyUrlParams: (params: WorkspaceParams) => void
 }
@@ -71,6 +82,18 @@ export function expandToParams(state: ExpandState): WorkspaceParams["expand"] {
   }
 }
 
+/** The URL-backed subset of the store, as `writeWorkspaceParams` takes it. */
+export function workspaceParamsOf(state: WorkspaceState): WorkspaceParams {
+  return {
+    node: state.selectedNodeId,
+    focus: state.focusMethodId,
+    expand: expandToParams(state.expand),
+    file: state.sourceTarget?.file ?? null,
+    pane: state.pane,
+    entity: state.pane === "data" ? state.selectedEntity : null,
+  }
+}
+
 export type WorkspaceStore = StoreApi<WorkspaceState>
 
 export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
@@ -85,6 +108,8 @@ export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
       : null,
     search: "",
     traceEnabled: false,
+    pane: initial.pane,
+    selectedEntity: initial.pane === "data" ? initial.entity : null,
 
     // Selecting anything lands on the CODE. The source viewer already
     // highlights and scrolls to whatever is selected (workspace-interior's
@@ -128,8 +153,16 @@ export function createWorkspaceStore(initial: WorkspaceParams): WorkspaceStore {
       })),
     setSearch: (query) => set({ search: query }),
     setTraceEnabled: (enabled) => set({ traceEnabled: enabled }),
+    setPane: (pane) =>
+      set((state) => ({
+        pane,
+        selectedEntity: pane === "data" ? state.selectedEntity : null,
+      })),
+    selectEntity: (entity) => set({ pane: "data", selectedEntity: entity }),
     applyUrlParams: (params) =>
       set((state) => ({
+        pane: params.pane,
+        selectedEntity: params.pane === "data" ? params.entity : null,
         selectedNodeId: params.node,
         focusMethodId: params.focus,
         expand: expandFromParams(params.expand),

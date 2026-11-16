@@ -1,0 +1,1435 @@
+{
+  "key": {
+    "snapshot_id": "snap_b58fd7a5e7d84d0bbbafad5253e36633",
+    "seed": 20261115,
+    "size": 40,
+    "drawn_at": "2026-11-15T11:16:33.770771+00:00"
+  },
+  "strata": {
+    "random": {
+      "endpoints": 40,
+      "full_agreement": 26,
+      "errors": 0,
+      "pairs": {
+        "over-claim": 0,
+        "miss": 0,
+        "withheld": 1,
+        "less-specific": 13,
+        "exact": 13
+      },
+      "error_rate_upper_95": 0.07215752450551456
+    },
+    "hard": {
+      "endpoints": 14,
+      "full_agreement": 1,
+      "errors": 4,
+      "pairs": {
+        "over-claim": 0,
+        "miss": 4,
+        "withheld": 4,
+        "less-specific": 9,
+        "exact": 4
+      },
+      "error_rate_upper_95": 0.5400054465239326
+    }
+  },
+  "endpoints": [
+    {
+      "id": "b001",
+      "endpoint_id": "ep_c4660f45b7250775",
+      "stratum": "random",
+      "service": "ts-admin-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/adminbasicservice/adminbasic/configs",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b002",
+      "endpoint_id": "ep_82270dc891895595",
+      "stratum": "random",
+      "service": "ts-admin-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/adminbasicservice/adminbasic/prices",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b003",
+      "endpoint_id": "ep_d726ac910fa37aba",
+      "stratum": "random",
+      "service": "ts-auth-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/users/hello",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b004",
+      "endpoint_id": "ep_294e3ca8a144f1b4",
+      "stratum": "random",
+      "service": "ts-config-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/paymentservice/payment",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Payment",
+          "wadi_entity": "com.cloudhubs.trainticket.config.entity.Payment",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b005",
+      "endpoint_id": "ep_389608fac0e12545",
+      "stratum": "hard",
+      "service": "ts-config-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "User",
+          "wadi_entity": "com.cloudhubs.trainticket.config.entity.User",
+          "verdict": "less-specific",
+          "true_operations": [
+            "delete",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "delete",
+            "read"
+          ],
+          "detail": {
+            "delete": "exact",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b006",
+      "endpoint_id": "ep_4c4fd71ac8e4e9b9",
+      "stratum": "hard",
+      "service": "ts-consign-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/consignpriceservice/consignprice",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "ConsignPrice",
+          "wadi_entity": "com.cloudhubs.trainticket.consign.entity.ConsignPrice",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b007",
+      "endpoint_id": "ep_7a2946733c61f6d5",
+      "stratum": "random",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/consignpriceservice/consignprice/price",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "ConsignPrice",
+          "wadi_entity": "com.cloudhubs.trainticket.consign.entity.ConsignPrice",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b008",
+      "endpoint_id": "ep_f585cb889cf03510",
+      "stratum": "hard",
+      "service": "ts-consign-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/consignservice/consigns",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "ConsignRecord",
+          "wadi_entity": "com.cloudhubs.trainticket.consign.entity.ConsignRecord",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b009",
+      "endpoint_id": "ep_a5e66847a3763f42",
+      "stratum": "random",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/consignservice/consigns/{consignee}",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "ConsignRecord",
+          "wadi_entity": "com.cloudhubs.trainticket.consign.entity.ConsignRecord",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b010",
+      "endpoint_id": "ep_2fa901b20fbd5275",
+      "stratum": "random",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/executeservice/welcome",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b011",
+      "endpoint_id": "ep_ff231dcbb1d3aa5b",
+      "stratum": "hard",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts",
+      "full_agreement": false,
+      "error": true,
+      "pairs": [
+        {
+          "entity": "Contacts",
+          "wadi_entity": "com.cloudhubs.trainticket.contacts.entity.Contacts",
+          "verdict": "miss",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "miss"
+          }
+        },
+        {
+          "entity": null,
+          "wadi_entity": null,
+          "verdict": "withheld",
+          "true_operations": [],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {}
+        }
+      ]
+    },
+    {
+      "id": "b012",
+      "endpoint_id": "ep_630abf2357574073",
+      "stratum": "hard",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts/admin",
+      "full_agreement": false,
+      "error": true,
+      "pairs": [
+        {
+          "entity": "Contacts",
+          "wadi_entity": "com.cloudhubs.trainticket.contacts.entity.Contacts",
+          "verdict": "miss",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "miss"
+          }
+        },
+        {
+          "entity": null,
+          "wadi_entity": null,
+          "verdict": "withheld",
+          "true_operations": [],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {}
+        }
+      ]
+    },
+    {
+      "id": "b013",
+      "endpoint_id": "ep_fb72b4cfcbd32db3",
+      "stratum": "random",
+      "service": "ts-contacts-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/contactservice/contacts/welcome",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b014",
+      "endpoint_id": "ep_74c03cd90ffcd344",
+      "stratum": "random",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/stationservice/stations/idlist",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Station",
+          "wadi_entity": null,
+          "verdict": "withheld",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "withheld"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b015",
+      "endpoint_id": "ep_fa80db01aac41488",
+      "stratum": "hard",
+      "service": "ts-delivery-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "InsidePayment",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.InsidePayment",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact"
+          }
+        },
+        {
+          "entity": "InsidePaymentMoney",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b016",
+      "endpoint_id": "ep_cfc9ec87c3770c92",
+      "stratum": "hard",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/account",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "InsidePaymentMoney",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        },
+        {
+          "entity": "InsidePayment",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.InsidePayment",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b017",
+      "endpoint_id": "ep_8c5d66e5d59d5c92",
+      "stratum": "hard",
+      "service": "ts-delivery-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/difference",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "InsidePayment",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.InsidePayment",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact"
+          }
+        },
+        {
+          "entity": "InsidePaymentMoney",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b018",
+      "endpoint_id": "ep_ec6213de6945a439",
+      "stratum": "random",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/drawback/{userId}/{money}",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "InsidePaymentMoney",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b019",
+      "endpoint_id": "ep_2faf888a04f70af3",
+      "stratum": "random",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/trainfoodservice/trainfoods",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "TrainFood",
+          "wadi_entity": "com.cloudhubs.trainticket.delivery.entity.TrainFood",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b020",
+      "endpoint_id": "ep_7730e60c3d6b16bf",
+      "stratum": "random",
+      "service": "ts-food-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/foodservice/createOrderBatch",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "FoodOrder",
+          "wadi_entity": "com.cloudhubs.trainticket.food.entity.FoodOrder",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b021",
+      "endpoint_id": "ep_1bdb3f6d6ea469ef",
+      "stratum": "random",
+      "service": "ts-notification-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/notifyservice/notification/preserve_success",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b022",
+      "endpoint_id": "ep_811ccd73923b6c2b",
+      "stratum": "random",
+      "service": "ts-order-related-service",
+      "http_method": "PATCH",
+      "full_uri": "/api/v1/assuranceservice/assurances/{assuranceId}/{orderId}/{typeIndex}",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Assurance",
+          "wadi_entity": "com.cloudhubs.trainticket.orderrelated.entity.Assurance",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b023",
+      "endpoint_id": "ep_68decfe89300d045",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/orderOther/status/{orderId}/{status}",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.preserve.entity.Order",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b024",
+      "endpoint_id": "ep_7d49e1005041f7f2",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/welcome",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b025",
+      "endpoint_id": "ep_bfb4433ed736a64f",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderservice/order/status/{orderId}/{status}",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.preserve.entity.Order",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b026",
+      "endpoint_id": "ep_10cde23ba1ee5e92",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "DELETE",
+      "full_uri": "/api/v1/orderservice/order/{orderId}",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.preserve.entity.Order",
+          "verdict": "exact",
+          "true_operations": [
+            "delete",
+            "read"
+          ],
+          "wadi_operations": [
+            "delete",
+            "read"
+          ],
+          "detail": {
+            "delete": "exact",
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b027",
+      "endpoint_id": "ep_fe3210078752a3d5",
+      "stratum": "hard",
+      "service": "ts-price-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/priceservice/prices",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "PriceConfig",
+          "wadi_entity": "com.cloudhubs.trainticket.price.entity.PriceConfig",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b028",
+      "endpoint_id": "ep_ad7a4d75eac2c36d",
+      "stratum": "random",
+      "service": "ts-price-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/priceservice/prices",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "PriceConfig",
+          "wadi_entity": "com.cloudhubs.trainticket.price.entity.PriceConfig",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b029",
+      "endpoint_id": "ep_e2a7995d55f446b8",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/admintravelservice/admintravel",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b030",
+      "endpoint_id": "ep_37bba7bc3e880642",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/admintravelservice/admintravel",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b031",
+      "endpoint_id": "ep_9de467f6d7243e7c",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/routeplanservice/routePlan/cheapestRoute",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b032",
+      "endpoint_id": "ep_20041f219ad1f517",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/travel2service/trip_detail",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Trip",
+          "wadi_entity": "com.cloudhubs.trainticket.rebook.entity.Trip",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b033",
+      "endpoint_id": "ep_3a82f6c19c5d8c44",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/travel2service/trips",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Trip",
+          "wadi_entity": "com.cloudhubs.trainticket.rebook.entity.Trip",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b034",
+      "endpoint_id": "ep_a0077dac1fb0a1fd",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/travelservice/trips",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Trip",
+          "wadi_entity": "com.cloudhubs.trainticket.rebook.entity.Trip",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b035",
+      "endpoint_id": "ep_9950733f65227171",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/assuranceservice/assurances/types",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b036",
+      "endpoint_id": "ep_4d9e0604a4cfc4c0",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/routeservice/routes",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Route",
+          "wadi_entity": "com.cloudhubs.trainticket.route.entity.Route",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b037",
+      "endpoint_id": "ep_090b3866966ea021",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/routeservice/routes/{routeId}",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Route",
+          "wadi_entity": "com.cloudhubs.trainticket.route.entity.Route",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b038",
+      "endpoint_id": "ep_a0f74a477b6a432a",
+      "stratum": "hard",
+      "service": "ts-route-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "User",
+          "wadi_entity": "com.cloudhubs.trainticket.route.entity.User",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "delete",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "delete",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "delete": "exact",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b039",
+      "endpoint_id": "ep_b2416ac33643832b",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/userservice/users/register",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "User",
+          "wadi_entity": "com.cloudhubs.trainticket.route.entity.User",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b040",
+      "endpoint_id": "ep_157cc21b218e6d58",
+      "stratum": "hard",
+      "service": "ts-security-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/consignpriceservice/consignprice",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "ConsignPrice",
+          "wadi_entity": "com.cloudhubs.trainticket.security.entity.ConsignPrice",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b041",
+      "endpoint_id": "ep_79aeddd660b69b0a",
+      "stratum": "hard",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts",
+      "full_agreement": false,
+      "error": true,
+      "pairs": [
+        {
+          "entity": "Contacts",
+          "wadi_entity": "com.cloudhubs.trainticket.station.entity.Contacts",
+          "verdict": "miss",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "miss"
+          }
+        },
+        {
+          "entity": null,
+          "wadi_entity": null,
+          "verdict": "withheld",
+          "true_operations": [],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {}
+        }
+      ]
+    },
+    {
+      "id": "b042",
+      "endpoint_id": "ep_fb9e5d418fcd239c",
+      "stratum": "hard",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts/admin",
+      "full_agreement": false,
+      "error": true,
+      "pairs": [
+        {
+          "entity": "Contacts",
+          "wadi_entity": "com.cloudhubs.trainticket.station.entity.Contacts",
+          "verdict": "miss",
+          "true_operations": [
+            "create",
+            "read"
+          ],
+          "wadi_operations": [
+            "create-or-update"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "read": "miss"
+          }
+        },
+        {
+          "entity": null,
+          "wadi_entity": null,
+          "verdict": "withheld",
+          "true_operations": [],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {}
+        }
+      ]
+    },
+    {
+      "id": "b043",
+      "endpoint_id": "ep_b6268df3cb86f4fa",
+      "stratum": "random",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/stationservice/stations/namelist",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Station",
+          "wadi_entity": "com.cloudhubs.trainticket.station.entity.Station",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b044",
+      "endpoint_id": "ep_fc1ced14dd072d17",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderOtherService/orderOther",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b045",
+      "endpoint_id": "ep_0361ecb8269b335d",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderOtherService/orderOther/admin",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b046",
+      "endpoint_id": "ep_2d1d9fe6950b35e7",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/orderOther/status/{orderId}/{status}",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b047",
+      "endpoint_id": "ep_f739a0936889c0c5",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderservice/order",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "verdict": "less-specific",
+          "true_operations": [
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "read"
+          ],
+          "detail": {
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b048",
+      "endpoint_id": "ep_ffb768315a19d5b9",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/orderservice/order/refresh",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b049",
+      "endpoint_id": "ep_3b77d09940037b15",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/orderservice/order/tickets",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Order",
+          "wadi_entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b050",
+      "endpoint_id": "ep_110a6c38ed435e50",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/travel2service/routes/{tripId}",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "Trip",
+          "wadi_entity": "com.cloudhubs.trainticket.travel.entity.Trip",
+          "verdict": "exact",
+          "true_operations": [
+            "read"
+          ],
+          "wadi_operations": [
+            "read"
+          ],
+          "detail": {
+            "read": "exact"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b051",
+      "endpoint_id": "ep_35b35f5d98c70411",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/waitorderservice/welcome",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b052",
+      "endpoint_id": "ep_d96bb96124efa063",
+      "stratum": "random",
+      "service": "ts-user-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/cancelservice/cancel/refound/{orderId}",
+      "full_agreement": true,
+      "error": false,
+      "pairs": []
+    },
+    {
+      "id": "b053",
+      "endpoint_id": "ep_3aca06526aee3001",
+      "stratum": "hard",
+      "service": "ts-user-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "full_agreement": false,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "User",
+          "wadi_entity": "com.cloudhubs.trainticket.user.entity.User",
+          "verdict": "less-specific",
+          "true_operations": [
+            "create",
+            "delete",
+            "read",
+            "update"
+          ],
+          "wadi_operations": [
+            "create-or-update",
+            "delete",
+            "read"
+          ],
+          "detail": {
+            "create": "less-specific",
+            "delete": "exact",
+            "read": "exact",
+            "update": "less-specific"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b054",
+      "endpoint_id": "ep_6900e6704f7530ba",
+      "stratum": "random",
+      "service": "ts-user-service",
+      "http_method": "DELETE",
+      "full_uri": "/api/v1/userservice/users/{userId}",
+      "full_agreement": true,
+      "error": false,
+      "pairs": [
+        {
+          "entity": "User",
+          "wadi_entity": "com.cloudhubs.trainticket.user.entity.User",
+          "verdict": "exact",
+          "true_operations": [
+            "delete",
+            "read"
+          ],
+          "wadi_operations": [
+            "delete",
+            "read"
+          ],
+          "detail": {
+            "delete": "exact",
+            "read": "exact"
+          }
+        }
+      ]
+    }
+  ],
+  "predating": [],
+  "unlabeled": [],
+  "unknown_labels": []
+}

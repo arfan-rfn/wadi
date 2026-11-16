@@ -187,6 +187,19 @@ export function useSystemAuth(enabled: boolean, snapshotId: string | null) {
   })
 }
 
+/** The entity × operation reverse view (§5.2.17), for the home Data view.
+ *  One read per snapshot, like the auth view: "which endpoints delete X?" is
+ *  system-wide, and the cell counts are computed server-side from one
+ *  projection rather than a fan-out over every endpoint. */
+export function useEntityUsage(enabled: boolean, snapshotId: string | null) {
+  return useQuery({
+    queryKey: QUERY_KEYS.entityUsage(snapshotId ?? "none"),
+    queryFn: () => wadiApi.entityUsage(snapshotId as string),
+    enabled: enabled && snapshotId !== null,
+    ...IMMUTABLE,
+  })
+}
+
 /** Whole-file source-on-demand (§11 Phase 2.7): fetched only while the Flow
  * tab is active, never preloaded; the server caps the window and says so. */
 export function useSourceFile(

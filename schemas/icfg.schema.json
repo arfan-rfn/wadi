@@ -39,6 +39,131 @@
       "title": "CalleeUnboundReason",
       "type": "string"
     },
+    "EntityAccess": {
+      "additionalProperties": false,
+      "description": "One entity one call site touches, with one operation (\u00a75.2.17).\n\n``candidate_operation`` is evidence, never a claim (R1-11): it is the verb\na gated basis computed while its flag was off. The fact then publishes\n``create-or-update``, and a reader that wants the claim reads\n``operation`` only.",
+      "properties": {
+        "candidate_operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityOperation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The verb a gated basis would have claimed (create | update); set only on a demoted fact, whose operation is then create-or-update"
+        },
+        "data_model_id": {
+          "anyOf": [
+            {
+              "pattern": "^dm_[0-9a-f]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The entity's `dm_` id when the entity is in this service's data_models",
+          "title": "Data Model Id"
+        },
+        "entity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Qualified type name of the entity; None = the entity could not be determined (an unbindable repository chain or an unresolved query name)",
+          "title": "Entity"
+        },
+        "operation": {
+          "$ref": "#/$defs/EntityOperation"
+        }
+      },
+      "required": [
+        "entity",
+        "data_model_id",
+        "operation"
+      ],
+      "title": "EntityAccess",
+      "type": "object"
+    },
+    "EntityAccessBasis": {
+      "description": "Which evidence decided a site's operations (\u00a75.2.17).",
+      "enum": [
+        "method-name",
+        "query-text",
+        "argument-origin",
+        "existence-guard"
+      ],
+      "title": "EntityAccessBasis",
+      "type": "string"
+    },
+    "EntityAccessSite": {
+      "additionalProperties": false,
+      "description": "One repository call site and what it touches (\u00a75.2.17, E1, C1).\n\nCarried on the ICFG node of the statement that makes the call, as a list,\nbecause one statement can make two repository calls (R1-2). Sites are\ncounted as sites and accesses as accesses, never mixed: a query that\ndeletes ``Invoice`` while reading ``Customer`` is ONE site with TWO\naccesses.",
+      "properties": {
+        "accesses": {
+          "items": {
+            "$ref": "#/$defs/EntityAccess"
+          },
+          "minItems": 1,
+          "title": "Accesses",
+          "type": "array"
+        },
+        "basis": {
+          "$ref": "#/$defs/EntityAccessBasis"
+        },
+        "entity_type_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The repository's entity type argument as written, kept as raw evidence when it could not be resolved to a type (R1-4)",
+          "title": "Entity Type Text"
+        },
+        "method_name": {
+          "description": "The repository method called, e.g. 'findByStatus'",
+          "title": "Method Name",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The receiver's declared repository type, qualified, e.g. 'com.acme.pets.PetRepository'",
+          "title": "Repository",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "method_name",
+        "basis",
+        "accesses"
+      ],
+      "title": "EntityAccessSite",
+      "type": "object"
+    },
+    "EntityOperation": {
+      "description": "What an access may do to its entity (\u00a75.2.17).\n\n\"May\" is the whole meaning: some path through the endpoint performs it,\nnever that every path does (Q16). The vocabulary is CRUD because the\nreader is a developer; there is no ``write``.",
+      "enum": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "create-or-update",
+        "unknown"
+      ],
+      "title": "EntityOperation",
+      "type": "string"
+    },
     "IcfgEdge": {
       "additionalProperties": false,
       "properties": {
@@ -146,6 +271,14 @@
           "default": null,
           "description": "Which Java construct this node is (\u00a75.2.8): if | switch | switch-arrow | for | foreach | while | do-while | try | catch | finally | throw | break | continue | goto. None = plain statement or an artifact predating 1.8.0 (unknown, not 'statement' \u2014 P10). (Named construct_kind because pydantic reserves `construct`.)",
           "title": "Construct Kind"
+        },
+        "entity_access_sites": {
+          "description": "1.26.0 (\u00a75.2.17): one entry per repository call this statement makes \u2014 a list, as `remote_call_ids` is, because one statement can make two (R1-2). Empty on every other node, and on graphs written before 1.26.0; read the endpoint's `entity_access` to tell those apart",
+          "items": {
+            "$ref": "#/$defs/EntityAccessSite"
+          },
+          "title": "Entity Access Sites",
+          "type": "array"
         },
         "id": {
           "minLength": 1,
@@ -435,7 +568,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.25.0/icfg.schema.json",
+  "$id": "https://trywadi.com/schemas/1.27.0/icfg.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "The assembled ICFG of one endpoint (statement-granularity, coarsened).\n\nThe root is *explicit* (``entry_node_id``), never inferred from topology:\na recursive flow back into the handler would give the root incoming\nedges, so \"the entry with no incoming edges\" is not a sound definition.",
@@ -472,7 +605,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.25.0",
+      "default": "1.27.0",
       "title": "Schema Version",
       "type": "string"
     },

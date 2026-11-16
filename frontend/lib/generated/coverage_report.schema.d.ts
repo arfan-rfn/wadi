@@ -145,6 +145,116 @@ export type Uri = string
  * Endpoints that derived the same content-derived id and so could not all be stored (§7, schema 1.18.0), rolled up across services. **Expected empty**: non-empty means the inventory is missing endpoints the analysis actually found — the loss happens at the storage key, downstream of every other counter here
  */
 export type EndpointCollisions = EndpointCollision[]
+export type Bound = number
+/**
+ * Every access has an entity and a single CRUD verb
+ */
+export type Bound1 = number
+/**
+ * Distinct repository call sites in the export
+ */
+export type CallSites = number
+/**
+ * Some access has operation create-or-update
+ */
+export type CreateOrUpdate = number
+/**
+ * Some access has no entity
+ */
+export type EntityUndetermined = number
+/**
+ * flush() — not an entity operation
+ */
+export type Flush = number
+/**
+ * argument-origin | existence-guard
+ */
+export type EntityAccessBasis =
+  "method-name" | "query-text" | "argument-origin" | "existence-guard"
+export type Enabled = boolean
+/**
+ * create | update
+ */
+export type EntityOperation =
+  "create" | "read" | "update" | "delete" | "create-or-update" | "unknown"
+/**
+ * The rules version this flag was scored against; a flag on for a different version than `rules_version` is a stale score (E4)
+ */
+export type ScoredRulesVersion = string | null
+/**
+ * The (basis, verb) gate flags as they were set for this run (E3)
+ */
+export type GateFlags = EntityGateFlagState[]
+/**
+ * The called repository method has a body in the project (C3)
+ */
+export type ImplementedInProject = number
+export type InEndpointFlow = number
+/**
+ * In the export but in no endpoint ICFG (lambda bodies, A1)
+ */
+export type InNoEndpointFlow = number
+/**
+ * The verb-table rules version (a hash) that ran
+ */
+export type RulesVersion = string
+/**
+ * Some access has operation unknown
+ */
+export type UnknownOperation = number
+export type ServiceId2 = string
+export type ServiceName = string
+/**
+ * Sorted by service_name
+ */
+export type ByService = ServiceEntityAccounting[]
+export type CallSites1 = number
+export type CreateOrUpdate1 = number
+export type EntityUndetermined1 = number
+export type Flush1 = number
+/**
+ * 1.27.0: operations the save split computes that a save may have been withheld from: on at least one reporting service a flag for that verb is off or stale, or missing, so the saves its basis decides publish create-or-update. Its count still includes what the query text and any current flag published, so it is not every such access. Enum order. None = the report predates this field, so whether a zero is withheld is not known; [] = computed, nothing withheld
+ */
+export type GatedOperations = EntityOperation1[] | null
+/**
+ * What an access may do to its entity (§5.2.17).
+ *
+ * "May" is the whole meaning: some path through the endpoint performs it,
+ * never that every path does (Q16). The vocabulary is CRUD because the
+ * reader is a developer; there is no ``write``.
+ */
+export type EntityOperation1 =
+  "create" | "read" | "update" | "delete" | "create-or-update" | "unknown"
+export type ImplementedInProject1 = number
+export type InEndpointFlow1 = number
+export type InNoEndpointFlow1 = number
+/**
+ * Service boundaries whose accounting is None: written before the phase, or extraction failed (the boundary's extraction_error tells them apart)
+ */
+export type ServicesPredating = number
+/**
+ * Boundaries that carry accounting
+ */
+export type ServicesReporting = number
+/**
+ * 'operation:<value>' / 'basis:<value>' entries with a zero count, sorted (E8). A zero is otherwise ambiguous: wadi may have looked and found none, or this corpus never exercises the case and the zero is evidence of nothing
+ */
+export type UnexercisedVocabulary1 = string[]
+export type UnknownOperation1 = number
+/**
+ * Ways an endpoint touches data that this phase does not measure (Q2, Q17, Q4).
+ *
+ * Listed on every coverage section, so a count of entity operations is never
+ * read as the complete set of writes an endpoint performs.
+ */
+export type UnmeasuredEntityAccess =
+  | "cascaded-operations"
+  | "dirty-checking-updates"
+  | "other-persistence-mechanisms"
+/**
+ * Ways data is touched that this phase does not measure — always all of them
+ */
+export type Unmeasured = UnmeasuredEntityAccess[]
 export type CallCount = number
 /**
  * @minItems 1
@@ -189,7 +299,7 @@ export type Registry = string
 /**
  * Owning service; None on a snapshot-level artifact
  */
-export type ServiceId2 = string | null
+export type ServiceId3 = string | null
 /**
  * The raw unrecognized value, verbatim
  */
@@ -212,7 +322,7 @@ export type AsyncRootedCallSites = number
 /**
  * Distinct remote-call facts considered
  */
-export type CallSites = number
+export type CallSites2 = number
 export type Edges = number
 export type External = number
 export type Placeholder = number
@@ -248,7 +358,7 @@ export type Reason = string
  */
 export type ReasonCode = string
 export type RemoteCallId = string
-export type ServiceId3 = string
+export type ServiceId4 = string
 export type Unresolved = UnresolvedCallEntry[]
 
 /**
@@ -274,6 +384,10 @@ export interface CoverageReport {
   cfg_anomalies?: CfgAnomalySection | null
   created_at?: CreatedAt
   endpoint_collisions?: EndpointCollisions
+  /**
+   * Every repository call site and what became of it (§5.2.17, schema 1.26.0). None when no service in the snapshot reports entity accounting — a report written before the phase
+   */
+  entity_coverage?: EntityCoverageSection | null
   external_apis?: ExternalApis
   low_confidence_edge_ids?: LowConfidenceEdgeIds
   phonebook_conflicts?: PhonebookConflicts
@@ -435,6 +549,119 @@ export interface EndpointCollision {
   uri: Uri
 }
 /**
+ * Snapshot rollup of entity access accounting (§5.2.17).
+ *
+ * Built by the stitcher the way :class:`~wadi_contracts.stitching.AuthCoverageSection`
+ * is: the sums over every boundary that reports accounting, and the count of
+ * boundaries that predate it, which are never folded into a zero. The
+ * unmeasured cases travel on every section so the operation counts are not
+ * read as every write the system performs (Q2, Q17, Q4).
+ */
+export interface EntityCoverageSection {
+  accesses_by_operation: AccessesByOperation
+  bound: Bound
+  by_service?: ByService
+  call_sites: CallSites1
+  create_or_update: CreateOrUpdate1
+  entity_undetermined: EntityUndetermined1
+  flush: Flush1
+  gated_operations?: GatedOperations
+  implemented_in_project: ImplementedInProject1
+  in_endpoint_flow: InEndpointFlow1
+  in_no_endpoint_flow: InNoEndpointFlow1
+  services_predating: ServicesPredating
+  services_reporting: ServicesReporting
+  sites_by_basis: SitesByBasis1
+  unexercised_vocabulary?: UnexercisedVocabulary1
+  unknown_operation: UnknownOperation1
+  unmeasured?: Unmeasured
+}
+/**
+ * Summed accesses per EntityOperation value
+ */
+export interface AccessesByOperation {
+  [k: string]: number
+}
+/**
+ * One service's accounting, named for the snapshot rollup.
+ */
+export interface ServiceEntityAccounting {
+  accounting: EntityAccessAccounting
+  service_id: ServiceId2
+  service_name: ServiceName
+}
+/**
+ * Every repository call site of one service, accounted for (§5.2.17, R1-1).
+ *
+ * The unit is one repository call site: one distinct ``call_id`` among the
+ * export's ``db`` sink rows. The sites are partitioned twice, and each
+ * partition must sum to ``call_sites``, so no site can fall out of the
+ * report unseen (P10):
+ *
+ * 1. **Flow membership** — whether the site lies in some endpoint's ICFG.
+ *    A site in the export but in no endpoint flow (a call inside a lambda
+ *    body, finding A1) is counted rather than lost.
+ * 2. **Outcome** — the first of these that holds, in this order:
+ *    ``flush`` (not an entity operation), ``implemented_in_project`` (a body
+ *    the verb table does not read, C3), ``entity_undetermined``,
+ *    ``unknown_operation``, ``create_or_update``, ``bound`` (every access has
+ *    an entity and a single CRUD verb).
+ *
+ * ``accesses_by_operation`` counts ACCESSES (a two-entity query counts two)
+ * and ``sites_by_basis`` counts SITES; both list every vocabulary value, so
+ * a zero reads as measured rather than as missing (E8).
+ *
+ * A sibling of ``ServiceBoundary.analysis_coverage``, never part of it: that
+ * one is an in-CPG methods metric with its own invariant (E2).
+ */
+export interface EntityAccessAccounting {
+  accesses_by_operation: AccessesByOperation1
+  bound: Bound1
+  call_sites: CallSites
+  create_or_update: CreateOrUpdate
+  entity_undetermined: EntityUndetermined
+  flush: Flush
+  gate_flags: GateFlags
+  implemented_in_project: ImplementedInProject
+  in_endpoint_flow: InEndpointFlow
+  in_no_endpoint_flow: InNoEndpointFlow
+  rules_version: RulesVersion
+  sites_by_basis: SitesByBasis
+  unknown_operation: UnknownOperation
+}
+/**
+ * Accesses per EntityOperation value; every value present
+ */
+export interface AccessesByOperation1 {
+  [k: string]: number
+}
+/**
+ * One (basis, verb) gate flag, as it was set when the worker ran (rule 5, E3).
+ *
+ * A gated basis publishes its candidate verb only while its flag is on, and
+ * a flag is only turned on after the basis met a precision bar on labeled
+ * saves. The stitcher cannot know how the worker was configured, so the
+ * worker records it here.
+ */
+export interface EntityGateFlagState {
+  basis: EntityAccessBasis
+  enabled: Enabled
+  operation: EntityOperation
+  scored_rules_version: ScoredRulesVersion
+}
+/**
+ * Sites per EntityAccessBasis value; every value present
+ */
+export interface SitesByBasis {
+  [k: string]: number
+}
+/**
+ * Summed sites per EntityAccessBasis value
+ */
+export interface SitesByBasis1 {
+  [k: string]: number
+}
+/**
  * A real dependency on an address outside the analyzed system.
  */
 export interface ExternalApiEntry {
@@ -476,7 +703,7 @@ export interface QuarantinedFact {
    * One example site, when the rejected fact carried one
    */
   sample_anchor?: SourceAnchor | null
-  service_id?: ServiceId2
+  service_id?: ServiceId3
   value: Value
 }
 /**
@@ -486,7 +713,7 @@ export interface CoverageTotals {
   analyzed: Analyzed
   async_rooted_call_sites?: AsyncRootedCallSites
   by_confidence?: ByConfidence
-  call_sites: CallSites
+  call_sites: CallSites2
   edges: Edges
   external: External
   placeholder: Placeholder
@@ -523,6 +750,6 @@ export interface UnresolvedCallEntry {
   reason: Reason
   reason_code: ReasonCode
   remote_call_id: RemoteCallId
-  service_id: ServiceId3
+  service_id: ServiceId4
   site: SourceAnchor
 }

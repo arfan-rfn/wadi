@@ -1,7 +1,14 @@
-"""Builders for MCP tests: an interprocedural ICFG with sinks."""
+"""Builders for MCP tests: an interprocedural ICFG with sinks, and entity facts."""
 
 from wadi_contracts import (
+    DataModel,
     Endpoint,
+    EntityAccess,
+    EntityAccessAccounting,
+    EntityAccessBasis,
+    EntityAccessSite,
+    EntityDeclaredBy,
+    EntityOperation,
     Icfg,
     IcfgEdge,
     IcfgEdgeKind,
@@ -13,6 +20,7 @@ from wadi_contracts import (
     SinkKind,
     Snapshot,
     SourceAnchor,
+    data_model_id,
     method_id,
     remote_call_id,
 )
@@ -22,8 +30,18 @@ def _anchor(line: int, file: str = "src/OrderController.java") -> SourceAnchor:
     return SourceAnchor(file=file, start_line=line, end_line=line)
 
 
-def make_two_method_icfg(snapshot: Snapshot, boundary: ServiceBoundary, endpoint: Endpoint) -> Icfg:
-    """Controller handler calls a service method that hits the DB and an HTTP client."""
+def make_two_method_icfg(
+    snapshot: Snapshot,
+    boundary: ServiceBoundary,
+    endpoint: Endpoint,
+    *,
+    db_sites: list[EntityAccessSite] | None = None,
+) -> Icfg:
+    """Controller handler calls a service method that hits the DB and an HTTP client.
+
+    ``db_sites`` are the entity access sites the worker would put on the
+    repository call (§5.2.17); none by default, as on a pre-phase graph.
+    """
     svc = boundary.service_id
     controller = endpoint.handler
     service_sig = "com.acme.OrderService.load(java.lang.String)"
@@ -81,6 +99,7 @@ def make_two_method_icfg(snapshot: Snapshot, boundary: ServiceBoundary, endpoint
             method=service,
             callee=repo,
             sink=SinkKind.DB,
+            entity_access_sites=db_sites or [],
         ),
         IcfgNode(
             id="s-http",
@@ -118,4 +137,69 @@ def make_two_method_icfg(snapshot: Snapshot, boundary: ServiceBoundary, endpoint
         entry_node_id="c-entry",
         nodes=nodes,
         edges=edges,
+    )
+
+
+def make_site(
+    operation: EntityOperation,
+    *,
+    entity: str | None = "com.acme.Order",
+    model_id: str | None = None,
+    method_name: str = "save",
+) -> EntityAccessSite:
+    """One repository call site, classified the way the worker classifies it."""
+    demoted = operation is EntityOperation.CREATE_OR_UPDATE
+    return EntityAccessSite(
+        repository="com.acme.OrderRepository",
+        method_name=method_name,
+        basis=EntityAccessBasis.ARGUMENT_ORIGIN if demoted else EntityAccessBasis.METHOD_NAME,
+        accesses=[
+            EntityAccess(
+                entity=entity,
+                data_model_id=model_id,
+                operation=operation,
+                candidate_operation=EntityOperation.UPDATE if demoted else None,
+            )
+        ],
+    )
+
+
+def make_data_model(snapshot: Snapshot, boundary: ServiceBoundary, entity: str) -> DataModel:
+    simple = entity.rsplit(".", 1)[-1]
+    return DataModel(
+        snapshot_id=snapshot.id,
+        service_id=boundary.service_id,
+        id=data_model_id(boundary.service_id, entity),
+        entity=simple,
+        type_full_name=entity,
+        persistence_framework="spring-data-jpa",
+        storage_name=simple.lower(),
+        declared_by=EntityDeclaredBy.ANNOTATION,
+    )
+
+
+def make_accounting(call_sites: int) -> EntityAccessAccounting:
+    """Accounting for ``call_sites`` bound reads, each one site with one access.
+
+    The two dicts count those same sites, which the 1.27.0 validators require.
+    """
+    return EntityAccessAccounting(
+        call_sites=call_sites,
+        in_endpoint_flow=call_sites,
+        in_no_endpoint_flow=0,
+        flush=0,
+        implemented_in_project=0,
+        entity_undetermined=0,
+        unknown_operation=0,
+        create_or_update=0,
+        bound=call_sites,
+        accesses_by_operation={
+            op.value: call_sites if op is EntityOperation.READ else 0 for op in EntityOperation
+        },
+        sites_by_basis={
+            basis.value: call_sites if basis is EntityAccessBasis.METHOD_NAME else 0
+            for basis in EntityAccessBasis
+        },
+        rules_version="rules-test",
+        gate_flags=[],
     )

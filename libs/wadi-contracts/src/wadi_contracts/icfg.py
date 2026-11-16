@@ -20,6 +20,7 @@ from typing import Self
 from pydantic import Field, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
+from wadi_contracts.entity_access import EntityAccessSite
 from wadi_contracts.enums import CalleeUnboundReason, IcfgEdgeKind, IcfgNodeKind, SinkKind
 from wadi_contracts.source import MethodRef, SourceAnchor
 
@@ -115,6 +116,16 @@ class IcfgNode(WadiModel):
         ),
     )
     mq_interaction_id: str | None = Field(default=None, pattern=r"^mq_[0-9a-f]{16}$")
+    entity_access_sites: list[EntityAccessSite] = Field(
+        default_factory=list[EntityAccessSite],
+        description=(
+            "1.26.0 (§5.2.17): one entry per repository call this statement "
+            "makes — a list, as `remote_call_ids` is, because one statement can "
+            "make two (R1-2). Empty on every other node, and on graphs written "
+            "before 1.26.0; read the endpoint's `entity_access` to tell those "
+            "apart"
+        ),
+    )
     method_info: MethodInfo | None = None
 
     @model_validator(mode="after")
@@ -148,6 +159,10 @@ class IcfgNode(WadiModel):
         has_marker = bool(self.remote_call_id or self.remote_call_ids or self.mq_interaction_id)
         if has_marker and self.kind in (IcfgNodeKind.ENTRY, IcfgNodeKind.EXIT):
             raise ValueError("remote-call / MQ markers are not valid on entry/exit nodes")
+        # 1.26.0 (§5.2.17): a repository call is a call site like any other
+        # marker, so it lives on the real statement that makes it.
+        if self.entity_access_sites and self.kind in (IcfgNodeKind.ENTRY, IcfgNodeKind.EXIT):
+            raise ValueError("entity_access_sites are not valid on entry/exit nodes")
         for rc_id in self.remote_call_ids:
             if not _RC_ID.match(rc_id):
                 raise ValueError(f"remote_call_ids entries must be rc_ ids, got {rc_id!r}")

@@ -5,6 +5,7 @@ from typing import Self, cast
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
+from wadi_contracts.entity_access import EntityAccessAccounting
 from wadi_contracts.enums import AuthGapCode, CfgAnomalyCode, ClientLibrary, ServiceKind
 from wadi_contracts.source import SourceAnchor
 from wadi_contracts.tags import ASYNC_ROOT_KINDS, REQUEST_POLICY_KINDS
@@ -347,6 +348,16 @@ class ServiceBoundary(ArtifactEnvelope):
         description=(
             "Analysis-coverage counts (§5.4.3). None = fact unavailable "
             "(library, extraction failed, or pre-1.5 snapshot) — never zero"
+        ),
+    )
+    entity_access_accounting: EntityAccessAccounting | None = Field(
+        default=None,
+        description=(
+            "1.26.0 (§5.2.17): every repository call site of this service, "
+            "partitioned by flow membership and by outcome (R1-1). A sibling of "
+            "`analysis_coverage`, not part of it (E2). None = written before "
+            "entity facts existed, or the service has no analysis (library, "
+            "extraction failed) — never zero"
         ),
     )
     async_roots: list[AsyncRoot] = Field(

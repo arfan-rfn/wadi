@@ -29,6 +29,7 @@ from wadi_stitcher.coverage import (
     build_cfg_anomalies,
     build_coverage_report,
     build_endpoint_collisions,
+    build_entity_coverage,
     build_quarantined_facts,
     build_unmodelled_mechanisms,
 )
@@ -124,6 +125,7 @@ class StitchPipeline:
             quarantined_facts=build_quarantined_facts(boundaries),
             endpoint_collisions=build_endpoint_collisions(boundaries),
             auth_coverage=build_auth_coverage(endpoints, boundaries),
+            entity_coverage=build_entity_coverage(boundaries),
         )
         await self._stitch.write_coverage_report(report)
 

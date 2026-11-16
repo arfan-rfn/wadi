@@ -14,11 +14,14 @@ from worker_support import petstore_like_export
 
 from wadi_config import WadiSettings
 from wadi_contracts import (
+    EndpointEntityAccess,
+    EntityOperation,
     ExtractionJob,
     JobType,
     RepoSource,
     Snapshot,
     System,
+    data_model_id,
     normalize_repo_source,
 )
 from wadi_joern_client import ServiceExport
@@ -146,8 +149,25 @@ class TestExtractionPipeline:
         assert "PetServiceImpl" in root.method_signature
         assert root.anchor.file.endswith(".java")
 
+        # §5.2.17: the repository-call accounting rides the boundary, a
+        # sibling of analysis_coverage (E2).
+        accounting = boundary.entity_access_accounting
+        assert accounting is not None
+        assert (accounting.call_sites, accounting.in_endpoint_flow, accounting.bound) == (1, 1, 1)
+
         endpoints = await artifacts.list_endpoints(snapshot.id, boundary.service_id)
         assert [e.simplified_uri for e in endpoints] == ["/pets/{?}"]
+        # The per-endpoint summary survives the store round trip, its
+        # per-operation count (1.27.0) included.
+        assert endpoints[0].entity_access == [
+            EndpointEntityAccess(
+                entity="com.acme.pets.Pet",
+                data_model_id=data_model_id(boundary.service_id, "com.acme.pets.Pet"),
+                operations=[EntityOperation.READ],
+                call_sites=1,
+                call_sites_by_operation={"read": 1},
+            )
+        ]
 
         icfg = await artifacts.get_icfg(snapshot.id, endpoints[0].id)
         assert icfg is not None
@@ -212,6 +232,38 @@ class TestExtractionPipeline:
         boundaries = await artifacts.list_service_boundaries(snapshot.id)
         assert len(boundaries) == 1
         assert boundaries[0].analysis_coverage is None
+
+    async def test_pre_entity_export_leaves_entity_facts_unknown(
+        self, database: WadiDatabase, repo_with_service: Path, tmp_path: Path
+    ) -> None:
+        """A 2.13.0 export states no repository facts. The boundary's
+        accounting and every endpoint's summary are None, meaning the snapshot
+        predates the phase, never zero or empty (R1-6)."""
+
+        class PreEntityExtractor(FakeExtractor):
+            def extract(
+                self, source_path: Path, export_dir: Path, project_name: str
+            ) -> ServiceExport:
+                export = super().extract(source_path, export_dir, project_name)
+                return export.model_copy(update={"export_schema_version": "2.13.0"})
+
+        settings, _, snapshot, job = await _seed(database, repo_with_service, tmp_path)
+        artifacts = ArtifactRepository(database)
+        pipeline = ExtractionPipeline(
+            settings=settings,
+            systems=SystemRepository(database),
+            snapshots=SnapshotRepository(database),
+            artifacts=artifacts,
+            repo_cache=RepoCache(settings.repo_cache_dir),
+            extractor=PreEntityExtractor(),
+        )
+        await pipeline.run(job)
+
+        boundaries = await artifacts.list_service_boundaries(snapshot.id)
+        assert len(boundaries) == 1
+        assert boundaries[0].entity_access_accounting is None
+        endpoints = await artifacts.list_endpoints(snapshot.id, boundaries[0].service_id)
+        assert [e.entity_access for e in endpoints] == [None]
 
     async def test_missing_snapshot_fails_loudly(
         self, database: WadiDatabase, tmp_path: Path

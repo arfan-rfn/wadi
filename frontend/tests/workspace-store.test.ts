@@ -1,9 +1,13 @@
 import { describe, expect, test } from "vitest"
 
-import { parseWorkspaceParams } from "@/lib/wadi/routes"
+import {
+  parseWorkspaceParams,
+  serializeWorkspaceParams,
+} from "@/lib/wadi/routes"
 import {
   createWorkspaceStore,
   expandToParams,
+  workspaceParamsOf,
 } from "@/components/endpoint/workspace-store"
 
 describe("workspace store (§11 Phase 2.8)", () => {
@@ -103,5 +107,57 @@ describe("workspace store (§11 Phase 2.8)", () => {
       parseWorkspaceParams(new URLSearchParams("file=src/A.java"))
     )
     expect(store.getState().sourceTarget?.file).toBe("src/A.java")
+  })
+
+  test("the Data pane and its selected entity hydrate from the URL", () => {
+    const store = createWorkspaceStore(
+      parseWorkspaceParams(
+        new URLSearchParams("pane=data&entity=com.acme.pets.Pet")
+      )
+    )
+    expect(store.getState().pane).toBe("data")
+    expect(store.getState().selectedEntity).toBe("com.acme.pets.Pet")
+  })
+
+  test("selecting an entity opens the Data pane; leaving it clears the entity", () => {
+    // The highlight belongs to the Data list (R1-26): back on the call tree
+    // there is no row to say what the lit nodes mean.
+    const store = createWorkspaceStore(
+      parseWorkspaceParams(new URLSearchParams())
+    )
+    expect(store.getState().pane).toBe("calls")
+    store.getState().selectEntity("com.acme.pets.Pet")
+    expect(store.getState().pane).toBe("data")
+    expect(store.getState().selectedEntity).toBe("com.acme.pets.Pet")
+    store.getState().setPane("calls")
+    expect(store.getState().selectedEntity).toBeNull()
+  })
+
+  test("applyUrlParams restores the pane and entity on back/forward", () => {
+    const store = createWorkspaceStore(
+      parseWorkspaceParams(new URLSearchParams())
+    )
+    store
+      .getState()
+      .applyUrlParams(
+        parseWorkspaceParams(
+          new URLSearchParams("pane=data&entity=%7Eundetermined")
+        )
+      )
+    expect(store.getState().pane).toBe("data")
+    expect(store.getState().selectedEntity).toBe("~undetermined")
+    store.getState().applyUrlParams(parseWorkspaceParams(new URLSearchParams()))
+    expect(store.getState().pane).toBe("calls")
+    expect(store.getState().selectedEntity).toBeNull()
+  })
+
+  test("the store mirrors pane and entity back to the URL form", () => {
+    const store = createWorkspaceStore(
+      parseWorkspaceParams(new URLSearchParams())
+    )
+    store.getState().selectEntity("com.acme.pets.Pet")
+    expect(
+      serializeWorkspaceParams(workspaceParamsOf(store.getState())).toString()
+    ).toBe("pane=data&entity=com.acme.pets.Pet")
   })
 })

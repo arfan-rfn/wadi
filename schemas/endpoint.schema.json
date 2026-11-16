@@ -378,6 +378,75 @@
       "title": "EndpointAuth",
       "type": "object"
     },
+    "EndpointEntityAccess": {
+      "additionalProperties": false,
+      "description": "One entity an endpoint may touch, and every operation it may perform (\u00a75.2.17).\n\nThe per-endpoint summary row, folded from the endpoint's sites by\n:func:`summarize_entity_access` and nowhere else (R1-22). ``operations``\nis a set written in :class:`EntityOperation` order, so ``create`` beside\n``create-or-update`` stays two values: one save the analysis split and one\nit could not, which is a different statement from either alone.",
+      "properties": {
+        "call_sites": {
+          "description": "Distinct repository call sites contributing to this row",
+          "minimum": 1,
+          "title": "Call Sites",
+          "type": "integer"
+        },
+        "call_sites_by_operation": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "1.27.0: per operation in `operations`, the distinct call sites with an access of this entity and that operation. None on a summary written before 1.27.0, which counted only per entity",
+          "title": "Call Sites By Operation"
+        },
+        "data_model_id": {
+          "anyOf": [
+            {
+              "pattern": "^dm_[0-9a-f]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Data Model Id"
+        },
+        "entity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Qualified type name; None = the row for accesses whose entity could not be determined",
+          "title": "Entity"
+        },
+        "operations": {
+          "description": "Unique, in EntityOperation declaration order",
+          "items": {
+            "$ref": "#/$defs/EntityOperation"
+          },
+          "minItems": 1,
+          "title": "Operations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "entity",
+        "data_model_id",
+        "operations",
+        "call_sites"
+      ],
+      "title": "EndpointEntityAccess",
+      "type": "object"
+    },
     "EndpointParam": {
       "additionalProperties": false,
       "properties": {
@@ -444,6 +513,19 @@
       ],
       "title": "EndpointStatus",
       "type": "object"
+    },
+    "EntityOperation": {
+      "description": "What an access may do to its entity (\u00a75.2.17).\n\n\"May\" is the whole meaning: some path through the endpoint performs it,\nnever that every path does (Q16). The vocabulary is CRUD because the\nreader is a developer; there is no ``write``.",
+      "enum": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "create-or-update",
+        "unknown"
+      ],
+      "title": "EntityOperation",
+      "type": "string"
     },
     "FieldShape": {
       "additionalProperties": false,
@@ -663,7 +745,7 @@
       "type": "object"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.25.0/endpoint.schema.json",
+  "$id": "https://trywadi.com/schemas/1.27.0/endpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One REST endpoint of one service within a snapshot.",
@@ -683,6 +765,22 @@
       },
       "title": "Declared Statuses",
       "type": "array"
+    },
+    "entity_access": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/EndpointEntityAccess"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Entities this endpoint may touch, one row per entity with every operation it may perform (\u00a75.2.17), folded from the `entity_access_sites` on its ICFG by `summarize_entity_access`. None = the snapshot predates entity facts; [] = analyzed and no repository call was found (R1-6). The two are different answers and a reader must not render them alike",
+      "title": "Entity Access"
     },
     "full_uri": {
       "description": "Route as written, e.g. /orders/{orderId}",
@@ -745,7 +843,7 @@
       "title": "Response Type"
     },
     "schema_version": {
-      "default": "1.25.0",
+      "default": "1.27.0",
       "title": "Schema Version",
       "type": "string"
     },

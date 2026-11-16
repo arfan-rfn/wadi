@@ -6,6 +6,7 @@ from typing import Self
 from pydantic import Field, field_validator, model_validator
 
 from wadi_contracts.base import ArtifactEnvelope, WadiModel
+from wadi_contracts.entity_access import EndpointEntityAccess
 from wadi_contracts.enums import HttpMethod, TriggerKind
 from wadi_contracts.ids import endpoint_id, simplify_uri
 from wadi_contracts.source import MethodRef, SourceAnchor
@@ -573,6 +574,17 @@ class Endpoint(ArtifactEnvelope):
         ),
     )
     auth: EndpointAuth = Field(default_factory=EndpointAuth)
+    entity_access: list[EndpointEntityAccess] | None = Field(
+        default=None,
+        description=(
+            "Entities this endpoint may touch, one row per entity with every "
+            "operation it may perform (§5.2.17), folded from the "
+            "`entity_access_sites` on its ICFG by `summarize_entity_access`. "
+            "None = the snapshot predates entity facts; [] = analyzed and no "
+            "repository call was found (R1-6). The two are different answers "
+            "and a reader must not render them alike"
+        ),
+    )
     handler: MethodRef
     trigger: TriggerKind = TriggerKind.HTTP
 
@@ -635,6 +647,7 @@ class Endpoint(ArtifactEnvelope):
         response_schema: TypeShape | None = None,
         type_defs: dict[str, TypeShape] | None = None,
         auth: EndpointAuth | None = None,
+        entity_access: list[EndpointEntityAccess] | None = None,
         trigger: TriggerKind = TriggerKind.HTTP,
     ) -> "Endpoint":
         """Construct an endpoint with its derived id and simplified URI computed."""
@@ -652,6 +665,7 @@ class Endpoint(ArtifactEnvelope):
             response_schema=response_schema,
             type_defs=type_defs or {},
             auth=auth or EndpointAuth(),
+            entity_access=entity_access,
             handler=handler,
             trigger=trigger,
         )

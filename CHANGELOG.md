@@ -3,6 +3,71 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.9.0 — 2026-11-16 (what data each endpoint touches)
+
+wadi now answers which entities an endpoint may read, create, update or delete.
+Every Spring Data repository call in an endpoint's flow becomes a fact: the
+entity it names, the operation, and the evidence that decided it. Where wadi
+cannot decide, it says so instead of guessing.
+
+### Added
+
+- **Each endpoint lists the data it may touch.** The endpoint workspace has a
+  Calls / Data switch. The Data list shows every repository call in the flow
+  with its entity, its operation (create, read, update, delete,
+  create-or-update or unknown) and what decided it, with the source one click
+  away. An empty list says where the flow stopped when it stops at calls wadi
+  could not open, because a repository call may sit behind one of them.
+- **The home page has a Data view** (`?view=data`): entities by operation, the
+  endpoints behind each cell, and totals that add up to the repository calls
+  found.
+- **Agents can ask the same questions.** MCP `entity_usage` answers which
+  endpoints touch an entity, optionally within one service, and
+  `endpoint_detail` carries the endpoint's entity summary beside its outbound
+  calls. `GET /snapshots/{id}/entities` serves the same view over REST.
+- **Coverage reports count repository calls per service**: how many were
+  found, how many sit in an endpoint's flow, and why each undecided one is
+  undecided. A service analyzed before this release, or whose extraction
+  failed, is listed as such and never summed in as zeros.
+- **Annotated queries are read.** `@Query` text decides the entity and
+  operation: JPQL, named queries, and native SQL through the entity's
+  `@Table`. Text the reader cannot read reliably stays `unknown`: Mongo JSON,
+  MySQL `#` and executable comments, dollar-quoted strings, nested comments
+  and a second statement.
+
+### Changed
+
+- **Contracts 1.27.0 and export 2.15.0.** Re-analyze a system to get entity
+  facts; a snapshot taken before this release says it predates them.
+- **A `save` is published as create-or-update** until wadi's way of telling a
+  create from an update has been scored against labeled saves. The Data view
+  marks the create and update columns as withheld while any service holds
+  saves back, so their zeros do not read as measured.
+- **Every call a statement makes gets its own row in the export.**
+  `repo.save(restTemplate.getForObject(...))` keeps its HTTP call, and a
+  repository call nested in an HTTP call no longer adds an outbound call that
+  does not exist.
+- Repository detection follows a project's own base repository interfaces.
+
+### Fixed
+
+- **MCP `endpoint_detail` keeps the request and response contract** when the
+  stitched graph is down or slow (it waits 10 s), and when an endpoint's
+  stored flow graph is missing a part. The answer says which part is unknown
+  instead of failing the call.
+- Method chips name every kind of call a method makes, database and HTTP
+  both, not only the first call on each line.
+
+### Measured
+
+- On train-ticket (2026-11-15), wadi's repository call sites match an
+  independent source-reading count on 384 of 384, with the same entity on all
+  384 and the same operation on all 344 that both decide. A blind hand check
+  of 40 random endpoints found no error, which bounds the endpoint error rate
+  at 7.2% (95%, one-sided), and found no over-claim in any of the 54 endpoints
+  drawn. Its 4 errors were all native SQL on entities that declare no
+  `@Table`. The run is committed under `docs/measurements/entity-access/`.
+
 ## 0.8.2 — 2026-08-09 (a list route serves a list shape)
 
 0.8.1 made a shared jar's types resolvable, and shape recovery did exactly what

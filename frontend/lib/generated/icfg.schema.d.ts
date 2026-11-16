@@ -91,6 +91,48 @@ export type Operands = OperandRef[]
  * Which Java construct this node is (§5.2.8): if | switch | switch-arrow | for | foreach | while | do-while | try | catch | finally | throw | break | continue | goto. None = plain statement or an artifact predating 1.8.0 (unknown, not 'statement' — P10). (Named construct_kind because pydantic reserves `construct`.)
  */
 export type ConstructKind = string | null
+/**
+ * @minItems 1
+ */
+export type Accesses = [EntityAccess, ...EntityAccess[]]
+/**
+ * What an access may do to its entity (§5.2.17).
+ *
+ * "May" is the whole meaning: some path through the endpoint performs it,
+ * never that every path does (Q16). The vocabulary is CRUD because the
+ * reader is a developer; there is no ``write``.
+ */
+export type EntityOperation =
+  "create" | "read" | "update" | "delete" | "create-or-update" | "unknown"
+/**
+ * The entity's `dm_` id when the entity is in this service's data_models
+ */
+export type DataModelId = string | null
+/**
+ * Qualified type name of the entity; None = the entity could not be determined (an unbindable repository chain or an unresolved query name)
+ */
+export type Entity = string | null
+/**
+ * Which evidence decided a site's operations (§5.2.17).
+ */
+export type EntityAccessBasis =
+  "method-name" | "query-text" | "argument-origin" | "existence-guard"
+/**
+ * The repository's entity type argument as written, kept as raw evidence when it could not be resolved to a type (R1-4)
+ */
+export type EntityTypeText = string | null
+/**
+ * The repository method called, e.g. 'findByStatus'
+ */
+export type MethodName = string
+/**
+ * The receiver's declared repository type, qualified, e.g. 'com.acme.pets.PetRepository'
+ */
+export type Repository = string
+/**
+ * 1.26.0 (§5.2.17): one entry per repository call this statement makes — a list, as `remote_call_ids` is, because one statement can make two (R1-2). Empty on every other node, and on graphs written before 1.26.0; read the endpoint's `entity_access` to tell those apart
+ */
+export type EntityAccessSites = EntityAccessSite[]
 export type Id1 = string
 export type IcfgNodeKind =
   "entry" | "exit" | "statement" | "branch" | "loop" | "call" | "return"
@@ -158,6 +200,7 @@ export interface IcfgNode {
   callee_unbound_reason?: CalleeUnboundReason | null
   condition?: BranchCondition | null
   construct_kind?: ConstructKind
+  entity_access_sites?: EntityAccessSites
   id: Id1
   kind: IcfgNodeKind
   method: MethodRef1
@@ -201,6 +244,39 @@ export interface BranchCondition {
 export interface OperandRef {
   name: Name
   origin?: OperandOrigin
+}
+/**
+ * One repository call site and what it touches (§5.2.17, E1, C1).
+ *
+ * Carried on the ICFG node of the statement that makes the call, as a list,
+ * because one statement can make two repository calls (R1-2). Sites are
+ * counted as sites and accesses as accesses, never mixed: a query that
+ * deletes ``Invoice`` while reading ``Customer`` is ONE site with TWO
+ * accesses.
+ */
+export interface EntityAccessSite {
+  accesses: Accesses
+  basis: EntityAccessBasis
+  entity_type_text?: EntityTypeText
+  method_name: MethodName
+  repository: Repository
+}
+/**
+ * One entity one call site touches, with one operation (§5.2.17).
+ *
+ * ``candidate_operation`` is evidence, never a claim (R1-11): it is the verb
+ * a gated basis computed while its flag was off. The fact then publishes
+ * ``create-or-update``, and a reader that wants the claim reads
+ * ``operation`` only.
+ */
+export interface EntityAccess {
+  /**
+   * The verb a gated basis would have claimed (create | update); set only on a demoted fact, whose operation is then create-or-update
+   */
+  candidate_operation?: EntityOperation | null
+  data_model_id: DataModelId
+  entity: Entity
+  operation: EntityOperation
 }
 /**
  * Reference to a method: stable content-derived id + human-readable signature.

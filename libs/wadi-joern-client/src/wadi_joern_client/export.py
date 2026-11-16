@@ -12,7 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EXPORT_SCHEMA_VERSION = "2.13.0"
+EXPORT_SCHEMA_VERSION = "2.15.0"
 """Reader migration note (1.x → 2.0.0): sinks became one row PER CANDIDATE
 URL — ``node_id`` is no longer unique across sink rows (group by it); every
 sink row carries ``call_id`` (the inner CALL node) and optional ``evidence`` /
@@ -118,7 +118,23 @@ arguments rather than interpreted. A guard that says
 already told us what it requires; before this the transport had nowhere to put
 that and the worker could only record "something unreadable guards this". All
 four default to empty/None, so pre-2.12.0 exports parse unchanged and continue
-to mean exactly what they meant."""
+to mean exactly what they meant.
+
+2.14.0 (additive, §5.2.17): sink rows of kind ``db`` carry a ``db`` object —
+the raw facts of one repository call: the receiver's declared repository type,
+the method, the bound entity type argument (``null`` when the extends chain
+could not be bound, R1-4), whether the called method has a body in the project
+(C3), the method's ``@Query``/``@Modifying``/named-query facts, and for a save
+the inputs of the create/update split (argument origin, same-repository lookup,
+existence-guard arm, one caller hop). They nest on the existing rows rather
+than forming a second inventory of the same call sites (E1); classifying them
+is the worker's job (P6). ``data_models`` rows gain ``type_full_name``,
+``jpql_name``, ``declared_by`` and ``fields[].declared_type``,
+``storage_name`` gains a writer, and a type a repository binds without a
+persistence annotation gets a row of its own (Q1). Every addition defaults to
+``None``, so a 2.13.0 export parses unchanged and its db rows read as carrying
+no facts. 2.13.0 is the last version Python read before this; the Scala writer
+stamped 2.12.0 for both, so the stamp catches up here (hardening H2)."""
 
 
 class ExportModelBase(BaseModel):
@@ -129,6 +145,16 @@ class ExportModelBase(BaseModel):
 class ExportParam(ExportModelBase):
     name: str
     type_name: str | None = None
+    declared_type: str | None = Field(
+        default=None,
+        description=(
+            "2.14.0, data-model field rows only (§5.2.17): the field's type as "
+            "written, generics kept, e.g. 'List<Release>'; `type_name` stays "
+            "erased. Always None on method params. Kept on the shared row type "
+            "rather than a subclass so existing builders of data-model rows "
+            "keep type-checking"
+        ),
+    )
 
 
 class ExportMethod(ExportModelBase):
@@ -334,6 +360,135 @@ class ExportEndpoint(ExportModelBase):
     )
 
 
+class RepositoryKind(StrEnum):
+    """Which Spring Data marker a repository's extends chain reached (§5.2.17)."""
+
+    JPA = "jpa"
+    MONGO = "mongo"
+    OTHER = "other"
+
+
+class SaveArgumentOrigin(StrEnum):
+    """Where a save's argument came from — the input of the create/update split (rule 3)."""
+
+    READ = "read"
+    """Returned by a read on a repository: saving it is an update."""
+
+    CONSTRUCTED = "constructed"
+    """A `new` in the enclosing method: a create, unless a lookup says otherwise."""
+
+    PARAMETER = "parameter"
+    """A parameter of the enclosing method; ``caller_origins`` traces one hop."""
+
+    MIXED = "mixed"
+    """Different origins on different paths."""
+
+    OTHER = "other"
+    """Anything else: a field, a call result that is not a repository read."""
+
+
+class GuardArm(StrEnum):
+    """Which arm of a same-repository existence check a save sits directly in (rule 3)."""
+
+    FOUND = "found"
+    NOT_FOUND = "not-found"
+    NONE = "none"
+    """Not directly inside such an arm — no guard to read."""
+
+
+class ExportDbQuery(ExportModelBase):
+    """The query a repository METHOD declares (2.14.0, §5.2.17).
+
+    Present when the method carries ``@Query`` or ``@Modifying``, or resolves
+    to a ``@NamedQuery``/``@NamedNativeQuery``. Its presence alone means the
+    method name never decides the operation (R1-12).
+    """
+
+    text: str | None = Field(
+        default=None, description="The query string; None when unreadable or named-only"
+    )
+    native: bool = Field(description="nativeQuery = true, or a @NamedNativeQuery")
+    named_ref: str | None = Field(
+        default=None,
+        description="@Query(name=...) or the implicit '<Entity>.<method>' key when it matched",
+    )
+    modifying: bool = Field(description="@Modifying present")
+
+
+class ExportDbSave(ExportModelBase):
+    """A save call's split inputs (2.14.0, §5.2.17 rule 3).
+
+    Set only when the method is save | saveAndFlush | saveAll |
+    saveAllAndFlush | insert.
+    """
+
+    argument_origin: SaveArgumentOrigin
+    lookup_same_repository: bool = Field(
+        description="The enclosing method also reads from the SAME repository"
+    )
+    guard_arm: GuardArm
+    guard_lookup_method: str | None = Field(
+        default=None,
+        description=(
+            "2.15.0: the repository method the guard's condition tests, e.g. 'findById', "
+            "when guard_arm is found or not-found; None otherwise and on older exports"
+        ),
+    )
+    caller_origins: list[SaveArgumentOrigin] = Field(
+        default_factory=list[SaveArgumentOrigin],
+        description=(
+            "When argument_origin is parameter: the matching argument's origin at "
+            "each caller, one hop. Empty = no caller found"
+        ),
+    )
+
+
+class ExportDbAccess(ExportModelBase):
+    """The raw facts of one repository call site (2.14.0, §5.2.17).
+
+    Nested on the ``db`` sink row keyed by the same ``call_id``, so a
+    statement with two repository calls has two rows with two objects (R1-2).
+    """
+
+    repository: str = Field(
+        description="The receiver's DECLARED type, qualified, e.g. 'com.acme.pets.PetRepository'"
+    )
+    method_name: str = Field(description="e.g. 'save', 'findByStatus'")
+    entity_type_text: str | None = Field(
+        default=None,
+        description="The bound entity type argument as written; None = the chain could not "
+        "be bound (R1-4)",
+    )
+    entity_type_full_name: str | None = Field(
+        default=None,
+        description="entity_type_text resolved to a project type; None when unresolved",
+    )
+    repository_kind: RepositoryKind
+    implemented_in_project: bool = Field(
+        description="The called method has a body in the project: a `default` method or a "
+        "custom fragment implementation (C3)"
+    )
+    query: ExportDbQuery | None = None
+    save: ExportDbSave | None = None
+    method_annotations: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "2.15.0: qualified names of the annotations on the resolved repository method "
+            "declaration (the simple name as written when unresolved). For an annotation the "
+            "project declares, the annotations on its own declaration follow, written "
+            "'<annotation>><meta-annotation>'. Empty for a method Spring Data declares"
+        ),
+    )
+    declaration_resolved: bool = Field(
+        default=True,
+        description=(
+            "2.15.0: False when a project interface in the receiver's chain declares the "
+            "method name but no declaration matched the call's arity, so the method's "
+            "annotations were not read"
+        ),
+    )
+
+
 class SinkValueConfidence(StrEnum):
     EXACT = "exact"
     HIGH = "high"
@@ -345,8 +500,13 @@ class ExportSink(ExportModelBase):
     """One candidate value for a tagged sink call site (db / http-client / mq:<broker>).
 
     Since 2.0.0 a multi-valued slice emits one row per candidate URL/topic:
-    rows sharing ``node_id`` (and ``call_id``) are the same call site with
-    branch-dependent targets (§5.2 over-approximation).
+    rows sharing ``call_id`` are the same call site with branch-dependent
+    targets (§5.2 over-approximation). Since 2.15.0 a statement writes rows
+    for every sink call it owns, of every kind, so rows sharing ``node_id``
+    are that statement's sink calls, told apart by ``call_id`` and read by
+    ``kind`` (§5.2.17). The rows for the statement's primary call come first.
+    2.15.0 had not shipped when per-kind rows were added, so every released
+    2.15.0 export carries them.
     """
 
     node_id: int = Field(description="The coarsened statement cfg node id of the sink site")
@@ -372,6 +532,13 @@ class ExportSink(ExportModelBase):
     auth_propagation: str | None = Field(
         default=None,
         description="'authorization-header' | 'feign-interceptor' when statically visible",
+    )
+    db: ExportDbAccess | None = Field(
+        default=None,
+        description=(
+            "2.14.0 (§5.2.17), kind=db rows only: the repository call's raw facts. "
+            "None on a pre-2.14.0 export, and on any row the pass did not describe"
+        ),
     )
 
 
@@ -652,11 +819,39 @@ class ExportConfigRef(ExportModelBase):
     context: str = Field(description="First line of the referencing declaration")
 
 
+class ExportDeclaredBy(StrEnum):
+    """How a ``data_models`` row came to be an entity (2.14.0, Q1)."""
+
+    ANNOTATION = "annotation"
+    REPOSITORY_ARGUMENT = "repository-argument"
+
+
 class ExportDataModel(ExportModelBase):
     entity: str
+    type_full_name: str | None = Field(default=None, description="2.14.0: the qualified class name")
+    jpql_name: str | None = Field(
+        default=None, description="2.14.0: the @Entity(name=...) value when set"
+    )
     fields: list[ExportParam] = Field(default_factory=list[ExportParam])
     persistence_framework: str
-    storage_name: str | None = None
+    storage_name: str | None = Field(
+        default=None,
+        description="@Table(name=) / @Document(collection=...); written since 2.14.0",
+    )
+    declared_by: ExportDeclaredBy | None = Field(
+        default=None,
+        description="2.14.0: annotation | repository-argument; None on older exports",
+    )
+    storage_schema: str | None = Field(
+        default=None, description="2.15.0: @Table(schema=...) when set"
+    )
+    delete_rewritten_by: str | None = Field(
+        default=None,
+        description=(
+            "2.15.0: org.hibernate.annotations.SQLDelete | SoftDelete when the entity class "
+            "carries one (simple name as written when unresolved)"
+        ),
+    )
 
 
 class ExportAnalysisCoverage(ExportModelBase):
@@ -693,6 +888,15 @@ class ServiceExport(ExportModelBase):
         default_factory=list[ExportUnreachableSink]
     )
     data_models: list[ExportDataModel] = Field(default_factory=list[ExportDataModel])
+    save_origin_rules: str | None = Field(
+        default=None,
+        description=(
+            "2.15.0: a hash of the Scala sources that derive the repository facts and the "
+            "save facts (SaveOrigin, EntityAccessFacts, SpringDataRepositories, "
+            "GenericSignature), computed by the sbt build. Part of the worker's rules "
+            "version, so a change to how a gated input is derived voids a flag's score"
+        ),
+    )
     security_rules: list[ExportSecurityRule] = Field(default_factory=list[ExportSecurityRule])
     auth_enforcements: list[ExportAuthEnforcement] = Field(
         default_factory=list[ExportAuthEnforcement],

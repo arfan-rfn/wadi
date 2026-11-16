@@ -6,9 +6,31 @@ default. The roll-up is a *view* over the same artifact — computed from the
 owning-method key every node carries (§7) — never a second schema.
 """
 
+from collections.abc import Iterable
 from typing import Any
 
-from wadi_contracts import Icfg, IcfgNodeKind
+from wadi_contracts import EntityAccessSite, Icfg, IcfgNode, IcfgNodeKind
+
+
+def entity_access_sites_json(sites: Iterable[EntityAccessSite]) -> list[dict[str, Any]]:
+    """Sites as JSON, with each gated candidate labelled as evidence (reviews A1, B5).
+
+    ``candidate_operation`` stays verbatim, because it is the contract's
+    field and the evidence M5 scores. Beside ``operation: create-or-update``
+    an agent can still read ``candidate_operation: update`` as the verb, and
+    it cannot open the code to check, so the access also says in words that
+    the candidate is withheld (R1-11).
+    """
+    dumped: list[dict[str, Any]] = []
+    for site in sites:
+        row = site.model_dump(mode="json")
+        for access, payload in zip(site.accesses, row["accesses"], strict=True):
+            if access.candidate_operation is not None:
+                payload["candidate_note"] = (
+                    f"candidate (gated, not published): {access.candidate_operation.value}"
+                )
+        dumped.append(row)
+    return dumped
 
 
 def method_rollup(icfg: Icfg) -> dict[str, Any]:
@@ -43,6 +65,7 @@ def method_rollup(icfg: Icfg) -> dict[str, Any]:
             or node.sink is not None
             or node.remote_call_id is not None
             or node.mq_interaction_id is not None
+            or node.entity_access_sites
         ):
             # Not gated on CALL kind: sinks anchor to the coarsened statement,
             # so `return client.get(...)` carries its marker on a RETURN node
@@ -63,6 +86,12 @@ def method_rollup(icfg: Icfg) -> dict[str, Any]:
                 call["remote_call_id"] = node.remote_call_id
             if node.mq_interaction_id is not None:
                 call["mq_interaction_id"] = node.mq_interaction_id
+            # §5.2.17: what a repository call touches, one entry per call the
+            # statement makes (R1-2). This is the default detail level, so an
+            # agent reading "which line writes Order" must not need a
+            # statement-level drill-down to find out.
+            if node.entity_access_sites:
+                call["entity_access_sites"] = entity_access_sites_json(node.entity_access_sites)
             record["calls"].append(call)
 
     root = icfg.root_entry()
@@ -98,6 +127,13 @@ def statement_detail(icfg: Icfg, method_id: str) -> dict[str, Any]:
         "service_id": icfg.service_id,
         "detail": "statements",
         "method_id": method_id,
-        "nodes": [node.model_dump(mode="json") for node in nodes],
+        "nodes": [_node_json(node) for node in nodes],
         "edges": [edge.model_dump(mode="json") for edge in edges],
     }
+
+
+def _node_json(node: IcfgNode) -> dict[str, Any]:
+    """A statement node as JSON, its sites labelled the way the roll-up labels them."""
+    row = node.model_dump(mode="json")
+    row["entity_access_sites"] = entity_access_sites_json(node.entity_access_sites)
+    return row

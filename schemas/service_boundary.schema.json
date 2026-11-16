@@ -214,6 +214,173 @@
       "title": "EndpointCollision",
       "type": "object"
     },
+    "EntityAccessAccounting": {
+      "additionalProperties": false,
+      "description": "Every repository call site of one service, accounted for (\u00a75.2.17, R1-1).\n\nThe unit is one repository call site: one distinct ``call_id`` among the\nexport's ``db`` sink rows. The sites are partitioned twice, and each\npartition must sum to ``call_sites``, so no site can fall out of the\nreport unseen (P10):\n\n1. **Flow membership** \u2014 whether the site lies in some endpoint's ICFG.\n   A site in the export but in no endpoint flow (a call inside a lambda\n   body, finding A1) is counted rather than lost.\n2. **Outcome** \u2014 the first of these that holds, in this order:\n   ``flush`` (not an entity operation), ``implemented_in_project`` (a body\n   the verb table does not read, C3), ``entity_undetermined``,\n   ``unknown_operation``, ``create_or_update``, ``bound`` (every access has\n   an entity and a single CRUD verb).\n\n``accesses_by_operation`` counts ACCESSES (a two-entity query counts two)\nand ``sites_by_basis`` counts SITES; both list every vocabulary value, so\na zero reads as measured rather than as missing (E8).\n\nA sibling of ``ServiceBoundary.analysis_coverage``, never part of it: that\none is an in-CPG methods metric with its own invariant (E2).",
+      "properties": {
+        "accesses_by_operation": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Accesses per EntityOperation value; every value present",
+          "title": "Accesses By Operation",
+          "type": "object"
+        },
+        "bound": {
+          "description": "Every access has an entity and a single CRUD verb",
+          "minimum": 0,
+          "title": "Bound",
+          "type": "integer"
+        },
+        "call_sites": {
+          "description": "Distinct repository call sites in the export",
+          "minimum": 0,
+          "title": "Call Sites",
+          "type": "integer"
+        },
+        "create_or_update": {
+          "description": "Some access has operation create-or-update",
+          "minimum": 0,
+          "title": "Create Or Update",
+          "type": "integer"
+        },
+        "entity_undetermined": {
+          "description": "Some access has no entity",
+          "minimum": 0,
+          "title": "Entity Undetermined",
+          "type": "integer"
+        },
+        "flush": {
+          "description": "flush() \u2014 not an entity operation",
+          "minimum": 0,
+          "title": "Flush",
+          "type": "integer"
+        },
+        "gate_flags": {
+          "description": "The (basis, verb) gate flags as they were set for this run (E3)",
+          "items": {
+            "$ref": "#/$defs/EntityGateFlagState"
+          },
+          "title": "Gate Flags",
+          "type": "array"
+        },
+        "implemented_in_project": {
+          "description": "The called repository method has a body in the project (C3)",
+          "minimum": 0,
+          "title": "Implemented In Project",
+          "type": "integer"
+        },
+        "in_endpoint_flow": {
+          "minimum": 0,
+          "title": "In Endpoint Flow",
+          "type": "integer"
+        },
+        "in_no_endpoint_flow": {
+          "description": "In the export but in no endpoint ICFG (lambda bodies, A1)",
+          "minimum": 0,
+          "title": "In No Endpoint Flow",
+          "type": "integer"
+        },
+        "rules_version": {
+          "description": "The verb-table rules version (a hash) that ran",
+          "title": "Rules Version",
+          "type": "string"
+        },
+        "sites_by_basis": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Sites per EntityAccessBasis value; every value present",
+          "title": "Sites By Basis",
+          "type": "object"
+        },
+        "unknown_operation": {
+          "description": "Some access has operation unknown",
+          "minimum": 0,
+          "title": "Unknown Operation",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "call_sites",
+        "in_endpoint_flow",
+        "in_no_endpoint_flow",
+        "flush",
+        "implemented_in_project",
+        "entity_undetermined",
+        "unknown_operation",
+        "create_or_update",
+        "bound",
+        "accesses_by_operation",
+        "sites_by_basis",
+        "rules_version",
+        "gate_flags"
+      ],
+      "title": "EntityAccessAccounting",
+      "type": "object"
+    },
+    "EntityAccessBasis": {
+      "description": "Which evidence decided a site's operations (\u00a75.2.17).",
+      "enum": [
+        "method-name",
+        "query-text",
+        "argument-origin",
+        "existence-guard"
+      ],
+      "title": "EntityAccessBasis",
+      "type": "string"
+    },
+    "EntityGateFlagState": {
+      "additionalProperties": false,
+      "description": "One (basis, verb) gate flag, as it was set when the worker ran (rule 5, E3).\n\nA gated basis publishes its candidate verb only while its flag is on, and\na flag is only turned on after the basis met a precision bar on labeled\nsaves. The stitcher cannot know how the worker was configured, so the\nworker records it here.",
+      "properties": {
+        "basis": {
+          "$ref": "#/$defs/EntityAccessBasis",
+          "description": "argument-origin | existence-guard"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/$defs/EntityOperation",
+          "description": "create | update"
+        },
+        "scored_rules_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The rules version this flag was scored against; a flag on for a different version than `rules_version` is a stale score (E4)",
+          "title": "Scored Rules Version"
+        }
+      },
+      "required": [
+        "basis",
+        "operation",
+        "enabled",
+        "scored_rules_version"
+      ],
+      "title": "EntityGateFlagState",
+      "type": "object"
+    },
+    "EntityOperation": {
+      "description": "What an access may do to its entity (\u00a75.2.17).\n\n\"May\" is the whole meaning: some path through the endpoint performs it,\nnever that every path does (Q16). The vocabulary is CRUD because the\nreader is a developer; there is no ``write``.",
+      "enum": [
+        "create",
+        "read",
+        "update",
+        "delete",
+        "create-or-update",
+        "unknown"
+      ],
+      "title": "EntityOperation",
+      "type": "string"
+    },
     "GatewayRoute": {
       "additionalProperties": false,
       "description": "One gateway routing rule extracted from config (\u00a75.4.1 phone-book input).\n\nOnly populated on services that ARE gateways (Spring Cloud Gateway routes\nin application.yml). The stitcher re-resolves ``target_uri`` through the\nphone book after applying the prefix rewrite.",
@@ -503,7 +670,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.25.0/service_boundary.schema.json",
+  "$id": "https://trywadi.com/schemas/1.27.0/service_boundary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "One discovered service within a snapshot.\n\nThe envelope's ``service_id`` is this service's own stable id\n(content-derived from repo + build root, \u00a77).",
@@ -593,6 +760,18 @@
       "title": "Endpoint Collisions",
       "type": "array"
     },
+    "entity_access_accounting": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EntityAccessAccounting"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "1.26.0 (\u00a75.2.17): every repository call site of this service, partitioned by flow membership and by outcome (R1-1). A sibling of `analysis_coverage`, not part of it (E2). None = written before entity facts existed, or the service has no analysis (library, extraction failed) \u2014 never zero"
+    },
     "extraction_error": {
       "anyOf": [
         {
@@ -659,7 +838,7 @@
       "type": "array"
     },
     "schema_version": {
-      "default": "1.25.0",
+      "default": "1.27.0",
       "title": "Schema Version",
       "type": "string"
     },

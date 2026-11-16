@@ -174,6 +174,40 @@ export type StatusOrigin = "builder" | "explicit" | "annotation" | "default"
  */
 export type DeclaredStatuses = EndpointStatus[]
 /**
+ * Entities this endpoint may touch, one row per entity with every operation it may perform (§5.2.17), folded from the `entity_access_sites` on its ICFG by `summarize_entity_access`. None = the snapshot predates entity facts; [] = analyzed and no repository call was found (R1-6). The two are different answers and a reader must not render them alike
+ */
+export type EntityAccess = EndpointEntityAccess[] | null
+/**
+ * Distinct repository call sites contributing to this row
+ */
+export type CallSites = number
+/**
+ * 1.27.0: per operation in `operations`, the distinct call sites with an access of this entity and that operation. None on a summary written before 1.27.0, which counted only per entity
+ */
+export type CallSitesByOperation = {
+  [k: string]: number
+} | null
+export type DataModelId = string | null
+/**
+ * Qualified type name; None = the row for accesses whose entity could not be determined
+ */
+export type Entity = string | null
+/**
+ * Unique, in EntityOperation declaration order
+ *
+ * @minItems 1
+ */
+export type Operations = [EntityOperation, ...EntityOperation[]]
+/**
+ * What an access may do to its entity (§5.2.17).
+ *
+ * "May" is the whole meaning: some path through the endpoint performs it,
+ * never that every path does (Q16). The vocabulary is CRUD because the
+ * reader is a developer; there is no ``write``.
+ */
+export type EntityOperation =
+  "create" | "read" | "update" | "delete" | "create-or-update" | "unknown"
+/**
  * Route as written, e.g. /orders/{orderId}
  */
 export type FullUri = string
@@ -369,6 +403,7 @@ export interface Endpoint {
   auth?: EndpointAuth
   created_at?: CreatedAt
   declared_statuses?: DeclaredStatuses
+  entity_access?: EntityAccess
   full_uri: FullUri
   handler: MethodRef
   http_method: HttpMethod
@@ -511,6 +546,22 @@ export interface EndpointStatus {
   code: Code
   detail: Detail2
   origin: StatusOrigin
+}
+/**
+ * One entity an endpoint may touch, and every operation it may perform (§5.2.17).
+ *
+ * The per-endpoint summary row, folded from the endpoint's sites by
+ * :func:`summarize_entity_access` and nowhere else (R1-22). ``operations``
+ * is a set written in :class:`EntityOperation` order, so ``create`` beside
+ * ``create-or-update`` stays two values: one save the analysis split and one
+ * it could not, which is a different statement from either alone.
+ */
+export interface EndpointEntityAccess {
+  call_sites: CallSites
+  call_sites_by_operation?: CallSitesByOperation
+  data_model_id: DataModelId
+  entity: Entity
+  operations: Operations
 }
 /**
  * Reference to a method: stable content-derived id + human-readable signature.

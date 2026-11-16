@@ -27,6 +27,7 @@ import type { RemoteEdgesView } from "@/lib/generated/remote_edges_view.schema"
 import { cn } from "@/lib/utils"
 import { buildCallTree } from "@/lib/wadi/call-tree"
 import { ghostConditions, governingConditions } from "@/lib/wadi/conditions"
+import { entityHighlightNodeIds } from "@/lib/wadi/entity-access"
 import {
   breadcrumbPath,
   focusMethodIds,
@@ -122,6 +123,8 @@ function FlowCanvasInner({
   // Subscribed ONLY because trace + zoom-to-selection need it; with trace off
   // this changes nothing in the node/edge arrays below.
   const selectedNodeId = useWorkspaceStore((s) => s.selectedNodeId)
+  const pane = useWorkspaceStore((s) => s.pane)
+  const selectedEntity = useWorkspaceStore((s) => s.selectedEntity)
   const { resolvedTheme } = useTheme()
   const reactFlow = useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -178,7 +181,23 @@ function FlowCanvasInner({
     () => hiddenNodeIds(graph, visibleMethods),
     [graph, visibleMethods]
   )
+  const entityNodes = useMemo(
+    () => entityHighlightNodeIds(icfg, pane, selectedEntity),
+    [icfg, pane, selectedEntity]
+  )
   const traceNodes = useMemo(() => {
+    // §5.2.17 UI: a Data-list entity lights its call sites with this same
+    // highlight, and wins while its pane is showing, because the row beside
+    // the canvas is what says what the lit nodes are. A site in a collapsed
+    // method lights that method's card.
+    if (entityNodes) {
+      const hot = new Set<string>()
+      for (const nodeId of entityNodes) {
+        const canvasId = canvasIdByIcfgId.get(nodeId)
+        if (canvasId) hot.add(canvasId)
+      }
+      if (hot.size > 0) return hot
+    }
     if (!traceEnabled || !selectedNodeId) return null
     let icfgId: string | null = null
     if (selectedNodeId.startsWith("stmt:"))
@@ -199,7 +218,7 @@ function FlowCanvasInner({
       if (canvasId) hot.add(canvasId)
     }
     return hot
-  }, [traceEnabled, selectedNodeId, icfg, canvasIdByIcfgId])
+  }, [entityNodes, traceEnabled, selectedNodeId, icfg, canvasIdByIcfgId])
 
   const traceStateOf = useCallback(
     (canvasId: string): "hot" | "dim" | null =>

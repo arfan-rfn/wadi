@@ -43,6 +43,27 @@ jobs:
           name: petstore-system-export
           path: joern-platform/target/petstore-system-export
           if-no-files-found: error
+      # One artifact per export, each with if-no-files-found: error, so a
+      # missing export fails here instead of turning into a skip downstream
+      # (review D2: these goldens skipped in CI because only petstore crossed).
+      - name: Upload auth-matrix export (spring-auth-matrix golden test)
+        uses: actions/upload-artifact@v4
+        with:
+          name: spring-auth-matrix-export
+          path: joern-platform/target/spring-auth-matrix-export/export.json
+          if-no-files-found: error
+      - name: Upload crud-matrix export (entity-access goldens, reconcile test)
+        uses: actions/upload-artifact@v4
+        with:
+          name: spring-data-crud-matrix-export
+          path: joern-platform/target/spring-data-crud-matrix-export/export.json
+          if-no-files-found: error
+      - name: Upload save-origin export (save-split goldens)
+        uses: actions/upload-artifact@v4
+        with:
+          name: save-origin-mini-export
+          path: joern-platform/target/save-origin-mini-export/export.json
+          if-no-files-found: error
 
   python:
     name: workspace (python)
@@ -63,6 +84,21 @@ jobs:
         with:
           name: petstore-system-export
           path: joern-platform/target/petstore-system-export
+      - name: Download auth-matrix export (golden test input)
+        uses: actions/download-artifact@v4
+        with:
+          name: spring-auth-matrix-export
+          path: joern-platform/target/spring-auth-matrix-export
+      - name: Download crud-matrix export (golden and reconcile test input)
+        uses: actions/download-artifact@v4
+        with:
+          name: spring-data-crud-matrix-export
+          path: joern-platform/target/spring-data-crud-matrix-export
+      - name: Download save-origin export (golden test input)
+        uses: actions/download-artifact@v4
+        with:
+          name: save-origin-mini-export
+          path: joern-platform/target/save-origin-mini-export
       - run: uv sync --all-packages
       - name: Lint
         run: |
@@ -72,6 +108,22 @@ jobs:
         run: uv run pyright
       - name: Tests (unit + integration; Mongo runs in Docker)
         run: uv run pytest -q
+      # A real-export test skips when its export is absent, which is right
+      # locally before `sbt test` and wrong here, where the scala job wrote it.
+      # Every test file whose skip reason says "export not present" is rerun
+      # and any skip fails the job, so a new real-export test whose export is
+      # not carried above cannot pass by skipping (review D2).
+      - name: Real-export goldens ran, none skipped for a missing export (§5.2.17)
+        shell: bash
+        run: |
+          files=$(grep -rl --include='*.py' 'export not present' services libs cli | sort)
+          test -n "$files"
+          echo "$files" | sed 's/^/real-export test file: /'
+          uv run pytest -q -rs $files | tee real-export-tests.txt
+          if grep -E '^SKIPPED' real-export-tests.txt; then
+            echo "::error::a real-export test skipped: carry its export from the scala job"
+            exit 1
+          fi
       - name: Contract schemas are not stale (§7)
         run: |
           uv run --package wadi-contracts python libs/wadi-contracts/scripts/export_schema.py --out schemas/

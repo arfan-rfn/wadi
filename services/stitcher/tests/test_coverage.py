@@ -12,6 +12,10 @@ from wadi_contracts import (
     Confidence,
     Endpoint,
     EndpointAuth,
+    EntityAccessAccounting,
+    EntityAccessBasis,
+    EntityGateFlagState,
+    EntityOperation,
     HttpMethod,
     MethodRef,
     Provenance,
@@ -28,6 +32,7 @@ from wadi_stitcher.coverage import (
     build_auth_coverage,
     build_cfg_anomalies,
     build_coverage_report,
+    build_entity_coverage,
 )
 from wadi_testing.builders import (
     make_analyzed_edge,
@@ -535,3 +540,453 @@ def test_a_zero_says_whether_it_was_measured_or_never_exercised() -> None:
     assert "authorities" in section.unexercised_vocabulary
     assert "denied" in section.unexercised_vocabulary
     assert "withheld" in section.unexercised_vocabulary
+
+
+def _accounting(
+    *,
+    in_no_endpoint_flow: int = 0,
+    flush: int = 0,
+    implemented_in_project: int = 0,
+    entity_undetermined: int = 0,
+    unknown_operation: int = 0,
+    create_or_update: int = 0,
+    bound: int = 0,
+    accesses: dict[EntityOperation, int] | None = None,
+    sites: dict[EntityAccessBasis, int] | None = None,
+    enabled: frozenset[tuple[EntityAccessBasis, EntityOperation]] = frozenset(),
+    stale: frozenset[tuple[EntityAccessBasis, EntityOperation]] = frozenset(),
+) -> EntityAccessAccounting:
+    """One service's accounting, with every unnamed counter at zero.
+
+    ``call_sites`` is the outcome partition's sum, and every site not named
+    as outside an endpoint flow is inside one, so both validators hold by
+    construction and each test names only the counters it is about.
+
+    A flag in ``enabled`` is on and scored against the version that ran; one
+    in ``stale`` is on and scored against an older version (E4).
+    """
+    call_sites = (
+        flush
+        + implemented_in_project
+        + entity_undetermined
+        + unknown_operation
+        + create_or_update
+        + bound
+    )
+    return EntityAccessAccounting(
+        call_sites=call_sites,
+        in_endpoint_flow=call_sites - in_no_endpoint_flow,
+        in_no_endpoint_flow=in_no_endpoint_flow,
+        flush=flush,
+        implemented_in_project=implemented_in_project,
+        entity_undetermined=entity_undetermined,
+        unknown_operation=unknown_operation,
+        create_or_update=create_or_update,
+        bound=bound,
+        accesses_by_operation={op.value: (accesses or {}).get(op, 0) for op in EntityOperation},
+        sites_by_basis={basis.value: (sites or {}).get(basis, 0) for basis in EntityAccessBasis},
+        rules_version="rules-1",
+        gate_flags=[
+            EntityGateFlagState(
+                basis=basis,
+                operation=op,
+                enabled=(basis, op) in enabled | stale,
+                scored_rules_version=(
+                    "rules-1"
+                    if (basis, op) in enabled
+                    else "rules-0"
+                    if (basis, op) in stale
+                    else None
+                ),
+            )
+            for basis in (EntityAccessBasis.ARGUMENT_ORIGIN, EntityAccessBasis.EXISTENCE_GUARD)
+            for op in (EntityOperation.CREATE, EntityOperation.UPDATE)
+        ],
+    )
+
+
+class TestEntityCoverage:
+    """§5.2.17: the per-service repository-call accounting, summed per snapshot."""
+
+    def test_counters_and_both_dicts_sum_across_services(self) -> None:
+        snapshot = make_snapshot(make_system())
+        orders = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    in_no_endpoint_flow=1,
+                    flush=1,
+                    entity_undetermined=1,
+                    create_or_update=1,
+                    bound=2,
+                    accesses={EntityOperation.READ: 3, EntityOperation.CREATE_OR_UPDATE: 1},
+                    # Five sites, one of them the flush, which has no basis: so
+                    # four bases (1.27.0). The fixture used to give it one too.
+                    sites={EntityAccessBasis.METHOD_NAME: 3, EntityAccessBasis.ARGUMENT_ORIGIN: 1},
+                )
+            }
+        )
+        # A gate flag on, so the per-service row can be seen to carry the
+        # flag state the worker recorded rather than one the stitcher assumed (E3).
+        pets = make_service(snapshot, "services/pets").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    implemented_in_project=1,
+                    unknown_operation=1,
+                    bound=1,
+                    accesses={EntityOperation.CREATE: 1, EntityOperation.UNKNOWN: 2},
+                    sites={EntityAccessBasis.METHOD_NAME: 2, EntityAccessBasis.QUERY_TEXT: 1},
+                    enabled=frozenset(
+                        {(EntityAccessBasis.ARGUMENT_ORIGIN, EntityOperation.CREATE)}
+                    ),
+                )
+            }
+        )
+
+        section = build_entity_coverage([pets, orders])
+
+        assert section is not None
+        assert (section.services_reporting, section.services_predating) == (2, 0)
+        assert section.call_sites == 8
+        assert (section.in_endpoint_flow, section.in_no_endpoint_flow) == (7, 1)
+        assert section.flush == 1
+        assert section.implemented_in_project == 1
+        assert section.entity_undetermined == 1
+        assert section.unknown_operation == 1
+        assert section.create_or_update == 1
+        assert section.bound == 3
+        assert section.accesses_by_operation == {
+            "create": 1,
+            "read": 3,
+            "update": 0,
+            "delete": 0,
+            "create-or-update": 1,
+            "unknown": 2,
+        }
+        assert section.sites_by_basis == {
+            "method-name": 5,
+            "query-text": 1,
+            "argument-origin": 1,
+            "existence-guard": 0,
+        }
+        # Sorted by name, whatever order the boundaries arrived in.
+        assert [row.service_name for row in section.by_service] == ["orders", "pets"]
+        assert [row.service_id for row in section.by_service] == [
+            orders.service_id,
+            pets.service_id,
+        ]
+        assert section.by_service[0].accounting == orders.entity_access_accounting
+        assert section.by_service[1].accounting == pets.entity_access_accounting
+        [enabled] = [flag for flag in section.by_service[1].accounting.gate_flags if flag.enabled]
+        assert (enabled.basis, enabled.operation) == (
+            EntityAccessBasis.ARGUMENT_ORIGIN,
+            EntityOperation.CREATE,
+        )
+        # One current flag on one service vouches for no other save: orders
+        # holds every save back, and pets still holds back the saves its
+        # existence guard decides, so both verbs stay withheld (§5.2.17).
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
+
+    def test_a_service_written_before_the_phase_is_counted_never_summed_as_zero(self) -> None:
+        snapshot = make_snapshot(make_system())
+        current = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=2,
+                    accesses={EntityOperation.READ: 2},
+                    sites={EntityAccessBasis.METHOD_NAME: 2},
+                )
+            }
+        )
+        predating = make_service(snapshot, "services/legacy")
+
+        section = build_entity_coverage([current, predating])
+
+        assert section is not None
+        assert (section.services_reporting, section.services_predating) == (1, 1)
+        # The sums are the reporting service's alone; the older boundary is a
+        # count of its own, never a row of zeros a reader could take as measured.
+        assert (section.call_sites, section.bound) == (2, 2)
+        assert section.accesses_by_operation["read"] == 2
+        assert [row.service_name for row in section.by_service] == ["orders"]
+
+    def test_a_snapshot_from_before_the_phase_has_no_section(self) -> None:
+        # Every snapshot stored before 0.9.0. A section of zeros would claim
+        # the repository calls were counted and none were found.
+        snapshot = make_snapshot(make_system())
+        boundaries = [make_service(snapshot, "services/a"), make_service(snapshot, "services/b")]
+
+        assert build_entity_coverage(boundaries) is None
+        assert build_entity_coverage([]) is None
+
+    def test_a_zero_count_names_its_vocabulary_value_as_unexercised(self) -> None:
+        # §5.2.11 T6, E8: `delete: 0` on a corpus with no delete endpoint is
+        # evidence of nothing, and the section says so instead of letting the
+        # zero read as "deletes are measured and there are none".
+        snapshot = make_snapshot(make_system())
+        reads = make_service(snapshot, "services/reads").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=2,
+                    accesses={EntityOperation.READ: 2},
+                    sites={EntityAccessBasis.METHOD_NAME: 2},
+                )
+            }
+        )
+        # Exercised by one service only: the summed count decides, so these
+        # stay off the list although `reads` has zero of each.
+        writes = make_service(snapshot, "services/writes").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    create_or_update=1,
+                    bound=1,
+                    accesses={EntityOperation.CREATE_OR_UPDATE: 1, EntityOperation.UPDATE: 1},
+                    sites={EntityAccessBasis.QUERY_TEXT: 1, EntityAccessBasis.ARGUMENT_ORIGIN: 1},
+                )
+            }
+        )
+
+        section = build_entity_coverage([reads, writes])
+
+        assert section is not None
+        assert section.unexercised_vocabulary == [
+            "basis:existence-guard",
+            "operation:create",
+            "operation:delete",
+            "operation:unknown",
+        ]
+
+    def test_the_unmeasured_cases_travel_on_every_section(self) -> None:
+        # Q2, Q17, Q4: cascades, dirty-checking updates and other persistence
+        # mechanisms are outside this phase, and the section says so even when
+        # every repository call bound cleanly.
+        snapshot = make_snapshot(make_system())
+        service = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=1,
+                    accesses={EntityOperation.READ: 1},
+                    sites={EntityAccessBasis.METHOD_NAME: 1},
+                )
+            }
+        )
+
+        section = build_entity_coverage([service])
+
+        assert section is not None
+        assert [case.value for case in section.unmeasured] == [
+            "cascaded-operations",
+            "dirty-checking-updates",
+            "other-persistence-mechanisms",
+        ]
+
+    def test_a_library_is_not_a_service_that_predates_the_phase(self) -> None:
+        # A library boundary is written with no export of its own (§5.2.6), so
+        # it never carries accounting. Counting it as predating would report
+        # every fresh analysis of a system with a shared jar as partly stale.
+        snapshot = make_snapshot(make_system())
+        service = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=1,
+                    accesses={EntityOperation.READ: 1},
+                    sites={EntityAccessBasis.METHOD_NAME: 1},
+                )
+            }
+        )
+        library = make_service(snapshot, "libs/common").model_copy(
+            update={"kind": ServiceKind.LIBRARY}
+        )
+
+        section = build_entity_coverage([service, library])
+
+        assert section is not None
+        assert (section.services_reporting, section.services_predating) == (1, 0)
+        assert [row.service_name for row in section.by_service] == ["orders"]
+
+    def test_the_section_travels_on_the_report(self) -> None:
+        snapshot = make_snapshot(make_system())
+        service = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=1,
+                    accesses={EntityOperation.DELETE: 1},
+                    sites={EntityAccessBasis.METHOD_NAME: 1},
+                )
+            }
+        )
+        section = build_entity_coverage([service])
+
+        report = build_coverage_report(
+            snapshot.id,
+            remote_calls=[],
+            edges=[],
+            unresolved=[],
+            phonebook_conflicts=[],
+            placeholder_names={},
+            entity_coverage=section,
+        )
+
+        assert report.entity_coverage is not None
+        assert report.entity_coverage.accesses_by_operation["delete"] == 1
+
+    def test_with_every_flag_off_both_split_verbs_are_gated(self) -> None:
+        # Review C6: train-ticket listed `operation:create` and `operation:update`
+        # as unexercised, which says the corpus never does them. All four flags
+        # were off, so no save could publish either verb, and 101 saves did
+        # publish `create-or-update`. The zero was withheld, not measured.
+        snapshot = make_snapshot(make_system())
+        boundaries = [
+            make_service(snapshot, f"services/{name}").model_copy(
+                update={
+                    "entity_access_accounting": _accounting(
+                        create_or_update=1,
+                        accesses={EntityOperation.CREATE_OR_UPDATE: 1},
+                        sites={EntityAccessBasis.ARGUMENT_ORIGIN: 1},
+                    )
+                }
+            )
+            for name in ("orders", "pets")
+        ]
+
+        section = build_entity_coverage(boundaries)
+
+        assert section is not None
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
+
+    def test_one_basis_on_leaves_the_verb_withheld_by_the_other(self) -> None:
+        # The existence guard may publish `create` on both services, but the
+        # saves argument origin decides are still held back as
+        # create-or-update, so a zero under `create` is not measured (§5.2.17).
+        snapshot = make_snapshot(make_system())
+        guard_create = frozenset({(EntityAccessBasis.EXISTENCE_GUARD, EntityOperation.CREATE)})
+        boundaries = [
+            make_service(snapshot, f"services/{name}").model_copy(
+                update={
+                    "entity_access_accounting": _accounting(
+                        bound=1,
+                        accesses={EntityOperation.CREATE: 1},
+                        sites={EntityAccessBasis.EXISTENCE_GUARD: 1},
+                        enabled=guard_create,
+                    )
+                }
+            )
+            for name in ("orders", "pets")
+        ]
+
+        section = build_entity_coverage(boundaries)
+
+        assert section is not None
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
+
+    def test_a_verb_is_measured_only_when_every_service_runs_every_basis_for_it(self) -> None:
+        snapshot = make_snapshot(make_system())
+        every_create = frozenset(
+            {
+                (EntityAccessBasis.ARGUMENT_ORIGIN, EntityOperation.CREATE),
+                (EntityAccessBasis.EXISTENCE_GUARD, EntityOperation.CREATE),
+            }
+        )
+        boundaries = [
+            make_service(snapshot, f"services/{name}").model_copy(
+                update={
+                    "entity_access_accounting": _accounting(
+                        bound=1,
+                        accesses={EntityOperation.CREATE: 1},
+                        sites={EntityAccessBasis.EXISTENCE_GUARD: 1},
+                        enabled=every_create,
+                    )
+                }
+            )
+            for name in ("orders", "pets")
+        ]
+
+        section = build_entity_coverage(boundaries)
+
+        assert section is not None
+        assert section.gated_operations == [EntityOperation.UPDATE]
+
+    def test_a_service_with_no_flag_for_a_verb_withholds_it(self) -> None:
+        # A service whose run recorded no flag for a verb published none of its
+        # saves as that verb, so every other service's flags cannot vouch for it.
+        snapshot = make_snapshot(make_system())
+        every_flag = frozenset(
+            (basis, operation)
+            for basis in (EntityAccessBasis.ARGUMENT_ORIGIN, EntityAccessBasis.EXISTENCE_GUARD)
+            for operation in (EntityOperation.CREATE, EntityOperation.UPDATE)
+        )
+        on = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=1,
+                    accesses={EntityOperation.CREATE: 1},
+                    sites={EntityAccessBasis.EXISTENCE_GUARD: 1},
+                    enabled=every_flag,
+                )
+            }
+        )
+        unflagged = _accounting(
+            create_or_update=1,
+            accesses={EntityOperation.CREATE_OR_UPDATE: 1},
+            sites={EntityAccessBasis.ARGUMENT_ORIGIN: 1},
+        ).model_copy(update={"gate_flags": []})
+        off = make_service(snapshot, "services/pets").model_copy(
+            update={"entity_access_accounting": unflagged}
+        )
+
+        only_on = build_entity_coverage([on])
+        assert only_on is not None
+        assert only_on.gated_operations == []
+        section = build_entity_coverage([on, off])
+
+        assert section is not None
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
+
+    def test_a_flag_scored_against_another_rules_version_still_gates(self) -> None:
+        # E4: the worker publishes nothing through a flag scored against a
+        # different rules version, so the verb is as withheld as with the flag off.
+        snapshot = make_snapshot(make_system())
+        service = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    create_or_update=1,
+                    accesses={EntityOperation.CREATE_OR_UPDATE: 1},
+                    sites={EntityAccessBasis.EXISTENCE_GUARD: 1},
+                    stale=frozenset(
+                        {
+                            (EntityAccessBasis.EXISTENCE_GUARD, EntityOperation.CREATE),
+                            (EntityAccessBasis.ARGUMENT_ORIGIN, EntityOperation.UPDATE),
+                        }
+                    ),
+                )
+            }
+        )
+
+        section = build_entity_coverage([service])
+
+        assert section is not None
+        flags = section.by_service[0].accounting.gate_flags
+        assert sum(flag.enabled for flag in flags) == 2
+        assert section.gated_operations == [EntityOperation.CREATE, EntityOperation.UPDATE]
+
+    def test_a_failed_extraction_counts_as_unmeasured_not_as_zero(self) -> None:
+        # A service whose extraction failed has no accounting either. It joins
+        # the predating count, where its `extraction_error` tells it apart.
+        snapshot = make_snapshot(make_system())
+        service = make_service(snapshot, "services/orders").model_copy(
+            update={
+                "entity_access_accounting": _accounting(
+                    bound=1,
+                    accesses={EntityOperation.READ: 1},
+                    sites={EntityAccessBasis.METHOD_NAME: 1},
+                )
+            }
+        )
+        failed = make_service(snapshot, "services/failed").model_copy(
+            update={"extraction_error": "RuntimeError: parse failed"}
+        )
+
+        section = build_entity_coverage([service, failed])
+
+        assert section is not None
+        assert (section.services_reporting, section.services_predating) == (1, 1)
+        assert section.call_sites == 1

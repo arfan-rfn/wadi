@@ -32,6 +32,7 @@ from wadi_contracts import (
     EndpointDetailView,
     EndpointSummary,
     EndpointTouchedFile,
+    EntityUsageView,
     ExtractionJob,
     Icfg,
     IcfgNodeKind,
@@ -58,7 +59,13 @@ from wadi_orchestrator.export import export_stream
 from wadi_orchestrator.monitor import SnapshotMonitor
 from wadi_orchestrator.state import AppState
 from wadi_repo import GitError, RefNotFoundError
-from wadi_storage import DuplicateSystemNameError, WadiDatabase, create_client
+from wadi_storage import (
+    DuplicateSystemNameError,
+    WadiDatabase,
+    create_client,
+    endpoint_outbound,
+    entity_usage_view,
+)
 
 API_PREFIX = "/api/v1"
 
@@ -523,16 +530,16 @@ def create_app(
         list derived from ICFG anchors. The ICFG itself and source content
         stay separate on-demand fetches (§5.3).
         """
-        # Four reads that take no input from each other, so they go together:
+        # Three reads that take no input from each other, so they go together:
         # this is the workspace's one blocking fetch and the latency is the
         # reader's. `endpoint.service_id` is the only value anything downstream
-        # depends on, which is why the boundary and the graph read follow.
-        # 404s are raised after the gather, in the same order as before.
-        endpoint, snapshot, icfg, stitched = await asyncio.gather(
+        # depends on, which is why the boundary and the outbound join follow,
+        # themselves together. 404s are raised after the gather, in the same
+        # order as before.
+        endpoint, snapshot, icfg = await asyncio.gather(
             state.artifacts.get_endpoint(snapshot_id, endpoint_id),
             state.snapshots.get(snapshot_id),
             state.artifacts.get_icfg(snapshot_id, endpoint_id),
-            state.stitch.coverage_report_exists(snapshot_id),
         )
         if endpoint is None:
             raise HTTPException(
@@ -541,15 +548,26 @@ def create_app(
             )
         if snapshot is None:
             raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
-        boundary = await state.artifacts.get_service_boundary(snapshot_id, endpoint.service_id)
+        # The outbound join is shared with MCP `endpoint_detail` (C5), so the
+        # workspace and an agent cannot be told two different things about
+        # where this endpoint's calls go. Pre-stitch it is 'not yet', never
+        # 'none' (P10), the same rule as the system graph.
+        boundary, (outbound, stitched) = await asyncio.gather(
+            state.artifacts.get_service_boundary(snapshot_id, endpoint.service_id),
+            endpoint_outbound(
+                state.stitch,
+                state.graph,
+                snapshot_id=snapshot_id,
+                service_id=endpoint.service_id,
+                icfg=icfg,
+            ),
+        )
         service_name = boundary.name if boundary is not None else endpoint.service_id
 
-        remote_call_ids: set[str] = set()
         touched: dict[tuple[str, SourceVariant], int] = {}
         unopenable: Counter[CalleeUnboundReason] = Counter()
         if icfg is not None:
             for node in icfg.nodes:
-                remote_call_ids.update(node.remote_call_ids)
                 # §5.4.2 T5: count the call sites whose target has no interior,
                 # grouped by why. Counting per reason (not one lump total) is
                 # the point — "10 Lombok accessors" is a fact about generated
@@ -565,15 +583,6 @@ def create_app(
                     continue
                 key = (node.anchor.file, node.anchor.variant)
                 touched[key] = touched.get(key, 0) + 1
-
-        # Pre-stitch, outbound is 'not yet', never 'none' (P10) — same rule as
-        # the system graph. (`stitched` came back from the gather above.)
-        outbound: list[RemoteEdgeItem] = []
-        if stitched and remote_call_ids:
-            edges_view = await state.graph.remote_edges(snapshot_id, endpoint.service_id)
-            outbound = [
-                edge for edge in edges_view.outbound if edge.remote_call_id in remote_call_ids
-            ]
 
         return EndpointDetailView(
             snapshot_id=snapshot_id,
@@ -741,6 +750,44 @@ def create_app(
             ),
             rows=sorted(rows, key=lambda row: (row.service_name, row.simplified_uri)),
         )
+
+    # --- entity usage (§5.2.17) -------------------------------------------------------
+
+    @app.get(
+        f"{API_PREFIX}/snapshots/{{snapshot_id}}/entities",
+        response_model=EntityUsageView,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def entity_usage(
+        snapshot_id: str, state: StateDep, service_id: str | None = None
+    ) -> EntityUsageView:
+        """Which endpoints may create, read, update or delete each entity (§5.2.17).
+
+        The reverse of each endpoint's summary, folded at read time from one
+        projected row per endpoint and one read of the data models (R1-8);
+        nothing is stored for it. System-wide for the same reason `/auth` is:
+        "who writes `Order`?" does not stop at a service boundary.
+
+        `service_id` narrows the inputs to one service, exactly as MCP
+        `entity_usage(service_id=...)` does, through the same composition, so
+        the two surfaces give one answer (review C4). The view passes through
+        unchanged: each service's `status` says why it has accounting or not.
+
+        `analyzed=False` means nothing listed was examined, as on a snapshot
+        written before entity facts existed: `entities` is empty because
+        nothing was looked at, not because nothing is touched (R1-6).
+        """
+        if await state.snapshots.get(snapshot_id) is None:
+            raise HTTPException(status_code=404, detail=f"snapshot {snapshot_id} not found")
+        if (
+            service_id is not None
+            and await state.artifacts.get_service_boundary(snapshot_id, service_id) is None
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail=f"service {service_id} not found in snapshot {snapshot_id}",
+            )
+        return await entity_usage_view(state.artifacts, snapshot_id, service_id=service_id)
 
     # --- system graph (§11 Phase 2.7 M4) ----------------------------------------------
 

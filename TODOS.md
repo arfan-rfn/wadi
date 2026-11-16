@@ -96,6 +96,13 @@ produced by an ad-hoc script outside the repo. They are correct as of
 Next step: land the measurement as a test or a `make` target so the numbers
 become a standing check rather than a claim in a document.
 
+v0.9.0 paid part of this for entity access: the repository call-site oracle and its reconciler
+are committed (`make measure-repository-sites`, `make reconcile-repository-sites`), the
+baseline harness can store each service's export (`WADI_BASELINE_EXPORT_DIR`), the blind hand
+check is drawn and scored by `make blind-sample` / `make blind-score`, and each run's summary is
+committed under `docs/measurements/entity-access/`. The older phases' numbers are still
+ad hoc.
+
 ---
 
 ## Auth — project-defined vocabularies (§5.2.12)
@@ -205,6 +212,348 @@ output is still the compose file's view, which is the misleading half.
 nothing matches them. A reader asking "is CORS open on THIS endpoint?" still has
 to compare by eye. Deliberately not merged into the auth claim — these decide
 which origin may call, not which principal — but a scoped read is still useful.
+
+---
+
+## Entity access (§5.2.17, Phase 2.10)
+
+Opened with the decision record on 2026-11-13, before any code. If milestone M8 (cross-service
+composition) is cut, it gets an entry here at that point.
+
+### Three decisions the gate needs are open
+**Priority:** P1 (blocks milestone M5, not M0 to M4)
+**Opened:** v0.8.2
+
+The precision bar for a single `create` or `update` claim: the number, whether it is a point
+estimate or a lower confidence bound, and the minimum labeled members per basis. The scope of
+a verdict: a release gate across labeled corpora (proposed) or per corpus. Who labels the
+saves. The bar has to be written before any save is labeled.
+
+### Dirty-checking updates are unclaimed
+**Priority:** P2
+**Opened:** v0.8.2
+
+A setter on a managed entity inside `@Transactional` updates a row with no `save` call. v1 does
+not detect it and the coverage section names it as unmeasured. Train-ticket has none (0 of 37
+update handlers). ICPC is unmeasured: 165 of its 187 `@Transactional` files contain no save
+call. Milestone M7 opens twenty ICPC update endpoints before any ICPC entity number is
+published, and that result decides whether detection is built.
+
+### "No repository call found" is not withheld when another mechanism is reachable
+**Priority:** P2
+**Opened:** v0.8.2
+
+An endpoint whose only write is `entityManager.persist` reads "no repository call found" with
+the v1 limits beside it. The stronger form withholds the negative when the endpoint's closure
+reaches an unmodelled persistence type. Decide at the ICPC milestone, which has 12
+`EntityManager` calls.
+
+### Database calls inside lambda bodies reach no endpoint flow
+**Priority:** P2
+**Opened:** v0.8.2
+
+They are counted in the per-service accounting as "in no endpoint flow" and are in no
+endpoint's entity summary. The fix is finding A1 in `docs/foundation-hardening-plan.md`.
+Three such writes exist across the three corpora, all in ICPC.
+
+### Cascaded operations are not followed
+**Priority:** P3
+**Opened:** v0.8.2
+
+`delete(order)` reports `Order` only. Following a cascade needs `DataModel.relations`, which
+nothing populates. ICPC has 86 `cascade =` declarations and yas has 9.
+
+### Other persistence mechanisms are unmarked
+**Priority:** P3
+**Opened:** v0.8.2
+
+`EntityManager` (12 calls in ICPC), `JdbcTemplate` (1 class in yas), Elasticsearch (yas),
+MyBatis, `MongoTemplate`. Each needs its own sink detection, its own way to name the entity and
+its own fixture.
+
+### An existence check with an early return stays "create or update"
+**Priority:** P3
+**Opened:** v0.8.2
+
+The existence-guard basis reads a `save` that sits directly inside the `if` or `else` of the
+check. `if (!found) return ...; repo.save(x)` needs dominance reasoning and is left two-valued.
+Measure how many train-ticket saves land there before building it.
+
+### Entity nodes in Neo4j
+**Priority:** P3
+**Opened:** v0.8.2
+
+§6 promises "every DB it touches" as a Neo4j traversal. Phase 2.10 answers from Mongo and
+composes one cross-service hop at read time.
+
+### Outside ground truth for entity access on TrainTicket
+**Priority:** P3
+**Opened:** v0.8.2
+
+Abdelfattah et al. (CLOSER 2023) built a hand-validated set of 1,364 CRUD operations on
+TrainTicket. Ask the authors for it. It is a different revision from `train-ticket-aitest`, so
+check how much of it maps before relying on it.
+
+### A method reached only through a bound method reference gets no db row
+**Priority:** P2
+**Opened:** v0.9.0
+
+`widgetWriter::storeViaRef` is a bound method reference on a field. In the `save-origin-mini`
+fixture the method it names emitted no `db` sink row, so it appears to be outside the export
+closure. §5.2 says method references are followed. Nobody has checked whether the REF edge is
+missing or the closure skips it. Found while building the save facts.
+
+### Collision losers' ICFGs survive the collision filter
+**Priority:** P2
+**Opened:** v0.9.0
+
+`resolve_id_collisions` drops a losing endpoint's ICFG by `endpoint_id`
+(`services/extraction-worker/src/wadi_worker/assembler.py`), but a loser shares the kept
+endpoint's id, so its ICFG passes the filter. `write_icfg` upserts on
+`(snapshot_id, endpoint_id)`, so the stored graph can belong to the dropped handler, and that
+handler's repository calls are counted as in endpoint flow. This predates Phase 2.10.
+
+The final-tree review (adversarial #1) found a second effect: the kept endpoint's
+`entity_access` is computed from its own graph before the drop, so when the loser's graph is the
+one stored, the Data list and MCP `endpoint_detail` disagree with the canvas and `endpoint_icfg`.
+The comment above the in-flow accounting says the opposite of what happens. `artifacts.endpoints`
+and `artifacts.icfgs` are built in lockstep, so the fix is to drop graphs by position, not by id.
+
+### A custom repository fragment's body is outside the endpoint flow
+**Priority:** P3
+**Opened:** v0.9.0
+
+`SpringDIPass` does not link `OrderRepository.archiveOld` to `OrderRepositoryImpl.archiveOld`.
+The export finds the implementation to set `implemented_in_project`, so the call reads
+`unknown` correctly, but the ICFG dead-ends at the call and the fragment's own repository calls
+reach no endpoint.
+
+### Store-specific Spring Data repositories are not detected
+**Priority:** P2
+**Opened:** v0.9.0
+
+Since export 2.15.0, `SpringDataRepositories.Markers` is an exact list of qualified names, and the
+transitive walk follows only parent types inside the project. So `interface X extends
+CassandraRepository<...>` (and the Elasticsearch, R2DBC, Neo4j and Couchbase equivalents) is
+never detected, with or without the jar, and every endpoint of such a service publishes
+`entity_access: []` with `call_sites: 0` and no note. Spring Data 2.x `RxJava2CrudRepository` and
+`RxJava2SortingRepository` matched the old package-substring rule and no longer do. A call that
+resolves to `JpaSpecificationExecutor` (`repo.findAll(spec)`) is tagged by its declaring type,
+which has no marker parent, so it may go untagged. yas uses Elasticsearch. Either add the store
+markers with a fixture, or withhold "no repository call found" for a service with store-module
+types (final-tree review, adversarial #2).
+
+### No standing index-scan test for the older hot read paths
+**Priority:** P3
+**Opened:** v0.9.0
+
+§5.2.15 audited eight read paths by hand. The profiler-based helper in
+`libs/wadi-storage/tests/test_entity_access_reads.py` covers only the three entity reads.
+Extending it to the rest turns the audit into a check.
+
+### A 1.0.x ICFG shows no outbound edges on the detail route
+**Priority:** P3
+**Opened:** v0.9.0
+
+`wadi_storage.compose.endpoint_outbound` reads `IcfgNode.remote_call_ids` only, as the detail
+route always did. An ICFG written before 1.1.0 carries only the deprecated `remote_call_id`,
+so `/detail` and MCP `endpoint_detail` return an empty `outbound` for it while MCP
+`cross_service=true` reads both fields.
+
+### Native SQL cannot name an entity that declares no `@Table`
+**Priority:** P1 (decide before releasing M6)
+**Opened:** v0.9.0
+
+The query reader resolves a native table only through `DataModel.storage_name`, which comes from
+`@Table`/`@Document`, and does not guess a naming strategy. On train-ticket-aitest every one of the
+9 query sites is native SQL on such an entity, so M6 moved all 9 from the repository's entity
+with `unknown` to an undetermined entity with `read`: the verb is now right and the entity is
+lost. The project sets no `spring.jpa.hibernate.naming.physical-strategy`, and Spring Boot's
+default (`CamelCaseToUnderscoresNamingStrategy`) maps `TrainType`, `Contacts`, `Station`,
+`PriceConfig` and `Route` to exactly the tables those queries name. Proposed: fall back to that
+default when the service's config sets no physical strategy, and record it as a decision in
+§5.2.17 first. Measure the effect on yas and ICPC the same way.
+
+The 2026-11-15 blind check put a number on it: all 4 endpoint errors in the hard stratum, and the
+one withheld pair in the random stratum, are this case (`Contacts` and `Station`), because the
+read lands on an undetermined entity instead of the entity's own row
+(`docs/measurements/entity-access/2026-11-15-train-ticket.md`).
+
+### The identity rule knows only Spring's id methods
+**Priority:** P2 (before M5 scores `existence-guard:update`)
+**Opened:** v0.9.0
+
+The found arm of an existence check gives an `update` candidate only when the lookup is
+`findById`, `getById`, `getReferenceById` or `existsById` (review B5). A derived finder on the
+entity's `@Id` field is an identity lookup too: `ts-security-service`'s `Config.update` tests
+`findByName` where `name` is the `@Id`, and lost a correct candidate on 2026-11-15. Recognizing
+it needs the entity's id field in the export, which `data_models` does not carry yet. Nothing
+false is published either way; the cost is a candidate M5 would have scored.
+
+### The query reader leaves HQL selects that start at `from` unread
+**Priority:** P3
+**Opened:** v0.9.0
+
+`from Order o where ...` is valid HQL with an implied select. The reader follows only the four
+leading verbs, so such a query keeps the pre-M6 `unknown`. Count them on ICPC before building.
+
+### Implicit joins through a path in a `where` clause are not claimed
+**Priority:** P3
+**Opened:** v0.9.0
+
+`select o from Order o where o.customer.vip = true` reads `Customer` without naming it in a
+declaring position, so the reader claims only `Order`. Reads are under-claimed there.
+
+### A flush-only endpoint reads "No repository call found"
+**Priority:** P3
+**Opened:** v0.9.0
+
+`flush()` is deliberately not an entity operation, so an endpoint whose only repository call is
+`flush` summarizes to `[]` and the Data list says "No repository call found." while the canvas
+shows a db icon on that call. Found by the release QA on `POST /crud/flush-not-an-operation`. The
+state can check the ICFG for db sink nodes without sites and say "no entity access found" there.
+
+### Two entities with one simple name differ only on hover in the Data matrix
+**Priority:** P3
+**Opened:** v0.9.0
+
+`com.acme.crud.billing.Account` and `com.acme.crud.crm.Account` render as two "Account" rows on the
+home `?view=data` matrix. The qualified name is only the cell's `title`. Show the package, or the
+distinguishing suffix, when two rows share a simple name.
+
+### The undetermined-entity row carries no text for an unbound type argument
+**Priority:** P3
+**Opened:** v0.9.0
+
+A call on `BaseRepository<E>` that binds no entity has `entity_type_text = null`, as contract A1
+says, so the "entity not determined" row has nothing to show a reader about what it saw. The
+repository type is on the site; whether to show it there is a UI decision.
+
+### A statement's second call into project code is not followed
+**Priority:** P1
+**Opened:** v0.9.0
+
+Found while building the rigor review's fixtures (F1). The ICFG puts one callee on a statement
+node, so in `a.count() > 0 && helper.existsIn(...)` the flow never enters `existsIn`, and any
+repository call or outbound call inside it is missing from that endpoint. Repository calls made
+directly in the statement are not affected: a node lists every site it holds (R1-2). The fixture
+was restructured around it, so no golden covers the shape yet. It affects endpoint completeness
+wherever a condition or an expression chains two calls into project methods.
+
+### The save's existence check is looked for only in the saving method
+**Priority:** P2
+**Opened:** v0.9.0
+
+Review A6. `lookup_same_repository` asks whether the saving method reads the same repository
+type. An existence check in the caller, in a helper, or on another repository of the same
+entity (train-ticket's travel and preserve services each have two repositories on `Order`)
+gives `constructed` with no lookup, which is a `create` candidate. The split is gated, so
+nothing false is published, but M5 must settle this before it scores `argument-origin:create`.
+
+### Transitive detection and the hard matching cases have no real-corpus measurement
+**Priority:** P2
+**Opened:** v0.9.0
+
+Reviews A7 and D9. `RepositoryDetectionRegressionTest` holds three database calls on the older
+fixtures, and every train-ticket repository is direct, so transitive detection is exercised only
+by the crud-matrix fixture. The ICPC claim (111 repositories through a project base) is not
+measured on this branch. On train-ticket the reconciler met no two calls on one line, no
+multi-line call and no overload, so those matching rules are proven only by synthetic tests.
+M7 (yas, ICPC) is where both get a real corpus.
+
+### The query reader's remaining silent misses
+**Priority:** P3
+**Opened:** v0.9.0
+
+Review B7, after the hardening. The reader still drops an access without a flag for an implicit
+join through a path (see the entry above), `treat(...)`, `delete ... using`, `straight_join`,
+and the second table of a MySQL multi-table delete (`delete o, l from ...`). None claims a false
+verb; each loses an entity the text names. The module docstring lists them.
+
+### An entity named only through a marker-typed receiver has no entity record
+**Priority:** P3
+**Opened:** v0.9.0
+
+F1 finding 5. A call on `CrudRepository<Foo, Long>` where `Foo` has no `@Entity` and no
+repository of its own binds `Foo`, but no `data_models` row is written for it. The reverse view
+still lists it (a row from the access, with no storage name), so nothing is lost; the record is.
+
+### Small reader gaps left by the 1.27.0 change
+**Priority:** P3
+**Opened:** v0.9.0
+
+- MCP `endpoint_detail` shows `call_sites_by_operation: null` on a summary written before
+  1.27.0 with no note saying why, where `entity_usage` explains it.
+- Two frontend fixtures still cast whole payloads (`tests/data-list-state.test.ts:40`,
+  `tests/entity-sites.test.ts:23`).
+- One type that arrives as two Data list rows (with and without a model id) shares one
+  `entity=` selection key, so selecting one selects both.
+
+### A vocabulary change must keep 0.9.0 accounting readable
+**Priority:** P1 (bound to the next change to `EntityOperation` or `EntityAccessBasis`)
+**Opened:** v0.9.0
+
+Pre-landing review finding #4. `EntityAccessAccounting` requires exactly the current operation and
+basis keys (a zero is written, never left out, E8), and the model is read back from every stored
+boundary and coverage report. Adding a value (M5 is the likely first) would make every 0.9.0
+document fail to load. That change must add a read rule in the same commit: accept a document
+missing the new key and read it as "not measured by that version" (§5.2.17, "Found by the
+pre-landing review").
+
+### Review notes left open at 0.9.0
+**Priority:** P2
+**Opened:** v0.9.0
+
+Below-floor findings from the three pre-landing passes, recorded here rather than fixed in 0.9.0.
+
+- **Query text keeps Java string syntax.** `unquote` strips only the outer quotes, so a text
+  block (`"""..."""`) reads as an empty quoted identifier, `\n` glues onto the next keyword, and
+  `\"Orders\"` names a table `Orders\`. Each degrades to `unknown` or undetermined, so nothing
+  false is published, but coverage drops on Java 15+ code. No fixture uses either.
+- **MariaDB executable comments** (`/*M! ... */`) are still dropped as comments; MariaDB runs
+  their text. Refuse them as `/*!` is refused.
+- **The flow-stops note counts only each statement's primary call.** In
+  `mapper.toDto(svc.load(id))` an unbound `svc.load` gets no reason, so `[]` shows with no note.
+- **`not-declared` counts as may-hide-project-code**, though its main source is a static import
+  such as `ResponseEntity.ok`, which the T5 golden calls benign. Probably split the reason.
+- **Two HTTP calls with one URL on one line share a remote-call id** (service, file, line, URL),
+  so one is dropped and its verb lost. Not a regression; the id format would have to change.
+- **REST `/detail` still fails on the graph.** It waits about 57 s on an unreachable Neo4j and
+  returns 500, and it returns 500 on a chunked ICFG missing a part, where MCP `endpoint_detail`
+  now degrades. Statement-level chips still show only `node.sink`.
+- **MCP `endpoint_detail` reads a missing ICFG as a clean flow.** Flow marks `None` (no stored
+  graph) gives `entity_facts: analyzed` with no note and `outbound: []` with `stitched: true`.
+- **Two descriptions trail the 0.9.0 fixes.** The Data view's withheld tooltip says a withheld
+  column counts only what query text states, which is no longer so once some flags are on. The
+  `endpoint_detail` tool description gives one cause for `outbound: null`, and now there are two.
+- **`entity_usage` and `/entities` on a running snapshot.** A service whose extraction has not
+  started is absent from the view and from `unexamined`, so asking for its entity answers "not
+  declared or touched here". The UI caches that answer as immutable.
+- **The Data matrix says "predates" for every unanalyzed view**, including one whose services all
+  failed extraction, while MCP names the failure.
+- **The Data list ignores `stitched: false`.** Before stitching a forwarding endpoint with
+  `entity_access: []` reads like one that calls nothing.
+- **The stale-flag ratchet checks the wrong version.** The build-time test compares enabled gate
+  flags to `RULES_VERSION`, computed without `save_origin_rules`, while the worker gates on
+  `export_rules_version(export)`. Every shipped flag is off, so nothing publishes wrongly yet.
+- **`e2e/test_baseline_snapshot.py` reruns keep a stale named export.** `name_by_service` skips
+  the rename when `<service>.json` exists, so the reconciler reads last run's file.
+
+### Re-measure train-ticket on the shipped export
+**Priority:** P2
+**Opened:** v0.9.0
+
+The 2026-11-15 measurement ran on an earlier 2.15.0 build of this branch (`41ecddc`), before
+every sink call got its own row. Repository sites should not move, since `db` rows were already
+per call, but remote-call counts can. Re-run the measurement on 0.9.0 and update
+`docs/measurements/entity-access/` if any number changes.
+
+### `e2e/` is outside pyright's include
+**Priority:** P3
+**Opened:** v0.9.0
+
+`e2e/test_baseline_snapshot.py` has four strict-mode errors in its schema spot-check that CI
+never reports.
 
 ---
 

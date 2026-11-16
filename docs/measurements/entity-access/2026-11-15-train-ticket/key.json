@@ -1,0 +1,1121 @@
+{
+  "key_format": "1",
+  "snapshot_id": "snap_b58fd7a5e7d84d0bbbafad5253e36633",
+  "seed": 20261115,
+  "size": 40,
+  "drawn_at": "2026-11-15T11:16:33.770771+00:00",
+  "api": "http://127.0.0.1:9234/api/v1/",
+  "population": 365,
+  "hard_population": 14,
+  "endpoints": [
+    {
+      "id": "b001",
+      "endpoint_id": "ep_c4660f45b7250775",
+      "stratum": "random",
+      "service": "ts-admin-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/adminbasicservice/adminbasic/configs",
+      "entity_access": []
+    },
+    {
+      "id": "b002",
+      "endpoint_id": "ep_82270dc891895595",
+      "stratum": "random",
+      "service": "ts-admin-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/adminbasicservice/adminbasic/prices",
+      "entity_access": []
+    },
+    {
+      "id": "b003",
+      "endpoint_id": "ep_d726ac910fa37aba",
+      "stratum": "random",
+      "service": "ts-auth-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/users/hello",
+      "entity_access": []
+    },
+    {
+      "id": "b004",
+      "endpoint_id": "ep_294e3ca8a144f1b4",
+      "stratum": "random",
+      "service": "ts-config-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/paymentservice/payment",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.config.entity.Payment",
+          "data_model_id": "dm_507892a8b94796ac",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b005",
+      "endpoint_id": "ep_389608fac0e12545",
+      "stratum": "hard",
+      "service": "ts-config-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.config.entity.User",
+          "data_model_id": "dm_f4709c8503c7c988",
+          "operations": [
+            "read",
+            "delete",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 1,
+            "delete": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b006",
+      "endpoint_id": "ep_4c4fd71ac8e4e9b9",
+      "stratum": "hard",
+      "service": "ts-consign-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/consignpriceservice/consignprice",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.consign.entity.ConsignPrice",
+          "data_model_id": "dm_9990ca28ebc35e33",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 2,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b007",
+      "endpoint_id": "ep_7a2946733c61f6d5",
+      "stratum": "random",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/consignpriceservice/consignprice/price",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.consign.entity.ConsignPrice",
+          "data_model_id": "dm_9990ca28ebc35e33",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b008",
+      "endpoint_id": "ep_f585cb889cf03510",
+      "stratum": "hard",
+      "service": "ts-consign-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/consignservice/consigns",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.consign.entity.ConsignRecord",
+          "data_model_id": "dm_48729432745031c4",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 4,
+          "call_sites_by_operation": {
+            "read": 2,
+            "create-or-update": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "b009",
+      "endpoint_id": "ep_a5e66847a3763f42",
+      "stratum": "random",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/consignservice/consigns/{consignee}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.consign.entity.ConsignRecord",
+          "data_model_id": "dm_48729432745031c4",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b010",
+      "endpoint_id": "ep_2fa901b20fbd5275",
+      "stratum": "random",
+      "service": "ts-consign-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/executeservice/welcome",
+      "entity_access": []
+    },
+    {
+      "id": "b011",
+      "endpoint_id": "ep_ff231dcbb1d3aa5b",
+      "stratum": "hard",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.contacts.entity.Contacts",
+          "data_model_id": "dm_cdf1c45f70766ead",
+          "operations": [
+            "create-or-update"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "create-or-update": 1
+          }
+        },
+        {
+          "entity": null,
+          "data_model_id": null,
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b012",
+      "endpoint_id": "ep_630abf2357574073",
+      "stratum": "hard",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts/admin",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.contacts.entity.Contacts",
+          "data_model_id": "dm_cdf1c45f70766ead",
+          "operations": [
+            "create-or-update"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "create-or-update": 1
+          }
+        },
+        {
+          "entity": null,
+          "data_model_id": null,
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b013",
+      "endpoint_id": "ep_fb72b4cfcbd32db3",
+      "stratum": "random",
+      "service": "ts-contacts-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/contactservice/contacts/welcome",
+      "entity_access": []
+    },
+    {
+      "id": "b014",
+      "endpoint_id": "ep_74c03cd90ffcd344",
+      "stratum": "random",
+      "service": "ts-contacts-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/stationservice/stations/idlist",
+      "entity_access": [
+        {
+          "entity": null,
+          "data_model_id": null,
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b015",
+      "endpoint_id": "ep_fa80db01aac41488",
+      "stratum": "hard",
+      "service": "ts-delivery-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.InsidePayment",
+          "data_model_id": "dm_b17d255db1e3047b",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 2
+          }
+        },
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "data_model_id": "dm_bc91c3f87f3ff25b",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b016",
+      "endpoint_id": "ep_cfc9ec87c3770c92",
+      "stratum": "hard",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/account",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.InsidePayment",
+          "data_model_id": "dm_b17d255db1e3047b",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        },
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "data_model_id": "dm_bc91c3f87f3ff25b",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b017",
+      "endpoint_id": "ep_8c5d66e5d59d5c92",
+      "stratum": "hard",
+      "service": "ts-delivery-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/difference",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.InsidePayment",
+          "data_model_id": "dm_b17d255db1e3047b",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 2
+          }
+        },
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "data_model_id": "dm_bc91c3f87f3ff25b",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b018",
+      "endpoint_id": "ep_ec6213de6945a439",
+      "stratum": "random",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/inside_pay_service/inside_payment/drawback/{userId}/{money}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.InsidePaymentMoney",
+          "data_model_id": "dm_bc91c3f87f3ff25b",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b019",
+      "endpoint_id": "ep_2faf888a04f70af3",
+      "stratum": "random",
+      "service": "ts-delivery-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/trainfoodservice/trainfoods",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.delivery.entity.TrainFood",
+          "data_model_id": "dm_3d06e8b7b7af3c57",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b020",
+      "endpoint_id": "ep_7730e60c3d6b16bf",
+      "stratum": "random",
+      "service": "ts-food-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/foodservice/createOrderBatch",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.food.entity.FoodOrder",
+          "data_model_id": "dm_c2aad176cfeb3b93",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b021",
+      "endpoint_id": "ep_1bdb3f6d6ea469ef",
+      "stratum": "random",
+      "service": "ts-notification-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/notifyservice/notification/preserve_success",
+      "entity_access": []
+    },
+    {
+      "id": "b022",
+      "endpoint_id": "ep_811ccd73923b6c2b",
+      "stratum": "random",
+      "service": "ts-order-related-service",
+      "http_method": "PATCH",
+      "full_uri": "/api/v1/assuranceservice/assurances/{assuranceId}/{orderId}/{typeIndex}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.orderrelated.entity.Assurance",
+          "data_model_id": "dm_75ca051b380b80c6",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b023",
+      "endpoint_id": "ep_68decfe89300d045",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/orderOther/status/{orderId}/{status}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.preserve.entity.Order",
+          "data_model_id": "dm_b9e3974d53f07414",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b024",
+      "endpoint_id": "ep_7d49e1005041f7f2",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/welcome",
+      "entity_access": []
+    },
+    {
+      "id": "b025",
+      "endpoint_id": "ep_bfb4433ed736a64f",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderservice/order/status/{orderId}/{status}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.preserve.entity.Order",
+          "data_model_id": "dm_b9e3974d53f07414",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b026",
+      "endpoint_id": "ep_10cde23ba1ee5e92",
+      "stratum": "random",
+      "service": "ts-preserve-service",
+      "http_method": "DELETE",
+      "full_uri": "/api/v1/orderservice/order/{orderId}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.preserve.entity.Order",
+          "data_model_id": "dm_b9e3974d53f07414",
+          "operations": [
+            "read",
+            "delete"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "delete": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b027",
+      "endpoint_id": "ep_fe3210078752a3d5",
+      "stratum": "hard",
+      "service": "ts-price-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/priceservice/prices",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.price.entity.PriceConfig",
+          "data_model_id": "dm_d3fe747263c57a9a",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "b028",
+      "endpoint_id": "ep_ad7a4d75eac2c36d",
+      "stratum": "random",
+      "service": "ts-price-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/priceservice/prices",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.price.entity.PriceConfig",
+          "data_model_id": "dm_d3fe747263c57a9a",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b029",
+      "endpoint_id": "ep_e2a7995d55f446b8",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/admintravelservice/admintravel",
+      "entity_access": []
+    },
+    {
+      "id": "b030",
+      "endpoint_id": "ep_37bba7bc3e880642",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/admintravelservice/admintravel",
+      "entity_access": []
+    },
+    {
+      "id": "b031",
+      "endpoint_id": "ep_9de467f6d7243e7c",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/routeplanservice/routePlan/cheapestRoute",
+      "entity_access": []
+    },
+    {
+      "id": "b032",
+      "endpoint_id": "ep_20041f219ad1f517",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/travel2service/trip_detail",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.rebook.entity.Trip",
+          "data_model_id": "dm_5ad963582bdedc2f",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "b033",
+      "endpoint_id": "ep_3a82f6c19c5d8c44",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/travel2service/trips",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.rebook.entity.Trip",
+          "data_model_id": "dm_5ad963582bdedc2f",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b034",
+      "endpoint_id": "ep_a0077dac1fb0a1fd",
+      "stratum": "random",
+      "service": "ts-rebook-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/travelservice/trips",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.rebook.entity.Trip",
+          "data_model_id": "dm_5ad963582bdedc2f",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b035",
+      "endpoint_id": "ep_9950733f65227171",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/assuranceservice/assurances/types",
+      "entity_access": []
+    },
+    {
+      "id": "b036",
+      "endpoint_id": "ep_4d9e0604a4cfc4c0",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/routeservice/routes",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.route.entity.Route",
+          "data_model_id": "dm_33ec46e6a75bddc4",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b037",
+      "endpoint_id": "ep_090b3866966ea021",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/routeservice/routes/{routeId}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.route.entity.Route",
+          "data_model_id": "dm_33ec46e6a75bddc4",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b038",
+      "endpoint_id": "ep_a0f74a477b6a432a",
+      "stratum": "hard",
+      "service": "ts-route-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.route.entity.User",
+          "data_model_id": "dm_05d936e64494a640",
+          "operations": [
+            "read",
+            "delete",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 1,
+            "delete": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b039",
+      "endpoint_id": "ep_b2416ac33643832b",
+      "stratum": "random",
+      "service": "ts-route-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/userservice/users/register",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.route.entity.User",
+          "data_model_id": "dm_05d936e64494a640",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b040",
+      "endpoint_id": "ep_157cc21b218e6d58",
+      "stratum": "hard",
+      "service": "ts-security-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/consignpriceservice/consignprice",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.security.entity.ConsignPrice",
+          "data_model_id": "dm_3767390f45c6ec2f",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 2,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b041",
+      "endpoint_id": "ep_79aeddd660b69b0a",
+      "stratum": "hard",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.station.entity.Contacts",
+          "data_model_id": "dm_e9c0607babf297e0",
+          "operations": [
+            "create-or-update"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "create-or-update": 1
+          }
+        },
+        {
+          "entity": null,
+          "data_model_id": null,
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b042",
+      "endpoint_id": "ep_fb9e5d418fcd239c",
+      "stratum": "hard",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/contactservice/contacts/admin",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.station.entity.Contacts",
+          "data_model_id": "dm_e9c0607babf297e0",
+          "operations": [
+            "create-or-update"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "create-or-update": 1
+          }
+        },
+        {
+          "entity": null,
+          "data_model_id": null,
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b043",
+      "endpoint_id": "ep_b6268df3cb86f4fa",
+      "stratum": "random",
+      "service": "ts-station-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/stationservice/stations/namelist",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.station.entity.Station",
+          "data_model_id": "dm_dd23b855fa1c6443",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b044",
+      "endpoint_id": "ep_fc1ced14dd072d17",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderOtherService/orderOther",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "data_model_id": "dm_f213dcbcae7ab412",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b045",
+      "endpoint_id": "ep_0361ecb8269b335d",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderOtherService/orderOther/admin",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "data_model_id": "dm_f213dcbcae7ab412",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b046",
+      "endpoint_id": "ep_2d1d9fe6950b35e7",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/orderOtherService/orderOther/status/{orderId}/{status}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "data_model_id": "dm_f213dcbcae7ab412",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b047",
+      "endpoint_id": "ep_f739a0936889c0c5",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/orderservice/order",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "data_model_id": "dm_f213dcbcae7ab412",
+          "operations": [
+            "read",
+            "create-or-update"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b048",
+      "endpoint_id": "ep_ffb768315a19d5b9",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/orderservice/order/refresh",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "data_model_id": "dm_f213dcbcae7ab412",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b049",
+      "endpoint_id": "ep_3b77d09940037b15",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "POST",
+      "full_uri": "/api/v1/orderservice/order/tickets",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.travel.entity.Order",
+          "data_model_id": "dm_f213dcbcae7ab412",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b050",
+      "endpoint_id": "ep_110a6c38ed435e50",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/travel2service/routes/{tripId}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.travel.entity.Trip",
+          "data_model_id": "dm_3c3da045b7da1155",
+          "operations": [
+            "read"
+          ],
+          "call_sites": 1,
+          "call_sites_by_operation": {
+            "read": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b051",
+      "endpoint_id": "ep_35b35f5d98c70411",
+      "stratum": "random",
+      "service": "ts-travel-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/waitorderservice/welcome",
+      "entity_access": []
+    },
+    {
+      "id": "b052",
+      "endpoint_id": "ep_d96bb96124efa063",
+      "stratum": "random",
+      "service": "ts-user-service",
+      "http_method": "GET",
+      "full_uri": "/api/v1/cancelservice/cancel/refound/{orderId}",
+      "entity_access": []
+    },
+    {
+      "id": "b053",
+      "endpoint_id": "ep_3aca06526aee3001",
+      "stratum": "hard",
+      "service": "ts-user-service",
+      "http_method": "PUT",
+      "full_uri": "/api/v1/userservice/users",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.user.entity.User",
+          "data_model_id": "dm_bb74ad7b2232abfa",
+          "operations": [
+            "read",
+            "delete",
+            "create-or-update"
+          ],
+          "call_sites": 3,
+          "call_sites_by_operation": {
+            "read": 1,
+            "delete": 1,
+            "create-or-update": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "b054",
+      "endpoint_id": "ep_6900e6704f7530ba",
+      "stratum": "random",
+      "service": "ts-user-service",
+      "http_method": "DELETE",
+      "full_uri": "/api/v1/userservice/users/{userId}",
+      "entity_access": [
+        {
+          "entity": "com.cloudhubs.trainticket.user.entity.User",
+          "data_model_id": "dm_bb74ad7b2232abfa",
+          "operations": [
+            "read",
+            "delete"
+          ],
+          "call_sites": 2,
+          "call_sites_by_operation": {
+            "read": 1,
+            "delete": 1
+          }
+        }
+      ]
+    }
+  ]
+}

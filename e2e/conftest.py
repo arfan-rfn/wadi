@@ -71,4 +71,4 @@ def joern_url(shared_dir: Path) -> Iterator[str]:
         client.close()
         yield url
     finally:
-        subprocess.run(["docker", "rm", "-f", container], capture_output=True, check=False)
+        subprocess.run(["docker", "rm", "-f", "-v", container], capture_output=True, check=False)

@@ -6,31 +6,359 @@ models as stored artifacts (§8: one schema everywhere), rendered to JSON-mode
 dicts at the boundary.
 """
 
-from typing import Any, Literal
+import asyncio
+from collections import Counter
+from collections.abc import Sequence
+from typing import Any, Literal, NamedTuple
 
-from wadi_contracts import Icfg, resolve_type_shape
+from wadi_contracts import (
+    UNDETERMINED_ENTITY_NAME,
+    CalleeUnboundReason,
+    EndpointEntityAccess,
+    EntityAccountingStatus,
+    EntityUsageRow,
+    EntityUsageService,
+    EntityUsageView,
+    Icfg,
+    resolve_type_shape,
+)
 from wadi_mcp.rollup import method_rollup, statement_detail
 from wadi_storage import (
+    GRAPH_READ_TIMEOUT_SECONDS,
     ArtifactRepository,
+    EndpointOutbound,
+    FlowMarks,
     GraphRepository,
+    IncompleteIcfgError,
+    OutboundUnavailable,
     SnapshotRepository,
     StitchRepository,
     SystemRepository,
     WadiDatabase,
+    endpoint_outbound_or_unavailable,
+    entity_usage_view,
 )
+
+#: Said wherever an endpoint's entity summary is None (R1-6). An agent cannot
+#: open the code to check, so `null` has to arrive already explained, and with
+#: the one action that fixes it.
+ENTITY_FACTS_PREDATE_NOTE = (
+    "This snapshot predates entity facts: entity_access is null because nothing was "
+    "examined, not because the endpoint touches no data. Re-analyze the system to get them."
+)
+
+
+#: Whether a call with this unbound reason may have a project body behind it,
+#: and so a repository call wadi never saw (§5.2.17, pre-landing review #5).
+#: False only where the reason rules a project body out: a Lombok accessor and
+#: an enum's `values()` have no source by construction, a method a framework
+#: supertype declares (Spring Data's `save`) is the framework's, and a
+#: third-party callee is outside every analyzed source root. Every other
+#: reason names project code wadi saw and could not connect, or a callee it
+#: could not name at all, which may be the project's (§5.4.2 T5). The
+#: frontend's Data list keeps the same table (`lib/wadi/entity-access.ts`);
+#: the two must agree, and each is checked total over the enum.
+MAY_HIDE_PROJECT_CODE: dict[CalleeUnboundReason, bool] = {
+    CalleeUnboundReason.LOMBOK_GENERATED: False,
+    CalleeUnboundReason.COMPILER_GENERATED: False,
+    CalleeUnboundReason.INHERITED_EXTERNAL: False,
+    CalleeUnboundReason.THIRD_PARTY: False,
+    CalleeUnboundReason.AMBIGUOUS_OVERLOAD: True,
+    CalleeUnboundReason.DECLARED_NOT_BOUND: True,
+    CalleeUnboundReason.NOT_DECLARED: True,
+    CalleeUnboundReason.UNRESOLVED_RECEIVER: True,
+    CalleeUnboundReason.UNPARSEABLE_CALLEE: True,
+}
+
+#: By wire value, as the flow marks count them. A value this build does not
+#: know is absent here and counted: an unread reason is not evidence that
+#: nothing is behind the call (P10).
+_MAY_HIDE_BY_VALUE = {reason.value: hides for reason, hides in MAY_HIDE_PROJECT_CODE.items()}
+
+
+#: Beside a reverse-view count that the endpoint's summary never recorded
+#: (review C1). A summary written before 1.27.0 counted per entity only, and
+#: `null` alone would read as zero, or invite the entity count in its place.
+CALL_SITES_NOT_RECORDED_NOTE = "count not recorded (summary predates 1.27.0; re-analyze)"
+
+#: The statuses whose service was never looked at. A library is not one: its
+#: sources were examined inside every service that depends on it (§5.2.14).
+_UNEXAMINED = (EntityAccountingStatus.EXTRACTION_FAILED, EntityAccountingStatus.PREDATING)
 
 
 class NotFoundError(LookupError):
     """Requested entity does not exist — message is agent-facing and precise."""
 
 
+def _select_entity(rows: list[EntityUsageRow], entity: str) -> list[EntityUsageRow]:
+    """The reverse-view rows one `entity` argument names.
+
+    A qualified name selects its rows, in every service that has the type. A
+    simple name is accepted when it names exactly one entity, and an ambiguous
+    one is refused with the candidates: two classes called `Order` in two
+    services are two entities, and merging them would answer a question
+    nobody asked.
+    """
+    exact = [row for row in rows if row.entity == entity]
+    if exact:
+        return exact
+    named = [row for row in rows if row.name == entity]
+    candidates = sorted({row.entity or UNDETERMINED_ENTITY_NAME for row in named})
+    if len(candidates) > 1:
+        raise ValueError(
+            f"{entity!r} names {len(candidates)} entities in this snapshot: {candidates}; "
+            "pass one qualified name, or a service_id to narrow it"
+        )
+    if not named:
+        raise NotFoundError(
+            f"no entity {entity!r} is declared or touched here; call entity_usage without "
+            "`entity` to list the entities this snapshot has"
+        )
+    return named
+
+
+def _named(services: Sequence[EntityUsageService]) -> str:
+    names = ", ".join(repr(service.service_name) for service in services)
+    return f"Service {names}" if len(services) == 1 else f"Services {names}"
+
+
+def _status_notes(services: Sequence[EntityUsageService]) -> list[str]:
+    """Why each listed service that carries no accounting has none (reviews C3, C5).
+
+    Read from the service's status and never from endpoint counts: a failed
+    service has no endpoint rows, so `endpoints_predating` is 0 for it and
+    said nothing about it at all.
+    """
+
+    def having(status: EntityAccountingStatus) -> list[EntityUsageService]:
+        return [service for service in services if service.status is status]
+
+    notes: list[str] = []
+    failed = having(EntityAccountingStatus.EXTRACTION_FAILED)
+    if failed:
+        one = len(failed) == 1
+        names = ", ".join(repr(service.service_name) for service in failed)
+        notes.append(
+            f"Extraction failed for {'service' if one else 'services'} {names}: "
+            f"{'its' if one else 'their'} entities were never examined, so nothing here "
+            f"says what {'it touches' if one else 'they touch'}. list_services shows the "
+            "extraction_error."
+        )
+    predating = having(EntityAccountingStatus.PREDATING)
+    if predating:
+        one = len(predating) == 1
+        notes.append(
+            f"{_named(predating)} {'predates' if one else 'predate'} entity facts: "
+            f"{'its' if one else 'their'} endpoints and entities were never examined, so "
+            f"they are not in this view. Re-analyze the system to include "
+            f"{'it' if one else 'them'}."
+        )
+    libraries = having(EntityAccountingStatus.LIBRARY)
+    if libraries:
+        one = len(libraries) == 1
+        notes.append(
+            f"{_named(libraries)} {'is a library' if one else 'are libraries'}: "
+            f"{'it has' if one else 'they have'} no accounting of {'its' if one else 'their'} "
+            f"own, and {'its' if one else 'their'} repository calls are counted in each "
+            f"service that depends on {'it' if one else 'them'}."
+        )
+    return notes
+
+
+def _usage_note(view: EntityUsageView, unexamined: Sequence[EntityUsageService] = ()) -> str | None:
+    """Say what an empty or partial reverse view is, so it is not read as a fact.
+
+    `entities: []` where nothing was examined means nothing was looked at;
+    read as "touched by nothing" it would be the claim R1-6 exists to
+    prevent. Each listed service without accounting says why, from its
+    status. `unexamined` names services an entity answer left out of
+    `services` that might still hold that entity.
+    """
+    listed = {service.service_id for service in view.services}
+    status_notes = _status_notes(
+        [*view.services, *(s for s in unexamined if s.service_id not in listed)]
+    )
+    predating = view.endpoints_predating
+    sentences: list[str] = []
+    if not view.analyzed:
+        if not view.services and predating == 0:
+            # No boundary and no endpoint row: nothing has been extracted, and
+            # this is the only case where "no endpoints" is the whole story.
+            return "This snapshot holds no endpoints yet, so there are no entity facts to read."
+        sentences.append(
+            "No service in this answer reports entity facts, so `entities` is empty because "
+            "nothing here was looked at, not because nothing is touched."
+        )
+        if not status_notes:
+            # Endpoint rows with no boundary to say why: the rows are the evidence.
+            sentences.append(
+                "This snapshot predates entity facts: its endpoints were never examined for "
+                "repository calls. Re-analyze the system to get them."
+            )
+    sentences.extend(status_notes)
+    if view.analyzed and predating:
+        sentences.append(
+            "1 endpoint predates entity facts and is not in this view; "
+            "re-analyze the system to include it."
+            if predating == 1
+            else f"{predating} endpoints predate entity facts and are not in this view; "
+            "re-analyze the system to include them."
+        )
+    return " ".join(sentences) or None
+
+
+def _say_unrecorded_counts(result: dict[str, Any]) -> None:
+    """Put the words beside every per-operation count a summary never recorded (C1)."""
+    for row in result["entities"]:
+        for usage in row["operations"]:
+            for endpoint in usage["endpoints"]:
+                if endpoint["call_sites"] is None:
+                    endpoint["call_sites_note"] = CALL_SITES_NOT_RECORDED_NOTE
+
+
+class _FlowUnreadable(NamedTuple):
+    """An endpoint's flow graph is stored but cannot be read whole (§5.2.17).
+
+    What :class:`~wadi_storage.IncompleteIcfgError` refused, kept apart from
+    ``None`` (no graph stored), so neither reads as the other.
+    """
+
+    reason: str
+
+
+def _entity_facts(
+    summary: list[EndpointEntityAccess] | None, marks: FlowMarks | _FlowUnreadable | None
+) -> dict[str, str]:
+    """Which of the two answers an endpoint's entity summary is (§5.2.17, R1-6).
+
+    `analyzed` covers `[]` too: looked, and no repository call was found in
+    the flow wadi could open. When that flow stops at calls which may hide
+    one, the note says so beside the empty summary, because an agent cannot
+    open the code to find out (§5.2.17 "An empty summary says where the flow
+    stopped", review #5). A forwarding endpoint is one with `[]` too, and its
+    `outbound` says where the work went (Q26), unless it sits behind one of
+    those calls.
+    """
+    if summary is None:
+        return {"entity_facts": "predates-phase", "entity_facts_note": ENTITY_FACTS_PREDATE_NOTE}
+    if isinstance(marks, _FlowUnreadable):
+        if summary:
+            return {"entity_facts": "analyzed"}
+        return {"entity_facts": "analyzed", "entity_facts_note": _flow_unreadable_note(marks)}
+    if summary or marks is None:
+        return {"entity_facts": "analyzed"}
+    unopened = {
+        reason: count
+        for reason, count in marks.unbound_reasons.items()
+        if _MAY_HIDE_BY_VALUE.get(reason, True)
+    }
+    if not unopened:
+        return {"entity_facts": "analyzed"}
+    return {"entity_facts": "analyzed", "entity_facts_note": _flow_stops_note(unopened)}
+
+
+def _flow_stops_note(unopened: dict[str, int]) -> str:
+    """`entity_access: []` qualified by the calls its flow stops at (review #5)."""
+    total = sum(unopened.values())
+    # Most first, then by name, so the same flow always reads the same.
+    by_reason = ", ".join(
+        f"{count} {reason}"
+        for reason, count in sorted(unopened.items(), key=lambda item: (-item[1], item[0]))
+    )
+    calls, behind = ("1 call", "it") if total == 1 else (f"{total} calls", "one of them")
+    return (
+        "No repository call was found in the flow wadi could open, and that flow stops at "
+        f"{calls} wadi could not open ({by_reason}): a repository call may sit behind "
+        f"{behind}, so entity_access [] is not evidence that this endpoint touches no data. "
+        "endpoint_icfg shows each as a call with its callee_unbound_reason."
+    )
+
+
+def _flow_unreadable_note(flow: _FlowUnreadable) -> str:
+    """`entity_access: []` when the calls its flow stops at cannot be counted."""
+    return (
+        "No repository call was found when this endpoint was analyzed, but its stored flow "
+        f"graph cannot be read now ({flow.reason}), so whether that flow stops at a call wadi "
+        "could not open is not known: entity_access [] is not evidence that this endpoint "
+        "touches no data. Re-analyze the system to write the graph again."
+    )
+
+
+def _marks_of(icfg: Icfg) -> FlowMarks:
+    """The marks :meth:`ArtifactRepository.endpoint_flow_marks` reads, from a
+    graph already loaded, so `endpoint_icfg` and `endpoint_detail` agree."""
+    return FlowMarks(
+        remote_call_ids={call for node in icfg.nodes for call in node.remote_call_ids},
+        unbound_reasons=dict(
+            Counter(
+                node.callee_unbound_reason.value
+                for node in icfg.nodes
+                if node.callee_unbound_reason is not None
+            )
+        ),
+    )
+
+
+def _outbound_without_flow(flow: _FlowUnreadable, *, stitched: bool) -> dict[str, Any]:
+    """`outbound` when the flow's remote-call ids cannot be read (§5.2.17).
+
+    Before stitching it is the usual "not yet", because no snapshot has edges
+    then. After it the edges exist and which of them this flow reaches is
+    unknown, so `outbound` is null, never `[]`, which reads as "calls nothing".
+    """
+    if not stitched:
+        return {"outbound": [], "stitched": False}
+    return {
+        "outbound": None,
+        "stitched": True,
+        "outbound_note": (
+            "Where this endpoint's calls go is not known: its flow graph could not be read "
+            f"({flow.reason}), so the calls it makes are unknown and outbound is null, not "
+            "empty. The rest of this answer does not depend on it. Re-analyze the system to "
+            "write the graph again, or call remote_edges for the service to see all its edges."
+        ),
+    }
+
+
+def _outbound_facts(joined: EndpointOutbound | OutboundUnavailable) -> dict[str, Any]:
+    """`outbound` and `stitched`, or why the edges are unknown (review #6).
+
+    Unknown is `outbound: null` with a note: `[]` would read as "calls
+    nothing". Unavailable is only returned after stitching, so `stitched`
+    stays true.
+    """
+    if isinstance(joined, OutboundUnavailable):
+        return {
+            "outbound": None,
+            "stitched": True,
+            "outbound_note": (
+                f"Where this endpoint's calls go is not known: {joined.reason}, so outbound "
+                "is null, not empty. The rest of this answer does not depend on it. Retry "
+                "later, or call remote_edges for the service once the graph answers."
+            ),
+        }
+    return {
+        "outbound": [edge.model_dump(mode="json") for edge in joined.outbound],
+        "stitched": joined.stitched,
+    }
+
+
 class WadiMcpService:
-    def __init__(self, database: WadiDatabase, graph: GraphRepository) -> None:
+    def __init__(
+        self,
+        database: WadiDatabase,
+        graph: GraphRepository,
+        *,
+        graph_timeout_seconds: float = GRAPH_READ_TIMEOUT_SECONDS,
+    ) -> None:
         self._systems = SystemRepository(database)
         self._snapshots = SnapshotRepository(database)
         self._artifacts = ArtifactRepository(database)
         self._stitch = StitchRepository(database)
         self._graph = graph
+        # How long `endpoint_detail` waits on the outbound join before it
+        # answers without it (review #6).
+        self._graph_timeout_seconds = graph_timeout_seconds
 
     async def list_systems(self) -> list[dict[str, Any]]:
         return [system.model_dump(mode="json") for system in await self._systems.list_all()]
@@ -83,12 +411,46 @@ class WadiMcpService:
         reads a tree without implementing resolution. Pass False to get the
         shared form plus `type_defs`, which is far smaller when a shape names
         the same type repeatedly and is what a large entity model needs.
+
+        The result adds keys to the endpoint's own fields: `outbound` and
+        `stitched`, joined the way the workspace's `/detail` joins them (C5),
+        and `entity_facts`. Without the edges a forwarding endpoint reads as
+        one that does nothing: its entity summary is `[]` because the data
+        lives behind the service it calls (Q26).
+
+        Two notes say what an answer is not. `entity_facts_note` beside an
+        empty summary whose flow stops at calls wadi could not open (review
+        #5). `outbound_note`, with `outbound: null`, when the stitched graph
+        cannot be read: the contract is this tool's reason to exist
+        (§5.2.16), so a graph failure costs the edges, never the answer
+        (review #6). The flow's remote-call ids and unbound callees come from
+        a projection, not the assembled ICFG (§5.2.15). A flow graph stored in
+        parts that are not all there costs the same, the edges and the
+        flow-stops note, and both notes say so (§5.2.17).
         """
-        endpoint = await self._artifacts.get_endpoint(snapshot_id, endpoint_id)
+        endpoint, marks = await asyncio.gather(
+            self._artifacts.get_endpoint(snapshot_id, endpoint_id),
+            self._flow_marks(snapshot_id, endpoint_id),
+        )
         if endpoint is None:
             raise NotFoundError(
                 f"endpoint {endpoint_id!r} not found in snapshot {snapshot_id!r}; "
                 "use list_endpoints to find endpoint ids"
+            )
+        if isinstance(marks, _FlowUnreadable):
+            outbound = _outbound_without_flow(
+                marks, stitched=await self._stitch.coverage_report_exists(snapshot_id)
+            )
+        else:
+            outbound = _outbound_facts(
+                await endpoint_outbound_or_unavailable(
+                    self._stitch,
+                    self._graph,
+                    snapshot_id=snapshot_id,
+                    service_id=endpoint.service_id,
+                    remote_call_ids=marks.remote_call_ids if marks is not None else set[str](),
+                    timeout_seconds=self._graph_timeout_seconds,
+                )
             )
         if resolve_shapes and endpoint.type_defs:
             endpoint = endpoint.model_copy(
@@ -108,7 +470,97 @@ class WadiMcpService:
                     "type_defs": {},
                 }
             )
-        return endpoint.model_dump(mode="json")
+        return {
+            **endpoint.model_dump(mode="json"),
+            **outbound,
+            **_entity_facts(endpoint.entity_access, marks),
+        }
+
+    async def _flow_marks(
+        self, snapshot_id: str, endpoint_id: str
+    ) -> FlowMarks | _FlowUnreadable | None:
+        """The flow's marks, or why its stored graph cannot be read whole."""
+        try:
+            return await self._artifacts.endpoint_flow_marks(snapshot_id, endpoint_id)
+        except IncompleteIcfgError as exc:
+            return _FlowUnreadable(reason=str(exc))
+
+    async def entity_usage(
+        self, snapshot_id: str, entity: str | None = None, service_id: str | None = None
+    ) -> dict[str, Any]:
+        """Which endpoints may create, read, update or delete each entity (§5.2.17).
+
+        The view is folded by the same function as the orchestrator's
+        `/entities` route (R1-22), then narrowed: `service_id` scopes its
+        inputs, so `analyzed` describes that service, and `entity` keeps the
+        rows it names together with the services they belong to.
+
+        A snapshot written before entity facts answers `analyzed: false` and a
+        `note` saying so, whatever entity is asked about, because nothing was
+        examined. It never answers that no endpoint touches the entity, and an
+        entity that only an unexamined service could hold is answered with
+        those services rather than "not found" (review C3).
+
+        Under each operation an endpoint's `call_sites` counts its sites that
+        perform that operation on that entity (review C1); a summary written
+        before 1.27.0 has no such count, and the entry says so in words.
+        """
+        if await self._snapshots.get(snapshot_id) is None:
+            raise NotFoundError(f"snapshot {snapshot_id!r} not found; use list_snapshots first")
+        if (
+            service_id is not None
+            and await self._artifacts.get_service_boundary(snapshot_id, service_id) is None
+        ):
+            raise NotFoundError(
+                f"service {service_id!r} not found in snapshot {snapshot_id!r}; "
+                "use list_services first"
+            )
+        view = await entity_usage_view(self._artifacts, snapshot_id, service_id=service_id)
+        unexamined: list[EntityUsageService] = []
+        if entity is not None and view.analyzed:
+            unexamined = [s for s in view.services if s.status in _UNEXAMINED]
+            try:
+                rows = _select_entity(view.entities, entity)
+            except NotFoundError:
+                if not unexamined:
+                    raise
+                return self._not_among_the_examined(view, entity, unexamined)
+            owners = {row.service_id for row in rows}
+            view = view.model_copy(
+                update={
+                    "entities": rows,
+                    "services": [s for s in view.services if s.service_id in owners],
+                }
+            )
+        result = view.model_dump(mode="json")
+        _say_unrecorded_counts(result)
+        note = _usage_note(view, unexamined)
+        if note is not None:
+            result["note"] = note
+        return result
+
+    @staticmethod
+    def _not_among_the_examined(
+        view: EntityUsageView, entity: str, unexamined: list[EntityUsageService]
+    ) -> dict[str, Any]:
+        """An entity no examined service has, in a snapshot with services nobody examined.
+
+        "No entity is declared or touched here" would be a claim about code
+        that was never read (review C3): a failed service's entities, or a
+        predating one's, are exactly what is missing from the view. So the
+        answer is the services it could be in, with nothing examined about
+        them, which is what `analyzed: false` says.
+        """
+        answer = view.model_copy(update={"analyzed": False, "entities": [], "services": unexamined})
+        result = answer.model_dump(mode="json")
+        result["note"] = " ".join(
+            [
+                f"{entity!r} is not an entity of any service that was examined, and the "
+                "services listed here were not examined, so it may be one of theirs.",
+                *_status_notes(unexamined),
+            ]
+        )
+        return result
 
     async def coverage_report(self, snapshot_id: str) -> dict[str, Any]:
         if await self._snapshots.get(snapshot_id) is None:
@@ -138,19 +590,30 @@ class WadiMcpService:
         method_id: str | None = None,
         cross_service: bool = False,
     ) -> dict[str, Any]:
-        icfg = await self._load_icfg(snapshot_id, endpoint_id)
+        icfg, summary = await asyncio.gather(
+            self._load_icfg(snapshot_id, endpoint_id),
+            self._artifacts.get_endpoint_entity_access(snapshot_id, endpoint_id),
+        )
+        # §5.2.17: empty `entity_access_sites` on every node reads the same on
+        # a graph that predates the phase and on an endpoint that makes no
+        # repository call. Only the endpoint's summary tells them apart, so
+        # both levels say which (R1-6), and where an empty flow stopped, as
+        # `endpoint_detail` does (review #5).
+        facts = _entity_facts(
+            summary.entity_access if summary is not None else None, _marks_of(icfg)
+        )
         if detail == "methods":
             rollup = method_rollup(icfg)
             if cross_service:
                 await self._annotate_cross_service(snapshot_id, icfg, rollup)
-            return rollup
+            return rollup | facts
         if method_id is None:
             raise ValueError(
                 "detail='statements' requires method_id — statement-level output is a "
                 "method-scoped drill-down; call with detail='methods' first and pick a method"
             )
         try:
-            return statement_detail(icfg, method_id)
+            return statement_detail(icfg, method_id) | facts
         except KeyError as exc:
             raise NotFoundError(str(exc)) from exc
 

@@ -670,32 +670,17 @@ class SpringHttpClientSinkPass(cpg: Cpg) extends CpgPass(cpg) {
   }
 }
 
-/** Tags spring-data repository call sites: `sink=db`. */
+/** Tags spring-data repository call sites: `sink=db`, by the one rule in
+  * `SpringDataRepositories` the export binds entities with.
+  */
 class SpringDataSinkPass(cpg: Cpg) extends CpgPass(cpg) {
 
-  private val RepositoryMarkers = List(
-    "org.springframework.data.repository",
-    "org.springframework.data.mongodb.repository",
-    "org.springframework.data.jpa.repository",
-    "MongoRepository",
-    "CrudRepository",
-    "JpaRepository",
-    "PagingAndSortingRepository"
-  )
-
   override def run(builder: DiffGraphBuilder): Unit = {
-    val repositoryTypes: Set[String] =
-      cpg.typeDecl
-        .filter(td => td.inheritsFromTypeFullName.exists(parent => RepositoryMarkers.exists(parent.contains)))
-        .fullName
-        .toSet
-
-    if (repositoryTypes.isEmpty) return
-
+    val index = new SpringDataRepositories.Index(cpg)
+    // No repository type and no Spring Data type named anywhere: no call to tag.
+    if (index.repositoryTypes.isEmpty && cpg.typeDecl.fullNameExact(SpringDataRepositories.Markers.toSeq*).isEmpty) return
     cpg.call.l.foreach { call =>
-      val declaring = call.methodFullName.split(':').head
-      val owner     = declaring.substring(0, math.max(declaring.lastIndexOf('.'), 0))
-      if (repositoryTypes.contains(owner)) {
+      if (index.isRepositoryCall(call)) {
         Iterator(call).newTagNodePair("sink", "db").store()(using builder)
       }
     }
