@@ -1,7 +1,7 @@
 // Client-side method-level roll-up of an ICFG (mirrors the MCP server's §8
 // progressive-disclosure view): which methods run, what each touches.
 
-import type { Icfg } from "@/lib/generated/icfg.schema"
+import type { Icfg, SinkKind } from "@/lib/generated/icfg.schema"
 
 export interface MethodRollup {
   id: string
@@ -65,8 +65,15 @@ export function rollupMethods(icfg: Icfg): MethodRollup[] {
       entry.constructCounts[node.construct_kind] =
         (entry.constructCounts[node.construct_kind] ?? 0) + 1
     }
-    if (node.sink && !entry.sinks.includes(node.sink)) {
-      entry.sinks.push(node.sink)
+    // A statement can make sink calls of several kinds (§5.2.17, "Found by
+    // the pre-landing review"): `node.sink` names only its primary call, so
+    // the remote calls and the repository sites the node carries count too.
+    const kinds: SinkKind[] = []
+    if (node.sink) kinds.push(node.sink)
+    if (node.remote_call_ids?.length) kinds.push("http-client")
+    if (node.entity_access_sites?.length) kinds.push("db")
+    for (const kind of kinds) {
+      if (!entry.sinks.includes(kind)) entry.sinks.push(kind)
     }
   }
 
