@@ -16,7 +16,9 @@ from wadi_contracts import (
     EntityAccessBasis,
     EntityDeclaredBy,
     EntityOperation,
+    HttpMethod,
     IcfgNode,
+    SinkKind,
     data_model_id,
 )
 from wadi_joern_client.export import (
@@ -37,6 +39,7 @@ from wadi_joern_client.export import (
     RepositoryKind,
     SaveArgumentOrigin,
     ServiceExport,
+    SinkValueConfidence,
 )
 from wadi_worker.assembler import AssembledArtifacts, Assembler
 from wadi_worker.entity_access import RULES_VERSION, SHIPPED_GATE_FLAGS, export_rules_version
@@ -682,3 +685,158 @@ class TestPredatingExport:
         assert before.remote_calls == after.remote_calls
         assert before.mq_interactions == after.mq_interactions
         assert before.cfg_anomalies == after.cfg_anomalies
+
+
+# --- one statement, two sink kinds (pre-landing review #1, #2) -----------------
+
+# cfg node ids in SERVICE
+HTTP_WRAPS_DB = 205
+DB_WRAPS_HTTP = 206
+MQ_WRAPS_DB = 207
+ORDERS_URL = "http://ts-order-service:12346/api/v1/orders"
+
+
+def _http(node_id: int, call_id: int, url: str, verb: str) -> ExportSink:
+    return ExportSink(
+        node_id=node_id,
+        call_id=call_id,
+        method_id=SERVICE,
+        kind="http-client",
+        value=url,
+        value_confidence=SinkValueConfidence.HIGH,
+        http_verb=verb,
+        mechanism="resttemplate",
+    )
+
+
+def mixed_export() -> ServiceExport:
+    """`crud_export` plus three statements that each make two sink calls.
+
+    Since the pre-landing review (§5.2.17) the export writes a row for every
+    sink call a statement owns, of every kind, the node's primary call first.
+    """
+    base = crud_export()
+    service_cfg = next(cfg for cfg in base.cfgs if cfg.method_id == SERVICE)
+    statements = [
+        _statement(
+            HTTP_WRAPS_DB,
+            "restTemplate.postForObject(URL, petRepository.findById(id).get(), String.class);",
+            25,
+        ),
+        _statement(
+            DB_WRAPS_HTTP, "petRepository.save(restTemplate.getForObject(URL + id, Pet.class));", 26
+        ),
+        _statement(MQ_WRAPS_DB, 'kafka.send("pets", petRepository.findById(id).get());', 27),
+    ]
+    cfgs = [
+        cfg.model_copy(update={"nodes": [*cfg.nodes, *statements]}) if cfg is service_cfg else cfg
+        for cfg in base.cfgs
+    ]
+    sinks = [
+        *base.sinks,
+        _http(HTTP_WRAPS_DB, 3206, ORDERS_URL, "POST"),
+        _sink(HTTP_WRAPS_DB, 3207, SERVICE, _db(PET_REPO, "findById", PET)),
+        _sink(
+            DB_WRAPS_HTTP,
+            3208,
+            SERVICE,
+            _db(PET_REPO, "save", PET, save=_save_facts(SaveArgumentOrigin.OTHER)),
+        ),
+        _http(DB_WRAPS_HTTP, 3209, f"{ORDERS_URL}/{{?}}", "GET"),
+        ExportSink(
+            node_id=MQ_WRAPS_DB,
+            call_id=3210,
+            method_id=SERVICE,
+            kind="mq:kafka",
+            value="pets",
+            value_confidence=SinkValueConfidence.EXACT,
+        ),
+        _sink(MQ_WRAPS_DB, 3211, SERVICE, _db(PET_REPO, "findById", PET)),
+    ]
+    return base.model_copy(update={"cfgs": cfgs, "sinks": sinks})
+
+
+@pytest.fixture
+def mixed() -> AssembledArtifacts:
+    return Assembler(snapshot_id=SNAP, service_id=SVC).assemble(mixed_export())
+
+
+class TestMixedSinkStatements:
+    """A node's rows are read by kind: remote-call ids come only from
+    `http-client` rows, MQ ids only from `mq:` rows, sites only from `db`
+    rows (§5.2.17, "Every sink call a statement owns gets its row")."""
+
+    def test_every_remote_call_id_on_a_node_names_a_remote_call(
+        self, mixed: AssembledArtifacts
+    ) -> None:
+        # Pre-landing review #1: the db row beside an HTTP row was read as a
+        # second candidate URL, `<undetermined>`, an outbound call with no
+        # RemoteCall behind it.
+        published = {call.id for call in mixed.remote_calls}
+        on_nodes = {
+            rc_id for icfg in mixed.icfgs for node in icfg.nodes for rc_id in node.remote_call_ids
+        }
+
+        assert on_nodes - published == set()
+        assert on_nodes == published
+
+    def test_an_http_call_wrapping_a_repository_call_is_one_remote_call_and_one_site(
+        self, mixed: AssembledArtifacts
+    ) -> None:
+        node = _node(mixed, SERVICE, HTTP_WRAPS_DB)
+        (call,) = [rc for rc in mixed.remote_calls if rc.id in node.remote_call_ids]
+
+        assert node.sink is SinkKind.HTTP_CLIENT  # the primary call's kind
+        assert len(node.remote_call_ids) == 1
+        assert (call.http_verb, call.url) == (HttpMethod.POST, ORDERS_URL)
+        assert [(s.repository, s.method_name) for s in node.entity_access_sites] == [
+            (PET_REPO, "findById")
+        ]
+
+    def test_an_http_call_inside_a_repository_call_is_still_a_remote_call(
+        self, mixed: AssembledArtifacts
+    ) -> None:
+        # Pre-landing review #2: the repository call is the primary call, and
+        # the HTTP call it saves is still an outbound call on the map.
+        node = _node(mixed, SERVICE, DB_WRAPS_HTTP)
+        (call,) = [rc for rc in mixed.remote_calls if rc.id in node.remote_call_ids]
+
+        assert node.sink is SinkKind.DB  # the primary call's kind
+        assert (call.http_verb, call.url) == (HttpMethod.GET, f"{ORDERS_URL}/{{?}}")
+        assert [(s.repository, s.method_name) for s in node.entity_access_sites] == [
+            (PET_REPO, "save")
+        ]
+
+    def test_an_mq_id_comes_from_the_mq_row_and_names_an_interaction(
+        self, mixed: AssembledArtifacts
+    ) -> None:
+        node = _node(mixed, SERVICE, MQ_WRAPS_DB)
+        (interaction,) = mixed.mq_interactions
+
+        assert node.mq_interaction_id == interaction.id
+        assert interaction.topic == "pets"
+        assert node.remote_call_ids == []
+        assert [s.method_name for s in node.entity_access_sites] == ["findById"]
+
+    def test_a_db_row_before_an_mq_row_still_yields_the_mq_id(self) -> None:
+        # Row order decides only the node's kind, never which rows are read.
+        export = mixed_export()
+        mq_rows = [s for s in export.sinks if s.node_id == MQ_WRAPS_DB]
+        others = [s for s in export.sinks if s.node_id != MQ_WRAPS_DB]
+        reordered = export.model_copy(update={"sinks": [*others, *reversed(mq_rows)]})
+
+        artifacts = Assembler(snapshot_id=SNAP, service_id=SVC).assemble(reordered)
+
+        node = _node(artifacts, SERVICE, MQ_WRAPS_DB)
+        assert node.sink is SinkKind.DB
+        assert node.mq_interaction_id == artifacts.mq_interactions[0].id
+
+    def test_the_accounting_counts_only_the_repository_calls(
+        self, mixed: AssembledArtifacts
+    ) -> None:
+        accounting = mixed.entity_access_accounting
+
+        assert accounting is not None
+        # crud_export's six, plus the three repository calls above; the two
+        # HTTP calls and the publish are not repository calls.
+        assert accounting.call_sites == 9

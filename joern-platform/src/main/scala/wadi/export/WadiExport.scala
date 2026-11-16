@@ -576,16 +576,19 @@ object WadiExport {
           if (sinkKind == "db") row("db") = entityFacts.dbObj(sinkCall)
           row
         }
+      // The primary call's rows first: the worker takes the node's kind from
+      // them.
       primarySink.foreach { case (sinkKind, sinkCall) => emit(sinkKind, sinkCall) }
-      // R1-2 (§5.2.17): the unit of entity accounting is the repository call
-      // site, and `repo.save(repo.findById(id).get())` is two of them in one
-      // statement. The node keeps ONE primary call; every other db call the
-      // statement owns still gets its row, keyed by its own call_id. Other
-      // sink kinds keep their one-per-statement contract.
+      // R1-2 and the pre-landing review (§5.2.17): the node keeps ONE primary
+      // call, and every other sink call the statement owns still gets its
+      // rows, of its own kind and keyed by its own call_id. With one row per
+      // statement for the other kinds, a statement making two kinds of sink
+      // call lost one. In `repo.save(restTemplate.getForObject(...))` the
+      // repository call is primary, and the HTTP call had no row and so no
+      // RemoteCall.
       ownedCalls(statement, enclosing)
-        .filter(_.tag.nameExact("sink").valueExact("db").nonEmpty)
         .filterNot(call => primarySink.exists(_._2.id == call.id))
-        .foreach(call => emit("db", call))
+        .foreach(call => sinkKindOf(call).foreach(sinkKind => emit(sinkKind, call)))
       val obj = ujson.Obj(
         "id"       -> num(statement.id),
         "kind"     -> kind,
@@ -1651,6 +1654,13 @@ object WadiExport {
       .l
       .sortBy(_.id)
 
+  /** The registered `sink=` kind a pack tagged the call with, if any. One
+    * reading for the primary call and every other call a statement owns, so
+    * the two can never disagree on a call's kind.
+    */
+  private def sinkKindOf(call: Call): Option[String] =
+    call.tag.nameExact("sink").value.headOption
+
   /** The most interesting real (non-operator) call the statement itself owns
     * (nearest enclosing statement is this one — container bodies never
     * double-claim their statements' calls).
@@ -1675,7 +1685,7 @@ object WadiExport {
         .find(_.body.astChildren.nonEmpty)
         .orElse(internalCallees.headOption)
       val viaDi = call.tag.nameExact("wadi-di").nonEmpty
-      val sink  = call.tag.nameExact("sink").value.headOption.map(kind => (kind, call))
+      val sink  = sinkKindOf(call).map(kind => (kind, call))
       val calleeId = concrete.map(_.id).filter(exportedMethodIds.contains)
       CallInfo(
         calleeFullName = concrete.map(_.fullName).getOrElse(call.methodFullName),

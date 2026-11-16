@@ -852,18 +852,24 @@ CRUD_MATRIX_SITES_PER_FILE = {
     "service/GenericStore.java": 1,
     # `R repository` where `R extends JpaRepository<Order, String>`.
     "service/BoundedStore.java": 1,
+    # The pre-landing review's mixed statements: `findById` inside the HTTP
+    # call's arguments at 29, and the `save` of an HTTP call's result at 35.
+    # `restTemplate` is no repository, so each line is one site.
+    "web/MixedSinkController.java": 2,
 }
 
 
-#: The oracle's operation reading of the same 84 sites, counted by hand from
+#: The oracle's operation reading of the same 86 sites, counted by hand from
 #: each call's name and its repository declaration (review D6).
 CRUD_MATRIX_OPERATIONS = {
     # 29, plus the hardening shapes: MarkerTypedOrders `count` and `existsById`,
     # GenericStore and BoundedStore `findAll`, Hardening 93 99 111 141
-    # (`findTagged` reads by its name: the oracle matches declarations by name).
-    OracleOperation.READ: 37,
-    # Every save-family call, the default method's receiverless save included.
-    OracleOperation.CREATE_OR_UPDATE: 17,
+    # (`findTagged` reads by its name: the oracle matches declarations by name),
+    # and MixedSinkController 29.
+    OracleOperation.READ: 38,
+    # Every save-family call, the default method's receiverless save included,
+    # and MixedSinkController 35.
+    OracleOperation.CREATE_OR_UPDATE: 18,
     # 47 59 82 83 84 of InheritedAndDerived, 128 of SaveController, and the
     # soft-deleted `Coupon` at Hardening 159 (the oracle does not read
     # `@SQLDelete`; wadi does, so this is an operation the two may differ on).
@@ -884,10 +890,11 @@ CRUD_MATRIX_OPERATIONS = {
     OracleOperation.UNKNOWN: 7,
 }
 
-#: The entity of each of the 84 sites, from the repositories' type arguments.
+#: The entity of each of the 86 sites, from the repositories' type arguments.
 CRUD_MATRIX_ENTITIES = {
-    # 54, plus MarkerTypedOrders 2, BoundedStore 1, Hardening 123 135 141 147.
-    "Order": 61,
+    # 54, plus MarkerTypedOrders 2, BoundedStore 1, Hardening 123 135 141 147,
+    # and MixedSinkController 29 and 35.
+    "Order": 63,
     # ShapeController 60 61 (findAllByIdIn, declared by BaseRepository<E>) and
     # QueryController 90.
     "Issue": 3,
@@ -947,24 +954,24 @@ class TestCommandLine:
         written = json.loads(out.read_text())
         assert load_sites(out) == scan(CRUD_MATRIX).sites
         assert written["totals"] == {
-            "sites": 84,
+            "sites": 86,
             "in_lambda": 1,
             "method_references": 0,
-            "by_module": {".": 84},
+            "by_module": {".": 86},
             "entity_unbound": 2,
             "by_operation": {
                 "create": 1,
-                "create-or-update": 17,
+                "create-or-update": 18,
                 "delete": 7,
                 "none": 1,
                 "query": 14,
-                "read": 37,
+                "read": 38,
                 "unknown": 7,
             },
         }
         printed = capsys.readouterr().out
         assert "src/main/java/com/acme/crud/web/SaveController.java:144" in printed
-        assert "sites: 84" in printed
+        assert "sites: 86" in printed
 
     def test_a_run_stored_before_entity_and_operation_loads_with_neither(
         self, tmp_path: Path

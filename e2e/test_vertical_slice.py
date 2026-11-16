@@ -150,6 +150,8 @@ ORDER_SAVE_ROUTES = [
     ("POST", "/crud/inherited-method-table"),
     ("PUT", "/crud/inherited-save-read-origin"),
     ("PUT", "/crud/repository-default-method"),
+    # Golden 53 saves what an HTTP call returned (pre-landing review #2).
+    ("POST", "/crud/repository-wraps-http"),
     ("POST", "/crud/save-constructed-no-lookup"),
     ("POST", "/crud/save-guard-early-return"),
     ("PUT", "/crud/save-guard-found-arm"),
@@ -349,8 +351,10 @@ class TestVerticalSlice:
         accounting = service["entity_access_accounting"]
         assert accounting is not None
         assert {key: accounting[key] for key in ACCOUNTING_COUNTS} == {
-            "call_sites": 84,
-            "in_endpoint_flow": 83,
+            # Goldens 52 and 53 add one repository call each; their HTTP calls
+            # are remote calls, never sites (pre-landing review #1, #2).
+            "call_sites": 86,
+            "in_endpoint_flow": 85,
             "in_no_endpoint_flow": 1,  # the lambda save (R1-1)
             "flush": 1,
             "implemented_in_project": 2,
@@ -359,14 +363,17 @@ class TestVerticalSlice:
             # M6 leaves the undeclared named query and the Mongo JSON query
             # unknown; the rigor review's six verbs nothing read decides join them.
             "unknown_operation": 8,
-            # Every save; golden 34's insert is a create by its name now.
-            "create_or_update": 17,
-            "bound": 54,
+            # Every save, golden 53's included; golden 34's insert is a create
+            # by its name now.
+            "create_or_update": 18,
+            # Golden 52's findById among them.
+            "bound": 55,
         }
 
         # 2. The list route: every row was analyzed ([] or rows, never null).
         rows = (await http.get(f"{api}/services/{service_id}/endpoints")).json()
-        assert len(rows) == 51  # the plan's 36 and the rigor review's 15
+        # The plan's 36, the rigor review's 15 and the pre-landing review's 2.
+        assert len(rows) == 53
         assert [row["full_uri"] for row in rows if row["entity_access"] is None] == []
         by_route = {(row["http_method"], row["full_uri"]): row for row in rows}
 
@@ -429,6 +436,18 @@ class TestVerticalSlice:
         assert view["endpoint"]["entity_access"] == []
         assert view["stitched"] is True
         assert len(view["outbound"]) == 1
+        # Pre-landing review #1 and #2: a statement that makes a repository
+        # call and an HTTP call, nested each way, puts exactly its one call on
+        # the map, with no phantom beside it and none lost, whichever of the
+        # two is the statement's primary call.
+        orders = "http://ts-order-service:12346/api/v1/orders"
+        for route, verb, url in (
+            (("POST", "/crud/http-wraps-repository"), "POST", orders),
+            (("POST", "/crud/repository-wraps-http"), "GET", f"{orders}/{{?}}"),
+        ):
+            mixed = (await http.get(f"{api}/endpoints/{by_route[route]['id']}/detail")).json()
+            assert [row["call_sites"] for row in mixed["endpoint"]["entity_access"]] == [1]
+            assert [(edge["http_verb"], edge["url"]) for edge in mixed["outbound"]] == [(verb, url)]
 
         # 5. The coverage report's entity section sums the boundary accounting.
         section = (await http.get(f"{api}/coverage")).json()["entity_coverage"]

@@ -226,7 +226,9 @@ class Assembler:
         methods = {m.id: m for m in export.methods}
         cfgs = {c.method_id: c for c in export.cfgs}
         # Since export 2.0.0 a call site emits one sink row per candidate value
-        # (§5.2 over-approximation) — rows sharing a node are one site.
+        # (§5.2 over-approximation), and a statement emits rows for every sink
+        # call it owns (§5.2.17): rows sharing a node are its call sites, told
+        # apart by `call_id` and read by `kind`.
         sinks_by_node: dict[int, list[ExportSink]] = {}
         for sink in export.sinks:
             sinks_by_node.setdefault(sink.node_id, []).append(sink)
@@ -483,25 +485,33 @@ class Assembler:
             # CALL node — `return restTemplate.getForObject(...)` coarsens to
             # RETURN, `if (client.get(...) != null)` to BRANCH. Gating on CALL
             # would silently drop those markers from the ICFG (P10).
+            #
+            # A statement can own sink calls of several kinds, and since the
+            # pre-landing review the export writes a row for each (§5.2.17).
+            # So the rows are read by kind: `restTemplate.postForObject(url,
+            # repo.findById(id).get(), R.class)` reading its db row as a second
+            # URL candidate put an `<undetermined>` remote-call id on the node
+            # with no RemoteCall behind it. The node's own kind is its primary
+            # call's, whose rows the export writes first.
             if site_sinks:
                 sink_kind = self._sink_kind(site_sinks[0].kind)
-                if sink_kind is SinkKind.HTTP_CLIENT:
-                    for sink in site_sinks:
-                        candidate_id = remote_call_id(
-                            self._service_id,
-                            method.filename,
-                            cfg_node.line,
-                            sink.value or "<undetermined>",
-                        )
-                        if candidate_id not in remote_ids:
-                            remote_ids.append(candidate_id)
-                elif sink_kind is SinkKind.MQ:
+            for sink in site_sinks:
+                if sink.kind == "http-client":
+                    candidate_id = remote_call_id(
+                        self._service_id,
+                        method.filename,
+                        cfg_node.line,
+                        sink.value or "<undetermined>",
+                    )
+                    if candidate_id not in remote_ids:
+                        remote_ids.append(candidate_id)
+                elif sink.kind.startswith("mq:") and mq_id is None:
                     mq_id = mq_interaction_id(
                         self._service_id,
                         method.filename,
                         cfg_node.line,
                         MqDirection.PUBLISH.value,
-                        site_sinks[0].value or "<undetermined>",
+                        sink.value or "<undetermined>",
                     )
             nodes.append(
                 IcfgNode(

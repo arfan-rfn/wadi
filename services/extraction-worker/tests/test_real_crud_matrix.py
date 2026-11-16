@@ -9,8 +9,10 @@ and a per-service accounting.
 The unit tests in `test_entity_classification.py` and
 `test_assembler_entity_access.py` pin the rules against synthetic rows. This
 pins them against what Joern actually produces from Java source, one golden
-per endpoint: the plan's 36 (R1-18) and the rigor review's 15 hardening shapes
-(37-51), so a golden that drifts names itself in the test id.
+per endpoint: the plan's 36 (R1-18), the rigor review's 15 hardening shapes
+(37-51) and the pre-landing review's two statements that make a repository
+call and an HTTP call (52, 53), so a golden that drifts names itself in the
+test id.
 
 Both gate states run (rule 5): the shipped table, where every save publishes
 `create-or-update` and keeps its candidate as evidence (R1-11), and all four
@@ -35,7 +37,10 @@ from wadi_contracts import (
     EntityAccessBasis,
     EntityDeclaredBy,
     EntityOperation,
+    HttpMethod,
     Icfg,
+    IcfgNode,
+    SinkKind,
 )
 from wadi_joern_client.export import ExportSink, ServiceExport
 from wadi_worker.assembler import AssembledArtifacts, Assembler
@@ -652,6 +657,26 @@ GOLDENS: tuple[Golden, ...] = (
         (named(UNK, "deleteById", COUPON, COUPON_REPO),),
         (Row(COUPON, (UNK,), 1),),
     ),
+    # --- the pre-landing review's mixed statements (§5.2.17) -------------------
+    # One statement, a repository call and an HTTP call nested each way. Each
+    # call is a site or a remote call by its own row's kind, whichever of the
+    # two is the node's primary call (TestGoldenShapes pins the remote calls).
+    Golden(
+        52,
+        "http-wraps-repository",
+        "POST",
+        # The read is the HTTP call's argument (pre-landing review #1).
+        (named(R, "findById"),),
+        (Row(ORDER, (R,), 1),),
+    ),
+    Golden(
+        53,
+        "repository-wraps-http",
+        "POST",
+        # What an HTTP call returned is `other`, so no candidate (review #2).
+        (saved(None),),
+        (Row(ORDER, (CU,), 1),),
+    ),
 )
 
 GOLDEN_IDS = [golden.id for golden in GOLDENS]
@@ -796,7 +821,7 @@ class TestGoldenFlagsOn:
             assert actual == _multiset(golden.sites), golden.id
         flags = {(f.enabled, f.scored_rules_version) for f in stale.accounting.gate_flags}
         assert flags == {(True, STALE_RULES_VERSION)}
-        assert stale.accounting.create_or_update == 17
+        assert stale.accounting.create_or_update == 18
 
 
 # --- goldens whose claim is not only a site list -------------------------------
@@ -835,6 +860,42 @@ class TestGoldenShapes:
         route = ("PUT", "/crud/forwarding-endpoint")
         assert shipped.endpoint(route).entity_access == []
         assert any(node.remote_call_ids for node in shipped.icfg(route).nodes)
+
+    def test_52_an_http_call_wrapping_a_repository_call_is_one_remote_call(
+        self, shipped: Assembled
+    ) -> None:
+        # Pre-landing review #1: the db row beside the HTTP row is a site, not
+        # a second URL candidate. Read as one, it put an `<undetermined>`
+        # remote-call id on the node with no RemoteCall behind it.
+        node = _sink_node(shipped, ("POST", "/crud/http-wraps-repository"))
+        assert node.sink is SinkKind.HTTP_CLIENT
+        assert _remote_calls_of(shipped, node) == [
+            (HttpMethod.POST, "http://ts-order-service:12346/api/v1/orders")
+        ]
+        assert [site.method_name for site in node.entity_access_sites] == ["findById"]
+
+    def test_53_an_http_call_inside_a_repository_call_is_still_a_remote_call(
+        self, shipped: Assembled
+    ) -> None:
+        # Pre-landing review #2: the save is the primary call, and the HTTP
+        # call whose result it saves is an outbound call all the same.
+        node = _sink_node(shipped, ("POST", "/crud/repository-wraps-http"))
+        assert node.sink is SinkKind.DB
+        assert _remote_calls_of(shipped, node) == [
+            (HttpMethod.GET, "http://ts-order-service:12346/api/v1/orders/{?}")
+        ]
+        assert [site.method_name for site in node.entity_access_sites] == ["save"]
+
+    def test_every_remote_call_id_on_a_node_names_a_remote_call(self, shipped: Assembled) -> None:
+        published = {call.id for call in shipped.artifacts.remote_calls}
+        dangling = {
+            rc_id
+            for icfg in shipped.artifacts.icfgs
+            for node in icfg.nodes
+            for rc_id in node.remote_call_ids
+            if rc_id not in published
+        }
+        assert dangling == set()
 
     def test_29_repository_only_entity_gets_its_own_record(self, shipped: Assembled) -> None:
         # Q1: no @Entity and no @Document, so the repository's type argument
@@ -875,6 +936,18 @@ class TestGoldenShapes:
                 assert row.data_model_id == expected, endpoint.full_uri
 
 
+def _sink_node(assembled: Assembled, route: tuple[str, str]) -> IcfgNode:
+    """The one node of the endpoint's graph that carries a sink."""
+    (node,) = [node for node in assembled.icfg(route).nodes if node.sink is not None]
+    return node
+
+
+def _remote_calls_of(assembled: Assembled, node: IcfgNode) -> list[tuple[HttpMethod | None, str]]:
+    """The node's remote calls as (verb, url); a dangling id fails the lookup."""
+    calls = {call.id: call for call in assembled.artifacts.remote_calls}
+    return [(calls[rc].http_verb, calls[rc].url or "") for rc in node.remote_call_ids]
+
+
 # --- the service's accounting --------------------------------------------------
 
 
@@ -883,9 +956,11 @@ class TestAccounting:
     def test_as_shipped(self, shipped: Assembled) -> None:
         accounting = shipped.accounting
         assert accounting.model_dump(mode="json", exclude={"gate_flags"}) == {
-            "call_sites": 84,
+            # 84, and goldens 52 and 53's repository calls: their HTTP calls
+            # are remote calls, never sites.
+            "call_sites": 86,
             # Partition 1: the lambda save (golden 26) is the one outside.
-            "in_endpoint_flow": 83,
+            "in_endpoint_flow": 85,
             "in_no_endpoint_flow": 1,
             # Partition 2, first match wins.
             "flush": 1,  # golden 35
@@ -896,25 +971,26 @@ class TestAccounting:
             # whose verb nothing read decides: 43, 44, 45, 46, 49, 51.
             "unknown_operation": 8,
             # Every save-family call, the lambda's included; 34's insert is a
-            # create by its name now (review B8), so not among them.
-            "create_or_update": 17,
-            # 44, golden 34's insert, and the nine bound hardening sites: 37 (two),
-            # 39, 40, 41, 42, 47, 48, 50.
-            "bound": 54,
-            # 85 accesses over 83 sites: goldens 9 and 31 name two entities.
+            # create by its name now (review B8), so not among them. Golden
+            # 53's save joins them.
+            "create_or_update": 18,
+            # 44, golden 34's insert, the nine bound hardening sites: 37 (two),
+            # 39, 40, 41, 42, 47, 48, 50, and golden 52's findById.
+            "bound": 55,
+            # 87 accesses over 85 sites: goldens 9 and 31 name two entities.
             "accesses_by_operation": {
                 "create": 1,  # golden 34's insert
-                "read": 49,  # 28 + 7 by name, 11 + 3 by query text
+                "read": 50,  # 28 + 7 + golden 52 by name, 11 + 3 by query text
                 "update": 1,  # golden 8
                 "delete": 7,  # 6 by name, golden 31's Invoice
-                "create-or-update": 17,
+                "create-or-update": 18,  # golden 53 among them
                 # Goldens 32 and 33 (C3), the two unread queries, the six above.
                 "unknown": 10,
             },
             "sites_by_basis": {
-                "method-name": 50,
+                "method-name": 51,  # golden 52's findById among them
                 "query-text": 16,
-                "argument-origin": 15,
+                "argument-origin": 16,  # golden 53's save among them
                 "existence-guard": 2,
             },
             "rules_version": export_rules_version(shipped.export),
@@ -929,15 +1005,15 @@ class TestAccounting:
 
     def test_flags_on(self, flags_on: Assembled) -> None:
         accounting = flags_on.accounting
-        # Five saves have no candidate (goldens 18, 19, 21, 22, 23) and stay
-        # create-or-update; the other twelve publish a single verb.
-        assert (accounting.create_or_update, accounting.bound) == (5, 66)
+        # Six saves have no candidate (goldens 18, 19, 21, 22, 23 and 53) and
+        # stay create-or-update; the other twelve publish a single verb.
+        assert (accounting.create_or_update, accounting.bound) == (6, 67)
         assert accounting.accesses_by_operation == {
             "create": 5,  # goldens 15, 16, 24, 26, and 34's insert by its name
-            "read": 49,
+            "read": 50,
             "update": 9,  # goldens 2, 17, 20, 25, 32 and 34's three saves, and 8's query
             "delete": 7,
-            "create-or-update": 5,
+            "create-or-update": 6,
             "unknown": 10,
         }
         flags = {(f.enabled, f.scored_rules_version) for f in accounting.gate_flags}
@@ -948,7 +1024,7 @@ class TestAccounting:
         # A 2.14.0 db row without `db` would be counted entity_undetermined
         # with no site (T4); the Scala pass must never emit one.
         rows = shipped.db_rows()
-        assert len({row.call_id for row in rows}) == 84
+        assert len({row.call_id for row in rows}) == 86
         assert [row.call_id for row in rows if row.db is None] == []
 
 
@@ -1002,6 +1078,8 @@ SAVE_FACTS: dict[tuple[str, str], tuple[str, bool, str, tuple[str, ...]]] = {
         "none",
         (),
     ),
+    # Golden 53: the saved object is what an HTTP call returned.
+    ("MixedSinkController.repositoryWrapsHttp", "save"): ("other", False, "none", ()),
 }
 """Rule 3's inputs as the Scala pass wrote them (export 2.14.0, A1). When a
 candidate moves, this says whether the fact or the rule did."""
