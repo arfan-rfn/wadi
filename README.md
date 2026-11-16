@@ -52,8 +52,9 @@ wadi mcp install    # prints the config snippet for Claude Code etc.
 ```
 
 Tools: `list_systems` · `list_snapshots` · `list_services` · `list_endpoints` ·
-`endpoint_icfg` (method-level roll-up by default; statement-level drill-down on
-request).
+`endpoint_detail` · `endpoint_icfg` (method-level roll-up by default;
+statement-level drill-down on request) · `coverage_report` · `remote_edges` ·
+`entity_usage`.
 
 ### Web UI
 
@@ -69,11 +70,19 @@ Use `--no-open` to skip the browser, `WADI_UI_PORT` to change the port;
 
 ## What you get, concretely
 
-- **Endpoint inventory** — method, route, params, response type, and a
-  *tri-state* auth field (`required` / `open` / honestly `unknown`) per endpoint.
+- **Endpoint inventory** — method, route, params, request and response shapes,
+  and an auth claim per endpoint that is one of five states: authenticated,
+  public, denied, withheld (a guard wadi could not read might change the
+  answer), or no evidence.
 - **Per-endpoint ICFG** — an interprocedural control-flow graph from the handler
   through DI-resolved implementations down to `sink=db` / `sink=http-client`
   call sites, every node anchored to `file:line` in the exact analyzed commit.
+- **Data access per endpoint** — which entities each endpoint may create, read,
+  update or delete through Spring Data repositories, with the evidence for each
+  claim, and for each entity, which endpoints touch it.
+- **Cross-service stitching** — each outbound HTTP call matched to the
+  endpoint it reaches, with a confidence tier, and a coverage report that
+  counts what was matched and what was not.
 - **Deterministic identity** — service and endpoint IDs are content-derived, so
   they're stable across runs and diffable across snapshots.
 - **Honest unknowns** — what static analysis can't determine is marked as
@@ -83,10 +92,10 @@ Measured on the [TrainTicket](https://github.com/cloudhubs/train-ticket-aitest)
 benchmark (22 services): **365/365 endpoints, exact against manually verified
 ground truth**, ~3 minutes wall-clock on a laptop.
 
-**Current scope (Phase 1):** Java/Spring, single-service flow graphs.
-**Next (Phase 2):** cross-service stitching (remote call ↔ endpoint matching),
-Spring Security auth extraction, the coverage report. Roadmap:
-[`docs/architecture.md`](docs/architecture.md) §11.
+**Current scope (0.9.0):** Java/Spring systems: per-endpoint flow graphs,
+cross-service stitching, the auth enforcement model, response shapes and data
+access per endpoint. **Next (Phase 3):** async flows and security analysis.
+Roadmap: [`docs/architecture.md`](docs/architecture.md) §11.
 
 ## How it works
 

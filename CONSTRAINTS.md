@@ -36,9 +36,12 @@ Every row blocks a merge. Zero means zero: there is no tolerance band on any of 
 | Frontend | ESLint, Prettier, `tsc --noEmit`, `next build`, vitest, in CI's order | `make verify-frontend` | task end for frontend changes, CI |
 | Whole stack | The conformance e2e passes against the real Joern image | `make joern-image && make e2e` | release checkpoint, CI |
 
-The cross-language golden tests (`test_real_export*.py`, `test_real_auth_matrix.py`) skip
-until `sbt test` has written their exports. A Scala or export change is not verified until
-they have run against a fresh `sbt test`, not skipped.
+The cross-language golden tests (`test_real_export*.py`, `test_real_auth_matrix.py`,
+`test_real_crud_matrix.py`, and `libs/wadi-testing/tests/test_reconcile_repository_sites.py`)
+skip until `sbt test` has written their exports. A Scala or export change is not verified until
+they have run against a fresh `sbt test`, not skipped. In CI that skip is a failure: the step
+"Real-export goldens ran, none skipped for a missing export" in `ci.yml` reruns every test file
+whose skip reason says "export not present" and fails the Python job on any skip.
 
 ## Measured, not yet enforced
 
