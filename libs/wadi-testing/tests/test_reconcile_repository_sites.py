@@ -492,10 +492,13 @@ class TestCrudMatrixReconciles:
         # golden-32 default method are sites on both sides, and the golden-26
         # lambda save is in the export (in no endpoint flow, A1) and in source.
         # The rigor review's 16 hardening sites are on both sides too, the
-        # type-variable receiver in BoundedStore included (review A2).
+        # type-variable receiver in BoundedStore included (review A2), and so
+        # are the pre-landing review's two, counted by hand in
+        # MixedSinkController (29 and 35): a repository call nested in an HTTP
+        # call's arguments, and one whose argument is an HTTP call.
         assert result.oracle_only == []
         assert result.wadi_only == []
-        assert len(result.agree) == 84
+        assert len(result.agree) == 86
         # Review D6: every agreed site also names the same entity, except the
         # two whose type argument is a class's type variable (AbstractArchiver's
         # `BaseRepository<E>`, GenericStore's `JpaRepository<E, String>`), which
@@ -504,12 +507,12 @@ class TestCrudMatrixReconciles:
         # own operation counts are pinned in `test_repository_oracle.py`.
         totals = result.totals()
         entity_keys = ("agree_entity", "entity_disagree", "entity_withheld", "entity_not_read")
-        assert [totals[key] for key in entity_keys] == [82, 0, 2, 0]
+        assert [totals[key] for key in entity_keys] == [84, 0, 2, 0]
         assert [
             (c.agreement.oracle.file.rsplit("/", 1)[-1], c.agreement.oracle.method)
             for c in result.entity_withheld
         ] == [("AbstractArchiver.java", "count"), ("GenericStore.java", "findAll")]
-        assert totals["operation_unpublished"] == 84
+        assert totals["operation_unpublished"] == 86
 
 
 class TestCommandLine:

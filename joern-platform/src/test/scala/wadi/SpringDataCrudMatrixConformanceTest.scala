@@ -541,6 +541,71 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     }
   }
 
+  /** One statement that makes a repository call and an HTTP call, nested each
+    * way (§5.2.17, "Found by the pre-landing review" #1 and #2), one handler
+    * each in `MixedSinkController`. Goldens 52 and 53 in the Python numbering.
+    */
+  private val preLandingGoldens: List[String] = List("http-wraps-repository", "repository-wraps-http")
+
+  private val preLanding: Map[String, List[Db]] = Map(
+    // The read is the HTTP call's argument, and a site of its own.
+    "http-wraps-repository" -> List(order("findById")),
+    // The saved object is what the HTTP call returned. Def-use does not
+    // follow a call's result into the callee, as with golden 23's getter.
+    "repository-wraps-http" -> List(orderSave(Save("other", lookup = false)))
+  )
+
+  preLandingGoldens.foreach { golden =>
+    val expected = preLanding.getOrElse(golden, Nil)
+    test(s"pre-landing $golden: ${expected.size} site(s) with their db raw facts") {
+      preLanding.contains(golden) shouldBe true
+      sitesOf(golden).map(factsOf).map(_.render()).sorted shouldBe expected.map(_.json.render()).sorted
+    }
+  }
+
+  /** Every sink row of the handler's own statements, in export order. */
+  private def handlerSinkRows(golden: String): Seq[ujson.Value] = {
+    val handler = handlerId(golden)
+    exportJson("sinks").arr.toSeq.filter(_("method_id").num.toLong == handler)
+  }
+
+  /** A row as `(kind, what it names)`: the repository method, or verb and URL. */
+  private def described(row: ujson.Value): (String, String) =
+    row("kind").str match {
+      case "db" => ("db", row("db")("method_name").str)
+      case kind => (kind, s"${row("http_verb").str} ${row("value").str}")
+    }
+
+  /** The method name of the call the export chose as the node's primary. */
+  private def primaryCallOf(golden: String, nodeId: Long): String = {
+    val node = cfgsByMethod(handlerId(golden))("nodes").arr.find(_("id").num.toLong == nodeId).get
+    node("call")("callee_full_name").str.split(':').head.split('.').last
+  }
+
+  test("golden 52 http-wraps-repository: the HTTP call is primary and the read inside it keeps its db row (pre-landing #1)") {
+    val rows = handlerSinkRows("http-wraps-repository")
+    // The primary call's rows come first: the worker takes the node's kind
+    // from them, and reads every other row by its own kind.
+    rows.map(described) shouldBe List(
+      ("http-client", "POST http://ts-order-service:12346/api/v1/orders"),
+      ("db", "findById")
+    )
+    rows.map(_("node_id").num.toLong).distinct should have size 1
+    rows.map(_("call_id").num.toLong).distinct should have size 2
+    primaryCallOf("http-wraps-repository", rows.head("node_id").num.toLong) shouldBe "postForObject"
+  }
+
+  test("golden 53 repository-wraps-http: the save is primary and the HTTP call inside it gets its row (pre-landing #2)") {
+    val rows = handlerSinkRows("repository-wraps-http")
+    rows.map(described) shouldBe List(
+      ("db", "save"),
+      ("http-client", "GET http://ts-order-service:12346/api/v1/orders/{?}")
+    )
+    rows.map(_("node_id").num.toLong).distinct should have size 1
+    rows.map(_("call_id").num.toLong).distinct should have size 2
+    primaryCallOf("repository-wraps-http", rows.head("node_id").num.toLong) shouldBe "save"
+  }
+
   /** A site's whole `db` object, `save` included; facts compare order-free. */
   private def factsOf(site: ujson.Value): ujson.Value =
     site.obj.getOrElse("db", fail(s"db sink row without a db object: $site"))
@@ -559,10 +624,12 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
   test("every golden in the plan's list has exactly one handler and one table entry (R1-18)") {
     val served = exportJson("endpoints").arr.map(_("uri").str).filter(_.startsWith("/crud/")).map(_.stripPrefix("/crud/"))
     planGoldens should have size 36
-    // The plan's 36 and the hardening shapes, and nothing else.
-    served.sorted shouldBe (planGoldens ++ hardeningGoldens).sorted
+    // The plan's 36, the hardening shapes and the pre-landing ones, and
+    // nothing else.
+    served.sorted shouldBe (planGoldens ++ hardeningGoldens ++ preLandingGoldens).sorted
     goldens.keySet shouldBe planGoldens.toSet
     hardening.keySet shouldBe hardeningGoldens.toSet
+    preLanding.keySet shouldBe preLandingGoldens.toSet
   }
 
   test("golden 26 save-in-lambda: the lambda's save is a db row outside the endpoint's flow (R1-1)") {
@@ -595,8 +662,9 @@ class SpringDataCrudMatrixConformanceTest extends AnyFunSuite with Matchers with
     val origins    = Set("read", "constructed", "parameter", "mixed", "other")
     val saves = dbRows.filter(row => saveFamily.contains(row("db")("method_name").str))
     // Ten in SaveController (golden 26's lambda included), three in
-    // OrderWriter, one in golden 32's default method, four in golden 34.
-    saves.distinctBy(_("call_id").num.toLong) should have size 18
+    // OrderWriter, one in golden 32's default method, four in golden 34, and
+    // golden 53's save of what an HTTP call returned.
+    saves.distinctBy(_("call_id").num.toLong) should have size 19
     dbRows.foreach { row =>
       val db = row("db")
       db.obj.contains("save") shouldBe true
