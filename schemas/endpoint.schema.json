@@ -50,7 +50,7 @@
           "type": "boolean"
         },
         "detail": {
-          "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'",
+          "description": "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'. For kind 'config' it is the setting's KEY only, never its value (\u00a75.2.18); records written by wadi 0.9.1 or earlier hold 'key=value', and a re-analysis writes a snapshot without them",
           "minLength": 1,
           "title": "Detail",
           "type": "string"

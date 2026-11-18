@@ -475,6 +475,37 @@ services:
         # The override file wins service-wise (compose semantics).
         assert service.config.env["INVENTORY_URL"] == "http://inventory:9999"
 
+    def test_carried_compose_values_lose_their_credentials(self, tmp_path: Path) -> None:
+        # Issue #28: a carried NAME says the entry is routing-shaped, not that
+        # its value is safe. `DATABASE_URL` passes every allowlist rule.
+        repo = self._repo(tmp_path)
+        (repo / "orders.env").write_text("REPORTS_URL=https://reports:hunter2@reports:8443\n")
+        (repo / "docker-compose.yml").write_text(
+            """
+services:
+  orders:
+    build: ./orders
+    env_file: orders.env
+    environment:
+      DATABASE_URL: postgres://shop:hunter2@db:5432/shop
+      SPRING_DATASOURCE_URL: jdbc:mysql://db/shop?user=shop&password=hunter2
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: https://idp.example.test/realms/shop
+      WEBHOOK: https://hooks.example.test/notify?token=hunter2
+      BROKEN_URL: https://shop:hun/ter2@broken:8443
+      INVENTORY_URL: http://inventory:8081
+"""
+        )
+        [service] = discover_services(repo)
+        assert service.config.env == {
+            "DATABASE_URL": "postgres://db:5432/shop",
+            "INVENTORY_URL": "http://inventory:8081",
+            "REPORTS_URL": "https://reports:8443",
+            "WEBHOOK": "https://hooks.example.test/notify?token=",
+        }
+        # Withheld because the credentials could not be separated: counted.
+        # The JDBC URL and the security setting are dropped by rule: not gaps.
+        assert service.config.notes == ["config-value-withheld:BROKEN_URL"]
+
     def test_spring_profiles_active_selects_profile_config(self, tmp_path: Path) -> None:
         repo = self._repo(tmp_path)
         resources = repo / "orders" / "src" / "main" / "resources"

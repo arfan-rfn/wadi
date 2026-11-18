@@ -45,6 +45,7 @@ def endpoints() -> dict[tuple[str, str], Endpoint]:
         service_id="svc_" + "a" * 16,
         config_env=config.env,
         config_structured=config.structured,
+        config_security_keys=config.security_keys,
     ).assemble(export)
     # Keyed by (verb, uri): the fixture puts POST and PUT on the same path
     # on purpose, and collapsing them would silently test only one.

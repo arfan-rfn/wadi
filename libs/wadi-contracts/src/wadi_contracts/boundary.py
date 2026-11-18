@@ -40,7 +40,10 @@ class GatewayRoute(WadiModel):
     path_prefix: str = Field(min_length=1, description="Matched prefix, e.g. '/api/v1/orders/**'")
     target_uri: str = Field(
         min_length=1,
-        description="Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'",
+        description=(
+            "Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'. "
+            "Published without credentials: user-info is removed (§5.2.18)"
+        ),
     )
     strip_prefix: int = Field(default=0, ge=0, description="StripPrefix filter segment count")
     anchor: SourceAnchor | None = Field(
@@ -61,10 +64,15 @@ class NetworkIdentity(WadiModel):
     env: dict[str, str] = Field(
         default_factory=dict[str, str],
         description=(
-            "Network-relevant config keys: flattened application.* allowlist "
-            "(profiles merged, T3) plus compose environment/env_file entries "
-            "in their raw env-var spelling — the stitcher's relaxed-binding "
-            "lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (§5.4.2)"
+            "The config entries the stitcher routes by: flattened application.* "
+            "allowlist (profiles merged, T3) plus compose environment/env_file "
+            "entries in their raw env-var spelling — the stitcher's relaxed-binding "
+            "lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (§5.4.2). "
+            "Values are published without credentials (§5.2.18): user-info is "
+            "removed and secret-bearing query values are blanked; no "
+            "spring.security.* key and no JDBC URL is carried. Boundaries "
+            "written by wadi 0.9.1 or earlier may hold these values as written; "
+            "a re-analysis writes a snapshot without them"
         ),
     )
     config_notes: list[str] = Field(
@@ -77,7 +85,10 @@ class NetworkIdentity(WadiModel):
             "— every profile merged, over-approximation) | "
             "'gateway-filter-unmodelled:<name>' / "
             "'gateway-predicate-unmodelled:<name>' (gateway shape perceived "
-            "but not modelled)"
+            "but not modelled) | 'config-value-withheld:<key>' / "
+            "'gateway-route-target-withheld:<route>' (a routing value whose "
+            "credentials could not be separated from its address, so no part "
+            "of it is published — §5.2.18)"
         ),
     )
     application_name: str | None = Field(

@@ -325,7 +325,15 @@ class AuthEvidence(_ActiveFlagged):
     """
 
     kind: AuthEvidenceKind
-    detail: str = Field(min_length=1, description="e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'")
+    detail: str = Field(
+        min_length=1,
+        description=(
+            "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'. For kind 'config' it is "
+            "the setting's KEY only, never its value (§5.2.18); records written "
+            "by wadi 0.9.1 or earlier hold 'key=value', and a re-analysis writes "
+            "a snapshot without them"
+        ),
+    )
     anchor: SourceAnchor | None = None
     effect: AuthEffect = Field(
         default=AuthEffect.UNKNOWN, description="What this does to a request that reaches it"

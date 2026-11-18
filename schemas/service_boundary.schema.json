@@ -424,7 +424,7 @@
           "type": "integer"
         },
         "target_uri": {
-          "description": "Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'",
+          "description": "Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'. Published without credentials: user-info is removed (\u00a75.2.18)",
           "minLength": 1,
           "title": "Target Uri",
           "type": "string"
@@ -455,7 +455,7 @@
           "title": "Application Name"
         },
         "config_notes": {
-          "description": "Machine-readable notes about config parsing for this service (\u00a75.4.2, T3): 'config-profile-merged:<file>' / 'config-profile-doc-merged:<profiles>' (profile config merged over the base) | 'config-profile-merged-all' (active set unknown \u2014 every profile merged, over-approximation) | 'gateway-filter-unmodelled:<name>' / 'gateway-predicate-unmodelled:<name>' (gateway shape perceived but not modelled)",
+          "description": "Machine-readable notes about config parsing for this service (\u00a75.4.2, T3): 'config-profile-merged:<file>' / 'config-profile-doc-merged:<profiles>' (profile config merged over the base) | 'config-profile-merged-all' (active set unknown \u2014 every profile merged, over-approximation) | 'gateway-filter-unmodelled:<name>' / 'gateway-predicate-unmodelled:<name>' (gateway shape perceived but not modelled) | 'config-value-withheld:<key>' / 'gateway-route-target-withheld:<route>' (a routing value whose credentials could not be separated from its address, so no part of it is published \u2014 \u00a75.2.18)",
           "items": {
             "type": "string"
           },
@@ -474,7 +474,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Network-relevant config keys: flattened application.* allowlist (profiles merged, T3) plus compose environment/env_file entries in their raw env-var spelling \u2014 the stitcher's relaxed-binding lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (\u00a75.4.2)",
+          "description": "The config entries the stitcher routes by: flattened application.* allowlist (profiles merged, T3) plus compose environment/env_file entries in their raw env-var spelling \u2014 the stitcher's relaxed-binding lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (\u00a75.4.2). Values are published without credentials (\u00a75.2.18): user-info is removed and secret-bearing query values are blanked; no spring.security.* key and no JDBC URL is carried. Boundaries written by wadi 0.9.1 or earlier may hold these values as written; a re-analysis writes a snapshot without them",
           "title": "Env",
           "type": "object"
         },

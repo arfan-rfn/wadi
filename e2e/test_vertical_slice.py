@@ -18,6 +18,11 @@ in production) — the compose stack adds process boundaries, not logic.
 (§5.2.17, test plan critical path 1). Export 2.14.0's repository facts, as the
 image's jar writes them, must reach every reader intact: the REST list, detail
 and `/entities` routes, the coverage report, and the MCP tools an agent uses.
+
+`test_config_values_are_not_published` runs the slice over a copy of
+`petstore-system` whose config carries credentials (§5.2.18, issue #28). The
+map must not change, and no reader may return a credential: the export stream,
+the REST routes and the MCP tools are searched as text.
 """
 
 import json
@@ -26,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from e2e_support import REPO_ROOT, make_fixture_repo, requires_joern_image
+from e2e_support import REPO_ROOT, git, make_fixture_repo, requires_joern_image
 from httpx import ASGITransport, AsyncClient
 
 from wadi_config import WadiSettings
@@ -45,6 +50,16 @@ FIXTURE = REPO_ROOT / "joern-platform" / "fixtures" / "spring-petstore-mini"
 EXPECTED_ENDPOINTS = FIXTURE / "expected" / "endpoints.json"
 CRUD_MATRIX = REPO_ROOT / "joern-platform" / "fixtures" / "spring-data-crud-matrix"
 
+PETSTORE_SYSTEM = REPO_ROOT / "joern-platform" / "fixtures" / "petstore-system"
+
+# Seeded into a copy of petstore-system (§5.2.18). None is a real credential.
+URL_PASSWORD = "wadi-sentinel-e2e-url-password"
+DOTENV_PASSWORD = "wadi-sentinel-e2e-dotenv-password"
+CLIENT_SECRET = "wadi-sentinel-e2e-client-secret"
+JDBC_PASSWORD = "wadi-sentinel-e2e-jdbc-password"
+SENTINELS = (URL_PASSWORD, DOTENV_PASSWORD, CLIENT_SECRET, JDBC_PASSWORD)
+INVENTORY_URL = "http://inventory:8081"
+
 pytestmark = pytest.mark.integration
 
 
@@ -58,6 +73,46 @@ def fixture_repo(shared_dir: Path) -> Path:
 def crud_matrix_repo(shared_dir: Path) -> Path:
     """The entity-access fixture: one endpoint per golden (R1-18)."""
     return make_fixture_repo(CRUD_MATRIX, shared_dir)
+
+
+@pytest.fixture
+def secret_bearing_repo(shared_dir: Path) -> Path:
+    """petstore-system with a credential in every config source wadi reads.
+
+    The fixture itself stays clean: it is shared with the Scala conformance
+    tests and the goldens, and the credentials belong to this one question.
+    """
+    repo = make_fixture_repo(PETSTORE_SYSTEM, shared_dir)
+    resources = repo / "petstore" / "src" / "main" / "resources"
+    seeded = [
+        (resources / "application.yml", URL_PASSWORD),
+        (resources / "application-prod.yml", URL_PASSWORD),
+        (repo / ".env", DOTENV_PASSWORD),
+    ]
+    for path, password in seeded:
+        text = path.read_text()
+        assert INVENTORY_URL in text, f"{path.name} no longer carries the inventory URL"
+        path.write_text(text.replace(INVENTORY_URL, f"http://svc:{password}@inventory:8081"))
+    (repo / "inventory" / "src" / "main" / "resources" / "application.yml").write_text(
+        f"""
+spring:
+  application:
+    name: inventory
+  datasource:
+    url: jdbc:postgresql://db:5432/inventory?user=inventory&password={JDBC_PASSWORD}
+  security:
+    oauth2:
+      client:
+        registration:
+          inventory:
+            client-secret: {CLIENT_SECRET}
+server:
+  port: 8081
+"""
+    )
+    git("add", "--all", ".", cwd=repo)
+    git("commit", "-m", "seed credentials", cwd=repo)
+    return repo
 
 
 async def _analyze_and_stitch(
@@ -533,3 +588,94 @@ class TestVerticalSlice:
         assert [row["entity"] for row in shipment_usage["entities"]] == [SHIPMENT]
         with pytest.raises(ValueError, match="names 2 entities"):
             await mcp.entity_usage(snapshot_id, entity="Account")
+
+    async def test_config_values_are_not_published(
+        self,
+        stack: tuple[AsyncClient, AppState, str],
+        secret_bearing_repo: Path,
+        database: WadiDatabase,
+        graph_repository: GraphRepository,
+    ) -> None:
+        http, state, joern_url = stack
+        state.graph = graph_repository  # remote-edges reads the test Neo4j container
+        snapshot_id = await _analyze_and_stitch(
+            http,
+            state,
+            joern_url,
+            database,
+            graph_repository,
+            name="secret-bearing-e2e",
+            repo=secret_bearing_repo,
+        )
+        api = f"/api/v1/snapshots/{snapshot_id}"
+
+        # 1. The seed was read, and each address survives without its
+        # credentials: application.yml, the prod profile file and the repo
+        # `.env` behind a compose pass-through.
+        services = await http.get(f"{api}/services")
+        by_name = {s["name"]: s for s in services.json() if s["kind"] == "service"}
+        petstore_env = by_name["petstore"]["network"]["env"]
+        assert petstore_env["inventory.url"] == INVENTORY_URL
+        assert petstore_env["inventory.profile.url"] == INVENTORY_URL
+        assert petstore_env["PETSTORE_SERVICES_INVENTORY"] == INVENTORY_URL
+        # The datasource URL and the security setting are not carried at all.
+        assert by_name["inventory"]["network"]["env"] == {
+            "server.port": "8081",
+            "spring.application.name": "inventory",
+        }
+
+        # 2. The map did not change. A `${inventory.url}` call still resolves
+        # to the inventory endpoint through config, where the URL parser used
+        # to stop at the user-info and report the call unparseable.
+        petstore_id = by_name["petstore"]["service_id"]
+        outbound = (await http.get(f"{api}/services/{petstore_id}/remote-edges")).json()["outbound"]
+        rest_edge = next(e for e in outbound if e["url"] == "${inventory.url}/stock/{?}")
+        assert rest_edge["target_kind"] == "analyzed"
+        assert rest_edge["target_simplified_uri"] == "/stock/{?}"
+        assert rest_edge["provenance"] == "config-resolved"
+        coverage = await http.get(f"{api}/coverage")
+        assert "url-unparseable" not in {e["reason_code"] for e in coverage.json()["unresolved"]}
+
+        # 3. The security setting is evidence by its key.
+        inventory_id = by_name["inventory"]["service_id"]
+        inventory_endpoints = (await http.get(f"{api}/services/{inventory_id}/endpoints")).json()
+        assert inventory_endpoints
+        detail = await http.get(f"{api}/endpoints/{inventory_endpoints[0]['id']}/detail")
+        assert detail.status_code == 200, detail.text
+        config_evidence = [
+            item["detail"]
+            for item in detail.json()["endpoint"]["auth"]["evidence"]
+            if item["kind"] == "config"
+        ]
+        assert config_evidence == [
+            "spring.security.oauth2.client.registration.inventory.client-secret"
+        ]
+
+        # 4. No reader returns a seeded value. Searched as text, so a leak
+        # through a field nobody named here still fails.
+        published = {
+            "GET /export": (await http.get(f"{api}/export")).text,
+            "GET /services": services.text,
+            "GET /coverage": coverage.text,
+            "GET /graph": (await http.get(f"{api}/graph")).text,
+            "GET /auth": (await http.get(f"{api}/auth")).text,
+            "GET /endpoints/{id}/detail": detail.text,
+            "GET remote-edges": json.dumps(outbound),
+        }
+        for name, service in by_name.items():
+            listed = await http.get(f"{api}/services/{service['service_id']}/endpoints")
+            published[f"GET endpoints of {name}"] = listed.text
+        mcp = WadiMcpService(database, graph_repository)
+        published["MCP list_services"] = json.dumps(await mcp.list_services(snapshot_id))
+        published["MCP coverage_report"] = json.dumps(await mcp.coverage_report(snapshot_id))
+        published["MCP endpoint_detail"] = json.dumps(
+            await mcp.endpoint_detail(snapshot_id, inventory_endpoints[0]["id"]), default=str
+        )
+        assert "service_boundary" in published["GET /export"]
+        leaks = sorted(
+            (reader, sentinel)
+            for reader, text in published.items()
+            for sentinel in SENTINELS
+            if sentinel in text
+        )
+        assert leaks == []
