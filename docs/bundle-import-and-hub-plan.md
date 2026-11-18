@@ -793,15 +793,15 @@ endpoint-unmatched reason, and a candidate it does not touch keeps its edge. A c
 leaves out because it is unreachable or suspected
 (`services/stitcher/src/wadi_stitcher/pipeline.py:97-100`) has no edge in either result. The test
 lists those calls and expects those differences. It also checks that every stored edge id is unique.
-Today a call that matches no endpoint on two candidate services gets two undetermined edges with one
-id (`http.py:178-187`, `ids.py:133-142`), the unique index on edges
-(`libs/wadi-storage/src/wadi_storage/mongo.py:93-95`) refuses the insert
-(`libs/wadi-storage/src/wadi_storage/stitch.py:33-36`), and the stitch fails, in a joint analysis
-too. An undetermined edge carries no target fields
-(`libs/wadi-contracts/src/wadi_contracts/stitching.py:127-133`), so the fix cannot come from the
-target alone. Step 3 must make every outcome of one call carry an id that is distinct from the
-call's other outcomes and the same across runs, for example by keying an unmatched outcome on its
-candidate service. The fixture includes a call that misses on two candidates.
+Until contracts 1.28.0 a call that matched no endpoint on two candidate services got two
+undetermined edges with one id, the unique index on edges
+(`libs/wadi-storage/src/wadi_storage/mongo.py:93-95`) refused the insert
+(`libs/wadi-storage/src/wadi_storage/stitch.py:33-36`), and the stitch failed, in a joint analysis
+too. An undetermined edge carries no target fields, so the fix could not come from the target
+alone. Issue #26 fixed it ahead of step 3: every outcome of one call carries an id that is distinct
+from the call's other outcomes and the same across runs, because an unmatched outcome is keyed on
+its candidate service (`candidate_service_id`, `architecture.md` section 7). Step 3 keeps that
+rule. The fixture includes a call that misses on two candidates.
 
 Compiler's notes on the acceptance test follow.
 

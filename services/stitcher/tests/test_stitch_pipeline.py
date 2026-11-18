@@ -157,6 +157,35 @@ class TestStitchPipeline:
         )
         assert rows == [{"n": 3}]  # no duplicate edges after the rerun
 
+    async def test_a_call_that_misses_on_two_candidates_is_stitched(
+        self, database: WadiDatabase, graph_repository: GraphRepository
+    ) -> None:
+        """Issue #26: two services answer to one hostname and neither serves the
+        path. The run must store one undetermined edge per candidate."""
+        artifacts = ArtifactRepository(database)
+        stitch = StitchRepository(database)
+        snapshot = make_snapshot(make_system())
+        petstore = make_service(snapshot, "services/petstore")
+        orders_a = _with_network(make_service(snapshot, "services/orders-a"), hostnames=["orders"])
+        orders_b = _with_network(make_service(snapshot, "services/orders-b"), hostnames=["orders"])
+        call = make_remote_call(snapshot, petstore, url="http://orders/no/such/path")
+        await artifacts.write_service_boundaries([petstore, orders_a, orders_b])
+        await artifacts.write_endpoints(
+            [make_endpoint(snapshot, orders_a), make_endpoint(snapshot, orders_b)]
+        )
+        await artifacts.write_remote_calls([call])
+
+        summary = await StitchPipeline(artifacts, stitch, graph_repository).run(snapshot.id)
+
+        assert summary.undetermined == 2
+        stored = await stitch.list_stitched_edges(snapshot.id)
+        assert [e.remote_call_id for e in stored] == [call.id, call.id]
+        assert [e.target_kind for e in stored] == [TargetKind.UNDETERMINED] * 2
+        assert len({e.id for e in stored}) == 2
+        report = await stitch.get_coverage_report(snapshot.id)
+        assert report is not None
+        assert [u.reason_code for u in report.unresolved] == ["no-endpoint-match"] * 2
+
     async def test_empty_snapshot_stitches_to_empty(
         self, database: WadiDatabase, graph_repository: GraphRepository
     ) -> None:

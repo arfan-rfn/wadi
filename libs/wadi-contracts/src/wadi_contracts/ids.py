@@ -133,10 +133,13 @@ def placeholder_service_id(logical_name: str) -> str:
 def remote_edge_id(rc_id: str, target_key: str) -> str:
     """Stable id for one stitched edge: remote-call fact x resolution target.
 
-    ``target_key`` is the target's identity: an endpoint id, ``external:<host>``,
-    ``placeholder:<ph_id>``, or ``undetermined``. The remote-call id is already
+    ``target_key`` names the outcome: an endpoint id, ``external:<host>``,
+    ``placeholder:<ph_id>``, ``undetermined:<svc_id>`` for a call that reached a
+    service and matched none of its endpoints, or ``undetermined`` when the
+    call resolved to no service at all. The remote-call id is already
     content-derived (service, site, candidate URL), so edge ids are stable
-    anchors for hints and cross-snapshot diffs; ambiguous resolutions yield
-    distinct ids per candidate target.
+    anchors for hints and cross-snapshot diffs. Every outcome of one call has
+    its own key, so an ambiguous resolution yields a distinct id per candidate
+    whether the candidate matched or not.
     """
     return "re_" + _digest("remote-edge", rc_id, target_key)
