@@ -3,6 +3,47 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.9.1 — 2026-11-18 (where wadi goes next, and where open work lives)
+
+This release changes documents only. The code, the contracts (1.27.0) and the
+export format (2.15.0) are the same as in 0.9.0, so a snapshot does not need to
+be re-analyzed. The images and the CLI are rebuilt from that code at the new
+version.
+
+### Added
+
+- **A proposed target architecture.** `docs/target-architecture-plan.md`
+  describes wadi as a map that agents read for a whole system: several readers
+  (code, deployment config, specs, a running system) write their own records,
+  and the map joins them when it is read. It holds an eleven-step build order
+  and the decisions that are still open. Two plans go deeper:
+  `docs/bundle-import-and-hub-plan.md` (exporting one service, importing it
+  elsewhere, and a hub for many teams) and `docs/identity-and-access-plan.md`
+  (test identities, and access as read compared with access as measured).
+  Nothing in them is built, and `docs/architecture.md` stays the decision
+  record. A page mirrors the plans
+  (`docs/designs/target-architecture-page.html`), and the research behind them
+  is in `docs/research/2026-11-architecture-discussion/`.
+
+### Changed
+
+- **Open work is tracked in GitHub issues.** The 43 open entries of
+  `TODOS.md` are issues #29 to #71, labelled by priority (`P0` to `P4`) and
+  area. `TODOS.md` now maps each old entry to its issue.
+
+### Known issues
+
+Found while reviewing the plans and filed as issues. None is fixed in this
+release.
+
+- A call that matches no endpoint on two candidate services gives two
+  stitched edges with one id, and the stitch fails (#26).
+- `spring.security.*` values and URLs with credentials in the analyzed
+  project's config reach the web UI, the REST API, the MCP server and the
+  export as written (#28).
+- A call id hashes the URL as the slicer rendered it, query string included
+  (#27).
+
 ## 0.9.0 — 2026-11-16 (what data each endpoint touches)
 
 wadi now answers which entities an endpoint may read, create, update or delete.
