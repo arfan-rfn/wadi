@@ -1,0 +1,978 @@
+<title>Wadi target architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+/* Layout: one reading column of sections with three wide figures that scroll sideways on a phone.
+   State is shown by outline style and a small glyph. Hue is kept for the two modes:
+   teal is analysis with no model, amber is the path where a model runs. */
+:root {
+  --bg: #f3f6f5;
+  --surface: #ffffff;
+  --surface-2: #e9efed;
+  --ink: #13201e;
+  --muted: #566865;
+  --line: #c7d2cf;
+  --node: #ffffff;
+  --edge: #40544f;
+  --accent: #0b6b60;
+  --accent-soft: #d9eeea;
+  --learn: #9a4f0a;
+  --learn-soft: #f7e8d4;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1615; --surface: #151f1e; --surface-2: #1c2927; --ink: #e4eeec; --muted: #93a6a2;
+    --line: #2c3b38; --node: #1a2624; --edge: #a9bbb7; --accent: #56c8b8; --accent-soft: #153a35;
+    --learn: #efa652; --learn-soft: #3a2a14; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1615; --surface: #151f1e; --surface-2: #1c2927; --ink: #e4eeec; --muted: #93a6a2;
+  --line: #2c3b38; --node: #1a2624; --edge: #a9bbb7; --accent: #56c8b8; --accent-soft: #153a35;
+  --learn: #efa652; --learn-soft: #3a2a14; color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15.5px; line-height: 1.6; }
+.wrap {
+  max-width: 1140px; margin: 0 auto; padding-block: 44px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 64px;
+}
+.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* type */
+h1 { font-family: var(--display); font-weight: 600; font-size: clamp(30px, 5vw, 44px); line-height: 1.08; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 25px; line-height: 1.2; margin: 0; text-wrap: balance; }
+h3 { font-size: 15.5px; font-weight: 600; margin: 0; }
+h4 { font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+p { margin: 0; }
+.prose { max-width: 68ch; display: flex; flex-direction: column; gap: 12px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .05em; color: var(--muted); }
+.lede { font-size: 18px; line-height: 1.55; max-width: 62ch; }
+code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+section { display: flex; flex-direction: column; gap: 20px; scroll-margin-top: 16px; }
+header { display: flex; flex-direction: column; gap: 16px; }
+
+/* state marks */
+.st { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.st::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--ink); box-sizing: border-box; flex: none; }
+.st[data-state="built"]::before { background: var(--ink); }
+.st[data-state="part"]::before { background: linear-gradient(90deg, transparent 50%, var(--ink) 50%); }
+.st[data-state="later"]::before { border-style: dotted; }
+.st[data-state="input"]::before { display: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+
+.toc { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 0; padding: 0; list-style: none; }
+.toc a { display: inline-block; font-size: 13.5px; color: var(--ink); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; background: var(--surface); }
+.toc a:hover { border-color: var(--accent); color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* the four rules */
+.rules4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0; border-top: 1px solid var(--line); }
+.rules4 > div { padding: 16px 20px 4px 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rules4 p { color: var(--muted); font-size: 14.5px; }
+
+/* figures */
+figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.scroll { overflow-x: auto; }
+.scroll svg { display: block; width: 100%; min-width: 900px; height: auto; }
+figcaption { color: var(--muted); font-size: 13.5px; max-width: 78ch; }
+
+svg text { font-family: var(--sans); }
+.box { fill: var(--node); stroke: var(--edge); stroke-width: 1.25; }
+.node[data-state="plan"] .box { stroke-dasharray: 6 4; }
+.node[data-state="later"] .box { stroke-dasharray: 1.5 4; stroke-linecap: round; }
+.node.learn .box { stroke: var(--learn); fill: var(--learn-soft); }
+.node.store .box { fill: var(--surface-2); }
+.tag { font-family: var(--mono); font-size: 9.5px; font-weight: 500; letter-spacing: .06em; fill: var(--muted); }
+.ttl { font-size: 13px; font-weight: 600; fill: var(--ink); }
+.sub { font-size: 11px; fill: var(--muted); }
+.lbl { font-family: var(--mono); font-size: 10.5px; font-weight: 500; fill: var(--muted); }
+.mode { font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: .07em; fill: var(--accent); }
+.mode.quiet { fill: var(--muted); }
+.note { font-size: 11px; font-style: italic; fill: var(--muted); }
+.edge line, .edge polyline { stroke: var(--edge); stroke-width: 1.5; fill: none; }
+.edge.learn line { stroke: var(--learn); }
+.edge.learn .lbl { fill: var(--learn); }
+.mk { fill: var(--edge); }
+.mk-l { fill: var(--learn); }
+.gl-fill { fill: var(--ink); }
+.gl-ring { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.gl-dot { stroke-dasharray: 1.5 2.5; stroke-linecap: round; }
+.pill { fill: var(--node); stroke: var(--edge); stroke-width: 1; }
+.pill.ok { fill: var(--accent-soft); stroke: var(--accent); }
+.pill.gap { fill: var(--learn-soft); stroke: var(--learn); }
+.pilltxt { font-family: var(--mono); font-size: 10.5px; font-weight: 500; fill: var(--ink); }
+.zone { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+
+#fig-flow .node { cursor: pointer; transition: opacity .15s; }
+#fig-flow .edge { transition: opacity .15s; }
+#fig-flow .node:hover .box { stroke: var(--accent); }
+#fig-flow .node:focus { outline: none; }
+#fig-flow .node:focus-visible .box { stroke: var(--accent); stroke-width: 2.5; }
+#fig-flow.has-sel .node:not(.is-on) { opacity: .26; }
+#fig-flow.has-sel .edge:not(.is-on) { opacity: .1; }
+#fig-flow .node.is-sel .box { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: none; }
+@media (prefers-reduced-motion: reduce) { #fig-flow .node, #fig-flow .edge { transition: none; } }
+
+/* detail panel under the first figure */
+.detail { border-top: 1px solid var(--line); padding-top: 16px; display: flex; flex-direction: column; gap: 12px; min-height: 150px; }
+.d-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.d-head h3 { font-size: 17px; }
+.reset { margin-left: auto; font: 500 12.5px var(--sans); color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.reset:hover { border-color: var(--accent); }
+.d-does { max-width: 74ch; }
+.d-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px 28px; }
+.d-grid > div { min-width: 0; }
+.conn { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.conn li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.conn button { font: 500 14px var(--sans); color: var(--accent); background: none; border: 0; border-bottom: 1px solid currentColor; padding: 0; cursor: pointer; text-align: left; }
+.via { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.d-grid p { font-size: 14.5px; }
+.d-note { color: var(--muted); margin-top: 6px; }
+.how { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14.5px; display: flex; flex-direction: column; gap: 4px; }
+
+/* lists and tables */
+ol.steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; max-width: 74ch; }
+ol.steps li { padding-left: 4px; }
+ol.steps .st { margin-left: 8px; }
+ul.plain { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; max-width: 74ch; }
+.tw { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.45; }
+table.wide { min-width: 820px; }
+table.mid { min-width: 620px; }
+th { text-align: left; font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 0 16px 8px 0; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+td { padding: 10px 16px 10px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
+td:first-child { font-weight: 600; }
+td.nw { white-space: nowrap; }
+.chip { display: inline-block; font-family: var(--mono); font-size: 12px; font-weight: 500; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--edge); white-space: nowrap; }
+.chip.ok { background: var(--accent-soft); border-color: var(--accent); }
+.chip.gap { background: var(--learn-soft); border-color: var(--learn); }
+
+/* hub */
+.hub { display: grid; grid-template-columns: minmax(0, .9fr) auto minmax(0, 1.5fr) auto minmax(0, 1.1fr); gap: 14px; align-items: center; }
+.hub .stack { display: flex; flex-direction: column; gap: 8px; }
+.hub .cell { border: 1px solid var(--edge); border-radius: 8px; padding: 9px 12px; background: var(--surface); font-size: 14px; min-width: 0; }
+.hub .cell.main { border-style: dashed; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.hub .cell.main p { color: var(--muted); font-size: 14px; }
+.hub .go { font-family: var(--mono); font-size: 11.5px; color: var(--muted); text-align: center; }
+.hub .go::after { content: "\2192"; display: block; font-size: 18px; line-height: 1; color: var(--edge); }
+
+/* how settled */
+.cols3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px 32px; }
+.cols3 > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; border-top: 2px solid var(--edge); padding-top: 12px; }
+.cols3 ul { margin: 0; padding-left: 18px; font-size: 14.5px; display: flex; flex-direction: column; gap: 4px; }
+.cols3 p { color: var(--muted); font-size: 14px; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 720px) {
+  .hub { grid-template-columns: minmax(0, 1fr); }
+  .hub .go::after { content: "\2193"; }
+  figure { padding: 12px; }
+  .reset { margin-left: 0; }
+}
+</style>
+
+<svg class="defs" width="0" height="0" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 1 L10 5 L0 9 z"/></marker>
+    <marker id="arr-l" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk-l" d="M0 1 L10 5 L0 9 z"/></marker>
+    <g id="st-built"><circle class="gl-fill" r="5"/></g>
+    <g id="st-part"><circle class="gl-ring" r="4.25"/><path class="gl-fill" d="M0 -5 A5 5 0 0 1 0 5 z"/></g>
+    <g id="st-plan"><circle class="gl-ring" r="4.25"/></g>
+    <g id="st-later"><circle class="gl-ring gl-dot" r="4.25"/></g>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">wadi 0.9.0 plus planned changes · 17 November 2026</p>
+  <h1>Wadi target architecture</h1>
+  <p class="lede">Wadi reads several kinds of evidence about a microservice system and joins them into one map. This page shows every part, what it connects to and which parts exist today.</p>
+  <div class="legend" aria-label="State of each part">
+    <span class="st" data-state="built">Built</span>
+    <span class="st" data-state="part">Partly built</span>
+    <span class="st" data-state="plan">Planned</span>
+    <span class="st" data-state="later">Later</span>
+  </div>
+  <ul class="toc">
+    <li><a href="#flow">Evidence to map</a></li>
+    <li><a href="#two-ways">Two ways in</a></li>
+    <li><a href="#processes">Processes</a></li>
+    <li><a href="#one-run">One analysis</a></li>
+    <li><a href="#storage">Code and rules</a></li>
+    <li><a href="#statuses">Statuses</a></li>
+    <li><a href="#learn-loop">Learn loop</a></li>
+    <li><a href="#auth">Identity and access</a></li>
+    <li><a href="#hub">Hub</a></li>
+    <li><a href="#pieces">All pieces</a></li>
+    <li><a href="#settled">How settled</a></li>
+  </ul>
+</header>
+
+<section>
+  <h2>Four rules the design follows</h2>
+  <div class="rules4">
+    <div><h3>One reader per kind of evidence</h3><p>Source code, deployment config, contracts and runtime data each get their own reader.</p></div>
+    <div><h3>Each reader keeps its own records</h3><p>A reader writes only to its own collection. Each run writes a new set, and a snapshot lists the sets it uses, so older snapshots never change. No reader edits what another one wrote.</p></div>
+    <div><h3>Records are joined when the map is read</h3><p>The join keeps every source's value and says how many sources agree. Wadi discards nothing at write time. Call edges join when the stitcher writes them, because the graph database is built from them.</p></div>
+    <div><h3>A model writes rules, never facts</h3><p>Analysis runs with no model and no API key. A model only drafts rules, and wadi tests them. A model's disagreement never changes a fact's status.</p></div>
+  </div>
+</section>
+
+<section id="flow">
+  <h2>From evidence to the map</h2>
+  <div class="prose"><p>Read the figure from top to bottom. Each column is one kind of evidence with its own reader and its own records. The panel on the right is the identity and access module. Select a box to see what it connects to.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg id="fig-flow" viewBox="0 0 1100 768" role="img" aria-label="Three kinds of evidence each go through their own reader into their own records. The stitcher links services and joins the sources of each call, the fold joins the other records when the map is read, and learn mode turns gaps into rules for the next run. A panel on the right holds the identity and access module. The access prober and coding agents send test requests through the credential broker to a running system, and the prober writes what the system answered.">
+      <text class="mode" x="220" y="24">ANALYZE · RUNS ON EVERY COMMIT · NO MODEL, NO API KEY</text>
+      <rect class="zone" x="712" y="8" width="380" height="336" rx="12"/>
+      <text class="mode" x="724" y="24">IDENTITY AND ACCESS · RUNS ON COMMAND</text>
+
+      <!-- edges -->
+      <g class="edge" data-from="src-code" data-to="analyzer" data-label="reads"><line x1="297" y1="102" x2="297" y2="140" marker-end="url(#arr)"/><text class="lbl" x="305" y="125">reads</text></g>
+      <g class="edge" data-from="src-config" data-to="config-reader" data-label="reads"><line x1="461" y1="102" x2="461" y2="140" marker-end="url(#arr)"/><text class="lbl" x="469" y="125">reads</text></g>
+      <g class="edge" data-from="src-declared" data-to="declared-reader" data-label="reads"><line x1="625" y1="102" x2="625" y2="140" marker-end="url(#arr)"/><text class="lbl" x="633" y="125">reads</text></g>
+      <g class="edge" data-from="src-runtime" data-to="prober" data-label="answers"><line x1="801" y1="102" x2="801" y2="140" marker-end="url(#arr)"/><text class="lbl" x="809" y="125">answers</text></g>
+
+      <g class="edge" data-from="analyzer" data-to="rec-code" data-label="writes"><line x1="297" y1="216" x2="297" y2="254" marker-end="url(#arr)"/><text class="lbl" x="305" y="239">writes</text></g>
+      <g class="edge" data-from="config-reader" data-to="rec-config" data-label="writes"><line x1="461" y1="216" x2="461" y2="254" marker-end="url(#arr)"/><text class="lbl" x="469" y="239">writes</text></g>
+      <g class="edge" data-from="declared-reader" data-to="rec-declared" data-label="writes"><line x1="625" y1="216" x2="625" y2="254" marker-end="url(#arr)"/><text class="lbl" x="633" y="239">writes</text></g>
+      <g class="edge" data-from="prober" data-to="rec-access" data-label="writes"><line x1="801" y1="216" x2="801" y2="254" marker-end="url(#arr)"/><text class="lbl" x="809" y="239">writes</text></g>
+
+      <g class="edge" data-from="rec-code" data-to="stitcher" data-label="calls"><line x1="340" y1="316" x2="340" y2="356" marker-end="url(#arr)"/><text class="lbl" x="348" y="340">calls</text></g>
+      <g class="edge" data-from="rec-config" data-to="stitcher" data-label="names, routes"><line x1="461" y1="316" x2="461" y2="356" marker-end="url(#arr)"/><text class="lbl" x="469" y="340">names, routes</text></g>
+      <g class="edge" data-from="rec-code" data-to="fold" data-label="facts"><line x1="242" y1="316" x2="242" y2="472" marker-end="url(#arr)"/><text class="lbl" x="235" y="398" text-anchor="end">facts</text></g>
+      <g class="edge" data-from="rec-config" data-to="fold" data-label="access rules"><polyline points="528,316 580,326 580,472" marker-end="url(#arr)"/><text class="lbl" x="574" y="452" text-anchor="end">access rules</text></g>
+      <g class="edge" data-from="rec-declared" data-to="fold" data-label="promises"><line x1="625" y1="316" x2="625" y2="472" marker-end="url(#arr)"/><text class="lbl" x="633" y="398">promises</text></g>
+      <g class="edge" data-from="rec-access" data-to="fold" data-label="as measured"><line x1="801" y1="316" x2="801" y2="472" marker-end="url(#arr)"/><text class="lbl" x="809" y="412">as measured</text></g>
+      <g class="edge" data-from="stitcher" data-to="fold" data-label="call edges"><line x1="404" y1="432" x2="404" y2="472" marker-end="url(#arr)"/><text class="lbl" x="412" y="456">call edges</text></g>
+
+      <g class="edge" data-from="fold" data-to="out-api" data-label="serves"><line x1="379" y1="568" x2="379" y2="606" marker-end="url(#arr)"/><text class="lbl" x="387" y="591">serves</text></g>
+      <g class="edge" data-from="fold" data-to="out-mcp" data-label="serves"><line x1="713" y1="568" x2="713" y2="606" marker-end="url(#arr)"/><text class="lbl" x="721" y="591">serves</text></g>
+      <g class="edge" data-from="out-api" data-to="c-web" data-label="REST"><line x1="297" y1="668" x2="297" y2="706" marker-end="url(#arr)"/><text class="lbl" x="305" y="691">REST</text></g>
+      <g class="edge" data-from="out-api" data-to="c-cli" data-label="REST"><line x1="461" y1="668" x2="461" y2="706" marker-end="url(#arr)"/><text class="lbl" x="469" y="691">REST</text></g>
+      <g class="edge" data-from="out-mcp" data-to="c-agent" data-label="MCP"><line x1="713" y1="668" x2="713" y2="706" marker-end="url(#arr)"/><text class="lbl" x="721" y="691">MCP</text></g>
+
+      <g class="edge" data-from="rules" data-to="analyzer" data-label="replays"><line x1="156" y1="178" x2="220" y2="178" marker-end="url(#arr)"/><text class="lbl" x="187" y="170" text-anchor="middle">replays</text></g>
+      <g class="edge learn" data-from="fold" data-to="learn" data-label="gaps"><line x1="220" y1="520" x2="156" y2="520" marker-end="url(#arr-l)"/><text class="lbl" x="189" y="512" text-anchor="middle">gaps</text></g>
+      <g class="edge learn" data-from="learn" data-to="rules" data-label="approved rules"><line x1="28" y1="472" x2="28" y2="216" marker-end="url(#arr-l)"/><text class="lbl" x="36" y="376">approved rules</text></g>
+      <g class="edge" data-from="bundle" data-to="rec-code" data-label="imports"><line x1="156" y1="285" x2="220" y2="285" marker-end="url(#arr)"/><text class="lbl" x="187" y="277" text-anchor="middle">imports</text></g>
+
+      <!-- identity and access -->
+      <g class="edge" data-from="broker" data-to="src-runtime" data-label="as a user"><line x1="946" y1="71" x2="878" y2="71" marker-end="url(#arr)"/><text class="lbl" x="913" y="63" text-anchor="middle">as a user</text></g>
+      <g class="edge" data-from="prober" data-to="broker" data-label="requests"><line x1="878" y1="166" x2="946" y2="166" marker-end="url(#arr)"/><text class="lbl" x="911" y="158" text-anchor="middle">requests</text></g>
+      <g class="edge" data-from="profile" data-to="broker" data-label="recipes"><line x1="1015" y1="254" x2="1015" y2="216" marker-end="url(#arr)"/><text class="lbl" x="1023" y="240">recipes</text></g>
+      <g class="edge" data-from="c-agent" data-to="broker" data-label="sends as an identity"><polyline points="878,729 912,729 912,200 946,200" marker-end="url(#arr)"/><text class="lbl" x="920" y="540">sends as an identity</text></g>
+
+      <!-- evidence -->
+      <g class="node" data-id="src-code" data-state="input" transform="translate(220,40)" tabindex="0" role="button" aria-label="Source code">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">EVIDENCE</text><text class="ttl" x="12" y="36">Source code</text><text class="sub" x="12" y="52">repositories at one commit</text></g>
+      <g class="node" data-id="src-config" data-state="input" transform="translate(384,40)" tabindex="0" role="button" aria-label="Deployment config">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">EVIDENCE</text><text class="ttl" x="12" y="36">Deployment config</text><text class="sub" x="12" y="52">compose and Kubernetes</text></g>
+      <g class="node" data-id="src-declared" data-state="input" transform="translate(548,40)" tabindex="0" role="button" aria-label="Specs and contracts">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">EVIDENCE</text><text class="ttl" x="12" y="36">Specs and contracts</text><text class="sub" x="12" y="52">OpenAPI, proto, Pact</text></g>
+      <g class="node" data-id="src-runtime" data-state="input" transform="translate(724,40)" tabindex="0" role="button" aria-label="A running system">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">EVIDENCE</text><text class="ttl" x="12" y="36">A running system</text><text class="sub" x="12" y="52">your test environment</text></g>
+
+      <!-- readers -->
+      <g class="node" data-id="analyzer" data-state="built" transform="translate(220,140)" tabindex="0" role="button" aria-label="Static analyzer, built">
+        <rect class="box" width="154" height="76" rx="8"/><text class="tag" x="12" y="17">READER</text><text class="ttl" x="12" y="36">Static analyzer</text><text class="sub" x="12" y="52">endpoints, flows, calls,</text><text class="sub" x="12" y="66">auth, data access</text><use href="#st-built" x="138" y="15"/></g>
+      <g class="node" data-id="config-reader" data-state="part" transform="translate(384,140)" tabindex="0" role="button" aria-label="Config reader, partly built">
+        <rect class="box" width="154" height="76" rx="8"/><text class="tag" x="12" y="17">READER</text><text class="ttl" x="12" y="36">Config reader</text><text class="sub" x="12" y="52">names, addresses and</text><text class="sub" x="12" y="66">routes per environment</text><use href="#st-part" x="138" y="15"/></g>
+      <g class="node" data-id="declared-reader" data-state="plan" transform="translate(548,140)" tabindex="0" role="button" aria-label="Declared reader, planned">
+        <rect class="box" width="154" height="76" rx="8"/><text class="tag" x="12" y="17">READER</text><text class="ttl" x="12" y="36">Declared reader</text><text class="sub" x="12" y="52">what each service</text><text class="sub" x="12" y="66">promises</text><use href="#st-plan" x="138" y="15"/></g>
+      <g class="node" data-id="prober" data-state="plan" transform="translate(724,140)" tabindex="0" role="button" aria-label="Access prober, planned">
+        <rect class="box" width="154" height="76" rx="8"/><text class="tag" x="12" y="17">READER</text><text class="ttl" x="12" y="36">Access prober</text><text class="sub" x="12" y="52">calls each endpoint as</text><text class="sub" x="12" y="66">each test identity</text><use href="#st-plan" x="138" y="15"/></g>
+
+      <!-- records -->
+      <g class="node store" data-id="rec-code" data-state="built" transform="translate(220,254)" tabindex="0" role="button" aria-label="Code facts, built">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">MONGODB COLLECTION</text><text class="ttl" x="12" y="36">Code facts</text><text class="sub" x="12" y="52">one set per service</text><use href="#st-built" x="138" y="15"/></g>
+      <g class="node store" data-id="rec-config" data-state="part" transform="translate(384,254)" tabindex="0" role="button" aria-label="Config records, partly built">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">MONGODB COLLECTION</text><text class="ttl" x="12" y="36">Config records</text><text class="sub" x="12" y="52">one set per environment</text><use href="#st-part" x="138" y="15"/></g>
+      <g class="node store" data-id="rec-declared" data-state="plan" transform="translate(548,254)" tabindex="0" role="button" aria-label="Declared contracts, planned">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">MONGODB COLLECTION</text><text class="ttl" x="12" y="36">Declared contracts</text><text class="sub" x="12" y="52">one set per contract</text><use href="#st-plan" x="138" y="15"/></g>
+      <g class="node store" data-id="rec-access" data-state="plan" transform="translate(724,254)" tabindex="0" role="button" aria-label="Access as measured, planned">
+        <rect class="box" width="154" height="62" rx="8"/><text class="tag" x="12" y="17">MONGODB COLLECTION</text><text class="ttl" x="12" y="36">Access as measured</text><text class="sub" x="12" y="52">one set per environment</text><use href="#st-plan" x="138" y="15"/></g>
+
+      <!-- stitcher and fold -->
+      <g class="node" data-id="stitcher" data-state="built" transform="translate(270,356)" tabindex="0" role="button" aria-label="Stitcher, built">
+        <rect class="box" width="268" height="76" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Stitcher</text><text class="sub" x="12" y="52">resolves every outbound call to the service it</text><text class="sub" x="12" y="66">reaches, once per environment</text><use href="#st-built" x="252" y="15"/></g>
+      <g class="node" data-id="fold" data-state="plan" transform="translate(220,472)" tabindex="0" role="button" aria-label="Fold, planned">
+        <rect class="box" width="658" height="96" rx="8"/><text class="tag" x="12" y="17">FUNCTION · STORES NOTHING</text><text class="ttl" x="12" y="36">Fold</text><text class="sub" x="12" y="52">joins every record by shared key when someone reads the map, and gives each fact a status</text>
+        <rect class="pill ok" x="12" y="64" width="78" height="20" rx="10"/><text class="pilltxt" x="51" y="78" text-anchor="middle">confirmed</text>
+        <rect class="pill" x="98" y="64" width="84" height="20" rx="10"/><text class="pilltxt" x="140" y="78" text-anchor="middle">static only</text>
+        <rect class="pill gap" x="190" y="64" width="100" height="20" rx="10"/><text class="pilltxt" x="240" y="78" text-anchor="middle">observed only</text>
+        <rect class="pill gap" x="298" y="64" width="100" height="20" rx="10"/><text class="pilltxt" x="348" y="78" text-anchor="middle">declared only</text>
+        <rect class="pill gap" x="406" y="64" width="78" height="20" rx="10"/><text class="pilltxt" x="445" y="78" text-anchor="middle">contested</text>
+        <use href="#st-plan" x="642" y="15"/></g>
+
+      <!-- serving and clients -->
+      <g class="node" data-id="out-api" data-state="built" transform="translate(220,606)" tabindex="0" role="button" aria-label="REST API, built">
+        <rect class="box" width="318" height="62" rx="8"/><text class="tag" x="12" y="17">SERVICE · ORCHESTRATOR</text><text class="ttl" x="12" y="36">REST API</text><text class="sub" x="12" y="52">serves the map and creates every analysis job</text><use href="#st-built" x="302" y="15"/></g>
+      <g class="node" data-id="out-mcp" data-state="built" transform="translate(548,606)" tabindex="0" role="button" aria-label="MCP server, built">
+        <rect class="box" width="330" height="62" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">MCP server</text><text class="sub" x="12" y="52">nine read-only tools</text><use href="#st-built" x="314" y="15"/></g>
+      <g class="node" data-id="c-web" data-state="built" transform="translate(220,706)" tabindex="0" role="button" aria-label="Web map, built">
+        <rect class="box" width="154" height="46" rx="8"/><text class="tag" x="12" y="17">CLIENT</text><text class="ttl" x="12" y="35">Web map</text><use href="#st-built" x="138" y="15"/></g>
+      <g class="node" data-id="c-cli" data-state="part" transform="translate(384,706)" tabindex="0" role="button" aria-label="CLI and CI check, partly built">
+        <rect class="box" width="154" height="46" rx="8"/><text class="tag" x="12" y="17">CLIENT</text><text class="ttl" x="12" y="35">CLI and CI check</text><use href="#st-part" x="138" y="15"/></g>
+      <g class="node" data-id="c-agent" data-state="built" transform="translate(548,706)" tabindex="0" role="button" aria-label="Coding agents, built">
+        <rect class="box" width="330" height="46" rx="8"/><text class="tag" x="12" y="17">CLIENT</text><text class="ttl" x="12" y="35">Coding agents</text><use href="#st-built" x="314" y="15"/></g>
+
+      <!-- rules and learn -->
+      <g class="node" data-id="rules" data-state="plan" transform="translate(16,140)" tabindex="0" role="button" aria-label="Rules, planned">
+        <rect class="box" width="140" height="76" rx="8"/><text class="tag" x="12" y="17">DATA FILES</text><text class="ttl" x="12" y="36">Rules</text><text class="sub" x="12" y="52">base packs, learned</text><text class="sub" x="12" y="66">rules and hints</text><use href="#st-plan" x="124" y="15"/></g>
+      <g class="node store" data-id="bundle" data-state="plan" transform="translate(40,254)" tabindex="0" role="button" aria-label="Service bundle, planned">
+        <rect class="box" width="116" height="62" rx="8"/><text class="tag" x="12" y="17">IMPORTED</text><text class="ttl" x="12" y="36">Service bundle</text><text class="sub" x="12" y="52">from another wadi</text><use href="#st-plan" x="100" y="15"/></g>
+      <g class="node learn" data-id="learn" data-state="plan" transform="translate(16,472)" tabindex="0" role="button" aria-label="Learn mode, planned">
+        <rect class="box" width="140" height="96" rx="8"/><text class="tag" x="12" y="17">USES A MODEL</text><text class="ttl" x="12" y="36">Learn mode</text><text class="sub" x="12" y="52">runs only on command,</text><text class="sub" x="12" y="66">a model drafts a rule,</text><text class="sub" x="12" y="80">a person approves it</text><use href="#st-plan" x="124" y="15"/></g>
+
+      <!-- identity and access -->
+      <g class="node" data-id="broker" data-state="plan" transform="translate(946,40)" tabindex="0" role="button" aria-label="Credential broker, planned">
+        <rect class="box" width="138" height="176" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Credential broker</text><text class="sub" x="12" y="52">logs in as a named</text><text class="sub" x="12" y="66">identity for each test</text><text class="sub" x="12" y="80">request. Nothing else</text><text class="sub" x="12" y="94">reads secrets.</text><use href="#st-plan" x="122" y="15"/></g>
+      <g class="node store" data-id="profile" data-state="plan" transform="translate(946,254)" tabindex="0" role="button" aria-label="Identity profile, planned">
+        <rect class="box" width="138" height="76" rx="8"/><text class="tag" x="12" y="17">DATA</text><text class="ttl" x="12" y="36">Identity profile</text><text class="sub" x="12" y="52">test identities and a</text><text class="sub" x="12" y="66">login recipe for each</text><use href="#st-plan" x="122" y="15"/></g>
+    </svg>
+    </div>
+
+    <div class="detail" id="flow-detail" aria-live="polite">
+      <div class="d-head"><h3>Select a box to see its connections</h3></div>
+      <ul class="how">
+        <li>Arrows point the way data moves.</li>
+        <li>A dashed outline is planned. A dotted outline comes later.</li>
+        <li>The amber path is the only place a model runs.</li>
+        <li>The panel on the right is the identity and access module. It sends requests to a test environment, and only on command.</li>
+      </ul>
+    </div>
+    <figcaption>Each reader writes only its own collection. The stitcher links services and joins the sources of each call edge when it writes them. The fold joins the other collections at read time. Learn mode takes the gaps the map reports and returns approved rules for the next run. A service can also arrive as a bundle that another wadi exported. In the panel on the right, the access prober and any coding agent send test requests through the credential broker. What the running system answers becomes a record like any other. <a href="#auth">Identity and access</a> has the details.</figcaption>
+  </figure>
+</section>
+
+<section id="two-ways">
+  <h2>Two ways to get a service into the map</h2>
+  <div class="prose"><p>Wadi does not need the source of every service. A team can analyze a service where its code lives, export the result, and import it into another wadi or into the hub.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1100 292" role="img" aria-label="A service enters from source through the static analyzer, or from a bundle through an import job. Both write the same service records. The stitcher reads those records, and export writes them out again as a bundle.">
+      <text class="mode quiet" x="270" y="26">TWO WAYS IN, ONE SET OF RECORDS</text>
+      <g class="edge"><line x1="200" y1="78" x2="270" y2="78" marker-end="url(#arr)"/><text class="lbl" x="234" y="70" text-anchor="middle">reads</text></g>
+      <g class="edge"><line x1="200" y1="214" x2="270" y2="214" marker-end="url(#arr)"/><text class="lbl" x="234" y="206" text-anchor="middle">reads</text></g>
+      <g class="edge"><line x1="480" y1="78" x2="630" y2="78" marker-end="url(#arr)"/><text class="lbl" x="554" y="70" text-anchor="middle">writes as analyzed</text></g>
+      <g class="edge"><line x1="480" y1="214" x2="630" y2="214" marker-end="url(#arr)"/><text class="lbl" x="554" y="206" text-anchor="middle">writes as imported</text></g>
+      <g class="edge"><line x1="830" y1="78" x2="900" y2="78" marker-end="url(#arr)"/><text class="lbl" x="864" y="70" text-anchor="middle">reads</text></g>
+      <g class="edge"><line x1="830" y1="214" x2="900" y2="214" marker-end="url(#arr)"/><text class="lbl" x="864" y="206" text-anchor="middle">exports</text></g>
+
+      <g class="node" data-state="input" transform="translate(20,40)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">EVIDENCE</text><text class="ttl" x="12" y="36">Source code</text><text class="sub" x="12" y="52">a repository wadi can</text><text class="sub" x="12" y="66">read, at one commit</text></g>
+      <g class="node store" data-state="plan" transform="translate(20,176)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">FILE SET</text><text class="ttl" x="12" y="36">Service bundle</text><text class="sub" x="12" y="52">exported by another</text><text class="sub" x="12" y="66">wadi, for one service</text><use href="#st-plan" x="164" y="15"/></g>
+
+      <g class="node" data-state="built" transform="translate(270,40)"><rect class="box" width="210" height="76" rx="8"/><text class="tag" x="12" y="17">WAY 1 · FROM SOURCE</text><text class="ttl" x="12" y="36">Static analyzer</text><text class="sub" x="12" y="52">the extraction worker and</text><text class="sub" x="12" y="66">Joern build the records</text><use href="#st-built" x="194" y="15"/></g>
+      <g class="node" data-state="plan" transform="translate(270,176)"><rect class="box" width="210" height="76" rx="8"/><text class="tag" x="12" y="17">WAY 2 · FROM A BUNDLE</text><text class="ttl" x="12" y="36">Import job</text><text class="sub" x="12" y="52">the extraction worker checks</text><text class="sub" x="12" y="66">each record and stores it</text><use href="#st-plan" x="194" y="15"/></g>
+
+      <g class="node store" data-state="part" transform="translate(630,40)"><rect class="box" width="200" height="212" rx="8"/><text class="tag" x="12" y="17">MONGODB</text><text class="ttl" x="12" y="36">Service records</text><text class="sub" x="12" y="96">the same collections for both</text><text class="sub" x="12" y="110">ways, and every record says</text><text class="sub" x="12" y="124">how it arrived</text><use href="#st-part" x="184" y="15"/></g>
+
+      <g class="node" data-state="built" transform="translate(900,40)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Stitcher</text><text class="sub" x="12" y="52">links analyzed and</text><text class="sub" x="12" y="66">imported services alike</text><use href="#st-built" x="164" y="15"/></g>
+      <g class="node store" data-state="part" transform="translate(900,176)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">FILE SET</text><text class="ttl" x="12" y="36">Service bundle</text><text class="sub" x="12" y="52">for the hub or for</text><text class="sub" x="12" y="66">another team's wadi</text><use href="#st-part" x="164" y="15"/></g>
+    </svg>
+    </div>
+    <figcaption>Both ways fill the same collections, so the stitcher, the fold and every client work the same on either. A service from a boundary-only bundle has no flow graphs, so the answers that need one read as not available for it, never as empty. The bundle that export writes is the bundle that import reads. Export works today for a whole snapshot. Export per service and import are planned.</figcaption>
+  </figure>
+  <div class="tw">
+  <table class="mid">
+    <thead><tr><th>Question</th><th>From source</th><th>From a bundle</th></tr></thead>
+    <tbody>
+      <tr><td>What it needs</td><td>The repository and the Joern container</td><td>Only the bundle</td></tr>
+      <tr><td>Who did the analysis</td><td>This install</td><td>Another wadi, named in the bundle's manifest</td></tr>
+      <tr><td>How each fact is marked</td><td>Analyzed here</td><td>Imported, with the team, commit, wadi version and rule hash it came from</td></tr>
+      <tr><td>Flow graphs</td><td>Always present</td><td>Present in a full bundle, absent in a boundary-only bundle</td></tr>
+      <tr><td>Who can close a gap with learn mode</td><td>This install</td><td>The team that holds the source</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <h3>What has to be built</h3>
+  <ul class="plain">
+    <li>Export per service. A service bundle leaves out stitched edges and the coverage report, because the receiver computes those for its own set of services.</li>
+    <li>A bundle as a kind of source in a system, next to a git URL and a local path. The decision record already reserves this.</li>
+    <li>An import job in the extraction worker. The orchestrator accepts the bundle and the worker writes it, so each collection keeps one writer.</li>
+    <li>An origin on every record: analyzed here, or imported from a named bundle.</li>
+    <li>A service id that does not depend on a folder path on one machine.</li>
+    <li>A snapshot that can be made of bundles as well as commits.</li>
+    <li>A round-trip test: export a service, import it into an empty install, export it again and compare its records without the envelope fields.</li>
+  </ul>
+</section>
+
+<section id="processes">
+  <h2>Which process talks to which</h2>
+  <div class="prose"><p>The services that build the map never call each other. Each one reads and writes MongoDB, and the orchestrator hands out work as jobs in that database. Only the extraction worker talks to Joern. The planned auth module adds one more direct connection. The access prober sends every test request through the credential broker.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1100 980" role="img" aria-label="Clients reach the orchestrator and the MCP server. Every wadi service connects to MongoDB. Two direct connections exist between wadi processes. The extraction worker controls the Joern container, and the planned access prober sends test requests through the planned credential broker, which reaches the identity provider and the system under test.">
+      <!-- left to centre -->
+      <g class="edge"><line x1="235" y1="60" x2="430" y2="60" marker-end="url(#arr)"/><text class="lbl" x="332" y="53" text-anchor="middle">REST</text></g>
+      <g class="edge"><line x1="235" y1="108" x2="430" y2="108" marker-end="url(#arr)"/><text class="lbl" x="332" y="101" text-anchor="middle">REST</text></g>
+      <g class="edge"><line x1="430" y1="172" x2="235" y2="172" marker-end="url(#arr)"/><text class="lbl" x="332" y="165" text-anchor="middle">clones at a pinned commit</text></g>
+      <g class="edge"><line x1="430" y1="222" x2="235" y2="222" marker-start="url(#arr)" marker-end="url(#arr)"/><text class="lbl" x="332" y="215" text-anchor="middle">stages inputs, reads export</text></g>
+      <g class="edge"><line x1="430" y1="282" x2="235" y2="282" marker-start="url(#arr)" marker-end="url(#arr)"/><text class="lbl" x="332" y="275" text-anchor="middle">reads inputs, writes export</text></g>
+      <g class="edge"><line x1="430" y1="326" x2="235" y2="326" marker-end="url(#arr)"/><text class="lbl" x="332" y="319" text-anchor="middle">keeps the code graph</text></g>
+      <g class="edge"><line x1="430" y1="446" x2="235" y2="446" marker-end="url(#arr)"/><text class="lbl" x="332" y="439" text-anchor="middle">writes the linked graph</text></g>
+      <g class="edge"><line x1="235" y1="504" x2="430" y2="504" marker-end="url(#arr)"/><text class="lbl" x="332" y="497" text-anchor="middle">reads</text></g>
+      <g class="edge"><line x1="235" y1="550" x2="430" y2="550" marker-end="url(#arr)"/><text class="lbl" x="332" y="543" text-anchor="middle">MCP</text></g>
+      <g class="edge learn"><line x1="430" y1="644" x2="235" y2="644" marker-end="url(#arr-l)"/><text class="lbl" x="332" y="637" text-anchor="middle">asks for a draft rule</text></g>
+      <!-- worker to joern -->
+      <g class="edge"><line x1="555" y1="240" x2="555" y2="264" marker-end="url(#arr)"/><text class="lbl" x="565" y="256">control over HTTP</text></g>
+      <!-- centre to MongoDB -->
+      <g class="edge"><line x1="680" y1="84" x2="880" y2="84" marker-start="url(#arr)" marker-end="url(#arr)"/><text class="lbl" x="780" y="77" text-anchor="middle">reads and writes</text></g>
+      <g class="edge"><line x1="680" y1="196" x2="880" y2="196" marker-start="url(#arr)" marker-end="url(#arr)"/><text class="lbl" x="780" y="189" text-anchor="middle">claims jobs, writes</text></g>
+      <text class="note" x="780" y="312" text-anchor="middle">no database access</text>
+      <g class="edge"><line x1="680" y1="420" x2="880" y2="420" marker-start="url(#arr)" marker-end="url(#arr)"/><text class="lbl" x="780" y="413" text-anchor="middle">reads records, writes</text></g>
+      <g class="edge"><line x1="880" y1="532" x2="680" y2="532" marker-end="url(#arr)"/><text class="lbl" x="780" y="525" text-anchor="middle">reads only</text></g>
+      <g class="edge learn"><line x1="680" y1="644" x2="880" y2="644" marker-start="url(#arr-l)" marker-end="url(#arr-l)"/><text class="lbl" x="780" y="637" text-anchor="middle">reads gaps, writes</text></g>
+      <!-- auth module -->
+      <g class="edge"><line x1="235" y1="846" x2="430" y2="846" marker-end="url(#arr)"/><text class="lbl" x="332" y="839" text-anchor="middle">sends as an identity</text></g>
+      <g class="edge"><line x1="430" y1="894" x2="235" y2="894" marker-end="url(#arr)"/><text class="lbl" x="332" y="887" text-anchor="middle">logs in as a test user</text></g>
+      <g class="edge"><line x1="430" y1="942" x2="235" y2="942" marker-end="url(#arr)"/><text class="lbl" x="332" y="935" text-anchor="middle">sends the test request</text></g>
+      <g class="edge"><line x1="555" y1="800" x2="555" y2="824" marker-end="url(#arr)"/><text class="lbl" x="565" y="816">sends as an identity</text></g>
+      <g class="edge"><line x1="680" y1="756" x2="880" y2="756" marker-start="url(#arr)" marker-end="url(#arr)"/><text class="lbl" x="780" y="749" text-anchor="middle">reads endpoints, writes</text></g>
+      <g class="edge"><line x1="880" y1="892" x2="680" y2="892" marker-end="url(#arr)"/><text class="lbl" x="780" y="885" text-anchor="middle">reads only</text></g>
+
+      <!-- left column -->
+      <g class="node" data-state="input" transform="translate(20,40)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">CLIENT</text><text class="ttl" x="12" y="32">wadi CLI</text></g>
+      <g class="node" data-state="input" transform="translate(20,88)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">CLIENT</text><text class="ttl" x="12" y="32">Web map</text></g>
+      <g class="node" data-state="input" transform="translate(20,152)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">EXTERNAL</text><text class="ttl" x="12" y="32">Git origins</text></g>
+      <g class="node store" data-state="input" transform="translate(20,206)"><rect class="box" width="215" height="92" rx="8"/><text class="tag" x="12" y="17">SHARED VOLUME</text><text class="ttl" x="12" y="36">Workspace</text><text class="sub" x="12" y="52">source, staged rules and the</text><text class="sub" x="12" y="66">export file of each service</text></g>
+      <g class="node store" data-state="input" transform="translate(20,306)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">SHARED VOLUME</text><text class="ttl" x="12" y="32">Code graph cache</text></g>
+      <g class="node store" data-state="input" transform="translate(20,430)"><rect class="box" width="215" height="92" rx="8"/><text class="tag" x="12" y="17">GRAPH DATABASE</text><text class="ttl" x="12" y="36">Neo4j</text><text class="sub" x="12" y="52">the linked system graph, rebuilt</text><text class="sub" x="12" y="66">from MongoDB when needed</text></g>
+      <g class="node" data-state="input" transform="translate(20,530)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">CLIENT</text><text class="ttl" x="12" y="32">Coding agent</text></g>
+      <g class="node" data-state="plan" transform="translate(20,624)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">EXTERNAL</text><text class="ttl" x="12" y="32">Model provider</text><use href="#st-plan" x="199" y="14"/></g>
+      <g class="node" data-state="plan" transform="translate(20,826)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">CLIENT</text><text class="ttl" x="12" y="32">Agent or test run</text><use href="#st-plan" x="199" y="14"/></g>
+      <g class="node" data-state="plan" transform="translate(20,874)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">EXTERNAL</text><text class="ttl" x="12" y="32">Identity provider</text><use href="#st-plan" x="199" y="14"/></g>
+      <g class="node" data-state="plan" transform="translate(20,922)"><rect class="box" width="215" height="40" rx="8"/><text class="tag" x="12" y="15">EXTERNAL</text><text class="ttl" x="12" y="32">System under test</text><use href="#st-plan" x="199" y="14"/></g>
+
+      <!-- services -->
+      <g class="node" data-state="built" transform="translate(430,40)"><rect class="box" width="250" height="88" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Orchestrator</text><text class="sub" x="12" y="52">REST API on port 9234,</text><text class="sub" x="12" y="66">creates and tracks every job</text><use href="#st-built" x="234" y="15"/></g>
+      <g class="node" data-state="built" transform="translate(430,152)"><rect class="box" width="250" height="88" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Extraction worker</text><text class="sub" x="12" y="52">runs each reader as a job,</text><text class="sub" x="12" y="66">one service at a time</text><use href="#st-built" x="234" y="15"/></g>
+      <g class="node" data-state="built" transform="translate(430,264)"><rect class="box" width="250" height="88" rx="8"/><text class="tag" x="12" y="17">CONTAINER</text><text class="ttl" x="12" y="36">Joern</text><text class="sub" x="12" y="52">builds one code graph, applies</text><text class="sub" x="12" y="66">the rules and exports the result</text><use href="#st-built" x="234" y="15"/></g>
+      <g class="node" data-state="built" transform="translate(430,376)"><rect class="box" width="250" height="88" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Stitcher</text><text class="sub" x="12" y="52">links each outbound call to the</text><text class="sub" x="12" y="66">service it reaches</text><use href="#st-built" x="234" y="15"/></g>
+      <g class="node" data-state="built" transform="translate(430,488)"><rect class="box" width="250" height="88" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">MCP server</text><text class="sub" x="12" y="52">nine read-only tools for</text><text class="sub" x="12" y="66">coding agents</text><use href="#st-built" x="234" y="15"/></g>
+      <g class="node learn" data-state="plan" transform="translate(430,600)"><rect class="box" width="250" height="88" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Learn service</text><text class="sub" x="12" y="52">the only place that holds a</text><text class="sub" x="12" y="66">model key</text><use href="#st-plan" x="234" y="15"/></g>
+      <g class="node" data-state="plan" transform="translate(430,712)"><rect class="box" width="250" height="88" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Access prober</text><text class="sub" x="12" y="52">calls each endpoint as each</text><text class="sub" x="12" y="66">test identity, on command</text><use href="#st-plan" x="234" y="15"/></g>
+      <g class="node" data-state="plan" transform="translate(430,824)"><rect class="box" width="250" height="136" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Credential broker</text><text class="sub" x="12" y="52">makes a credential for a named</text><text class="sub" x="12" y="66">identity and attaches it to the</text><text class="sub" x="12" y="80">request. The only place that</text><text class="sub" x="12" y="94">reads secrets.</text><use href="#st-plan" x="234" y="15"/></g>
+
+      <!-- MongoDB -->
+      <g class="node store" data-state="built" transform="translate(880,40)"><rect class="box" width="200" height="920" rx="8"/><text class="tag" x="12" y="17">SOURCE OF TRUTH</text><text class="ttl" x="12" y="36">MongoDB</text><use href="#st-built" x="184" y="15"/>
+        <text class="sub" x="12" y="62">systems, snapshots,</text><text class="sub" x="12" y="76">jobs, hints,</text><text class="sub" x="12" y="90">identity profiles</text>
+        <text class="sub" x="12" y="720">access as measured</text>
+        <text class="sub" x="12" y="856">identity profile</text>
+        <text class="sub" x="12" y="152">records from each reader</text><text class="sub" x="12" y="166">(code facts today)</text>
+        <text class="sub" x="12" y="376">call edges,</text><text class="sub" x="12" y="390">coverage report</text>
+        <text class="sub" x="12" y="496">every collection</text>
+        <text class="sub" x="12" y="608">rule proposals</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>The learn service, the model provider, the access prober and the credential broker are planned. Everything else runs in wadi 0.9.0. The config reader, the declared reader and bundle import are planned as extra jobs inside the extraction worker, so they add no new process. The prober and the broker start only when someone tests against a running system.</figcaption>
+  </figure>
+  <ul class="plain">
+    <li>Any service can be restarted or replaced without the others noticing, because they share only the database.</li>
+    <li>Only the credential broker reads secrets. It reads the identity profile from MongoDB and writes only its request log, which never holds a credential.</li>
+    <li>Joern holds no data that matters. It receives source files and returns one export file per service.</li>
+    <li>Reading the map never starts an analysis. The REST API and the MCP server read stored records.</li>
+  </ul>
+</section>
+
+<section id="one-run">
+  <h2>Inside one analysis of one service</h2>
+  <div class="prose"><p>The static analyzer is the extraction worker and the Joern container working together. Inside Joern, wadi's code runs in a fixed order. What wadi knows about each framework arrives as data.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1100 316" role="img" aria-label="One service passes through the parser, the language profile, the rule engine, the plugins and the exporter. The rule engine loads rule files that the worker staged from base packs, organization packs and learned rules.">
+      <text class="mode quiet" x="200" y="26">ONE CODE GRAPH, HELD IN MEMORY, PASSED FROM STAGE TO STAGE AND THEN DISCARDED</text>
+      <g class="edge"><line x1="180" y1="78" x2="200" y2="78" marker-end="url(#arr)"/></g>
+      <g class="edge"><line x1="360" y1="78" x2="380" y2="78" marker-end="url(#arr)"/></g>
+      <g class="edge"><line x1="540" y1="78" x2="560" y2="78" marker-end="url(#arr)"/></g>
+      <g class="edge"><line x1="720" y1="78" x2="740" y2="78" marker-end="url(#arr)"/></g>
+      <g class="edge"><line x1="900" y1="78" x2="920" y2="78" marker-end="url(#arr)"/></g>
+      <g class="edge"><polyline points="100,258 100,282 640,282 640,258" marker-end="url(#arr)"/><line x1="280" y1="258" x2="280" y2="282"/><line x1="460" y1="258" x2="460" y2="282"/><text class="lbl" x="370" y="301" text-anchor="middle">the worker copies what this service needs into the shared volume</text></g>
+      <g class="edge"><line x1="640" y1="196" x2="640" y2="116" marker-end="url(#arr)"/><text class="lbl" x="648" y="160">loads</text></g>
+      <g class="edge"><line x1="720" y1="227" x2="740" y2="227" marker-end="url(#arr)"/></g>
+      <g class="edge"><line x1="1000" y1="116" x2="1000" y2="196" marker-end="url(#arr)"/><text class="lbl" x="1008" y="160">writes</text></g>
+
+      <g class="node" data-state="input" transform="translate(20,40)"><rect class="box" width="160" height="76" rx="8"/><text class="tag" x="12" y="17">INPUT</text><text class="ttl" x="12" y="36">One service</text><text class="sub" x="12" y="52">its source and the</text><text class="sub" x="12" y="66">libraries it uses</text></g>
+      <g class="node" data-state="built" transform="translate(200,40)"><rect class="box" width="160" height="76" rx="8"/><text class="tag" x="12" y="17">JOERN'S CODE</text><text class="ttl" x="12" y="36">Parser</text><text class="sub" x="12" y="52">one per language,</text><text class="sub" x="12" y="66">14 ship with Joern</text><use href="#st-built" x="144" y="15"/></g>
+      <g class="node" data-state="part" transform="translate(380,40)"><rect class="box" width="160" height="76" rx="8"/><text class="tag" x="12" y="17">WADI CODE</text><text class="ttl" x="12" y="36">Language profile</text><text class="sub" x="12" y="52">one per language,</text><text class="sub" x="12" y="66">Java today</text><use href="#st-part" x="144" y="15"/></g>
+      <g class="node" data-state="plan" transform="translate(560,40)"><rect class="box" width="160" height="76" rx="8"/><text class="tag" x="12" y="17">WADI CODE</text><text class="ttl" x="12" y="36">Rule engine</text><text class="sub" x="12" y="52">one for all libraries,</text><text class="sub" x="12" y="66">reads rules as data</text><use href="#st-plan" x="144" y="15"/></g>
+      <g class="node" data-state="built" transform="translate(740,40)"><rect class="box" width="160" height="76" rx="8"/><text class="tag" x="12" y="17">WADI CODE</text><text class="ttl" x="12" y="36">Plugins</text><text class="sub" x="12" y="52">rare, for depth such</text><text class="sub" x="12" y="66">as Spring Security</text><use href="#st-built" x="144" y="15"/></g>
+      <g class="node" data-state="built" transform="translate(920,40)"><rect class="box" width="160" height="76" rx="8"/><text class="tag" x="12" y="17">WADI CODE</text><text class="ttl" x="12" y="36">Exporter</text><text class="sub" x="12" y="52">writes one file</text><text class="sub" x="12" y="66">per service</text><use href="#st-built" x="144" y="15"/></g>
+
+      <g class="node store" data-state="plan" transform="translate(20,196)"><rect class="box" width="160" height="62" rx="8"/><text class="tag" x="12" y="17">DATA</text><text class="ttl" x="12" y="36">Base packs</text><text class="sub" x="12" y="52">in the wadi release</text><use href="#st-plan" x="144" y="15"/></g>
+      <g class="node store" data-state="plan" transform="translate(200,196)"><rect class="box" width="160" height="62" rx="8"/><text class="tag" x="12" y="17">DATA</text><text class="ttl" x="12" y="36">Organization packs</text><text class="sub" x="12" y="52">your git repository</text><use href="#st-plan" x="144" y="15"/></g>
+      <g class="node store" data-state="plan" transform="translate(380,196)"><rect class="box" width="160" height="62" rx="8"/><text class="tag" x="12" y="17">DATA</text><text class="ttl" x="12" y="36">Learned rules</text><text class="sub" x="12" y="52">and hints, per system</text><use href="#st-plan" x="144" y="15"/></g>
+      <g class="node store" data-state="plan" transform="translate(560,196)"><rect class="box" width="160" height="62" rx="8"/><text class="tag" x="12" y="17">THIS RUN</text><text class="ttl" x="12" y="36">Staged rules</text><text class="sub" x="12" y="52">for this service only</text><use href="#st-plan" x="144" y="15"/></g>
+      <g class="node store" data-state="plan" transform="translate(740,196)"><rect class="box" width="160" height="62" rx="8"/><text class="tag" x="12" y="17">ON THE SNAPSHOT</text><text class="ttl" x="12" y="36">Rule-set hash</text><text class="sub" x="12" y="52">names the rules used</text><use href="#st-plan" x="144" y="15"/></g>
+      <g class="node store" data-state="built" transform="translate(920,196)"><rect class="box" width="160" height="62" rx="8"/><text class="tag" x="12" y="17">FILE</text><text class="ttl" x="12" y="36">export.json</text><text class="sub" x="12" y="52">the worker stores it</text><use href="#st-built" x="144" y="15"/></g>
+    </svg>
+    </div>
+    <figcaption>Code is compiled into the Joern image. Rules are files the worker stages for each run, so a rule can change without a new image. A framework gets a pack, never a profile of its own.</figcaption>
+  </figure>
+  <ol class="steps">
+    <li>The orchestrator creates an extract job for a snapshot.</li>
+    <li>The extraction worker claims the job and checks out the repository at the pinned commit.</li>
+    <li>The worker finds each service, its language and its libraries, and picks the packs that match.<span class="st" data-state="plan">Planned</span></li>
+    <li>The worker copies those packs and the system's learned rules into the shared volume and records their hash.<span class="st" data-state="plan">Planned</span></li>
+    <li>Joern parses the service, runs the language profile, the rule engine and the plugins, and writes one export file.</li>
+    <li>The worker checks the file against the contracts and stores it as code facts.</li>
+    <li>Joern drops the code graph. The cached copy can be deleted at any time.</li>
+  </ol>
+</section>
+
+<section id="storage">
+  <h2>Where code and rules are kept</h2>
+  <div class="prose"><p>The first five rows arrive with a wadi release. Wadi decides which of them to use when it reads a repository, so a Java service never loads a Python pack.</p></div>
+  <div class="tw">
+  <table class="wide">
+    <thead><tr><th>Piece</th><th>Form</th><th>Kept in</th><th>Reaches a machine by</th><th>State</th></tr></thead>
+    <tbody>
+      <tr><td>Parsers</td><td>Joern's code</td><td>The Joern image, 14 languages, 1.7 GB</td><td>A wadi release</td><td class="nw"><span class="st" data-state="built">Built</span></td></tr>
+      <tr><td>Language profiles</td><td>Wadi code, one per language</td><td>Wadi's jar inside the Joern image, 11.5 MB today</td><td>A wadi release</td><td class="nw"><span class="st" data-state="part">Java only</span></td></tr>
+      <tr><td>Rule engine</td><td>Wadi code, one for all packs</td><td>The same jar</td><td>A wadi release</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+      <tr><td>Plugins</td><td>Wadi code, rare</td><td>The same jar</td><td>A wadi release</td><td class="nw"><span class="st" data-state="built">Built for Spring</span></td></tr>
+      <tr><td>Base packs</td><td>Data, one folder per library</td><td>A <code>packs/</code> folder in the wadi repository, copied into the worker image</td><td>A wadi release</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+      <tr><td>Organization packs</td><td>Data</td><td>A git repository your company owns</td><td>The worker clones it at a commit named in the system's settings</td><td class="nw"><span class="st" data-state="plan">Proposed</span></td></tr>
+      <tr><td>Learned rules and hints</td><td>Data</td><td>Wadi's database, and a <code>.wadi/</code> file in the analyzed repository</td><td>Git, once someone commits the file</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="statuses">
+  <h2>What the fold tells a reader</h2>
+  <div class="prose"><p>Every fact in the map carries a status that says which sources back it.</p></div>
+  <div class="tw">
+  <table class="mid">
+    <thead><tr><th>Status</th><th>Means</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td class="nw"><span class="chip ok">confirmed</span></td><td>Two or more sources agree.</td><td>The code declares <code>GET /orders/{id}</code> and a trace shows it being called.</td></tr>
+      <tr><td class="nw"><span class="chip">static only</span></td><td>Only the code shows it. This is not an error.</td><td>An endpoint that no test or trace has exercised.</td></tr>
+      <tr><td class="nw"><span class="chip gap">observed only</span></td><td>Runtime data shows it and the code analysis does not.</td><td>A call made through a client wrapper the rules do not cover yet.</td></tr>
+      <tr><td class="nw"><span class="chip gap">declared only</span></td><td>A spec or a deployment file states it and no code was found.</td><td>An OpenAPI path whose handler was removed, or an ingress route to no endpoint.</td></tr>
+      <tr><td class="nw"><span class="chip gap">contested</span></td><td>Two sources give different values.</td><td>The spec marks a field as required and the code treats it as optional.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul class="plain">
+    <li>Only a source that is independent of the code can confirm a fact. A spec generated from the same annotations is a check, not a confirmation, and a file two readers both read counts as one source.</li>
+    <li>Each fact lists the readers that covered it, so "static only" says whether anything else looked.</li>
+    <li>Two sources from different builds, or a name that matched two services, are not comparable. That result never counts as agreement or conflict.</li>
+    <li>Only readers that run with no model can make a fact contested.</li>
+  </ul>
+  <div class="prose">
+    <p>The three amber statuses are the gaps that learn mode works on.</p>
+    <h3>Keys and scope</h3>
+    <p>Records from different readers join because each one carries keys that any source can compute.</p>
+  </div>
+  <div class="tw">
+  <table class="mid">
+    <thead><tr><th>Key</th><th>Made from</th></tr></thead>
+    <tbody>
+      <tr><td>Service</td><td>One service id that does not depend on a folder, plus every name the service runs under</td></tr>
+      <tr><td>Endpoint</td><td>The service, the verb and the route template</td></tr>
+      <tr><td>Method</td><td>Class, method, file and lines</td></tr>
+      <tr><td>Data</td><td>The table or collection name</td></tr>
+      <tr><td>Messaging</td><td>The topic and the consumer group</td></tr>
+      <tr><td>Identity</td><td>A test identity named in the system's identity profile, such as admin or customer <span class="st" data-state="plan" style="margin-left:8px">Planned</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose"><p>Every record also carries a scope: the commit, the environment and, for runtime data, the time window. A name that matches two services stays ambiguous and one that matches none stays unmatched. The join never picks one.</p></div>
+</section>
+
+<section id="learn-loop">
+  <h2>The learn loop</h2>
+  <div class="prose"><p>Learn mode runs only when someone starts it. The only thing it adds to analysis is a rule. The auditor's disagreements and counts are reports, never facts.</p></div>
+  <ol class="steps">
+    <li><strong>Find.</strong> Wadi lists the gaps: unknowns the map reports, facts that are observed only, declared only or contested, and disagreements from an auditor that re-reads sampled endpoints without seeing the map.</li>
+    <li><strong>Draft.</strong> A model reads the source around one gap and drafts a rule.</li>
+    <li><strong>Check.</strong> Wadi runs the draft inside a real extraction and compares the result with and without it. A draft may only add facts.</li>
+    <li><strong>Approve.</strong> A person accepts or rejects the rule. Wadi remembers rejections. Whether a rule that is not about authorization applies before this step is still open.</li>
+    <li><strong>Replay.</strong> The approved rule is stored with the system and runs on every later analysis, with no model.</li>
+  </ol>
+</section>
+
+<section id="auth">
+  <h2>Identity and access</h2>
+  <div class="prose">
+    <p>Every service decides who may call it in its own way. Spring Security alone can allow, deny or skip a request in a dozen places, and a gateway in front of the service can change the answer again. Wadi therefore keeps two answers for every endpoint. One is the rule it read. The other is the result it measured on a running test environment.</p>
+    <p>The goal is that an agent or a test generator can call any endpoint as any kind of user and know what should happen. Nothing in this section is built. Wadi 0.9.0 reads access rules from Spring code and stops there.</p>
+  </div>
+  <div class="rules4">
+    <div><h3>A test names an identity, never a token</h3><p>A test says admin or customer B. A recipe for that identity produces the credential when the test runs, so the same test works on a laptop and in staging.</p></div>
+    <div><h3>The running system gives the verdict</h3><p>What wadi reads from code, config and specs is a prediction with its reason. What a test environment answers is the measurement. The map shows both.</p></div>
+    <div><h3>Only the broker reads secrets</h3><p>Analysis still runs with no secret and no API key. An agent asks the broker to send a request as an identity and never sees a password.</p></div>
+  </div>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1100 602" role="img" aria-label="The static readers write access rules as read. The access prober calls a test environment as each test identity and writes access as measured. The fold joins both into one access table that the MCP server and the REST API serve. The prober and any agent send test requests through the credential broker, which gets recipes from the identity profile, reads secrets from a secret store, logs in at the identity provider and sends the request to the system under test.">
+      <text class="mode quiet" x="20" y="26">WHAT WADI READ AND WHAT IT MEASURED MEET IN ONE TABLE</text>
+
+      <g class="edge"><line x1="184" y1="82" x2="236" y2="82" marker-end="url(#arr)"/><text class="lbl" x="209" y="74" text-anchor="middle">writes</text></g>
+      <g class="edge"><line x1="416" y1="82" x2="470" y2="82" marker-end="url(#arr)"/><text class="lbl" x="442" y="74" text-anchor="middle">as read</text></g>
+      <g class="edge"><line x1="650" y1="82" x2="700" y2="82" marker-end="url(#arr)"/><text class="lbl" x="674" y="74" text-anchor="middle">serves</text></g>
+      <g class="edge"><line x1="870" y1="82" x2="920" y2="82" marker-end="url(#arr)"/><text class="lbl" x="894" y="74" text-anchor="middle">reads</text></g>
+      <g class="edge"><line x1="326" y1="120" x2="326" y2="196" marker-end="url(#arr)"/><text class="lbl" x="334" y="162">endpoints, requests</text></g>
+      <g class="edge"><line x1="416" y1="234" x2="470" y2="234" marker-end="url(#arr)"/><text class="lbl" x="442" y="226" text-anchor="middle">writes</text></g>
+      <g class="edge"><line x1="560" y1="196" x2="560" y2="120" marker-end="url(#arr)"/><text class="lbl" x="568" y="162">as measured</text></g>
+      <g class="edge"><line x1="326" y1="272" x2="326" y2="348" marker-end="url(#arr)"/><text class="lbl" x="334" y="314">sends as an identity</text></g>
+      <g class="edge"><line x1="1000" y1="120" x2="1000" y2="348" marker-end="url(#arr)"/><text class="lbl" x="992" y="240" text-anchor="end">sends as an identity</text></g>
+      <g class="edge"><line x1="102" y1="120" x2="102" y2="348" marker-end="url(#arr)"/><text class="lbl" x="110" y="240">drafts</text></g>
+      <g class="edge"><line x1="184" y1="396" x2="240" y2="396" marker-end="url(#arr)"/><text class="lbl" x="211" y="388" text-anchor="middle">recipes</text></g>
+      <g class="edge"><line x1="102" y1="520" x2="102" y2="444" marker-end="url(#arr)"/><text class="lbl" x="110" y="486">confirms once</text></g>
+      <g class="edge"><line x1="365" y1="520" x2="365" y2="444" marker-end="url(#arr)"/><text class="lbl" x="373" y="486">secrets</text></g>
+      <g class="edge"><line x1="660" y1="444" x2="660" y2="520" marker-end="url(#arr)"/><text class="lbl" x="668" y="486">logs in as a test user</text></g>
+      <g class="edge"><line x1="955" y1="444" x2="955" y2="520" marker-end="url(#arr)"/><text class="lbl" x="963" y="486">test request</text></g>
+
+      <g class="node" data-state="part" transform="translate(20,44)"><rect class="box" width="164" height="76" rx="8"/><text class="tag" x="12" y="17">READERS</text><text class="ttl" x="12" y="36">Static readers</text><text class="sub" x="12" y="52">read the access rules in</text><text class="sub" x="12" y="66">code, config and specs</text><use href="#st-part" x="148" y="15"/></g>
+      <g class="node store" data-state="part" transform="translate(236,44)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">RECORDS</text><text class="ttl" x="12" y="36">Access rules as read</text><text class="sub" x="12" y="52">one record per place a</text><text class="sub" x="12" y="66">rule lives, with its reason</text><use href="#st-part" x="164" y="15"/></g>
+      <g class="node" data-state="plan" transform="translate(470,44)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">FOLD</text><text class="ttl" x="12" y="36">Access table</text><text class="sub" x="12" y="52">endpoint, identity and case,</text><text class="sub" x="12" y="66">both answers and a status</text><use href="#st-plan" x="164" y="15"/></g>
+      <g class="node" data-state="part" transform="translate(700,44)"><rect class="box" width="170" height="76" rx="8"/><text class="tag" x="12" y="17">SERVICES</text><text class="ttl" x="12" y="36">MCP server, REST API</text><text class="sub" x="12" y="52">serve the identities and</text><text class="sub" x="12" y="66">the access table</text><use href="#st-part" x="154" y="15"/></g>
+      <g class="node" data-state="input" transform="translate(920,44)"><rect class="box" width="160" height="76" rx="8"/><text class="tag" x="12" y="17">CLIENT</text><text class="ttl" x="12" y="36">Agent or test run</text><text class="sub" x="12" y="52">names an identity,</text><text class="sub" x="12" y="66">never holds a secret</text></g>
+
+      <g class="node" data-state="plan" transform="translate(236,196)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">SERVICE</text><text class="ttl" x="12" y="36">Access prober</text><text class="sub" x="12" y="52">calls each endpoint as</text><text class="sub" x="12" y="66">each test identity</text><use href="#st-plan" x="164" y="15"/></g>
+      <g class="node store" data-state="plan" transform="translate(470,196)"><rect class="box" width="180" height="76" rx="8"/><text class="tag" x="12" y="17">RECORDS</text><text class="ttl" x="12" y="36">Access as measured</text><text class="sub" x="12" y="52">the answer, the</text><text class="sub" x="12" y="66">environment and the time</text><use href="#st-plan" x="164" y="15"/></g>
+
+      <g class="node store" data-state="plan" transform="translate(20,348)"><rect class="box" width="164" height="96" rx="8"/><text class="tag" x="12" y="17">DATA</text><text class="ttl" x="12" y="36">Identity profile</text><text class="sub" x="12" y="52">test identities, a recipe</text><text class="sub" x="12" y="66">for each, roles and</text><text class="sub" x="12" y="80">authorities per service</text><use href="#st-plan" x="148" y="15"/></g>
+      <g class="node" data-state="plan" transform="translate(240,348)"><rect class="box" width="840" height="96" rx="8"/><text class="tag" x="12" y="17">SERVICE · THE ONLY PLACE THAT READS SECRETS</text><text class="ttl" x="12" y="36">Credential broker</text><text class="sub" x="12" y="52">turns an identity name into a credential and attaches it to the request, in one of three ways</text>
+        <rect class="pill" x="12" y="64" width="84" height="20" rx="10"/><text class="pilltxt" x="54" y="78" text-anchor="middle">real login</text>
+        <rect class="pill" x="104" y="64" width="92" height="20" rx="10"/><text class="pilltxt" x="150" y="78" text-anchor="middle">mock issuer</text>
+        <rect class="pill" x="204" y="64" width="104" height="20" rx="10"/><text class="pilltxt" x="256" y="78" text-anchor="middle">saved session</text>
+        <use href="#st-plan" x="824" y="15"/></g>
+
+      <g class="node" data-state="input" transform="translate(20,520)"><rect class="box" width="164" height="62" rx="8"/><text class="tag" x="12" y="17">PERSON</text><text class="ttl" x="12" y="36">System owner</text><text class="sub" x="12" y="52">adds test users, secrets</text></g>
+      <g class="node store" data-state="input" transform="translate(240,520)"><rect class="box" width="250" height="62" rx="8"/><text class="tag" x="12" y="17">EXTERNAL</text><text class="ttl" x="12" y="36">Secret store</text><text class="sub" x="12" y="52">CI secrets or a vault, read at run time</text></g>
+      <g class="node" data-state="input" transform="translate(535,520)"><rect class="box" width="250" height="62" rx="8"/><text class="tag" x="12" y="17">EXTERNAL</text><text class="ttl" x="12" y="36">Identity provider</text><text class="sub" x="12" y="52">real login, for a whole-system test</text></g>
+      <g class="node" data-state="input" transform="translate(830,520)"><rect class="box" width="250" height="62" rx="8"/><text class="tag" x="12" y="17">EXTERNAL</text><text class="ttl" x="12" y="36">System under test</text><text class="sub" x="12" y="52">a test environment, never production</text></g>
+    </svg>
+    </div>
+    <figcaption>Wadi reads access rules from code, config and specs. It measures access by calling a test environment as each test identity. The fold puts both answers in one table. Every test request, from the prober or from an agent, goes through the broker.</figcaption>
+  </figure>
+
+  <h3>How a test gets its credential</h3>
+  <div class="prose"><p>A recipe can run once before a test run, or at the moment of a request. The broker keeps the credential until it expires. How the recipe makes the credential depends on what the test runs against.</p></div>
+  <div class="tw">
+  <table class="wide">
+    <thead><tr><th>Test runs against</th><th>How the identity is set</th><th>Any role without a test user</th><th>What the test proves</th></tr></thead>
+    <tbody>
+      <tr><td>One service, inside its own test process</td><td>The framework's test support sets the identity. No token and no broker.</td><td>Yes</td><td>The service's own rules</td></tr>
+      <tr><td>One service running alone</td><td>The broker's mock issuer signs a token with the claims the test asks for</td><td>Yes</td><td>The service's token checks and its rules</td></tr>
+      <tr><td>The whole system in a test environment</td><td>The broker logs in as a test user at the real identity provider</td><td>No, one test user per identity</td><td>The whole path, gateway included</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul class="plain">
+    <li>Recipes use the Web Fuzzing Commons authentication format, which EvoMaster, Schemathesis and other API test tools already read.</li>
+    <li>For single sign-on with a second factor, a person logs in once and the broker reuses that session.</li>
+  </ul>
+
+  <h3>What the auth module changes in the architecture</h3>
+  <div class="tw">
+  <table class="wide">
+    <thead><tr><th>Piece</th><th>Change</th><th>Kind</th></tr></thead>
+    <tbody>
+      <tr><td>Identity profile</td><td>The test identities of a system in one environment, a recipe for each, and the roles and authorities each identity has in each service. Wadi drafts it from what the readers found and a person confirms it.</td><td class="nw"><span class="chip">New data</span></td></tr>
+      <tr><td>Credential broker</td><td>Runs the recipes, includes a mock issuer and attaches the credential to each test request.</td><td class="nw"><span class="chip">New service</span></td></tr>
+      <tr><td>Access prober</td><td>Calls each endpoint as each identity, through the broker, and stores what the system answered.</td><td class="nw"><span class="chip">New service</span></td></tr>
+      <tr><td>Access rules as read</td><td>One record per place a rule lives, such as the code, the gateway, the mesh or the spec. Today wadi stores one verdict per endpoint.</td><td class="nw"><span class="chip">Changed</span></td></tr>
+      <tr><td>Static analyzer</td><td>Its access result becomes a prediction with its reason. It also lists the roles each service checks, where a role comes from, and a valid request for each endpoint.</td><td class="nw"><span class="chip">Changed</span></td></tr>
+      <tr><td>Config reader</td><td>Also reads the access rules that a gateway, an ingress or a mesh applies.</td><td class="nw"><span class="chip">Wider</span></td></tr>
+      <tr><td>Declared reader</td><td>Also reads the security part of each spec.</td><td class="nw"><span class="chip">Wider</span></td></tr>
+      <tr><td>Packs</td><td>Each framework pack also says how that framework answers a refused request, so the prober reads a 401, a 403 or a 404 correctly.</td><td class="nw"><span class="chip">Wider</span></td></tr>
+      <tr><td>Shared keys</td><td>Identity becomes a key. Services that name their roles differently join on the test identity.</td><td class="nw"><span class="chip">Changed</span></td></tr>
+      <tr><td>Call view</td><td>Each call shows whether the caller passes the user's identity on, next to what the called endpoint requires. They stay two facts, not an access verdict.</td><td class="nw"><span class="chip">Wider</span></td></tr>
+      <tr><td>Fold</td><td>Builds the access table. Each cell holds the answer as read, the answer as measured and a status.</td><td class="nw"><span class="chip">Wider</span></td></tr>
+      <tr><td>MCP server</td><td>Two more tools, for the test identities and the access table. It stays read-only.</td><td class="nw"><span class="chip">Wider</span></td></tr>
+      <tr><td>Direct connections</td><td>There was one, from the worker to Joern. The prober to the broker is a second.</td><td class="nw"><span class="chip">Changed</span></td></tr>
+      <tr><td>Bundles and the hub</td><td>A bundle also carries the access rules read for a service and the roles and authorities each test identity has in it. It never carries a recipe, and config values pass a routing projection.</td><td class="nw"><span class="chip">Wider</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose"><p>The way bundles are exported and imported, the learn loop, Joern and the storage tiers stay as they are. Analysis still runs with no secret and no API key.</p></div>
+
+  <h3>What is kept where</h3>
+  <div class="tw">
+  <table class="mid">
+    <thead><tr><th>Thing</th><th>Kept in</th><th>Written by</th></tr></thead>
+    <tbody>
+      <tr><td>Identity profile</td><td>Wadi's database, and a <code>.wadi/</code> file a team can commit</td><td>The orchestrator</td></tr>
+      <tr><td>Role mappings imported with a bundle</td><td>MongoDB, with that service's other imported records</td><td>The extraction worker</td></tr>
+      <tr><td>Secrets</td><td>Your secret store. The profile holds only the name of each secret.</td><td>You</td></tr>
+      <tr><td>Credentials</td><td>The broker's memory, until they expire</td><td>The broker</td></tr>
+      <tr><td>Access rules as read</td><td>MongoDB, with the other records of each reader</td><td>Each reader</td></tr>
+      <tr><td>Access as measured</td><td>MongoDB, with the environment and the time of the measurement</td><td>The access prober</td></tr>
+      <tr><td>The broker's request log</td><td>MongoDB, one entry per request, never a credential</td><td>The broker</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>What a person supplies once per system</h3>
+  <ul class="plain">
+    <li>The names of the test identities and the roles and authorities each one has.</li>
+    <li>For one service running alone, a test configuration that trusts the mock issuer.</li>
+    <li>For a whole system, one test user per identity at the identity provider, with its secret in the secret store.</li>
+    <li>Where a second factor is required, an exclusion for the test users or one login whose session the broker reuses.</li>
+  </ul>
+
+  <h3>Limits</h3>
+  <ul class="plain">
+    <li>A measurement holds for the identities tried, in one environment, at one time.</li>
+    <li>Checking that a user sees only their own records needs two identities with the same role and data that each one owns. This comes after role checks.</li>
+    <li>A role kept in a service's own database needs a setup step that creates the user.</li>
+    <li>A mock token can carry roles the real identity provider would never issue together. Mock tokens should copy the claim layout of one real token per identity.</li>
+    <li>The measured result is what the system does. What it should do still comes from a person or a spec. A request that fails validation, a failed login or an answer from the wrong route reads as inconclusive.</li>
+  </ul>
+
+  <h3>How the broker enforces the safety rules</h3>
+  <ul class="plain">
+    <li>The identity profile lists, for each test environment, the exact destinations a credential may go to: scheme, host, port and path prefix. The broker checks every hop, refuses everything else and follows no redirect off the list. No production destination is on any list, and a missing list means no request.</li>
+    <li>Every request through the broker is read-only, an agent's included. The first version sends only the operations a fixture lists, and a person can allow more per environment.</li>
+    <li>Each caller has its own token and may use only the identities and environments it is bound to.</li>
+    <li>The broker logs every request without the credential. The first version returns only the status and whether each fixture check held, because a credential can sit anywhere in a body.</li>
+    <li>The mock issuer has its own key for each test environment and its own issuer name, with short expiry. Only the test deployment trusts it. A service that checks tokens with a key written into its own code needs that key from the owner instead, and that recipe stays off until the owner records that production rejects the key.</li>
+  </ul>
+</section>
+
+<section id="hub">
+  <h2>The hub</h2>
+  <div class="prose"><p>The hub is not a new service. It is the same stack deployed once for an organization. Each team runs wadi on the services it owns and sends one bundle per service to the hub.</p></div>
+  <div class="hub">
+    <div class="stack"><div class="cell">Team A's wadi</div><div class="cell">Team B's wadi</div><div class="cell">Team C's wadi</div></div>
+    <div class="go">pushes a bundle</div>
+    <div class="cell main"><h3>Hub <span class="st" data-state="plan" style="margin-left:8px">Planned</span></h3><p>Runs the same stitcher and fold across every team's bundle, and shows how old each bundle is.</p></div>
+    <div class="go">answers</div>
+    <div class="cell">An agent on any team asks about services it does not own</div>
+  </div>
+  <h3>How a team sends a service</h3>
+  <ol class="steps">
+    <li>The team's CI runs wadi on the services it owns, at one commit.</li>
+    <li>A publish command exports one bundle per service and sends each one to the hub's REST API with the team's token.</li>
+    <li>The hub's orchestrator checks the manifest: the schema version, the record counts, the branch and whether this team owns the service. A bundle from a branch the map does not follow is stored and starts no snapshot. When the map follows one branch, so is a bundle whose commit does not descend from the one the current map holds: the publish command checks descent in the team's own repository, and the hub admits the bundle only if the commit it checked against is still current. A service's first bundle, a map that takes the newest bundle from any branch, and a local or folder import skip that check. Otherwise the orchestrator creates a pending snapshot and its import job, and a sweep fails a pending snapshot left without a job.</li>
+    <li>The pending snapshot lists the new bundle and every other member of the current map. The hub's worker checks the new bundle as a whole and stores its records as a member of that snapshot. The unchanged services come from the current map, copied or listed as decision D5 settles. Each imported fact keeps the team, commit, wadi version and rule hash it came from.</li>
+    <li>The stitcher runs across all of them. The snapshot becomes the current map only when it succeeds. Until then the previous snapshot stays current, and a read of a pending or running snapshot returns only its status.</li>
+    <li>The coverage report lists the age of every bundle and of every carried member, so a stale service is visible before anyone trusts an answer.</li>
+  </ol>
+  <ul class="plain">
+    <li>Sending again a bundle that is already the service's current member changes nothing, because its identity comes from the service, the commit, the wadi version and image digest, the rule hash once it exists, the role mappings it carries, the branch, the bundle kind, the library sources staged into the analysis, a digest of its records after the projection and, once deployment files are read, the commit of each other repository they came from and the environments they cover.</li>
+    <li>A rejected or interrupted import leaves the previous snapshot readable and unchanged.</li>
+    <li>The same bundle can be written to a folder and imported from that folder, for networks the hub cannot be reached from.</li>
+    <li>A team's own wadi can import a neighbour's bundle from the hub. A placeholder for that service then becomes a real service with real endpoints.</li>
+  </ul>
+  <h3>What a service bundle carries</h3>
+  <div class="tw">
+  <table class="mid">
+    <thead><tr><th>Part</th><th>Content</th></tr></thead>
+    <tbody>
+      <tr><td>Manifest</td><td>The service id, the repository, commit and branch, the base commit it was checked against and whether it descends from it, a digest of the role mappings it carries, the library sources staged into it, a digest of its records after the projection, the wadi version and image digest, the config keys it carries, the schema version, the rule hash once it exists, the time it was produced, a count per kind of record, and whether the bundle is full or boundary-only</td></tr>
+      <tr><td>Records</td><td>The service boundary, endpoints, outbound calls, queue interactions and data models. A full bundle adds the flow graph of every endpoint. Config records and declared contracts join once those readers exist.</td></tr>
+      <tr><td>Access</td><td>The access rules read for each endpoint, without raw config values, and the roles and authorities each test identity has in this service. Measured access stays on the install that measured it.</td></tr>
+      <tr><td>Left out</td><td>Stitched edges and the coverage report. The receiver computes them for its own set of services. A bundle never carries a recipe. From config it keeps only the values the receiving stitcher routes by, and strips user names, passwords and query strings from URLs. A value under such a key travels as it is, unless removing the rest would change where a call goes; then it is withheld and the call stays unresolved. A boundary-only bundle also drops text copied from the code. A full bundle carries a line of source per flow-graph node, so it goes only where the code may be read.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose"><p>The decision record fixes the shape: bundles, an ingestion API on the hub, snapshots made of bundles and ownership by team. The six steps and the access row are proposals for the mechanics. <code>docs/bundle-import-and-hub-plan.md</code> describes them.</p></div>
+</section>
+
+<section id="pieces">
+  <h2>Every piece in one table</h2>
+  <div class="tw">
+  <table class="wide">
+    <thead><tr><th>Piece</th><th>What it does</th><th>Runs in</th><th>Writes</th><th>State</th></tr></thead>
+    <tbody>
+      <tr><td>Orchestrator</td><td>Serves the REST API and creates every job</td><td>Its own service</td><td>Systems, snapshots, jobs, hints</td><td class="nw"><span class="st" data-state="built">Built</span></td></tr>
+      <tr><td>Extraction worker</td><td>Runs each reader as a job</td><td>Its own service</td><td>Records from each reader</td><td class="nw"><span class="st" data-state="built">Built</span></td></tr>
+      <tr><td>Joern container</td><td>Builds one service's code graph and exports it</td><td>Its own container, reached only by the worker</td><td>One export file per service</td><td class="nw"><span class="st" data-state="built">Built</span></td></tr>
+      <tr><td>Static analyzer</td><td>Extracts endpoints, flows, calls, authorization and data access</td><td>The worker and Joern</td><td>Code facts</td><td class="nw"><span class="st" data-state="built">Java and Spring</span></td></tr>
+      <tr><td>Rule engine and packs</td><td>Apply what wadi knows about each framework, as data</td><td>Wadi's jar in Joern, with rule files staged by the worker</td><td>A rule hash on each snapshot</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+      <tr><td>Config reader</td><td>Reads names, addresses and routes per environment</td><td>The worker, as its own job</td><td>Config records</td><td class="nw"><span class="st" data-state="part">Partly built</span></td></tr>
+      <tr><td>Declared reader</td><td>Reads specs and contracts</td><td>The worker, as its own job</td><td>Declared contracts</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+      <tr><td>Access prober</td><td>Calls each endpoint as each test identity and records the answer</td><td>Its own service, started only for testing</td><td>Access as measured</td><td class="nw"><span class="st" data-state="plan">Proposed</span></td></tr>
+      <tr><td>Credential broker</td><td>Turns an identity name into a credential and attaches it to a test request</td><td>Its own service, the only one that reads secrets</td><td>Its request log, never a credential</td><td class="nw"><span class="st" data-state="plan">Proposed</span></td></tr>
+      <tr><td>Identity profile</td><td>Names the test identities of a system and how each one logs in</td><td>Data, stored through the orchestrator</td><td>Nothing</td><td class="nw"><span class="st" data-state="plan">Proposed</span></td></tr>
+      <tr><td>Trace importer</td><td>Maps observed calls to the shared keys</td><td>Its own job, fed by uploaded files</td><td>Observed calls</td><td class="nw"><span class="st" data-state="later">Later</span></td></tr>
+      <tr><td>Bundle export</td><td>Writes stored records out as a file set</td><td>The orchestrator's REST API and the CLI</td><td>A bundle</td><td class="nw"><span class="st" data-state="part">Whole snapshot only</span></td></tr>
+      <tr><td>Bundle import</td><td>Checks a bundle and stores its records as imported</td><td>The orchestrator accepts it, the worker writes it</td><td>The same service records</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+      <tr><td>Stitcher</td><td>Links each outbound call to the service it reaches</td><td>Its own service</td><td>Call edges, coverage report, the Neo4j graph</td><td class="nw"><span class="st" data-state="built">Built for HTTP</span></td></tr>
+      <tr><td>Fold</td><td>Joins all records and gives each fact a status</td><td>A function in the contracts library</td><td>Nothing</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+      <tr><td>MCP server</td><td>Gives coding agents nine read-only tools</td><td>Its own process</td><td>Nothing</td><td class="nw"><span class="st" data-state="built">Built</span></td></tr>
+      <tr><td>Web map</td><td>Shows the map in a browser</td><td>The frontend container</td><td>Nothing</td><td class="nw"><span class="st" data-state="built">Built</span></td></tr>
+      <tr><td>Learn service</td><td>Finds gaps, drafts rules and tests them</td><td>Its own service, with the only model key</td><td>Rule proposals</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+      <tr><td>Hub</td><td>Joins the bundles of many teams</td><td>The same services, deployed for an organization</td><td>Imported records, call edges and the coverage report, through the same services</td><td class="nw"><span class="st" data-state="plan">Planned</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="settled">
+  <h2>How settled each part is</h2>
+  <div class="cols3">
+    <div>
+      <h3>Built and recorded</h3>
+      <p>In <code>docs/architecture.md</code> and running in 0.9.0.</p>
+      <ul>
+        <li>Static analyzer for Java and Spring</li>
+        <li>Stitcher for HTTP calls</li>
+        <li>Orchestrator, REST API and CLI</li>
+        <li>MCP server and web map</li>
+        <li>MongoDB and Neo4j</li>
+        <li>Export of a whole snapshot</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Planned, with open decisions</h3>
+      <p>In the rule-packs plan, and in Phase 11 of <code>docs/architecture.md</code> for bundles and the hub.</p>
+      <ul>
+        <li>Language profiles, rule engine and base packs</li>
+        <li>Learned rules, hints and the learn loop</li>
+        <li>A rule hash on every snapshot</li>
+        <li>Bundles as a kind of source, the hub's ingestion API and snapshots made of bundles</li>
+        <li>Open: where learned rules live (D1)</li>
+        <li>Open: whether a draft applies before approval (D2)</li>
+        <li>Open: how many frameworks to aim for (D5)</li>
+        <li>Open: which frameworks to try first (D6)</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Proposed in discussion only</h3>
+      <p>Not written in any document yet.</p>
+      <ul>
+        <li>One collection per reader, and the fold</li>
+        <li>Environment as a scope, on the snapshot first</li>
+        <li>Config reader for Kubernetes, Helm, ingress and nginx</li>
+        <li>Declared reader and trace importer</li>
+        <li>The auditor inside learn mode</li>
+        <li>Organization packs</li>
+        <li>Base packs shipped in the worker image</li>
+        <li>Export per service, import as a worker job and the publish command</li>
+        <li>Identity profile, credential broker and access prober</li>
+        <li>One access-rule record per place a rule lives, and the access table</li>
+        <li>Open: which kind of test comes first, one service running alone or the whole system</li>
+      </ul>
+    </div>
+  </div>
+  <h3>Suggested build order</h3>
+  <ol class="steps">
+    <li>A scorer and ground truth, a service id that does not depend on a folder, and fixes for the facts known to be wrong.</li>
+    <li>An origin on every record, and a snapshot that can list imported bundles and counts as current only after it succeeds. A restitch of the newest snapshot whose filling jobs all succeeded, the current map or a newer one whose stitch failed, makes a new snapshot with that snapshot's members. An import or an analysis keeps the members of the current map it does not replace.</li>
+    <li>Export per service and bundle import, proven by two services analyzed apart and imported together.</li>
+    <li>The identity profile and the credential broker with its mock issuer and its safety checks, proven on one service running alone.</li>
+    <li>The access prober and the access table, first with one fixture's requests and expected answers.</li>
+    <li>The config reader for Kubernetes and Helm, with the access rules of gateways and meshes, built against a fixture first.</li>
+    <li>The rule engine and the base packs.</li>
+    <li>The declared reader, then the auditor.</li>
+    <li>Real login recipes, for tests against a whole system.</li>
+    <li>The trace importer.</li>
+    <li>The hub: the publish command, ownership by team and authentication for a shared install.</li>
+  </ol>
+  <div class="prose"><p>Import comes before identity because it proves the hub with the smallest change to records. Identity stays fourth and fifth because test generation depends on it. A review by three models on 2026-11-17 led to this order.</p></div>
+</section>
+
+<footer>Sources: <code>docs/architecture.md</code>, <code>docs/architecture-views.md</code> and <code>docs/rule-packs-and-learned-rules-plan.md</code> in the wadi repository, the 0.9.0 compose file, and measurements of the 0.9.0 images. The identity and access part also draws on public framework documentation and the Web Fuzzing Commons authentication format.</footer>
+
+</div>
+
+<script>
+(function () {
+  var INFO = {
+    "src-code": { name: "Source code", does: "The repositories of every service in the system, each checked out at one pinned commit.", runs: "Fetched by the extraction worker from your git origins." },
+    "src-config": { name: "Deployment config", does: "Files that say how services are named, addressed and routed: compose files, Spring config, Kubernetes manifests, Helm charts, ingress rules and nginx files.", runs: "Read from the same repositories, or from a config repository you name.", note: "Wadi reads compose files and Spring config today." },
+    "src-declared": { name: "Specs and contracts", does: "What teams have written down about a service: OpenAPI and AsyncAPI files, proto files and Pact contracts.", runs: "Read from the repositories that hold them." },
+    "src-runtime": { name: "A running system", does: "A test environment that the access prober and coding agents can call. What it answers to each request is the evidence.", runs: "Your own test environment. Wadi never calls production.", note: "A trace importer that reads exported trace files comes later, as one more reader of this evidence." },
+    "analyzer": { name: "Static analyzer", does: "Reads the code of one service at a time. It extracts the endpoints, the control flow behind each endpoint, outbound calls, authorization and data access.", runs: "The extraction worker and the Joern container.", note: "Built for Java and Spring. With the auth module, what it reads about access becomes a prediction that a measurement confirms or contests." },
+    "config-reader": { name: "Config reader", does: "Reads how each service is named, addressed and routed in each environment.", runs: "The extraction worker, as its own job.", note: "Compose and Spring config are read today, inside the static analyzer. Kubernetes, Helm, ingress and nginx come next, with the access rules that a gateway or a mesh applies." },
+    "declared-reader": { name: "Declared reader", does: "Reads what each service promises in its specs and contracts, and maps every promise to the shared keys. It also reads the security part of each spec.", runs: "The extraction worker, as its own job." },
+    "prober": { name: "Access prober", does: "Calls each endpoint as each test identity and records what the system answered. It builds each request from what the static analyzer knows about the endpoint.", runs: "Its own service, started on command.", note: "It sends read-only requests unless a person allows more." },
+    "rec-code": { name: "Code facts", does: "Endpoints, flow graphs, outbound calls, authorization and data access, stored per service.", runs: "MongoDB. Only the extraction worker writes here.", note: "Filled in one of two ways: from source by the static analyzer, or from a bundle by the import job." },
+    "bundle": { name: "Service bundle", does: "A file set that another wadi exported for one service: its boundary, endpoints, flow graphs, calls and data models, with a manifest that names the commit, the wadi version and the rules used.", runs: "An import job in the extraction worker checks every record against the schemas and stores it in the same collections, marked as imported.", note: "Export works today for a whole snapshot. Export per service and import are planned." },
+    "rec-config": { name: "Config records", does: "Names, addresses, routes and edge rules, stored once per environment.", runs: "MongoDB.", note: "Today these values sit inside each service's boundary record." },
+    "rec-declared": { name: "Declared contracts", does: "One record per promised endpoint, message or field.", runs: "MongoDB." },
+    "rec-access": { name: "Access as measured", does: "The answer each endpoint gave to each test identity, with the environment and the time of the measurement.", runs: "MongoDB. Only the access prober writes here." },
+    "stitcher": { name: "Stitcher", does: "Resolves every outbound call to the service and endpoint it reaches, once per environment. A call it cannot resolve is published with the reason. It joins the sources of each call edge when it writes the edge set.", runs: "The stitcher service. It writes call edges, the coverage report and the graph in Neo4j.", note: "Built for HTTP calls. Resolving once per environment is new." },
+    "fold": { name: "Fold", does: "Joins the records by shared key each time someone reads the map, with a limit on how many records one query reads. It keeps every source's value and gives each fact a status. Call edges arrive already joined, because the graph database is built from them. For access it builds one table of endpoint, test identity and request case, from the access rules in the code facts and the config records and from access as measured.", runs: "A function in the contracts library, called by the REST API and the MCP server. It stores nothing." },
+    "out-api": { name: "REST API", does: "Serves everything the web map and the CLI show, and creates every analysis job.", runs: "The orchestrator service, on port 9234." },
+    "out-mcp": { name: "MCP server", does: "Gives coding agents nine read-only tools for reading the map.", runs: "Its own process, started by the agent or run as a container.", note: "The auth module adds two read tools, for the test identities and the access table." },
+    "c-web": { name: "Web map", does: "The browser view of the system, its endpoints and the flow behind each one.", runs: "The frontend container." },
+    "c-cli": { name: "CLI and CI check", does: "The wadi command line, and a check that runs the analysis on each commit and fails the build on a quality gate.", runs: "A developer's machine or a CI runner.", note: "The CLI is built. The CI check is planned." },
+    "c-agent": { name: "Coding agents", does: "Agents that read the map before they change code, write tests or look for the cause of a failure.", runs: "Wherever the agent runs.", note: "To send a test request, an agent names an identity and the credential broker attaches the credential." },
+    "rules": { name: "Rules", does: "Data files that say what marks an endpoint, a call or a data access in one library. Base packs ship with wadi. Learned rules and hints belong to one system.", runs: "Staged by the extraction worker before each run. The snapshot records a hash of the rules it used.", note: "Today these rules are compiled Scala code." },
+    "broker": { name: "Credential broker", does: "Turns an identity name into a credential and attaches it to a test request. It logs in at the real identity provider, signs a token as a mock issuer, or reuses a saved session.", runs: "Its own service, the only one that reads secrets. It runs only where tests run.", note: "An agent never sees a password. It names an identity and the broker does the rest." },
+    "profile": { name: "Identity profile", does: "The test identities of a system in one environment, a login recipe for each, and the roles and authorities each identity has in each service. It names each secret and never holds one.", runs: "Wadi's database, and a file a team can commit.", note: "Wadi drafts it from what the readers found, and a person confirms it once." },
+    "learn": { name: "Learn mode", does: "Collects the unknowns and disagreements the map reports. A model drafts a rule for each, wadi tests the draft inside a real extraction, and a person approves it.", runs: "A learn service, the only place that holds a model key. It runs only on command.", note: "The only thing it adds to analysis is a rule. It never writes a fact." }
+  };
+  var STATE = { built: "Built", part: "Partly built", plan: "Planned", later: "Later", input: "Input" };
+
+  var svg = document.getElementById("fig-flow");
+  var panel = document.getElementById("flow-detail");
+  if (!svg || !panel) return;
+  var rest = panel.innerHTML;
+  var nodes = {};
+  Array.prototype.forEach.call(svg.querySelectorAll(".node"), function (n) { nodes[n.getAttribute("data-id")] = n; });
+  var edges = Array.prototype.slice.call(svg.querySelectorAll(".edge"));
+
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function list(items, empty) {
+    if (!items.length) return "<p>" + esc(empty) + "</p>";
+    return '<ul class="conn">' + items.map(function (it) {
+      return '<li><button type="button" data-go="' + esc(it[0]) + '">' + esc(INFO[it[0]].name) + '</button><span class="via">' + esc(it[1]) + "</span></li>";
+    }).join("") + "</ul>";
+  }
+  function clear() {
+    Object.keys(nodes).forEach(function (k) { nodes[k].classList.remove("is-on", "is-sel"); });
+    edges.forEach(function (e) { e.classList.remove("is-on"); });
+  }
+  function select(id) {
+    var info = INFO[id], node = nodes[id];
+    if (!info || !node) return;
+    clear();
+    svg.classList.add("has-sel");
+    node.classList.add("is-on", "is-sel");
+    var ins = [], outs = [];
+    edges.forEach(function (e) {
+      var f = e.getAttribute("data-from"), t = e.getAttribute("data-to"), l = e.getAttribute("data-label");
+      if (f === id) { e.classList.add("is-on"); nodes[t].classList.add("is-on"); outs.push([t, l]); }
+      if (t === id) { e.classList.add("is-on"); nodes[f].classList.add("is-on"); ins.push([f, l]); }
+    });
+    var state = node.getAttribute("data-state");
+    panel.innerHTML =
+      '<div class="d-head"><h3>' + esc(info.name) + '</h3><span class="st" data-state="' + esc(state) + '">' + esc(STATE[state]) + '</span>' +
+      '<button type="button" class="reset" data-reset="1">Show the whole figure</button></div>' +
+      '<p class="d-does">' + esc(info.does) + "</p>" +
+      '<div class="d-grid">' +
+      "<div><h4>Gets from</h4>" + list(ins, "Nothing inside wadi. Data enters here.") + "</div>" +
+      "<div><h4>Gives to</h4>" + list(outs, "Nothing inside wadi. The map is read here.") + "</div>" +
+      "<div><h4>Runs in</h4><p>" + esc(info.runs) + "</p>" + (info.note ? '<p class="d-note">' + esc(info.note) + "</p>" : "") + "</div>" +
+      "</div>";
+  }
+  function reset() {
+    clear();
+    svg.classList.remove("has-sel");
+    panel.innerHTML = rest;
+  }
+  svg.addEventListener("click", function (ev) {
+    var n = ev.target.closest ? ev.target.closest(".node") : null;
+    if (n) select(n.getAttribute("data-id")); else reset();
+  });
+  svg.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") { reset(); return; }
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    var n = ev.target.closest ? ev.target.closest(".node") : null;
+    if (n) { ev.preventDefault(); select(n.getAttribute("data-id")); }
+  });
+  panel.addEventListener("click", function (ev) {
+    var t = ev.target.closest ? ev.target.closest("[data-go], [data-reset]") : null;
+    if (!t) return;
+    if (t.hasAttribute("data-reset")) reset(); else select(t.getAttribute("data-go"));
+  });
+})();
+</script>
