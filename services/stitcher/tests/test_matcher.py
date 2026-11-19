@@ -231,6 +231,7 @@ class TestTargetKinds:
         [edge] = outcome.edges
         assert edge.target_kind is TargetKind.UNDETERMINED
         assert edge.confidence is Confidence.NONE
+        assert edge.candidate_service_id is None  # no service was reached
         [entry] = outcome.unresolved
         assert entry.reason_code == "url-undetermined"
         assert entry.remote_call_id == call.id
@@ -298,6 +299,8 @@ class TestTargetKinds:
         )
         [edge] = outcome.edges
         assert edge.target_kind is TargetKind.UNDETERMINED  # never fabricate (P10)
+        assert edge.candidate_service_id == inventory.service_id
+        assert edge.target_service_id is None
         [entry] = outcome.unresolved
         assert entry.reason_code == "no-endpoint-match"
         assert "inventory" in entry.reason
@@ -335,6 +338,69 @@ class TestTargetKinds:
         assert len(outcome.edges) == 2
         assert all(e.confidence is Confidence.HEURISTIC for e in outcome.edges)
         assert {e.target_endpoint_id for e in outcome.edges} == {endpoint_a.id, endpoint_b.id}
+
+    def test_a_call_that_misses_on_two_candidates_gets_two_edge_ids(self) -> None:
+        # Issue #26: the store keys an edge on its id, so two outcomes of one
+        # call that share an id cannot both be written.
+        snapshot, caller = self._base()
+        a = make_service(snapshot, "services/a").model_copy(
+            update={"network": _network(hostnames=["orders"])}
+        )
+        b = make_service(snapshot, "services/b").model_copy(
+            update={"network": _network(hostnames=["orders"])}
+        )
+        call = make_remote_call(snapshot, caller, url="http://orders/no/such/path")
+        outcome = match_call(
+            call,
+            _context(
+                snapshot,
+                [caller, a, b],
+                [make_endpoint(snapshot, a), make_endpoint(snapshot, b)],
+            ),
+            MATCHERS,
+        )
+        assert [e.target_kind for e in outcome.edges] == [TargetKind.UNDETERMINED] * 2
+        assert [u.reason_code for u in outcome.unresolved] == ["no-endpoint-match"] * 2
+        assert len({e.id for e in outcome.edges}) == 2
+        assert {e.candidate_service_id for e in outcome.edges} == {a.service_id, b.service_id}
+
+    def test_a_hit_and_a_miss_on_two_candidates_are_two_outcomes(self) -> None:
+        snapshot, caller = self._base()
+        a = make_service(snapshot, "services/a").model_copy(
+            update={"network": _network(hostnames=["orders"])}
+        )
+        b = make_service(snapshot, "services/b").model_copy(
+            update={"network": _network(hostnames=["orders"])}
+        )
+        endpoint_a = make_endpoint(snapshot, a, uri="/orders/{id}")
+        call = make_remote_call(snapshot, caller, url="http://orders/orders/5")
+        outcome = match_call(call, _context(snapshot, [caller, a, b], [endpoint_a]), MATCHERS)
+        by_kind = {e.target_kind: e for e in outcome.edges}
+        assert set(by_kind) == {TargetKind.ANALYZED, TargetKind.UNDETERMINED}
+        assert by_kind[TargetKind.ANALYZED].target_endpoint_id == endpoint_a.id
+        assert by_kind[TargetKind.ANALYZED].candidate_service_id is None
+        assert by_kind[TargetKind.UNDETERMINED].candidate_service_id == b.service_id
+        assert len({e.id for e in outcome.edges}) == 2
+
+    def test_one_service_under_two_spellings_of_a_hostname_is_one_candidate(self) -> None:
+        # A compose service `orders` with `container_name: Orders` lists both
+        # spellings. They name one service, so one call has one outcome.
+        snapshot, caller = self._base()
+        a = make_service(snapshot, "services/a").model_copy(
+            update={"network": _network(hostnames=["orders", "Orders"])}
+        )
+        miss = make_remote_call(snapshot, caller, url="http://orders/no/such/path")
+        missed = match_call(
+            miss, _context(snapshot, [caller, a], [make_endpoint(snapshot, a)]), MATCHERS
+        )
+        assert [e.target_kind for e in missed.edges] == [TargetKind.UNDETERMINED]
+        assert [u.reason_code for u in missed.unresolved] == ["no-endpoint-match"]
+
+        endpoint_a = make_endpoint(snapshot, a, uri="/orders/{id}")
+        hit = make_remote_call(snapshot, caller, url="http://orders/orders/5")
+        matched = match_call(hit, _context(snapshot, [caller, a], [endpoint_a]), MATCHERS)
+        assert [e.target_endpoint_id for e in matched.edges] == [endpoint_a.id]
+        assert PhoneBook.build([caller, a]).conflicts == ()
 
 
 class TestConfigKeyExpansion:

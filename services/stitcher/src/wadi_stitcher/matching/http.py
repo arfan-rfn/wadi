@@ -10,6 +10,8 @@ Classification per call fact (§5.4.2, recorded decisions):
   - candidate is an analyzed service → endpoint match → ANALYZED edge(s);
     no endpoint matches → UNDETERMINED, ``no-endpoint-match`` — the service
     is known but the endpoint is not; fabricating one would be a false edge.
+    The edge names the service as its candidate, which also keeps its id
+    apart from the same call's miss on another candidate.
   - candidate is config-known with no analyzed service → PLACEHOLDER.
 - Host unknown to every namespace: dotted/IP → EXTERNAL; bare single label →
   PLACEHOLDER at HEURISTIC (user decision — internal-looking names land on
@@ -184,6 +186,7 @@ class HttpMatcher:
                     f"{resolution.evidence}; resolved to service {target_name!r} but no "
                     f"endpoint matched {effective_path!r}"
                     + (f" {call.http_verb.value}" if call.http_verb else ""),
+                    candidate_service_id=candidate.service_id,
                 )
                 outcome.edges.extend(entry_outcome.edges)
                 outcome.unresolved.extend(entry_outcome.unresolved)
@@ -280,7 +283,14 @@ class HttpMatcher:
             ],
         )
 
-    def _undetermined(self, call: RemoteCall, reason_code: str, reason: str) -> MatchOutcome:
+    def _undetermined(
+        self,
+        call: RemoteCall,
+        reason_code: str,
+        reason: str,
+        *,
+        candidate_service_id: str | None = None,
+    ) -> MatchOutcome:
         edge = StitchedEdge.create(
             snapshot_id=call.snapshot_id,
             service_id=call.service_id,
@@ -288,6 +298,7 @@ class HttpMatcher:
             mechanism=call.mechanism,
             http_verb=call.http_verb,
             target_kind=TargetKind.UNDETERMINED,
+            candidate_service_id=candidate_service_id,
             confidence=Confidence.NONE,
             provenance=Provenance.MACHINE_PROVEN,
             evidence=reason,

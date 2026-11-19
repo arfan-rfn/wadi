@@ -34,6 +34,7 @@ from wadi_contracts.version import SCHEMA_VERSION
 _EXTERNAL_KEY_PREFIX = "external:"
 _PLACEHOLDER_KEY_PREFIX = "placeholder:"
 _UNDETERMINED_KEY = "undetermined"
+_CANDIDATE_KEY_PREFIX = "undetermined:"
 
 
 def edge_target_key(
@@ -42,8 +43,17 @@ def edge_target_key(
     target_endpoint_id: str | None,
     target_service_id: str | None,
     external_host: str | None,
+    candidate_service_id: str | None = None,
 ) -> str:
-    """The identity component a stitched edge hashes for its id (§7)."""
+    """The identity component a stitched edge hashes for its id (§7).
+
+    One call can have several outcomes, and each is its own edge row, so each
+    key must differ from the call's other keys. A matched outcome is keyed on
+    its target. An unmatched outcome has no target: it is keyed on the
+    candidate service it missed on when there is one, because one call can miss
+    on several, and on the constant alone when there is none, which a call
+    reaches at most once.
+    """
     match target_kind:
         case TargetKind.ANALYZED:
             return target_endpoint_id or ""
@@ -52,7 +62,9 @@ def edge_target_key(
         case TargetKind.PLACEHOLDER:
             return _PLACEHOLDER_KEY_PREFIX + (target_service_id or "")
         case TargetKind.UNDETERMINED:
-            return _UNDETERMINED_KEY
+            if candidate_service_id is None:
+                return _UNDETERMINED_KEY
+            return _CANDIDATE_KEY_PREFIX + candidate_service_id
 
 
 class StitchedEdge(ArtifactEnvelope):
@@ -62,6 +74,10 @@ class StitchedEdge(ArtifactEnvelope):
     to the service whose call site it resolves. One ``RemoteCall`` fact can
     yield N edges (ambiguous resolution, multi-candidate URLs); each is its
     own row with its own content-derived id (§5.2 over-approximation).
+
+    1.28.0: ``candidate_service_id`` is part of the id of an UNDETERMINED edge
+    that carries one. An edge written before 1.28.0 carries none and keeps the
+    id it was written with.
     """
 
     id: str = Field(pattern=r"^re_[0-9a-f]{16}$")
@@ -85,6 +101,16 @@ class StitchedEdge(ArtifactEnvelope):
     )
     external_host: str | None = Field(
         default=None, description="Normalized host[:port] — set for EXTERNAL targets only"
+    )
+    candidate_service_id: str | None = Field(
+        default=None,
+        description=(
+            "1.28.0: the svc_ id of the analyzed service the call's host resolved to, "
+            "when none of that service's endpoints matched the call. Only an "
+            "UNDETERMINED edge carries it. The service is known and the endpoint is "
+            "not, so it is a candidate and never a target. None on every other edge "
+            "and on every edge written before 1.28.0"
+        ),
     )
     confidence: Confidence = Field(
         description="Composed edge confidence: min(url recovery, resolution, path match)"
@@ -136,6 +162,12 @@ class StitchedEdge(ArtifactEnvelope):
                 if self.provenance not in (Provenance.MACHINE_PROVEN, Provenance.HEURISTIC):
                     raise ValueError("UNDETERMINED provenance must be machine-proven or heuristic")
 
+        if self.candidate_service_id is not None:
+            if self.target_kind is not TargetKind.UNDETERMINED:
+                raise ValueError("only UNDETERMINED edges carry candidate_service_id")
+            if not self.candidate_service_id.startswith("svc_"):
+                raise ValueError("candidate_service_id must be a svc_ id")
+
         expected = remote_edge_id(
             self.remote_call_id,
             edge_target_key(
@@ -143,6 +175,7 @@ class StitchedEdge(ArtifactEnvelope):
                 target_endpoint_id=self.target_endpoint_id,
                 target_service_id=self.target_service_id,
                 external_host=self.external_host,
+                candidate_service_id=self.candidate_service_id,
             ),
         )
         if self.id != expected:
@@ -165,6 +198,7 @@ class StitchedEdge(ArtifactEnvelope):
         target_service_id: str | None = None,
         target_endpoint_id: str | None = None,
         external_host: str | None = None,
+        candidate_service_id: str | None = None,
         evidence: str | None = None,
     ) -> "StitchedEdge":
         """Build an edge with its content-derived id computed (§7)."""
@@ -175,6 +209,7 @@ class StitchedEdge(ArtifactEnvelope):
                 target_endpoint_id=target_endpoint_id,
                 target_service_id=target_service_id,
                 external_host=external_host,
+                candidate_service_id=candidate_service_id,
             ),
         )
         return cls(
@@ -189,6 +224,7 @@ class StitchedEdge(ArtifactEnvelope):
             target_service_id=target_service_id,
             target_endpoint_id=target_endpoint_id,
             external_host=external_host,
+            candidate_service_id=candidate_service_id,
             confidence=confidence,
             provenance=provenance,
             evidence=evidence,

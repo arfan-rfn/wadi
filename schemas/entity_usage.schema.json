@@ -380,7 +380,7 @@
       "type": "string"
     }
   },
-  "$id": "https://trywadi.com/schemas/1.27.0/entity_usage.schema.json",
+  "$id": "https://trywadi.com/schemas/1.28.0/entity_usage.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Which endpoints may create, read, update or delete each entity (\u00a75.2.17).\n\nThe reverse question, answered at read time by\n:func:`build_entity_usage_view` from a projection of the endpoint\ndocuments and one read of the snapshot's data models. Nothing is stored\nfor it.\n\n``analyzed=False`` means nothing in the view was examined with entity\nfacts: no listed service reports accounting and no endpoint row carries a\nsummary. ``entities`` is then empty because nothing was looked at, not\nbecause nothing is touched (R1-6).",

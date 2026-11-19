@@ -215,9 +215,11 @@ export function CoveragePane({ snapshotId }: { snapshotId: string | null }) {
         <section className="space-y-3">
           <SectionHeading>Unresolved calls</SectionHeading>
           <div className="divide-y rounded-lg border">
-            {unresolved.map((entry) => (
+            {unresolved.map((entry, index) => (
               <div
-                key={`${entry.remote_call_id}-${entry.reason_code}`}
+                // One call can miss on two candidate services, which gives two
+                // entries with the same call id and reason.
+                key={`${entry.remote_call_id}-${entry.reason_code}-${index}`}
                 className="space-y-1 px-3 py-2"
               >
                 <div className="flex flex-wrap items-center gap-2">

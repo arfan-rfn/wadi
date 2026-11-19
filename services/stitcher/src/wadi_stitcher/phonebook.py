@@ -114,8 +114,11 @@ class PhoneBook:
         ns = _Namespaces()
         ordered = sorted(boundaries, key=lambda b: b.service_id)
         for boundary in ordered:
-            for hostname in boundary.network.hostnames:
-                ns.compose.setdefault(hostname.strip().lower(), []).append(boundary)
+            # A service can list one hostname under two spellings (a compose
+            # service name and a `container_name` that differ in case). It is
+            # one claimant, or one call would get the same outcome twice (#26).
+            for hostname in dict.fromkeys(h.strip().lower() for h in boundary.network.hostnames):
+                ns.compose.setdefault(hostname, []).append(boundary)
             declared_names: list[str] = []
             if boundary.network.application_name:
                 declared_names.append(boundary.network.application_name)
