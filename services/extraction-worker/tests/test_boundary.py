@@ -500,7 +500,7 @@ services:
             "DATABASE_URL": "postgres://db:5432/shop",
             "INVENTORY_URL": "http://inventory:8081",
             "REPORTS_URL": "https://reports:8443",
-            "WEBHOOK": "https://hooks.example.test/notify?token=",
+            "WEBHOOK": "https://hooks.example.test/notify",
         }
         # Withheld because the credentials could not be separated: counted.
         # The JDBC URL and the security setting are dropped by rule: not gaps.

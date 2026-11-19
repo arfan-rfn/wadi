@@ -29,6 +29,7 @@ from typing import cast
 import yaml
 
 from wadi_worker.config_values import (
+    is_key_name,
     is_security_key,
     publishable_entries,
     strip_credentials,
@@ -51,6 +52,10 @@ _EXACT_KEYS = {
     "server.servlet.context-path",
 }
 _SUFFIXES = (".url", ".uri", ".host", ".port")
+
+# A Java properties line. The key ends at the first `=`, `:` or space that no
+# backslash escapes, so `key: value` and `key value` are read as written.
+_PROPERTY_LINE = re.compile(r"(?P<key>(?:\\.|[^=:\s\\])+)\s*[=:]?\s*(?P<value>.*)")
 
 _PATH_PREDICATE = re.compile(r"^Path=(?P<patterns>.+)$")
 _STRIP_FILTER = re.compile(r"^StripPrefix=(?P<count>\d+)$")
@@ -257,7 +262,10 @@ def _flatten(
             items = cast(list[object], value)
             if structured is not None and items and all(isinstance(i, dict) for i in items):
                 structured[key] = [cast(dict[str, object], i) for i in items]
-            into[key] = ",".join(str(item) for item in items)
+            # Only a list of scalars has a text form. A map inside the list
+            # would be written out as Python text, values and all (#28).
+            if not any(isinstance(item, dict | list) for item in items):
+                into[key] = ",".join(str(item) for item in items)
         elif value is not None:
             into[key] = str(value)
     return routes
@@ -359,9 +367,9 @@ def _parse_properties(config_path: Path) -> dict[str, str]:
         stripped = line.strip()
         if not stripped or stripped.startswith(("#", "!")):
             continue
-        if "=" in stripped:
-            key, value = stripped.split("=", 1)
-            flat[key.strip()] = value.strip()
+        matched = _PROPERTY_LINE.match(stripped)
+        if matched:
+            flat[matched.group("key")] = matched.group("value").strip()
     return flat
 
 
@@ -393,7 +401,7 @@ def _from_flat(
     ]
     return AppConfigFacts(
         env=env,
-        security_keys=sorted(key for key in flat if is_security_key(key)),
+        security_keys=sorted(key for key in flat if is_security_key(key) and is_key_name(key)),
         application_name=flat.get("spring.application.name"),
         server_port=server_port,
         gateway_routes=all_routes,

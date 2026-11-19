@@ -344,11 +344,62 @@ partner.host=partner-user:hunter2@partner.example.test
         )
         facts = parse_app_config(tmp_path)
         assert facts.env == {
-            "audit.uri": "http://audit:7000/log?access_token=",
+            "audit.uri": "http://audit:7000/log",
             "billing.url": "https://billing:9000/api",
             "partner.host": "partner.example.test",
         }
         assert facts.notes == []
+
+    def test_a_properties_line_separated_by_a_colon_or_a_space_keeps_its_value_out_of_the_key(
+        self, tmp_path: Path
+    ) -> None:
+        # Java properties end a key at the first `=`, `:` or space. A parser
+        # that knows only `=` splits a base64 value at its padding and puts
+        # the value into the "key", which is published as auth evidence.
+        _write(
+            tmp_path,
+            "application.properties",
+            """
+spring.security.user.password: aHVudGVyMg==
+spring.security.user.name hunter2=x
+billing.url: https://billing:9000/api?sig=aHVudGVyMg==
+audit.uri http://audit:7000/log
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.security_keys == [
+            "spring.security.user.name",
+            "spring.security.user.password",
+        ]
+        assert facts.env == {
+            "audit.uri": "http://audit:7000/log",
+            "billing.url": "https://billing:9000/api",
+        }
+
+    def test_a_list_of_maps_under_a_routing_key_is_not_published_as_text(
+        self, tmp_path: Path
+    ) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+partners:
+  url:
+    - name: a
+      password: hunter2
+    - name: b
+      password: hunter2
+upstreams:
+  host:
+    - a.example.test
+    - b.example.test
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.env == {"upstreams.host": "a.example.test,b.example.test"}
+        assert facts.notes == []
+        published = (facts.env, facts.notes, facts.security_keys, facts.gateway_routes)
+        assert "hunter2" not in repr(published)
 
     def test_inseparable_credentials_withhold_the_value_and_say_so(self, tmp_path: Path) -> None:
         _write(

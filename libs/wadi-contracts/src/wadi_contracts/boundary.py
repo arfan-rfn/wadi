@@ -68,10 +68,10 @@ class NetworkIdentity(WadiModel):
             "allowlist (profiles merged, T3) plus compose environment/env_file "
             "entries in their raw env-var spelling — the stitcher's relaxed-binding "
             "lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (§5.4.2). "
-            "Values are published without credentials (§5.2.18): user-info is "
-            "removed and secret-bearing query values are blanked; no "
+            "Values are published as addresses only (§5.2.18): user-info, the "
+            "query, the fragment and matrix parameters are removed; no "
             "spring.security.* key and no JDBC URL is carried. Boundaries "
-            "written by wadi 0.9.1 or earlier may hold these values as written; "
+            "written before contracts 1.28.0 may hold these values as written; "
             "a re-analysis writes a snapshot without them"
         ),
     )

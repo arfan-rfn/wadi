@@ -63,6 +63,12 @@ COMPOSE_SECURITY = "wadi-sentinel-compose-security"
 COMPOSE_TOKEN = "wadi-sentinel-compose-query-token"
 ENV_FILE_PASSWORD = "wadi-sentinel-envfile-password"
 DOTENV_PASSWORD = "wadi-sentinel-dotenv-password"
+QUERY_CODE = "wadi-sentinel-query-code"
+FRAGMENT_TOKEN = "wadi-sentinel-fragment-token"
+LIST_PASSWORD = "wadi-sentinel-list-of-maps-password"
+CONNECTION_PASSWORD = "wadi-sentinel-connection-string-password"
+COLON_PASSWORD = "wadi-sentinel-properties-colon-password"
+SPACE_PASSWORD = "wadi-sentinel-properties-space-password"
 
 #: place -> the value seeded there, so a failure names where the leak entered.
 SENTINELS = {
@@ -84,6 +90,12 @@ SENTINELS = {
     "compose environment URL query token": COMPOSE_TOKEN,
     "compose env_file URL user-info": ENV_FILE_PASSWORD,
     "repo .env pass-through URL user-info": DOTENV_PASSWORD,
+    "application.yml URL query parameter with an unlisted name": QUERY_CODE,
+    "application.yml URL fragment": FRAGMENT_TOKEN,
+    "application.yml list of maps under a routing key": LIST_PASSWORD,
+    "application.yml connection string under a routing key": CONNECTION_PASSWORD,
+    "profile properties colon-separated security value": COLON_PASSWORD,
+    "profile properties space-separated security value": SPACE_PASSWORD,
 }
 
 _APPLICATION_YML = f"""
@@ -120,12 +132,22 @@ audit:
   uri: http://audit:7000/log?access_token={QUERY_TOKEN}
 reports:
   url: https://reports-user:pa/{SLASH_PASSWORD}@reports:8443/x
+callback:
+  uri: https://cb.example.test/done?code={QUERY_CODE}#access_token={FRAGMENT_TOKEN}
+partners:
+  url:
+    - name: a
+      password: {LIST_PASSWORD}
+legacydb:
+  url: "Server=db; Password={CONNECTION_PASSWORD}"
 """
 
 _PROFILE_PROPERTIES = f"""
 partner.host=partner-user:{HOST_PASSWORD}@partner.example.test
 zuul.routes.old.path=/old/**
 zuul.routes.old.url=http://zuul-user:{ZUUL_PASSWORD}@old:8000
+spring.security.user.password: {COLON_PASSWORD}==
+spring.security.user.name {SPACE_PASSWORD}=x
 """
 
 _COMPOSE = f"""
@@ -200,9 +222,10 @@ class TestBoundaryRecord:
             "DATABASE_URL": "postgres://db:5432/shop",
             "INVENTORY_URL": "http://inventory:8081",
             "REPORTS_URL": "https://reports:8443",
-            "WEBHOOK": "https://hooks.example.test/notify?token=",
-            "audit.uri": "http://audit:7000/log?access_token=",
+            "WEBHOOK": "https://hooks.example.test/notify",
+            "audit.uri": "http://audit:7000/log",
             "billing.url": "https://billing:9000/api",
+            "callback.uri": "https://cb.example.test/done",
             "partner.host": "partner.example.test",
             "server.port": "8080",
             "spring.application.name": "shop",
@@ -211,6 +234,8 @@ class TestBoundaryRecord:
         # Withheld whole, and counted: the credentials of `reports.url` could
         # not be told apart from its host, so no part of it is published.
         assert "config-value-withheld:reports.url" in network.config_notes
+        # A connection string is not an address, so it is withheld the same way.
+        assert "config-value-withheld:legacydb.url" in network.config_notes
         assert sorted((r.path_prefix, r.target_uri) for r in network.gateway_routes) == [
             ("/legacy/**", "http://legacy:8000"),
             ("/old/**", "http://old:8000"),
@@ -283,11 +308,12 @@ def _analysis_of(repo: Path, tmp_path: Path) -> _Analysis:
     return _Analysis(settings, cache, system, snapshot, job)
 
 
-#: The three `spring.security.*` settings the seed declares. The key says
+#: The four `spring.security.*` settings the seed declares. The key says
 #: which setting exists; its value stays in the repo.
 _SECURITY_KEYS = [
     "spring.security.oauth2.client.registration.shop.client-secret",
     "spring.security.oauth2.resourceserver.jwt.issuer-uri",
+    "spring.security.user.name",
     "spring.security.user.password",
 ]
 
