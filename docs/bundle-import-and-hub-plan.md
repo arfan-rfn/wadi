@@ -4,6 +4,23 @@
 (wadi 0.9.0). Nothing in this document is built unless a section says so. Revised the same day
 after a review by three models. Section 16 lists what changed.
 
+**Read with the direction record (added 2026-11-18).** `architecture.md` §11 now holds a direction
+record and a build order of eleven steps. Where this plan differs from
+`target-architecture-plan.md`, that plan governs. No difference is known. This plan is steps 2, 3
+and 11 of the build order. Three of its decisions have moved.
+
+- **D4 is in step 1.** The service id stops depending on a folder there, with the identity key on
+  each repository.
+- **D6 is in the accepted order.** Import comes before identity. The order of identity against
+  the config reader is confirmed at the checkpoint after step 3.
+- **Compatibility starts at step 3.** The direction record lets a snapshot be thrown away during
+  the migration and makes one promise from step 3 on: a newer wadi imports a bundle that an older
+  wadi wrote.
+
+D1 to D6 here are this plan's own labels. A bare D label in the target plan means a decision of
+the rule-packs plan. The open decisions of section 11 move to GitHub issues with the `decision`
+label, and a decision record in `architecture.md` closes each one.
+
 **Purpose.** Wadi can write an analyzed snapshot to files, and it cannot read those files back.
 This document records how a service could enter the map from a bundle that another wadi exported,
 and how teams could send their services to one shared hub. It exists so that the owner and later

@@ -4,6 +4,13 @@
 (wadi 0.9.0). Nothing in this document is built unless a section says so. Revised the same day
 after a review by three models. Section 21 lists what changed.
 
+**Accepted as the direction on 2026-11-18.** `architecture.md` §11 holds the direction record. It
+accepts the four rules of section 4.1 and the build order of section 15, and it fixes how the
+migration runs. It fixes no record shape: each step opens with its own decision record. Where
+this plan and the five other plan documents differ, this plan governs. From that date only the
+status table of section 2 is kept current. The open decisions of section 16 move to GitHub
+issues with the `decision` label, and a decision record in `architecture.md` closes each one.
+
 **Purpose.** Wadi 0.9.0 builds its map of a microservice system from source code. A design
 discussion that ended on 2026-11-17 worked out how wadi could read several kinds of evidence about
 one system, keep each kind in its own records, and join them into one map that says which sources
@@ -38,6 +45,8 @@ design, and this document is its written form.
 - Published page: https://claude.ai/artifact/AvjQASWRX8YVTHUH6QV6Kj (the owner shares it with
   anyone who has the link)
 - Render of its main figure: `docs/designs/target-architecture-main-figure.png`, shown below
+- The page was last changed on 2026-11-17. It does not show the acceptance of 2026-11-18, so it
+  still calls the build order suggested and lists the rules of section 4.1 as proposed.
 
 ![Main figure of the target architecture page](designs/target-architecture-main-figure.png)
 
@@ -92,9 +101,10 @@ agents query for ground truth. Goal 10 is a map that a developer reads in place 
 | Language profiles, the rule engine, base packs, learned rules, learn mode and a rule-set hash on every snapshot | Planned in another plan document, with open decisions D1, D2, D5 and D6 | `rule-packs-and-learned-rules-plan.md` |
 | Ingesting a provider's OpenAPI document (C5), provenance terms for declared and assumed contracts (M1), identity for a service known only from a spec (M5) | Planned in another plan document | `contract-triangulation-plan.md` |
 | Scorer and ground truth (W0), G9, the idiom census, the hybrid extraction layer (W8) | Planned in another plan document | `foundation-hardening-plan.md` |
-| A model writes rules and never facts, which includes never a call edge | Proposed in discussion only. It narrows §5.6 point 3 and touches D7. | Section 3 |
+| The four rules of section 4.1 and the build order of section 15 | Accepted as the direction on 2026-11-18. No record shape is decided and nothing is built. | `architecture.md` §11, "Direction and migration rules" |
+| A model writes rules and never facts, which includes never a call edge | Accepted as rule 4 of the direction. Whether W8's verified one-off facts stay (T5 against D7) is open and decided before step 8. | Section 3 |
 | The auditor inside learn mode, and the gate experiment | Proposed in discussion only | Sections 3 and 6.4 |
-| One collection per reader, and the fold | Proposed in discussion only | Section 4 |
+| One collection per reader, and the fold | Accepted as rules 2 and 3 of the direction, which settles T1. Shapes are decided step by step. Not built. | Section 4 |
 | The five statuses | Proposed in discussion only | Section 4.4 |
 | Shared keys that any source can compute, and scope with the environment in it | Proposed in discussion only | Section 4.5 |
 | Config reader for Kubernetes, Helm, ingress and nginx | Proposed in discussion only | Section 6.2 |
