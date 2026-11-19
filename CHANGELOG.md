@@ -3,6 +3,55 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## 0.9.2 — 2026-11-18 (the direction is accepted, and how the migration runs)
+
+This release changes documents only. The code, the contracts (1.27.0) and the
+export format (2.15.0) are the same as in 0.9.0, so a snapshot does not need to
+be re-analyzed. The images and the CLI are rebuilt from that code at the new
+version.
+
+### Changed
+
+- **The target architecture is the accepted direction.** A direction record in
+  `docs/architecture.md` §11 accepts the four rules of
+  `docs/target-architecture-plan.md` (one reader per kind of evidence, each
+  reader keeps its own records, records are joined when the map is read, and a
+  model writes rules and never facts). It fixes no record shape. Each step
+  opens with its own decision record.
+- **The roadmap is an eleven-step build order.** It replaces the order of the
+  unbuilt Phases 3 to 11, and a table in §11 places each earlier phase on a
+  step or marks it unscheduled. Phase 3 and entity-access M5, M7 and M8 are
+  paused. Step 1 (a scorer, ground truth and the facts known to be wrong) must
+  be done before any structural step starts.
+- **One definition of done for every step.** Its decision record merges first,
+  every code pull request passes `CONSTRAINTS.md`, a scorer run before and
+  after is committed with members opened in both directions, the consumer the
+  step was built for is exercised, and it ships as a release. A step also
+  needs a real corpus pinned by commit before it starts.
+- **The plan documents are reference.** Each of the six carries a note at its
+  top. Where they disagree, the target plan governs, and the notes name the
+  points each older plan loses.
+- **`CLAUDE.md` and `AGENTS.md` describe the new roadmap** and the rules of the
+  migration, and the README's "Next" line names step 1.
+
+### Fixed
+
+- **Two stale lines in `docs/architecture.md` on token propagation.** Both said
+  detection fires on 0 of 157 calls and that Phase 3 owns the fix. Phase 2.9.2
+  shipped it. Each line now carries a dated amendment.
+
+### Not in this release
+
+- No scorer exists yet, and no step of the build order has started.
+- The open decisions of the plans are not yet GitHub issues. The pull request
+  for this release lists them for the owner to review first.
+- The line in `docs/architecture.md` that says upstream gateway enforcement is
+  "detected and reported" is unchanged. `identity-and-access-plan.md` says no
+  code produces that kind of evidence.
+- The architecture page (`docs/designs/target-architecture-page.html` and its
+  published copy) is unchanged. It still calls the build order suggested.
+- #26, #27 and #28 are still open.
+
 ## 0.9.1 — 2026-11-18 (where wadi goes next, and where open work lives)
 
 This release changes documents only. The code, the contracts (1.27.0) and the
