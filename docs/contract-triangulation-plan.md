@@ -3,6 +3,29 @@
 **Status:** proposal, not yet a decision record. Compiled 2026-08-25 against wadi 0.8.2
 (contracts 1.25.0, export 2.13.0).
 
+**Read with the direction record (added 2026-11-18).** `architecture.md` §11 now holds a direction
+record and a build order of eleven steps. Where this plan differs from
+`target-architecture-plan.md`, that plan governs. The rest of this document is unchanged. It
+differs on these points.
+
+- **Only C5 is in the build order.** It is the declared reader of step 8. C0 to C4 and C6 are
+  unscheduled.
+- **The roadmap in section 9 is replaced.** The route "3, 5, 6, 11" gives way to the build order.
+- **M1's two terms name a source. They do not carry several sources.** The target plan rejects
+  more values on the one provenance scalar as the way to hold more than one source, and gives
+  each call and endpoint a sources list. Step 8's decision record says how
+  `provider-declared` and `consumer-inferred` appear in that list.
+- **M4 and M5 are open, with a second proposal beside this plan's.** This plan prefers an analyzed
+  service marked `provider-declared`. T12 of the target plan suggests the placeholder id rule for
+  a service known only from a spec. The owner decides before step 8, and M5 cannot be changed
+  afterwards.
+- **Question 1 of section 12 is out of date.** Phase 2.10, §5.2.17 and 0.9.0 went to entity
+  access.
+
+"M5" in this plan is the identity rule of section 7. It is not milestone M5 of Phase 2.10. The
+open questions of section 12 move to GitHub issues with the `decision` label, and a decision
+record in `architecture.md` closes each one.
+
 **Purpose.** wadi extracts a contract for every endpoint from the provider's source code. That is
 *one* view of an interface. This document proposes two more — the contract the provider
 **publishes** (its OpenAPI document) and the contract a consumer's code **assumes** — and argues

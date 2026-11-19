@@ -3,6 +3,26 @@
 **Status:** proposal, not yet a decision record. Compiled 2026-08-23 against wadi 0.8.2
 (contracts 1.25.0, export 2.12.0 as stamped / 2.13.0 as declared — see H2).
 
+**Read with the direction record (added 2026-11-18).** `architecture.md` §11 now holds a direction
+record and a build order of eleven steps. Where this plan differs from
+`target-architecture-plan.md`, that plan governs. The rest of this document is unchanged. It
+differs on these points.
+
+- **W0 is step 1 of the build order, with a changed list.** Step 1 adds A5 and issues #33 and #34,
+  and a held-out test set follows it. H2 is already fixed. B4 is not named in step 1, and step 1's
+  decision record says whether it joins.
+- **B2's identity key goes on each repository of a system**, not on `System` as section 5 says,
+  because a service id is computed per repository.
+- **The paper gate on W8 is withdrawn.** No outside date drives the order. W8's subject is steps 7
+  and 8 of the build order.
+- **W1 to W7 are in no step of the build order.** A finding from them is worked when a step needs
+  it or when it is filed as an issue with the `bug` label.
+- **Question 1 of section 16 is out of date.** Phase 2.10, §5.2.17 and 0.9.0 went to entity
+  access.
+
+The open questions of section 16 move to GitHub issues with the `decision` label. A decision
+record in `architecture.md` closes each one.
+
 **Revision 2, same day.** The first pass audited the *seams* — reachability closures, contracts,
 merge logic, storage — and inferred the pack interiors from them. Revision 2 reads
 `SpringPacks.scala` (endpoint extraction) and `TypeShapes.scala` (wire shapes) line by line, which

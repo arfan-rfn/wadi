@@ -94,7 +94,8 @@ ground truth**, ~3 minutes wall-clock on a laptop.
 
 **Current scope (0.9.0):** Java/Spring systems: per-endpoint flow graphs,
 cross-service stitching, the auth enforcement model, response shapes and data
-access per endpoint. **Next (Phase 3):** async flows and security analysis.
+access per endpoint. **Next:** step 1 of the build order, which is a scorer,
+ground truth for three corpora and fixes for the facts known to be wrong.
 Roadmap: [`docs/architecture.md`](docs/architecture.md) §11.
 
 ## How it works

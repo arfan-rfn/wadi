@@ -3,6 +3,24 @@
 **Status:** proposal, not a decision record. Compiled 2026-11-13 against commit `118eb91`
 (wadi 0.8.2, Joern 4.0.593). Nothing in this document is built.
 
+**Read with the direction record (added 2026-11-18).** `architecture.md` §11 now holds a direction
+record and a build order of eleven steps. Where this plan differs from
+`target-architecture-plan.md`, that plan governs. The rest of this document is unchanged. This
+plan is the inside of step 7 of the build order, and section 8 of the target plan lists what the
+later discussion added to it. Four of its decisions have moved.
+
+- **D4, timing against the paper, is settled.** No outside date drives the order.
+- **D7 is open and contested.** T5 of the target plan recommends that a model writes rules only.
+  D7 recommends keeping W8's verified one-off facts. The owner decides before step 8.
+- **D3 has a working assumption.** T7 of the target plan assumes a capable agent for auditing and
+  rule drafting and keeps W8's packets for work on one gap. It is still open.
+- **D6 has a third candidate.** T13 of the target plan asks whether Express or Django joins
+  Quarkus and FastAPI in stage 1.
+
+The gate experiment of the target plan must report before step 7 starts. The open decisions of
+section 11 move to GitHub issues with the `decision` label, in place of the `TODOS.md` lines the
+paragraph below mentions. A decision record in `architecture.md` closes each one.
+
 **Purpose.** Wadi supports one stack today: Java, Spring and Maven. This document records how
 wadi could support many languages and frameworks, and how each analyzed system could extend the
 rules for its own conventions, with a model drafting those extensions. It exists so the work can

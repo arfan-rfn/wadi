@@ -4,6 +4,22 @@
 (wadi 0.9.0). Nothing in this document is built unless a section says so. Revised the same day
 after a review by three models. Section 19 lists what changed.
 
+**Read with the direction record (added 2026-11-18).** `architecture.md` §11 now holds a direction
+record and a build order of eleven steps. Where this plan differs from
+`target-architecture-plan.md`, that plan governs. No difference is known. This plan is steps 4, 5
+and 9 of the build order. Three points have moved.
+
+- **D5 is in the accepted order.** The module comes after import. The order of steps 4 and 5
+  against the config reader of step 6 is confirmed at the checkpoint after step 3.
+- **D8 waits for step 5.** Phase 3 item 2 of `architecture.md` is not built before steps 4 and 5,
+  and the decision on a separate findings collection follows step 5.
+- **Two of the three corrections in section 17 are made.** `architecture.md` now carries a dated
+  amendment on token propagation at both places. The line on gateway enforcement is unchanged.
+
+D1 to D9 here are this plan's own labels. A bare D label in the target plan means a decision of
+the rule-packs plan. The open decisions of section 14 move to GitHub issues with the `decision`
+label, and a decision record in `architecture.md` closes each one.
+
 **Purpose.** Wadi 0.9.0 reads access rules from Spring code and publishes one claim per endpoint.
 An agent or a test generator needs two more things: a valid credential for each kind of user, and
 the expected result of each call for each kind of user. This document records the design that a
