@@ -5,8 +5,19 @@ All notable changes to wadi. One version spans the whole release set
 
 ## Unreleased (the base migration is recorded)
 
-This change touches documents only and ships no release. The code, the
-contracts (1.27.0) and the export format (2.15.0) are those of 0.9.2.
+No release yet. The contracts are 1.28.0 since the fix for #28, and the
+export format is still 2.15.0.
+
+### Fixed
+
+- **Config values of an analyzed project are no longer published** (#28,
+  #76). `spring.security.*` settings publish their key only, a JDBC URL is
+  never carried, and a routing value is published as scheme, host, port and
+  path, without user info, query, fragment or matrix parameters. A value that
+  cannot be read as an address is withheld with a `config-value-withheld:<key>`
+  note. This covers auth evidence, gateway and Zuul routes, compose
+  environment and `.env` files, and the coverage report. Contracts 1.27.0 to
+  1.28.0. Re-analyze a snapshot to drop values stored before the fix.
 
 ### Changed
 
@@ -28,6 +39,21 @@ contracts (1.27.0) and the export format (2.15.0) are those of 0.9.2.
 - **The plan and its trace are committed.** The plan the owner approved is in
   `docs/measurements/base-migration/reviewed-plan.md`, and
   `amendment-trace.md` beside it maps each accepted requirement to the record.
+- **Release 1a's record is written.** A record in `docs/architecture.md` §11,
+  "Release 1a, the canonical map", fixes how the canonical map tool is built.
+  It captures a running stack without checking any model, then normalizes
+  that capture into canonical JSON Lines under RFC 8785. Stored records and
+  the graph are read over the loopback ports of `--expose-db`, and MCP over
+  stdio through `wadi mcp`. The record also covers the field classification
+  the owner reads, redaction by digest, a guard against local paths and
+  credentials, and a release job that reruns each public corpus on a hosted
+  runner. The owner approved it on 2026-11-21.
+- **The corpora are pinned and 0.9.2 is published.** yas is pinned at
+  `2b09247` and `sqshq/piggymetrics`, the microSecEnD application, at
+  `6bb2cf9`. A GitHub-hosted Linux runner is the second machine for the
+  determinism gate. `v0.9.2` is tagged at `f11b251`, so the 0.9.2 capture has
+  images to run. The record names the owner's 8 GB Mac as the machine that
+  analyzes the three pinned corpora, with the analyzer's peak memory for each.
 
 ## 0.9.2 — 2026-11-18 (the direction is accepted, and how the migration runs)
 
