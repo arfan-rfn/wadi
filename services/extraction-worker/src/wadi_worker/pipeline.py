@@ -139,37 +139,7 @@ class ExtractionPipeline:
                 logger.warning("no analyzable services found in %s", normalized)
             for service in discovered:
                 svc_id = service_id(repo.source, service.build_root)
-                boundary = ServiceBoundary(
-                    snapshot_id=snapshot.id,
-                    service_id=svc_id,
-                    name=service.name,
-                    repo=normalized,
-                    build_root=service.build_root,
-                    languages=service.languages,
-                    build_system=service.build_system,
-                    kind=ServiceKind.LIBRARY if service.kind == "library" else ServiceKind.SERVICE,
-                    library_roots=service.library_roots,
-                    client_libraries=service.client_libraries,
-                    network=NetworkIdentity(
-                        hostnames=service.hostnames,
-                        ports=service.ports,
-                        env=service.config.env,
-                        application_name=service.config.application_name,
-                        discovery_names=service.config.discovery_names,
-                        server_port=service.config.server_port,
-                        gateway_routes=[
-                            GatewayRoute(
-                                route_id=route.route_id,
-                                path_prefix=route.path_prefix,
-                                target_uri=route.target_uri,
-                                strip_prefix=route.strip_prefix,
-                            )
-                            for route in service.config.gateway_routes
-                        ],
-                        gateway_discovery_locator=service.config.gateway_discovery_locator,
-                        config_notes=service.config.notes,
-                    ),
-                )
+                boundary = service_boundary(snapshot.id, normalized, svc_id, service)
 
                 # Libraries are classification facts, never analysis units (§5.2.6).
                 if service.kind == "library":
@@ -257,6 +227,7 @@ class ExtractionPipeline:
                     service_id=svc_id,
                     config_env=service.config.env,
                     config_structured=service.config.structured,
+                    config_security_keys=service.config.security_keys,
                 ).assemble(export)
                 # §5.2.8 M2: the invariant check runs during assembly, so the
                 # boundary write moves after it — cfg_anomalies is a
@@ -308,6 +279,48 @@ class ExtractionPipeline:
             extracted_count,
             service_count,
         )
+
+
+def service_boundary(
+    snapshot_id: str, repo: str, svc_id: str, service: DiscoveredService
+) -> ServiceBoundary:
+    """The boundary record a discovered module is published as.
+
+    A free function because it is a pure mapping from discovery facts to the
+    stored artifact, which is what lets a test read the published record
+    without a database.
+    """
+    return ServiceBoundary(
+        snapshot_id=snapshot_id,
+        service_id=svc_id,
+        name=service.name,
+        repo=repo,
+        build_root=service.build_root,
+        languages=service.languages,
+        build_system=service.build_system,
+        kind=ServiceKind.LIBRARY if service.kind == "library" else ServiceKind.SERVICE,
+        library_roots=service.library_roots,
+        client_libraries=service.client_libraries,
+        network=NetworkIdentity(
+            hostnames=service.hostnames,
+            ports=service.ports,
+            env=service.config.env,
+            application_name=service.config.application_name,
+            discovery_names=service.config.discovery_names,
+            server_port=service.config.server_port,
+            gateway_routes=[
+                GatewayRoute(
+                    route_id=route.route_id,
+                    path_prefix=route.path_prefix,
+                    target_uri=route.target_uri,
+                    strip_prefix=route.strip_prefix,
+                )
+                for route in service.config.gateway_routes
+            ],
+            gateway_discovery_locator=service.config.gateway_discovery_locator,
+            config_notes=service.config.notes,
+        ),
+    )
 
 
 def stage_parse_root(

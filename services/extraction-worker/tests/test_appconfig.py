@@ -103,10 +103,12 @@ spring:
 """,
         )
         facts = parse_app_config(tmp_path)
-        assert (
-            facts.env["spring.security.oauth2.resourceserver.jwt.issuer-uri"]
-            == "https://issuer.example.com"
-        )
+        # The KEY survives, as the auth evidence it is. Its value does not
+        # reach `env`, which is published on the boundary (issue #28): the
+        # same namespace holds `client-secret` and `user.password`.
+        assert facts.security_keys == ["spring.security.oauth2.resourceserver.jwt.issuer-uri"]
+        assert "spring.security.oauth2.resourceserver.jwt.issuer-uri" not in facts.env
+        assert "https://issuer.example.com" not in facts.env.values()
 
 
 class TestPropertiesConfig:
@@ -288,6 +290,159 @@ spring:
         assert "gateway-predicate-unmodelled:Host" in facts.notes
         # The Path predicate itself still routes.
         assert facts.gateway_routes[0].path_prefix == "/api/**"
+
+
+class TestConfigValuesNotPublished:
+    """§5.2.18, issue #28: `env` and the routes are published on the boundary."""
+
+    def test_only_routing_keys_are_carried_never_a_namespace(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+spring:
+  datasource:
+    url: jdbc:postgresql://db:5432/shop?user=shop&password=hunter2
+  security:
+    user:
+      password: hunter2
+    oauth2:
+      client:
+        registration:
+          shop:
+            client-secret: hunter2
+            redirect-uri: https://shop.example.test/login/oauth2/code/shop
+  cloud:
+    gateway:
+      default-filters:
+        - AddRequestHeader=X-Api-Key, hunter2
+      httpclient:
+        connect-timeout: 1000
+inventory:
+  url: http://inventory:8081
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.env == {"inventory.url": "http://inventory:8081"}
+        assert facts.security_keys == [
+            "spring.security.oauth2.client.registration.shop.client-secret",
+            "spring.security.oauth2.client.registration.shop.redirect-uri",
+            "spring.security.user.password",
+        ]
+        # Dropped by rule, so none of these is a parsing gap to note.
+        assert facts.notes == []
+
+    def test_credentials_leave_a_routing_value_and_the_address_stays(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.properties",
+            """
+billing.url=https://billing-user:hunter2@billing:9000/api
+audit.uri=http://audit:7000/log?access_token=hunter2
+partner.host=partner-user:hunter2@partner.example.test
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.env == {
+            "audit.uri": "http://audit:7000/log",
+            "billing.url": "https://billing:9000/api",
+            "partner.host": "partner.example.test",
+        }
+        assert facts.notes == []
+
+    def test_a_properties_line_separated_by_a_colon_or_a_space_keeps_its_value_out_of_the_key(
+        self, tmp_path: Path
+    ) -> None:
+        # Java properties end a key at the first `=`, `:` or space. A parser
+        # that knows only `=` splits a base64 value at its padding and puts
+        # the value into the "key", which is published as auth evidence.
+        _write(
+            tmp_path,
+            "application.properties",
+            """
+spring.security.user.password: aHVudGVyMg==
+spring.security.user.name hunter2=x
+billing.url: https://billing:9000/api?sig=aHVudGVyMg==
+audit.uri http://audit:7000/log
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.security_keys == [
+            "spring.security.user.name",
+            "spring.security.user.password",
+        ]
+        assert facts.env == {
+            "audit.uri": "http://audit:7000/log",
+            "billing.url": "https://billing:9000/api",
+        }
+
+    def test_a_list_of_maps_under_a_routing_key_is_not_published_as_text(
+        self, tmp_path: Path
+    ) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+partners:
+  url:
+    - name: a
+      password: hunter2
+    - name: b
+      password: hunter2
+upstreams:
+  host:
+    - a.example.test
+    - b.example.test
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.env == {"upstreams.host": "a.example.test,b.example.test"}
+        assert facts.notes == []
+        published = (facts.env, facts.notes, facts.security_keys, facts.gateway_routes)
+        assert "hunter2" not in repr(published)
+
+    def test_inseparable_credentials_withhold_the_value_and_say_so(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.properties",
+            "reports.url=https://reports-user:hun/ter2@reports:8443/x\n",
+        )
+        facts = parse_app_config(tmp_path)
+        assert facts.env == {}
+        assert facts.notes == ["config-value-withheld:reports.url"]
+
+    def test_gateway_route_targets_lose_their_credentials(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path,
+            "application.yml",
+            """
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: legacy
+          uri: http://gateway-user:hunter2@legacy:8000
+          predicates:
+            - Path=/legacy/**
+        - id: broken
+          uri: http://gateway-user:hun/ter2@broken:8000
+          predicates:
+            - Path=/broken/**
+zuul:
+  routes:
+    old:
+      path: /old/**
+      url: http://zuul-user:hunter2@old:8000
+""",
+        )
+        facts = parse_app_config(tmp_path)
+        assert [(r.route_id, r.path_prefix, r.target_uri) for r in facts.gateway_routes] == [
+            ("legacy", "/legacy/**", "http://legacy:8000"),
+            ("old", "/old/**", "http://old:8000"),
+        ]
+        # The route that could not be published is counted, by id.
+        assert facts.notes == ["gateway-route-target-withheld:broken"]
+        assert facts.env == {"zuul.routes.old.url": "http://old:8000"}
 
 
 class TestT3DiscoveryNames:
