@@ -210,12 +210,14 @@ class Assembler:
         service_id: str,
         config_env: dict[str, str] | None = None,
         config_structured: dict[str, list[dict[str, object]]] | None = None,
+        config_security_keys: list[str] | None = None,
         gate_flags: Sequence[GateFlag] = SHIPPED_GATE_FLAGS,
     ) -> None:
         self._snapshot_id = snapshot_id
         self._service_id = service_id
         self._config_env = config_env or {}
         self._config_structured = config_structured or {}
+        self._config_security_keys = config_security_keys or []
         self._gate_flags = gate_flags
 
     def assemble(self, export: ServiceExport) -> AssembledArtifacts:
@@ -326,6 +328,7 @@ class Assembler:
                     method_security=export.method_security,
                     config_structured=self._config_structured,
                     authority_models=export.auth_authorities,
+                    config_security_keys=self._config_security_keys,
                 ),
             )
             icfg = self._assemble_icfg(

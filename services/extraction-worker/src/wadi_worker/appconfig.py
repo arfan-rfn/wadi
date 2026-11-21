@@ -13,29 +13,49 @@ gateway shapes are perceived and noted, never silently dropped.
 
 Best-effort by design (P10): a malformed file degrades to no facts, never to
 a failed extraction.
+
+Values are not published as written (§5.2.18): ``env`` holds only what the
+stitcher routes by, with credentials removed, and a ``spring.security.*``
+setting leaves this module as its key.
 """
 
 import logging
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
 import yaml
 
+from wadi_worker.config_values import (
+    is_key_name,
+    is_security_key,
+    publishable_entries,
+    strip_credentials,
+    withheld_note,
+)
+
 logger = logging.getLogger(__name__)
 
-# Keys worth carrying into NetworkIdentity.env: what URL templates resolve
-# against (`${key}` → *.url/*.uri and — T3 — *.host/*.port pairs), identity
-# and port facts, and security config (auth-evidence source three, §5.2).
+# Keys carried into NetworkIdentity.env, which is exactly what the stitcher
+# routes by: what URL templates resolve against (`${key}` → *.url/*.uri and —
+# T3 — *.host/*.port pairs), plus the identity, port and context-path facts.
+# Nothing is carried by namespace. `spring.security.*` and
+# `spring.cloud.gateway.*` used to be, which published client secrets and
+# gateway header values to every reader of the boundary while no reader
+# routed by either (issue #28): gateway routes travel structured, and security
+# settings travel as key names (`AppConfigFacts.security_keys`).
 _EXACT_KEYS = {
     "spring.application.name",
     "server.port",
     "server.servlet.context-path",
 }
 _SUFFIXES = (".url", ".uri", ".host", ".port")
-_PREFIXES = ("spring.security.", "spring.cloud.gateway.")
+
+# A Java properties line. The key ends at the first `=`, `:` or space that no
+# backslash escapes, so `key: value` and `key value` are read as written.
+_PROPERTY_LINE = re.compile(r"(?P<key>(?:\\.|[^=:\s\\])+)\s*[=:]?\s*(?P<value>.*)")
 
 _PATH_PREDICATE = re.compile(r"^Path=(?P<patterns>.+)$")
 _STRIP_FILTER = re.compile(r"^StripPrefix=(?P<count>\d+)$")
@@ -63,6 +83,11 @@ class AppGatewayRoute:
 @dataclass(frozen=True)
 class AppConfigFacts:
     env: dict[str, str] = field(default_factory=dict[str, str])
+    """Routing entries as published on the boundary: credentials removed, no
+    ``spring.security.*`` key, no JDBC URL (:mod:`wadi_worker.config_values`)."""
+    security_keys: list[str] = field(default_factory=list[str])
+    """The ``spring.security.*`` settings present, by KEY, sorted. Auth evidence
+    says which settings exist; their values never leave this module."""
     application_name: str | None = None
     server_port: int | None = None
     gateway_routes: list[AppGatewayRoute] = field(default_factory=list[AppGatewayRoute])
@@ -237,7 +262,10 @@ def _flatten(
             items = cast(list[object], value)
             if structured is not None and items and all(isinstance(i, dict) for i in items):
                 structured[key] = [cast(dict[str, object], i) for i in items]
-            into[key] = ",".join(str(item) for item in items)
+            # Only a list of scalars has a text form. A map inside the list
+            # would be written out as Python text, values and all (#28).
+            if not any(isinstance(item, dict | list) for item in items):
+                into[key] = ",".join(str(item) for item in items)
         elif value is not None:
             into[key] = str(value)
     return routes
@@ -339,9 +367,9 @@ def _parse_properties(config_path: Path) -> dict[str, str]:
         stripped = line.strip()
         if not stripped or stripped.startswith(("#", "!")):
             continue
-        if "=" in stripped:
-            key, value = stripped.split("=", 1)
-            flat[key.strip()] = value.strip()
+        matched = _PROPERTY_LINE.match(stripped)
+        if matched:
+            flat[matched.group("key")] = matched.group("value").strip()
     return flat
 
 
@@ -351,11 +379,11 @@ def _from_flat(
     notes: list[str] | None = None,
     structured: dict[str, list[dict[str, object]]] | None = None,
 ) -> AppConfigFacts:
-    env = {
-        key: value
+    env, withheld = publishable_entries(
+        (key, value)
         for key, value in sorted(flat.items())
-        if key in _EXACT_KEYS or key.endswith(_SUFFIXES) or key.startswith(_PREFIXES)
-    }
+        if key in _EXACT_KEYS or key.endswith(_SUFFIXES)
+    )
     server_port: int | None = None
     raw_port = flat.get("server.port")
     if raw_port is not None:
@@ -365,14 +393,15 @@ def _from_flat(
             logger.warning("non-numeric server.port %r ignored", raw_port)
     locator = flat.get("spring.cloud.gateway.discovery.locator.enabled", "").lower() == "true"
     all_notes = list(notes or [])
-    all_routes = list(routes or [])
-    all_routes.extend(_zuul_routes(flat))
+    all_notes.extend(withheld_note(key) for key in withheld)
+    all_routes = _publishable_routes([*(routes or []), *_zuul_routes(flat)], all_notes)
     all_notes.extend(_unmodelled_gateway_notes(flat))
     discovery_names = [
         flat[key].strip() for key in _DISCOVERY_NAME_KEYS if flat.get(key, "").strip()
     ]
     return AppConfigFacts(
         env=env,
+        security_keys=sorted(key for key in flat if is_security_key(key) and is_key_name(key)),
         application_name=flat.get("spring.application.name"),
         server_port=server_port,
         gateway_routes=all_routes,
@@ -381,6 +410,25 @@ def _from_flat(
         notes=all_notes,
         structured=dict(structured or {}),
     )
+
+
+def _publishable_routes(routes: list[AppGatewayRoute], notes: list[str]) -> list[AppGatewayRoute]:
+    """Routes with credentials removed from their forward target.
+
+    The phone book re-resolves ``target_uri`` by host, so the host is kept and
+    any user-info goes. A target whose credentials cannot be separated is
+    dropped with a note naming the route, never published as written.
+    """
+    published: list[AppGatewayRoute] = []
+    for route in routes:
+        target = strip_credentials(route.target_uri)
+        if target is None:
+            note = f"gateway-route-target-withheld:{route.route_id or route.path_prefix}"
+            if note not in notes:
+                notes.append(note)
+            continue
+        published.append(replace(route, target_uri=target))
+    return published
 
 
 def _zuul_routes(flat: dict[str, str]) -> list[AppGatewayRoute]:

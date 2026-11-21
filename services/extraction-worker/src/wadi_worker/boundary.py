@@ -18,6 +18,7 @@ import yaml
 
 from wadi_contracts.enums import ClientLibrary
 from wadi_worker.appconfig import AppConfigFacts, parse_app_config
+from wadi_worker.config_values import publishable_entries, withheld_note
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +111,15 @@ def _to_service(module: _ModuleScan, is_library: bool) -> DiscoveredService:
         module.module_dir,
         active_profiles=identity.profiles if identity and identity.profiles else None,
     )
-    if identity and identity.env:
+    if identity and (identity.env or identity.withheld_env):
         # Compose env overrides application files (Spring precedence, T3);
         # keys stay in their raw env-var spelling — the stitcher's relaxed-
         # binding lookup bridges to ${dotted.keys}.
-        config = replace(config, env={**config.env, **identity.env})
+        config = replace(
+            config,
+            env={**config.env, **identity.env},
+            notes=[*config.notes, *(withheld_note(name) for name in identity.withheld_env)],
+        )
     return DiscoveredService(
         name=module.artifact,
         build_root=module.build_root,
@@ -391,12 +396,18 @@ class _ComposeIdentity:
     ports: list[int]
     env: dict[str, str] = field(default_factory=dict[str, str])
     profiles: list[str] = field(default_factory=list[str])
+    withheld_env: list[str] = field(default_factory=list[str])
+    """Carried names whose value could not be published (credentials not
+    separable from the address); they become ``config-value-withheld`` notes."""
 
 
 # Compose env keys worth carrying onto the boundary (T3, §5.4.2): URL-shaped
 # values (the yas ${yas.services.*} closure), *_URL/*_URI/*_HOST/*_PORT names,
 # and the Spring identity/profile keys — never the whole environment (secrets
-# and infra noise stay out).
+# and infra noise stay out). This picks the NAMES; what a carried value may be
+# published as is `config_values`' decision, the same one application files
+# get, because `DATABASE_URL=postgres://user:password@db/shop` matches every
+# rule here and is still a credential.
 _ENV_VALUE_SHAPES = ("http://", "https://", "lb://")
 _ENV_NAME_SUFFIXES = ("_URL", "_URI", "_HOST", "_PORT")
 _ENV_EXACT_NAMES = {"SERVER_PORT", "SPRING_APPLICATION_NAME", "SERVER_SERVLET_CONTEXT_PATH"}
@@ -478,14 +489,20 @@ def _parse_compose_identities(repo_root: Path) -> dict[str, _ComposeIdentity]:
             continue
         typed_spec = cast(dict[str, object], spec)
         ports = _extract_container_ports(typed_spec)
-        env, profiles = _extract_environment(typed_spec, dotenv, compose_path.parent)
+        env, profiles, withheld_env = _extract_environment(typed_spec, dotenv, compose_path.parent)
         hostnames = [service_name]
         for extra_host_key in ("hostname", "container_name"):
             extra_host = typed_spec.get(extra_host_key)
             if isinstance(extra_host, str) and extra_host.strip() and extra_host not in hostnames:
                 hostnames.append(extra_host.strip())
         hostnames.extend(_network_aliases(typed_spec, hostnames))
-        identity = _ComposeIdentity(hostnames=hostnames, ports=ports, env=env, profiles=profiles)
+        identity = _ComposeIdentity(
+            hostnames=hostnames,
+            ports=ports,
+            env=env,
+            profiles=profiles,
+            withheld_env=withheld_env,
+        )
         identities[service_name] = identity
         build = typed_spec.get("build")
         context: object = (
@@ -513,8 +530,9 @@ def _compose_services(compose_path: Path) -> dict[str, object] | None:
 
 def _extract_environment(
     spec: dict[str, object], dotenv: dict[str, str], compose_dir: Path
-) -> tuple[dict[str, str], list[str]]:
-    """The service's carried env (allowlisted) + its active Spring profiles."""
+) -> tuple[dict[str, str], list[str], list[str]]:
+    """The service's carried env (allowlisted, credentials removed), its active
+    Spring profiles, and the carried names whose value was withheld."""
     collected: dict[str, str] = {}
     for env_file in _env_file_paths(spec, compose_dir):
         collected.update(_parse_dotenv(env_file))
@@ -538,10 +556,10 @@ def _extract_environment(
     raw_profiles = collected.get("SPRING_PROFILES_ACTIVE", "")
     if raw_profiles:
         profiles = [p.strip() for p in raw_profiles.split(",") if p.strip()]
-    carried = {
-        name: value for name, value in sorted(collected.items()) if _carry_env_entry(name, value)
-    }
-    return carried, profiles
+    carried, withheld = publishable_entries(
+        (name, value) for name, value in sorted(collected.items()) if _carry_env_entry(name, value)
+    )
+    return carried, profiles, withheld
 
 
 def _env_file_paths(spec: dict[str, object], compose_dir: Path) -> list[Path]:

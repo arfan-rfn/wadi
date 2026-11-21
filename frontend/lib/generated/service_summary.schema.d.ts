@@ -268,7 +268,7 @@ export type Name = string
  */
 export type ApplicationName = string | null
 /**
- * Machine-readable notes about config parsing for this service (§5.4.2, T3): 'config-profile-merged:<file>' / 'config-profile-doc-merged:<profiles>' (profile config merged over the base) | 'config-profile-merged-all' (active set unknown — every profile merged, over-approximation) | 'gateway-filter-unmodelled:<name>' / 'gateway-predicate-unmodelled:<name>' (gateway shape perceived but not modelled)
+ * Machine-readable notes about config parsing for this service (§5.4.2, T3): 'config-profile-merged:<file>' / 'config-profile-doc-merged:<profiles>' (profile config merged over the base) | 'config-profile-merged-all' (active set unknown — every profile merged, over-approximation) | 'gateway-filter-unmodelled:<name>' / 'gateway-predicate-unmodelled:<name>' (gateway shape perceived but not modelled) | 'config-value-withheld:<key>' / 'gateway-route-target-withheld:<route>' (a routing value whose credentials could not be separated from its address, so no part of it is published — §5.2.18)
  */
 export type ConfigNotes = string[]
 /**
@@ -292,7 +292,7 @@ export type RouteId = string | null
  */
 export type StripPrefix = number
 /**
- * Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'
+ * Forward target, e.g. 'lb://ts-order-service' or 'http://orders:8080'. Published without credentials: user-info is removed (§5.2.18)
  */
 export type TargetUri = string
 /**
@@ -564,7 +564,7 @@ export interface NetworkIdentity {
   server_port?: ServerPort
 }
 /**
- * Network-relevant config keys: flattened application.* allowlist (profiles merged, T3) plus compose environment/env_file entries in their raw env-var spelling — the stitcher's relaxed-binding lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (§5.4.2)
+ * The config entries the stitcher routes by: flattened application.* allowlist (profiles merged, T3) plus compose environment/env_file entries in their raw env-var spelling — the stitcher's relaxed-binding lookup bridges ${dotted.keys} to SCREAMING_SNAKE names (§5.4.2). Values are published as addresses only (§5.2.18): user-info, the query, the fragment and matrix parameters are removed; no spring.security.* key and no JDBC URL is carried. Boundaries written before contracts 1.28.0 may hold these values as written; a re-analysis writes a snapshot without them
  */
 export interface Env {
   [k: string]: string

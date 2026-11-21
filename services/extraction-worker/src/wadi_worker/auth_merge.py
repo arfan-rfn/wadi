@@ -89,6 +89,7 @@ def merge_endpoint_auth(
     method_security: ExportMethodSecurity | None = None,
     config_structured: dict[str, list[dict[str, object]]] | None = None,
     authority_models: list[ExportAuthorityModel] | None = None,
+    config_security_keys: list[str] | None = None,
 ) -> EndpointAuth:
     """Collect every enforcement in scope, then derive the claim from it."""
     evidence: list[AuthEvidence] = []
@@ -98,7 +99,7 @@ def merge_endpoint_auth(
     evidence.extend(
         _rule_evidence(security_rules, full_uri, http_method, config_structured or {}, config_env)
     )
-    evidence.extend(_config_evidence(config_env))
+    evidence.extend(_config_evidence(config_security_keys or []))
     evidence.extend(_authority_model_evidence(authority_models or []))
 
     if not evidence:
@@ -810,16 +811,23 @@ def _authority_model_evidence(models: list[ExportAuthorityModel]) -> list[AuthEv
     return evidence
 
 
-def _config_evidence(config_env: dict[str, str]) -> list[AuthEvidence]:
-    """``spring.security.*`` keys — context about the service, not a gate."""
-    keys = sorted(key for key in config_env if key.startswith("spring.security."))
+def _config_evidence(security_keys: list[str]) -> list[AuthEvidence]:
+    """``spring.security.*`` keys — context about the service, not a gate.
+
+    The KEY is the evidence: it says the setting exists and where to read it.
+    Its value is never published (§5.2.18, issue #28). This function used to
+    write ``key=value``, which put OAuth client secrets and
+    ``spring.security.user`` passwords on every endpoint of the service. It is
+    handed key names instead of the config map so that it holds no value it
+    could write out.
+    """
     return [
         AuthEvidence(
             kind=AuthEvidenceKind.CONFIG,
-            detail=f"{key}={config_env[key]}",
+            detail=key,
             effect=AuthEffect.UNKNOWN,
         )
-        for key in keys[:5]  # evidence, not claims — keep it bounded
+        for key in sorted(security_keys)[:5]  # evidence, not claims — keep it bounded
     ]
 
 

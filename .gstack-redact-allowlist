@@ -1,0 +1,32 @@
+# Sample credentials that are not secrets. gstack's pre-push guard reads this file.
+# Each line is one exact span the guard matched. Every one is a made-up input for
+# the code that removes credentials from config values (issue #28), or the same
+# example in docs/architecture.md or in a code comment. Anything not listed here
+# is still blocked. Add a line only for a value you have read and know is a sample.
+
+https://user:pw@billing:9000
+http://svc:{password}@inventory:8081"))
+postgres://user:password@db
+http://a:80,u:p@b:80``
+https://user:pa?ss@host`
+https://billing-user:hunter2@billing:9000
+http://gateway-user:hunter2@legacy:8000
+http://zuul-user:hunter2@old:8000
+https://reports:hunter2@reports:8443\n")
+postgres://shop:hunter2@db:5432
+https://user:p@ss@billing:9000
+postgres://shop:pw@db:5432
+mongodb://shop:pw@m1:27017,m2:27017
+http://u:p@a:8080,http:
+https://user:pw@api.example.test}",
+https://u:p@h
+https://user:pa?ss@reports:8443",
+https://user:pa#ss@reports:8443",
+http://a:80,u:p@b:80",
+http://u:p@inventory:8081"),
+http://gateway-user:{ROUTE_PASSWORD}@legacy:8000
+https://{USER_NAME}:{USER_PASSWORD}@billing:9000
+http://zuul-user:{ZUUL_PASSWORD}@old:8000
+postgres://shop:{COMPOSE_PASSWORD}@db:5432
+https://reports:{ENV_FILE_PASSWORD}@reports:8443\n"
+http://inventory:{DOTENV_PASSWORD}@inventory:8081\n"

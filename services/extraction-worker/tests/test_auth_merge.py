@@ -185,11 +185,49 @@ class TestConflictsAndUnknowns:
             auth_tags=[],
             security_rules=[],
             handler_anchor=ANCHOR,
-            config_env={"spring.security.oauth2.resourceserver.jwt.issuer-uri": "https://i"},
+            config_env={},
+            config_security_keys=["spring.security.oauth2.resourceserver.jwt.issuer-uri"],
         )
         assert auth.authenticated is None  # evidence without a claim
         [evidence] = auth.evidence
         assert evidence.kind is AuthEvidenceKind.CONFIG
+        # The key alone: which setting exists, never what it is set to.
+        assert evidence.detail == "spring.security.oauth2.resourceserver.jwt.issuer-uri"
+
+    def test_a_security_value_in_the_config_map_is_never_evidence(self) -> None:
+        # Issue #28: evidence used to be written as `key=value` straight from
+        # the config map, so a client secret landed on every endpoint. The
+        # merge now takes key NAMES, and a value handed to it by the old route
+        # is not read at all.
+        auth = merge_endpoint_auth(
+            full_uri="/x",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[],
+            handler_anchor=ANCHOR,
+            config_env={"spring.security.oauth2.client.registration.shop.client-secret": "s3cr3t"},
+        )
+        assert auth.evidence == []
+        assert "s3cr3t" not in auth.model_dump_json()
+
+    def test_config_evidence_stays_bounded_and_ordered(self) -> None:
+        keys = [f"spring.security.k{index}" for index in (7, 3, 5, 1, 6, 2, 4)]
+        auth = merge_endpoint_auth(
+            full_uri="/x",
+            http_method=HttpMethod.GET,
+            auth_tags=[],
+            security_rules=[],
+            handler_anchor=ANCHOR,
+            config_env={},
+            config_security_keys=keys,
+        )
+        assert [item.detail for item in auth.evidence] == [
+            "spring.security.k1",
+            "spring.security.k2",
+            "spring.security.k3",
+            "spring.security.k4",
+            "spring.security.k5",
+        ]
 
 
 class TestAntMatching:
