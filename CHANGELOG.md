@@ -3,6 +3,32 @@
 All notable changes to wadi. One version spans the whole release set
 (CLI, images, contracts — architecture.md §13).
 
+## Unreleased (the base migration is recorded)
+
+This change touches documents only and ships no release. The code, the
+contracts (1.27.0) and the export format (2.15.0) are those of 0.9.2.
+
+### Changed
+
+- **Step 1 of the build order is four releases.** A record in
+  `docs/architecture.md` §11, "The base migration", amends the build order of
+  2026-11-18. Release 1a adds the canonical map tool and captures each pinned
+  corpus on 0.9.2 with no behaviour change. Release 1b makes two analyses of
+  one checkout give the same map and adds a version check in `wadi-storage`
+  that the REST API and the MCP server both pass through. Release 1c adds the
+  scorer, ground truth and a baseline. Release 1d fixes the facts known to be
+  wrong and freezes the map.
+- **A shape spike tests the record shapes first.** Three throwaway readers
+  and an import probe run on real artifacts for at most eight working days.
+  After their report the owner decides whether items 3 to 9 go ahead as
+  written, and until then every other record shape is provisional.
+- **The pinned corpora are named.** `train-ticket-aitest` at `a84716f`, yas
+  and one microSecEnD application are pinned for every gate. ICPC is measured
+  as a supplementary corpus, and no release waits on it.
+- **The plan and its trace are committed.** The plan the owner approved is in
+  `docs/measurements/base-migration/reviewed-plan.md`, and
+  `amendment-trace.md` beside it maps each accepted requirement to the record.
+
 ## 0.9.2 — 2026-11-18 (the direction is accepted, and how the migration runs)
 
 This release changes documents only. The code, the contracts (1.27.0) and the

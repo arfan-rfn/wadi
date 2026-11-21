@@ -95,16 +95,17 @@ agents query for ground truth. Goal 10 is a map that a developer reads in place 
 | Hints per system and a committed `.wadi/hints.yml` | Recorded in `architecture.md`, not built | `architecture.md:1454-1460` |
 | The `llm-resolver` service and `llm-guessed` edges | Recorded in `architecture.md`, not built. Section 3 proposes a change. | §5.6 |
 | Service bundles as a kind of source, the hub's ingestion API, snapshots made of service bundles, ownership by team | Recorded in `architecture.md`, not built | Phase 11, `architecture.md:1442-1446` and `:1468-1469` |
-| Evidence from outside wadi with an `observed-at-runtime` provenance | Recorded in `architecture.md` as unscheduled | `architecture.md:1448`, `:1469` |
+| Evidence from outside wadi with an `observed-at-runtime` provenance | Recorded in `architecture.md` as unscheduled | `architecture.md` §11, "Unscheduled / speculative" |
 | Kubernetes manifests as an identity source | Recorded in `architecture.md` as demand-triggered | `architecture.md:925` |
-| A layer of the config analyzer that reads infrastructure-as-code files | Recorded in `architecture.md`, Phase 10 | `architecture.md:1440`, `:1467` |
+| A layer of the config analyzer that reads infrastructure-as-code files | Recorded in `architecture.md`, Phase 10 | `architecture.md` §11, Phase 10 and "Where the earlier phases went" |
 | Language profiles, the rule engine, base packs, learned rules, learn mode and a rule-set hash on every snapshot | Planned in another plan document, with open decisions D1, D2, D5 and D6 | `rule-packs-and-learned-rules-plan.md` |
 | Ingesting a provider's OpenAPI document (C5), provenance terms for declared and assumed contracts (M1), identity for a service known only from a spec (M5) | Planned in another plan document | `contract-triangulation-plan.md` |
-| Scorer and ground truth (W0), G9, the idiom census, the hybrid extraction layer (W8) | Planned in another plan document | `foundation-hardening-plan.md` |
-| The four rules of section 4.1 and the build order of section 15 | Accepted as the direction on 2026-11-18. No record shape is decided and nothing is built. | `architecture.md` §11, "Direction and migration rules" |
+| Scorer and ground truth (W0), G9, the idiom census, the hybrid extraction layer (W8) | The scorer and ground truth are approved as release 1c of the base migration on 2026-11-20 and are not built. G9, the idiom census and W8 are planned in another plan document. | `architecture.md` §11, "The base migration", and `foundation-hardening-plan.md` |
+| The four rules of section 4.1 and the build order of section 15 | Accepted as the direction on 2026-11-18. The build order was amended on 2026-11-20. Nothing is built. | `architecture.md` §11, "Direction and migration rules" |
+| The base migration: the record model with the static analyzer as the only reader | Step 1 (four releases) and the shape spike approved on 2026-11-20. The other record shapes are provisional until the spike checkpoint. Not built. | `architecture.md` §11, "The base migration" |
 | A model writes rules and never facts, which includes never a call edge | Accepted as rule 4 of the direction. Whether W8's verified one-off facts stay (T5 against D7) is open and decided before step 8. | Section 3 |
-| The auditor inside learn mode, and the gate experiment | Proposed in discussion only | Sections 3 and 6.4 |
-| One collection per reader, and the fold | Accepted as rules 2 and 3 of the direction, which settles T1. Shapes are decided step by step. Not built. | Section 4 |
+| The auditor inside learn mode, and the gate experiment | The gate experiment is approved on 2026-11-20 to run after release 1c of the base migration, and has not run. The auditor is proposed in discussion only. | Sections 3 and 6.4, and `architecture.md` §11, "The base migration" |
+| One collection per reader, and the fold | Accepted as rules 2 and 3 of the direction, which settles T1. The fold's shape is provisional item 6 of the base migration, decided at the spike checkpoint. Not built. | Section 4, and `architecture.md` §11, "The base migration" |
 | The five statuses | Proposed in discussion only | Section 4.4 |
 | Shared keys that any source can compute, and scope with the environment in it | Proposed in discussion only | Section 4.5 |
 | Config reader for Kubernetes, Helm, ingress and nginx | Proposed in discussion only | Section 6.2 |
