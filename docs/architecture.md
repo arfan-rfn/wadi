@@ -1765,6 +1765,47 @@ A test walks the FastAPI route table and the MCP tool list. It fails when a rout
 
 *Settled on 2026-11-21.* The owner settled the three open points of this record: tag `v0.9.2` at `f11b251` (#92), pin `sqshq/piggymetrics` as the microSecEnD application with yas and a hosted runner as the second machine (#78), and merge #76 before release 1a (#79). This record closes the three issues. Pull request #75, the fix for #26, stays open, because the base migration record lands that fix in release 1d with a major contracts bump, a typed-refusal test that needs release 1b, and a scorer run that shows the fact wrong before the fix.
 
+### Starting early, and what release 1d fixes (recorded 2026-11-22)
+
+**Starting early, and what release 1d fixes (recorded 2026-11-22, binding once the owner approves).** This record amends "The base migration" in two ways. Two pieces of work may start before the release they belong to, and two fixes leave release 1d. Nothing it moves changes what a release builds or measures. Nothing in it is built.
+
+*Decision, why this is an exception.* The base migration record lets the order change at three checkpoints, or when a release passes twice its estimate. Between them the order holds. None of those points has come. The owner makes this change between checkpoints, by this record. The two early starts change only when work may begin, and only for work that reads no output of an earlier release. The changes to release 1d remove fixes whose evidence rule cannot be met on the pinned corpora.
+
+*Decision, release 1c's record and ground truth start now.* Release 1c's decision record may be written and merge before release 1a ships. That record fixes the ground-truth file format, in natural keys with the handler's class and method as a secondary part, the labeling protocol, the two model providers, the person who checks the seeded sample of 40 endpoints per corpus by hand, and the cost estimate of the gate experiment. Once it merges, labeling of the three pinned corpora starts at their pinned commits (`train-ticket-aitest` at `a84716f`, yas at `2b09247d5d36`, piggymetrics at `6bb2cf9ddbca`). Ground truth is made without reading wadi's output, so it depends on no earlier release.
+
+- The scorer's code still starts after release 1b ships, because it scores output that the determinism gate has made reproducible.
+- Labels for entity access on saves wait for the precision bar of #40, because that issue requires the bar to be written before any save is labeled. Endpoints, the authenticated claim, roles and authorities, and service-to-service edges do not wait.
+- The owner reads every change to a ground-truth file, as the base migration record says.
+
+*Decision, the spike's readers start now.* Item 2 splits into two parts that keep its rules.
+
+- **Part one starts now.** It writes the draft-shapes file and the three throwaway readers. They map real artifacts onto the proposed shapes and fold them with the code facts by endpoint key. None of this needs two analyses to give the same bytes. The artifacts on the pinned corpora at their pinned commits are these. yas has Helm charts under `k8s/charts`. No pinned corpus has a checked-in OpenAPI document. yas configures springdoc in each service and does not commit the document it serves, so the spike generates one or writes one and says which, as item 2 already allows. `train-ticket-aitest` has an OpenTelemetry collector config under `telemetry/otelcollector` and no trace file, so the trace reader uses a trace the spike records or writes and says which.
+- **Part two waits for the determinism gate of release 1b.** It is the import probe. The probe compares split stitching with joint stitching, and until B1 lands the URL slicer's wall-clock deadline can make two runs of one checkout differ. A difference from that cause would read as an import defect.
+- The time box stays eight working days across both parts. The branch is still never merged. `docs/measurements/base-migration/shape-spike.md` is committed on `master` when both parts are done. The spike checkpoint still follows the spike's report.
+
+*Decision, the fixes of release 1d.* #34 and A5 of the hardening plan leave release 1d. #26 stays, with a different evidence rule.
+
+- **#34** reproduces only on ICPC. ICPC is supplementary, needs about 10 GB for Docker, which the owner's machine does not have, and has no ground truth that a release waits on. The scorer cannot show it wrong before a fix.
+- **A5** is marked as not measured on a real corpus in `foundation-hardening-plan.md`, because no system that does not use Spring Security has been analyzed. None of the three pinned corpora uses Shiro or Sa-Token. The scorer cannot show it wrong before a fix either.
+- Both stay open at P1 and are unscheduled. Step 4's decision record, the identity profile, states whether it needs either one fixed first, because the identity and access work reads the authorization claims. A5 is filed as [#94](https://github.com/arfan-rfn/wadi/issues/94), labeled `known-limitation`, `P1` and `area:auth`.
+- **#26** stays in release 1d. Its fix changes the edge id rule, which is a major contracts bump, and a major bump costs least before the freeze. #26 publishes no wrong fact. Two undetermined edges of one call get one id, the insert fails on the unique index of the edge set, and the snapshot never succeeds. The scorer has nothing to show wrong. Its evidence is a matcher test and a storage test that fail before the fix and pass after it, and the canonical-map diff on every pinned corpus. The capture of release 1a refuses a snapshot that has not succeeded, so a successful 0.9.2 capture of a pinned corpus shows that #26 does not occur in it. The canonical map excludes hashed ids, so the edge id change shows in no line, and the diff must be empty. Release 1d's record checks that the canonical edge key separates the outcomes the fix separates. If an undetermined edge names no candidate service, the key gains one, as a schema change before the freeze.
+- The rest of release 1d stands: the named failure when no repository of a system yields a service, and the freeze.
+
+*Reason.* Labeling is likely the longest task of step 1, and the spike is the first work that tests the new shapes. Both waited behind tooling they do not read. Release 1d named fixes that its own evidence rule could not accept on the corpora it scores.
+
+*Changed.* This record replaces these sentences.
+
+- In "The base migration", item 2: "It may start once the determinism gate of release 1b has passed, and may run beside releases 1c and 1d." Its draft-shapes file and its three readers may start now. Its import probe may start once the determinism gate of release 1b has passed. Both parts may run beside releases 1a to 1d.
+- In "The base migration", release 1d: "A5 of the hardening plan, #34 and #26 land here, each shown wrong by the scorer before its fix and right after it." #26 lands here, shown by a matcher test and a storage test that fail before its fix and pass after it, and by an empty canonical-map diff on every pinned corpus. A5 and #34 are unscheduled.
+- In "The base migration", release 1d: "The fix for #28 lands here at the latest. Whether its pull request (#76) merges on its own before release 1a is for the owner." #76 merged on 2026-11-21, as release 1a's record says, so the sentence is settled.
+- In "The base migration", *Decision, the goal*: "Release 1d fixes the facts known to be wrong and freezes the map." Release 1d fixes #26 and freezes the map. The facts known to be wrong on corpora the scorer does not cover, A5 and #34, are fixed when a later decision record schedules them.
+- In the build order, row 1: "fixes for the facts known to be wrong (A5 of the hardening plan, [#33](https://github.com/arfan-rfn/wadi/issues/33), [#34](https://github.com/arfan-rfn/wadi/issues/34))". Step 1 fixes #26 and closes #33. A5 and #34 leave step 1.
+- In "The base migration", the list of superseded text: "#26 and #28 join the facts known to be wrong." #26 joins step 1, and #28 is fixed.
+
+*Rejected: waiting for the spike checkpoint to make these changes.* The checkpoint comes after the work they speed up. *Rejected: starting the scorer's code early as well.* It would score output that is not yet reproducible, and its first numbers would move when B1 and B2 land. *Rejected: scoring #34 and A5 on fixtures inside release 1d.* A fixture shows only what its author imagined, and the scorer's claim is about the pinned corpora. That route stays open when the fixes are scheduled. *Rejected: dropping #26 from release 1d.* Its id change is a major bump, which costs least before the freeze. *Rejected: starting the import probe now.* Its one measurement is a difference between two stitchings, and the slicer's deadline can make such a difference on its own.
+
+*Not decided.* When #34 and A5 are scheduled. The precision bar of #40. The second model provider for labeling and the person who checks the hand sample, which release 1c's record settles.
+
 ### Where the earlier phases went (recorded 2026-11-18)
 
 Phases 3 to 11 below were the roadmap until the direction record. Their text is kept because it holds designs that other sections and the plans cite. It is not a schedule. "Unscheduled" means no step builds it, and a later decision record places it.
