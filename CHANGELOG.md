@@ -29,6 +29,15 @@ export format is still 2.15.0.
   that the REST API and the MCP server both pass through. Release 1c adds the
   scorer, ground truth and a baseline. Release 1d fixes the facts known to be
   wrong and freezes the map.
+- **Step 1 is built as parallel tracks and ships as three releases.** A record
+  of 2026-11-24 in `docs/architecture.md` §11, "Parallel tracks", lets a
+  track be written once its release's record and the interfaces it reads are
+  merged, without waiting for the release before it. Release 1c joins release
+  1d, so step 1 ships as 1a (0.10.0), 1b (0.11.0) and 1d (0.12.0).
+  Measurements run on GitHub-hosted runners, every product pull request gets
+  a canonical-map diff on the three pinned corpora, and map-changing pull
+  requests merge one at a time. This replaces the four-release order of the
+  entry above.
 - **A shape spike tests the record shapes first.** Three throwaway readers
   and an import probe run on real artifacts for at most eight working days.
   After their report the owner decides whether items 3 to 9 go ahead as

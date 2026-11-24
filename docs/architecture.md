@@ -1806,6 +1806,188 @@ A test walks the FastAPI route table and the MCP tool list. It fails when a rout
 
 *Not decided.* When #34 and A5 are scheduled. The precision bar of #40. The second model provider for labeling and the person who checks the hand sample, which release 1c's record settles.
 
+### Parallel tracks (recorded 2026-11-24)
+
+**Parallel tracks (recorded 2026-11-24, approved by the owner on 2026-11-24).** This record amends the direction record, the build order, "The base migration", release 1a's record and the record of 2026-11-22. It changes when a piece of work may start and when it may merge, where measurements run, and how many releases step 1 ships as. It removes no row of `CONSTRAINTS.md`, no test and no file from the owner's reading list. It does remove one release, release 1c, with that release's review and approval, and the paragraph on release 1c says what stands in for them. The record of 2026-11-22 merged by the owner's hand on 2026-11-23 (pull request #95), and this record builds on it as approved. Nothing in this record is built.
+
+*Decision, why this is an exception.* The order may change at three checkpoints, or when a release passes twice its estimate. None of those points has come. On 2026-11-24 the owner asked for the work to run in parallel wherever it can, and makes this change between checkpoints, by this record.
+
+*Finding, what each piece reads.* The order of 2026-11-20 is a chain of four releases, and each piece of a release waits for the whole release before it. The table lists what each piece reads, which is the least it has to wait for.
+
+| Piece | What it reads | What it waited for until this record |
+|---|---|---|
+| The capture stage (1a) | a running stack | nothing |
+| The normalizer, the field classification and the diff (1a) | the layout of a raw capture, and the map's line format | nothing |
+| The 0.9.2 capture | the capture stage and a 0.9.2 stack | the whole tool |
+| Tolerant reads, the error model, the import and writer rows (1b) | today's code | release 1a |
+| The version check (1b) | today's code and the error model | release 1a |
+| B1, B2 and the node tie-break (1b) | today's code to be written, and the tool and a map of `master` to be measured | release 1a |
+| The determinism gate (1b) | B1, B2, the tie-break and the tool | release 1a |
+| The scorer's code (1c) | the map's line format and the ground-truth file format | release 1b |
+| Ground truth (1c) | the corpora at their pins | nothing, since 2026-11-22 |
+| The baseline (1c) | the determinism gate, the scorer and ground truth | release 1b |
+| #26 and the named failure when no repository yields a service (1d) | the error model and the typed refusal of 1b, and the tool for the diff | release 1c |
+| The freeze (1d) | the baseline | release 1c |
+| The gate experiment | source alone for its agent runs. The scorer, ground truth and the baseline for its scores | release 1c |
+| The spike, part one | one whole-snapshot export per corpus | nothing, since 2026-11-22 |
+| The spike, part two | B1 | the determinism gate of release 1b |
+
+Five things stay in sequence, because each reads the output of the one before: the capture stage, the 0.9.2 capture, the three changes of release 1b that alter the map (B1, B2 and the node tie-break), the determinism gate, and the baseline with the freeze. Every other piece reads an interface or today's code. It waited because of the release it was filed under.
+
+*Decision, a dependency gates a merge or a committed number, and never a start.* A track may be written once two things are merged: its release's decision record, as condition 1 of done requires, and the pin of each interface it reads. It need not wait for the release before its own. What it waits for after that is its merge gate, and for a measurement the point at which its number may be committed. Four pieces start early under this rule.
+
+- **The scorer's code** starts when release 1d's record merges. The record of 2026-11-22 rejected an early start, because the scorer's first numbers would move when B1 and B2 land. That reason is about numbers, so the rule is on numbers. Until the determinism gate has passed, the scorer runs only on fixtures and on the sample files of its interfaces, and no score of a pinned corpus is committed or quoted in a record.
+- **The code of release 1b** starts when release 1b's record merges. Each of its tracks is written on its own branch and merges when its gate in the table below opens.
+- **The fix for #26 and the named failure when no repository yields a service** start when release 1d's record merges. Pull request #75 already holds the first. Both wait for their merge gate.
+- **The gate experiment's preregistration and its priced pilot** are written now. Its agent runs read source alone and may run before the scorer exists. It is scored and reports after release 1d ships.
+
+A decision gate is different from a dependency, and it still blocks the start, because its result may cancel the work. The spike checkpoint blocks items 3 to 9. The gate experiment's report blocks work on the fold. Both stand.
+
+After the spike checkpoint the same rule applies to the items the owner keeps. An item's decision record may merge and its code may be written before release 1d ships. No structural change merges before release 1d ships, because the guarantee compares every later map with the map of release 1d.
+
+The rule has a cost. A track written against an interface is reworked when the interface changes. The next decision limits that.
+
+*Decision, four interfaces are pinned before the tracks that read them start.*
+
+| Interface | Pinned by | Written by | Read by |
+|---|---|---|---|
+| The layout of a raw capture | the first pull request of release 1a, because 1a's record says what a raw capture holds and not how its files are laid out | the capture stage | the normalizer |
+| One line of the canonical map | release 1a's record (JSON Lines, one fact per line with its part, fact class, key and value, draft schema 0.1) | the normalizer | the diff and the scorer |
+| A ground-truth file | release 1d's record | the labelers | the scorer |
+| The problem-details model and the codes of the two refusals | release 1b's record | the error model track | the version check, the refusal test of #26 and the named failure |
+
+Each interface has a validator and a committed sample. The tests of the reading track read the sample. A test of the writing track passes its real output through the validator. A pull request that changes an interface changes its validator and its sample too, so the other track's tests fail until it follows. The ground-truth validator is the first part of the scorer to merge, so each ground-truth file is checked when it arrives and not when the scorer is finished.
+
+The scorer reads a canonical map and a ground-truth file. It starts no stack and calls no route. It can then be built beside the tool, and a later scorer can score the stored map of an earlier release. Release 1d's record fixes which parts of the map it reads.
+
+*Decision, two lanes.* The evidence lane is `libs/wadi-testing`, the ground-truth files, `docs/measurements/`, the Makefile targets and the measurement workflows. Nothing in it changes what a stack does. The product lane is `wadi-contracts`, `wadi-storage`, the services, `joern-platform`, the CLI and the frontend. The lanes share six places: the two read-only functions that release 1a adds to `wadi-storage`, `fields.toml` when a product change adds a contract field, the normalizer's node key when the tie-break lands, the Makefile, `CONSTRAINTS.md` and `.github/workflows/`.
+
+- An evidence-lane pull request merges when its checks pass and an agent that did not write it has reviewed it.
+- A product-lane pull request of the migration also waits for the tag of the release before its own. A release's map diff then holds only that release's changes.
+- A fix for an issue with the `bug` label belongs to no release. It merges on its checks and its review, as today, but never while a release candidate is being measured. If it changes the map, it merges alone, and once the tool exists its diff is opened like any other map change.
+- Release 1a's candidate holds no product change of the migration. It does hold two bug fixes merged since 0.9.2, #76 and #96. A difference between its map and the 0.9.2 map therefore points at the tool or at those two fixes, and each fact they changed is opened, as release 1a's record already requires for #76.
+
+*Decision, the tracks of step 1.* The rows of release 1a are fixed here, because its record is merged. The rows of releases 1b and 1d are design input. Their records confirm or change them and name each track's files. A track may merge in several pull requests, each complete with its tests.
+
+| Track | Release | Owns | Merges when |
+|---|---|---|---|
+| E1, the capture stage | 1a | the raw capture layout with its validator and sample, the capture modules of `canonical/`, the two read functions in `wadi-storage`, the redaction and its guard, the route and tool walk | its checks pass. The layout is the first pull request of the release |
+| E2, the normalizer | 1a | the RFC 8785 encoder, the normalize modules, the key and reference rules, `fields.toml`, the completeness test | the layout is merged, and the owner has read `fields.toml` and the normalizer |
+| E3, the diff | 1a | `canonical-diff` and the mutation test | E1 and E2 are merged, because the mutation test seeds a change in a served view and reads normalized maps |
+| E4, reproduction | 1a | `make reproduce`, the README of `docs/measurements/base-migration/`, the release-asset job, the measurement workflow | E1 to E3 are merged, and the owner has read both workflows |
+| E5, the scorer | 1d | the scorer package in `libs/wadi-testing`, the ground-truth validator, its table test and mutation test | 1d's record is merged, its checks pass and the owner has read it |
+| E6, ground truth | 1d | the ground-truth files | 1d's record is merged, a file passes the validator and the owner has read it |
+| E7, the gate experiment | none | its preregistration, pilot and report under `docs/measurements/` | the report is committed after release 1d ships |
+| E8, the spike | none | the spike branch | never. Its report is committed on `master` |
+| E9, the determinism gate | 1b | the id manifest, the two-machine measurement, the determinism row of `CONSTRAINTS.md` | P1 to P3 are merged and the gate has passed |
+| E10, the baseline and the freeze | 1d | the committed baseline, schema version 1 of the map, the scorer row of `CONSTRAINTS.md` | E5, E6, P8 and P9 are merged and E9 has passed |
+| P1, B1 | 1b | `UrlSlicer.scala` and its test | 0.10.0 is tagged. Alone, with its diff opened |
+| P3, the node tie-break | 1b | `WadiExport.scala`, `wadi_joern_client/export.py`, the export version, the fixture with two calls on one line, the node key in the normalizer | 0.10.0 is tagged. Alone, with its diff opened, and the owner has read the normalizer change |
+| P2, B2 | 1b | `service_id` in `ids.py`, the identity key on each repository in `system.py`, `pipeline.py`, the CLI option | 0.10.0 is tagged. Alone, with its diff opened |
+| P4, tolerant control-plane reads | 1b | the system, snapshot and job models, `systems.py` | P1 to P3 are merged, with an empty diff |
+| P5, the error model | 1b | a new module in `wadi-contracts`, the CLI's mapping, the MCP error result, the page of anchors | P1 to P3 are merged, with an empty diff |
+| P6, the version check | 1b | the read handle in `wadi-storage`, the routes of `app.py`, `wadi_mcp/service.py`, the route and tool walk | P5 is merged, with an empty diff |
+| P7, the constraint rows | 1b | `CONSTRAINTS.md`, the import-linter configuration with `pyproject.toml` and `uv.lock`, the writer-map test, the CI steps | 0.10.0 is tagged for the import row and the writer row. P6 is merged for the version-check row. The owner has read each |
+| P8, #26 | 1d | the edge id in `ids.py` and `stitching.py`, the stitcher's matcher and phonebook, the matcher test and the storage test | 0.11.0 is tagged, with the diff the record of 2026-11-22 requires, which is expected to be empty |
+| P9, the named failure | 1d | `pipeline.py`, the coverage finding, the CLI's message | 0.11.0 is tagged. Alone, with its diff opened |
+
+Some tracks share a file. P2 and P4 change `system.py`. P2 and P9 change `pipeline.py`. P2 and P8 change `ids.py`. P8 and P9 may both change `stitching.py`. P2, P5 and P9 change `cli/src/wadi_cli/main.py`, because the CLI is one command module. Tracks that share a file merge in the order of the table, and the later one rebases.
+
+*Decision, rules that keep parallel tracks mergeable.*
+
+- **One branch and one worktree per track.** A branch holds one track's change. The direction record's "no long-lived migration branch" stands. No branch collects several tracks, and no track merges into another track's branch.
+- **A pull request merges on a head that contains the current `master`.** CI has run on that head. `master` has no branch protection today, so the integrator enforces this.
+- **One map-changing pull request at a time.** B1, the node tie-break, B2 and the named failure each rebase on `master`, are measured against the map of `master`, have their diff opened in both directions and merge. The map of the new `master` is the next baseline. Two of them are never measured together, because a changed fact could then not be assigned to its cause.
+- **Run-to-run noise is measured, never assumed away.** Until B1 and the tie-break are on `master`, two analyses of one checkout may give different maps, as release 1a's record says. Each measurement therefore analyzes its base twice in the same workflow run, on the same kind of machine as the pull request. A fact that differs between the two base runs is listed as noise and is not counted for or against the pull request.
+- **A map-neutral product pull request shows an empty diff before it merges**, on the three pinned corpora. This gate is used only once two analyses of `master` give equal maps on each corpus, which is why P4 to P6 merge after P1 to P3. Until now a corpus was compared once per release. Every stored artifact carries the contracts version (`libs/wadi-contracts/src/wadi_contracts/base.py:28`). If `fields.toml` keeps that field in the map, an empty diff for a pull request that bumps contracts means empty apart from that field.
+- **Shared files have one writer at a time.** They are `SCHEMA_VERSION`, `schemas/`, `frontend/lib/generated/`, the export schema version, `fields.toml`, `CONSTRAINTS.md`, `.github/workflows/`, the Makefile, the root `pyproject.toml`, `uv.lock`, `VERSION`, `CHANGELOG.md`, this section and the plan's status table. A pull request that changes contracts takes its version number when it merges, by a rebase, and runs `make schema` again. Nobody resolves a conflict in a generated file or in `uv.lock` by hand. `VERSION` and the version strings that `make bump V=` sets change only in a release pull request.
+- **A pull request that adds a contract field classifies it in `fields.toml`**, and the owner reads that change. The completeness test fails otherwise, once track E2 is merged.
+- **One integrator.** One session owns the merge order, the shared files, the one local stack and the build's state file. Workers write code in their own worktrees and never merge or push.
+- **A release candidate closes `master` to other work.** While a candidate is measured and reviewed, only fixes to it merge. Other pull requests stay open with their checks passing.
+
+*Decision, measurements run on hosted runners.* The owner's machine runs one stack at a time (6.27 GiB for Docker), so every measurement there waits for the one before it. Release 1a's record has a release-asset job in the release workflow that "can also be started by hand on a release-candidate commit". That job stays. Track E4 adds a second workflow with the same steps. It is started by hand with a ref, a corpus and a base ref. It runs `make reproduce` on a GitHub-hosted runner, keeps the map, the raw capture and the provenance file as artifacts, and prints the diff against the base. One job runs per corpus, so the three pinned corpora are measured at the same time, and so are two pull requests. The repository is public, so these runners cost nothing.
+
+- The `e2e` job of `ci.yml` already builds the wadi-joern image and runs the conformance test on such a runner. Whether its 14 GB disk holds the full stack and each corpus is not measured. The first run measures it. A corpus that does not fit is measured on the owner's machine, as release 1a's record says.
+- The owner's machine keeps four uses: debugging, the run on a second operating system that the determinism gate needs, the second scoring of the baseline, and a corpus that does not fit on a runner.
+- The spike's part one needs no running stack after one whole-snapshot export per corpus. It does not wait for the capture of release 1a.
+- The 0.9.2 capture is taken as a raw capture as soon as track E1 merges, with its redaction and guard. A raw capture is checked against no model, so the normalizer of any later commit can normalize it. If the capture stage later gains a route it had missed, the capture is taken again. 0.9.2 is published, and the slowest pinned corpus analyzed in 156 s.
+
+*Decision, release 1c joins release 1d.* Step 1 ships as three releases: 1a as 0.10.0, 1b as 0.11.0 and 1d as 0.12.0. The scorer, ground truth and the baseline become tracks of release 1d, under one decision record. The record that the text of 2026-11-22 calls release 1c's record is release 1d's record, and it may still be written and merge before release 1a ships.
+
+- **Reason.** Release 1d followed release 1c so that the scorer could show each wrong fact before its fix. The record of 2026-11-22 moved A5 and #34 out of release 1d and gave #26 an evidence rule that uses no scorer. The fixes of release 1d now read nothing from the baseline. The diff of #26 is expected to be empty, and the diff of the named failure is opened. The baseline is taken after both, on the map that the freeze fixes.
+- **What is given up.** Release 1c had its own review by several reviewers, its own approval by the owner and its own tag. Those three go. Release 1d's reviewers now read the scorer, ground truth, the baseline and the freeze in one review. The owner still reads every change to the scorer and to a ground-truth file when it merges, and an agent that did not write it reviews each pull request.
+- **The scorer row.** It enters `CONSTRAINTS.md` under "Enforced with numbers" when release 1d ships, with no release under "Measured, not yet enforced". Under the order of 2026-11-20 the rule's first comparison was release 1d against the baseline of release 1c. That comparison is lost, and the first one between two releases now comes with the release after 1d.
+- **Two checks stand in for it.** The regression rule runs once against a map of a pinned corpus with one seeded wrong fact, and must fail. The baseline is scored on a hosted runner and on the owner's machine, and the two score files must be equal. Both are weaker than a comparison of two real releases, because the seeded fact is one the author chose.
+- **The gate experiment** is scored and reports after release 1d ships, where it ran after release 1c before. Its scores then come from a scorer and a baseline that a release review and the owner have passed.
+- **Release 1d's order inside.** #26 and the named failure merge after 0.11.0 is tagged. The baseline is taken on the `master` that holds them. The freeze follows.
+
+*Decision, the owner's reads and the reviews.* The owner's read is the one step that no track can do in parallel, so it is kept off the critical path.
+
+- The records of release 1b and of release 1d are written now, as two documents-only changes, and the owner reads them together.
+- A track puts the files the owner reads (`fields.toml`, the normalizer, a ground-truth file, the scorer, a workflow, `CONSTRAINTS.md`) in a pull request of their own where it can. Code that merges on checks and an agent's review does not wait behind them.
+- The review by several independent reviewers still runs on every release. Its reviewers run at the same time, on the candidate's commit, and start when that commit is fixed.
+- A release's effort estimate counts days of work summed over its tracks, the way release 1a's twelve days were counted for one builder. Elapsed days do not count, so parallel tracks cannot hide an overrun from the rule of twice the estimate.
+
+*Decision, how a change is tested under parallel work.* Layers 1, 2 and 6 are unchanged. This record adds layer 5 and runs layers 3 and 4 more often.
+
+1. A track's own acceptance tests, written before its code and listed in its release's record.
+2. Every row of `CONSTRAINTS.md` that runs in CI, on every pull request, on a head that contains `master`.
+3. A canonical-map diff on the three pinned corpora for every product-lane pull request. It ran once per release before.
+4. A measurement of `master` after each product-lane merge. Once B1 is on `master`, it analyzes `petstore-system` twice and compares the bytes of the two maps.
+5. The validator and the sample of each interface, which fail one track's tests when another track changes what it reads.
+6. The release measurement with members opened in both directions, the consumer exercised, the review by several reviewers and the owner's approval.
+
+*The order from here.*
+
+1. **Now.** Tracks E1 and E2 of release 1a, starting with the raw capture layout. The records of releases 1b and 1d. The spike's part one. The gate experiment's preregistration.
+2. **When release 1b's record merges.** Tracks P1 to P7 are written on their branches.
+3. **When release 1d's record merges.** The scorer starts with the ground-truth validator, labeling starts, and tracks P8 and P9 are written on their branches.
+4. **When E1 merges.** The 0.9.2 raw captures of the three corpora and of `petstore-system`.
+5. **When E1 to E4 are merged.** Release 1a's candidate is measured and reviewed, and 0.10.0 is tagged.
+6. **When 0.10.0 is tagged.** P1, P3 and P2 merge one at a time, each with its diff opened. The import row and the writer row of P7 merge.
+7. **When B1 is on `master`** and two analyses of `petstore-system` on that `master` give equal maps, the spike's part two starts. The import probe runs on that fixture, and B1 is the one cause the record of 2026-11-22 names for a false difference.
+8. **When P1 to P3 are merged.** P4 to P6 merge, each with an empty diff, then the version-check row of P7. The determinism gate runs, and 0.11.0 is tagged.
+9. **When 0.11.0 is tagged.** P8 and P9 merge. The baseline is taken, the map is frozen and 0.12.0 is tagged. The gate experiment is then scored.
+10. **When both parts of the spike have reported.** The spike checkpoint. It may now come before release 1d ships.
+
+*Design input for the spike checkpoint.* Items 3 to 9 stay provisional, and this table is as provisional as they are. It lists what each item reads from the others, for the owner's decision on the sequence.
+
+| Item | Reads | May be built beside |
+|---|---|---|
+| 3, keys | step 1 | item 4 |
+| 4, origin, lifecycle and readers | step 1, with the read handle of release 1b. Its index on each reader's natural key reads the keys of item 3 | item 3, and that index merges after item 3 |
+| 5, import as bundle version 0 | the id rules of item 3, and the members and job types of item 4 | items 6, 7 and 8 |
+| 6, the fold | the registry and the test reader of item 4, and the gate experiment's report | items 5, 7 and 8 |
+| 7, the edge shape | the test reader of item 4, and the shape of a source in item 6 | items 5, 6 and 8, and it merges after item 6 |
+| 8, the environment | item 4's decision on the current map per environment | items 5, 6 and 7 |
+| 9, the closing release | every item | each exit test is built with the item it tests |
+
+Read this way, seven releases in a row become four groups by merge order: items 3 and 4, then items 5, 6 and 8, then item 7, then item 9. Each item's record carries a track table like the one above, with what each track owns, what it reads and when it merges. Whether items 3 and 7 share one major contracts bump is a question for the checkpoint.
+
+*What stays.* What each release builds and measures. The five conditions of done. Every row of `CONSTRAINTS.md`. Ground truth made without reading wadi's output. The list of what the owner reads. The review by several reviewers on every release that ships. The three checkpoints. The spike's time box and its unmerged branch. The pinned corpora. Releases ship in order, one at a time.
+
+*Changed.* This record replaces these sentences.
+
+- In the direction record: "The work lands on `master`, one step at a time". Releases ship one at a time, in order. Tracks of a later release are written beside an earlier one and merge when their gate opens.
+- In the direction record: "No structural step (the origin of a record, import, a new reader, the fold) starts until step 1 is done." No structural change merges until release 1d ships. After the spike checkpoint, the record of an item the owner keeps may merge and its code may be written. The sentence of "The base migration" that says this rule "stands" is replaced the same way, and where it says the spike "may run beside releases 1c and 1d", the record of 2026-11-22 already governs.
+- In the build order: "Step 1 is approved as four releases and the shape spike as item 2." Step 1 is approved as three releases.
+- In "The base migration", *Decision, what is approved now*: "Step 1, built as four releases (1a to 1d)". Step 1 is built as three releases, 1a, 1b and 1d, and release 1d holds what release 1c held.
+- In "The base migration", release 1b: "Four land in `CONSTRAINTS.md` in this release and the scorer row lands in release 1c", and in its table "measured from 1c and enforced from 1d". The scorer row lands in release 1d, enforced.
+- In "The base migration", release 1c: "The scorer enters `CONSTRAINTS.md` under "Measured, not yet enforced"." It enters under "Enforced with numbers" when release 1d ships. The same holds for "the scorer moves to "Enforced with numbers"" in release 1d and for "It is measured from release 1c and enforced from 1d" in the list of superseded text.
+- In "The base migration", release 1c: "It runs after release 1c as the first use of the scorer. Release 1c's decision record states its cost estimate." The gate experiment is scored and reports after release 1d ships, and release 1d's record states its cost estimate. The same holds for "the gate experiment runs after release 1c and reports before any fold work" in the list of superseded text.
+- In "The base migration", the list of superseded text: "Releases 1a to 1c come before a scorer run can be compared with an earlier one, so they meet condition 3 with a canonical-map diff opened in both directions, and release 1c also commits the baseline." Releases 1a, 1b and 1d meet condition 3 that way, and release 1d commits the baseline.
+- In "The base migration", the rules: "Each pinned corpus is analyzed once per release". It is also analyzed for every product-lane pull request and after each product-lane merge.
+- In "The base migration", the version table: "Major at release 1d" stands, and release 1d is 0.12.0. The canonical map schema is still frozen as version 1 when release 1d ships.
+- In the record of 2026-11-22: "The scorer's code still starts after release 1b ships, because it scores output that the determinism gate has made reproducible." The scorer's code starts when release 1d's record merges, and no score of a pinned corpus is committed or quoted before the determinism gate has passed. Its rejection of "starting the scorer's code early as well" is withdrawn on the same terms.
+- In the record of 2026-11-22: "Part two waits for the determinism gate of release 1b", and "Its import probe may start once the determinism gate of release 1b has passed." Part two starts once B1 is on `master` and two analyses of `petstore-system` give equal maps.
+- In release 1a's record: "Release 1a changes no product code, so the diff is empty, unless pull request #76 merged first." Pull request #96 has merged as well, and each fact that either fix changed is opened.
+- In release 1a's record: "The release workflow gains one job per public pinned corpus." It still does. Track E4 adds the second workflow described above, and the owner reads both.
+- In release 1a's record: "The estimate is twelve working days." The estimate stands as days of work summed over tracks E1 to E4.
+
+*Rejected: keeping the order of 2026-11-20 with the two early starts of 2026-11-22.* Most pieces read nothing from the release they wait for, as the first table shows. *Rejected: one integration branch that collects the tracks and merges to `master` later.* It is the long-lived branch the direction record rejected, and a diff of that branch against `master` holds every track's changes at once. *Rejected: merging B1, B2 and the tie-break together with one diff.* A changed fact could not be assigned to its cause. *Rejected: merging the map-neutral tracks of release 1b before B1 and the tie-break.* An empty diff proves nothing while two analyses of one checkout can differ. *Rejected: committing early scores marked provisional.* A number in the repository is quoted, and the reason of 2026-11-22 against it stands. *Rejected: scoring the gate experiment as soon as a baseline exists on `master`.* Its report can stop work on the fold, so it should rest on a scorer that a release review has read. *Rejected: folding release 1a into release 1b as well.* Release 1a's candidate holds no product change of the migration, which keeps a difference from the 0.9.2 map down to the tool and two named bug fixes. *Rejected: a second stack on the owner's machine.* Its Docker VM has 6.27 GiB. *Rejected: a paid cloud machine as the first choice.* Hosted runners cost nothing for a public repository. A paid machine stays the fallback for a corpus that fits on neither a runner nor the owner's machine. *Rejected: writing the records of items 3 to 9 before the checkpoint.* The spike exists to say which of their shapes are wrong. *Rejected: merging structural code before release 1d ships.* The guarantee compares every later map with the map of release 1d. *Rejected: one review by several reviewers for the whole of step 1.* The tool, the determinism gate and the freeze are three claims, and each is reviewed when it ships.
+
+*Not decided.* Whether `master` gets branch protection that requires passing checks on an up-to-date branch, which is a repository setting only the owner can change. How many tracks run at once, which is the owner's choice of cost, because parallel tracks spend the same effort in fewer days and add rebases and four interface samples. Whether a hosted runner's disk holds each corpus. Whether `fields.toml` keeps the contracts version of each artifact in the map, which release 1b's record settles before P4 to P6 are measured. The files of each track of releases 1b and 1d, which their records name.
+
 ### Where the earlier phases went (recorded 2026-11-18)
 
 Phases 3 to 11 below were the roadmap until the direction record. Their text is kept because it holds designs that other sections and the plans cite. It is not a schedule. "Unscheduled" means no step builds it, and a later decision record places it.
