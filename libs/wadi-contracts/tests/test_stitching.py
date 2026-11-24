@@ -115,6 +115,100 @@ class TestStitchedEdgeCreate:
         assert edge.id == remote_edge_id(rc_id, "undetermined")
 
 
+class TestCandidateService:
+    """Issue #26: a call can miss on several candidate services, and each miss
+    is its own edge row, so each needs its own id."""
+
+    CANDIDATE_A = "svc_" + "1" * 16
+    CANDIDATE_B = "svc_" + "2" * 16
+
+    def _unmatched(self, svc_id: str, rc_id: str, candidate: str | None) -> StitchedEdge:
+        return StitchedEdge.create(
+            snapshot_id=SNAPSHOT,
+            service_id=svc_id,
+            remote_call_id=rc_id,
+            mechanism="resttemplate",
+            target_kind=TargetKind.UNDETERMINED,
+            candidate_service_id=candidate,
+            confidence=Confidence.NONE,
+            provenance=Provenance.MACHINE_PROVEN,
+        )
+
+    def test_two_candidates_of_one_call_get_two_ids(self, svc_id: str, rc_id: str) -> None:
+        on_a = self._unmatched(svc_id, rc_id, self.CANDIDATE_A)
+        on_b = self._unmatched(svc_id, rc_id, self.CANDIDATE_B)
+        assert on_a.candidate_service_id == self.CANDIDATE_A
+        assert on_a.id != on_b.id
+        assert on_a.target_service_id is None  # a candidate is not a target
+
+    def test_a_candidate_changes_the_id(self, svc_id: str, rc_id: str) -> None:
+        assert (
+            self._unmatched(svc_id, rc_id, self.CANDIDATE_A).id
+            != self._unmatched(svc_id, rc_id, None).id
+        )
+
+    def test_ids_without_a_candidate_are_the_ids_before_the_field_existed(self) -> None:
+        # Literals computed on the commit before candidate_service_id (912f56f).
+        caller = "svc_" + "c" * 16
+        rc = "rc_" + "a" * 16
+        analyzed = make_analyzed(caller, rc, "ep_" + "d" * 16)
+        external = StitchedEdge.create(
+            snapshot_id=SNAPSHOT,
+            service_id=caller,
+            remote_call_id=rc,
+            mechanism="resttemplate",
+            target_kind=TargetKind.EXTERNAL,
+            external_host="api.stripe.com",
+            confidence=Confidence.EXACT,
+            provenance=Provenance.MACHINE_PROVEN,
+        )
+        placeholder = StitchedEdge.create(
+            snapshot_id=SNAPSHOT,
+            service_id=caller,
+            remote_call_id=rc,
+            mechanism="resttemplate",
+            target_kind=TargetKind.PLACEHOLDER,
+            target_service_id="ph_" + "e" * 16,
+            confidence=Confidence.HEURISTIC,
+            provenance=Provenance.HEURISTIC,
+        )
+        undetermined = StitchedEdge.create(
+            snapshot_id=SNAPSHOT,
+            service_id=caller,
+            remote_call_id=rc,
+            mechanism="resttemplate",
+            target_kind=TargetKind.UNDETERMINED,
+            confidence=Confidence.NONE,
+            provenance=Provenance.MACHINE_PROVEN,
+        )
+        assert analyzed.id == "re_1972afe1d5be745b"
+        assert external.id == "re_2bab35dd372645c2"
+        assert placeholder.id == "re_de4f14b3382addb8"
+        assert undetermined.id == "re_2dd76fb752179998"
+
+    def test_an_edge_stored_before_the_field_still_validates(self, svc_id: str, rc_id: str) -> None:
+        stored = self._unmatched(svc_id, rc_id, None).model_dump()
+        del stored["candidate_service_id"]
+        assert StitchedEdge.model_validate(stored).candidate_service_id is None
+
+    def test_a_matched_edge_names_no_candidate(
+        self, svc_id: str, rc_id: str, target_ep_id: str
+    ) -> None:
+        with pytest.raises(ValidationError, match="candidate_service_id"):
+            make_analyzed(svc_id, rc_id, target_ep_id, candidate_service_id=self.CANDIDATE_A)
+
+    def test_a_candidate_is_an_analyzed_service(self, svc_id: str, rc_id: str) -> None:
+        with pytest.raises(ValidationError, match="svc_"):
+            self._unmatched(svc_id, rc_id, placeholder_service_id("billing"))
+
+    def test_a_stored_candidate_must_match_the_id(self, svc_id: str, rc_id: str) -> None:
+        on_a = self._unmatched(svc_id, rc_id, self.CANDIDATE_A)
+        with pytest.raises(ValidationError, match="derived id"):
+            StitchedEdge.model_validate(
+                {**on_a.model_dump(), "candidate_service_id": self.CANDIDATE_B}
+            )
+
+
 class TestKindHonesty:
     def test_analyzed_requires_endpoint(self, svc_id: str, rc_id: str) -> None:
         with pytest.raises(ValidationError, match="ANALYZED"):

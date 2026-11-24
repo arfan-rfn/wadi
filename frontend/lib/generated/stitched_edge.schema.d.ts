@@ -6,6 +6,10 @@
  */
 
 /**
+ * 1.28.0: the svc_ id of the analyzed service the call's host resolved to, when none of that service's endpoints matched the call. Only an UNDETERMINED edge carries it. The service is known and the endpoint is not, so it is a candidate and never a target. None on every other edge and on every edge written before 1.28.0
+ */
+export type CandidateServiceId = string | null
+/**
  * Composed edge confidence: min(url recovery, resolution, path match)
  */
 export type Confidence = "exact" | "high" | "heuristic" | "none"
@@ -68,8 +72,13 @@ export type Url = string | null
  * to the service whose call site it resolves. One ``RemoteCall`` fact can
  * yield N edges (ambiguous resolution, multi-candidate URLs); each is its
  * own row with its own content-derived id (§5.2 over-approximation).
+ *
+ * 1.28.0: ``candidate_service_id`` is part of the id of an UNDETERMINED edge
+ * that carries one. An edge written before 1.28.0 carries none and keeps the
+ * id it was written with.
  */
 export interface StitchedEdge {
+  candidate_service_id?: CandidateServiceId
   confidence: Confidence
   created_at?: CreatedAt
   evidence?: Evidence
