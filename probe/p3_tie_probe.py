@@ -8,6 +8,7 @@ compare  compare two run directories and print the report as JSON
 from __future__ import annotations
 
 import argparse
+import functools
 import itertools
 import json
 import os
@@ -112,59 +113,100 @@ def _renumber(value: Any, mapping: dict[int, int]) -> Any:
     return value
 
 
-def _tie(node: dict[str, Any]) -> tuple[Any, ...]:
-    return (node.get("file", "<unknown>"), node.get("kind", -1), tuple(node.get("path", [])))
+NO_FILE = ("<unknown>", "<empty>", "")
+
+
+def _tie(node: dict[str, Any], file_key: str = "file") -> tuple[Any, ...]:
+    # ujson writes a Long as a string, so the kind is parsed back to a number here.
+    kind = int(node.get("kind", -1))
+    return (node.get(file_key, node.get("file", "<unknown>")), kind, tuple(node.get("path", [])))
+
+
+def _key_of(o: dict[str, Any]) -> tuple[int, int] | None:
+    """(line, id) for an export row: `id`, `call_id` or `node_id`, and `line` or `anchor.line`."""
+    ident = next((o[k] for k in ("id", "call_id", "node_id") if isinstance(o.get(k), int)), None)
+    line = o.get("line")
+    if not isinstance(line, int) and isinstance(o.get("anchor"), dict):
+        line = o["anchor"].get("line")
+    if ident is None or not isinstance(line, int):
+        return None
+    return line, ident
 
 
 def _lists_with_ids(value: Any, path: str, out: list[tuple[str, list[dict[str, Any]]]]) -> None:
-    """Every array of objects that carry an `id` and a `line`: the export's id-ordered lists."""
+    """Every array of rows that carry a node id and a line: the export's id-ordered lists."""
     if isinstance(value, dict):
         for key, v in value.items():
             _lists_with_ids(v, f"{path}.{key}", out)
     elif isinstance(value, list):
         objs = [v for v in value if isinstance(v, dict)]
-        if objs and len(objs) == len(value) and all(
-            isinstance(o.get("id"), int) and isinstance(o.get("line"), int) for o in objs
-        ):
+        if objs and len(objs) == len(value) and all(_key_of(o) is not None for o in objs):
             out.append((path, objs))
         for v in value:
             _lists_with_ids(v, f"{path}[]", out)
 
 
-def _site_analysis(export: Any, nodes: dict[str, Any]) -> dict[str, dict[str, int]]:
+def _decl_cmp(a: tuple[int, ...], b: tuple[int, ...]) -> int:
+    """The plan's order for the (line, -id) sites: an earlier statement first, and inside one
+    chain the inner call, whose AST path extends the outer call's, before the call that wraps it."""
+    if a == b:
+        return 0
+    if len(a) > len(b) and a[: len(b)] == b:
+        return -1
+    if len(b) > len(a) and b[: len(a)] == a:
+        return 1
+    return -1 if a < b else 1
+
+
+def _site_analysis(export: Any, nodes: dict[str, Any], file_key: str) -> dict[str, dict[str, int]]:
     lists: list[tuple[str, list[dict[str, Any]]]] = []
     _lists_with_ids(export, "", lists)
-    sites: dict[str, dict[str, int]] = defaultdict(Counter)  # type: ignore[arg-type]
+    sites: dict[str, Counter[str]] = defaultdict(Counter)
+
+    def tie(ident: int) -> tuple[Any, ...]:
+        return _tie(nodes.get(str(ident), {}), file_key)
+
     for path, objs in lists:
         site = sites[path]
         site["lists"] += 1
-        keys_asc = [(o["line"], o["id"]) for o in objs]
-        keys_desc = [(o["line"], -o["id"]) for o in objs]
-        if keys_asc == sorted(keys_asc):
-            site["sorted_line_id"] += 1
-        elif keys_desc == sorted(keys_desc):
-            site["sorted_line_minus_id"] += 1
+        keys = [_key_of(o) for o in objs]
+        asc = [(line, ident) for line, ident in keys]  # type: ignore[misc]
+        desc = [(line, -ident) for line, ident in keys]  # type: ignore[misc]
+        if asc == sorted(asc):
+            mode = "asc"
+        elif desc == sorted(desc):
+            mode = "desc"
         else:
             site["other_order"] += 1
             continue
-        by_line: dict[int, list[dict[str, Any]]] = defaultdict(list)
-        for o in objs:
-            by_line[o["line"]].append(o)
+        site[f"sorted_line_{'id' if mode == 'asc' else 'minus_id'}"] += 1
+        by_line: dict[int, list[int]] = defaultdict(list)
+        for line, ident in keys:  # type: ignore[misc]
+            if ident not in by_line[line]:
+                by_line[line].append(ident)  # rows of one node keep their own order
         for group in by_line.values():
             if len(group) < 2:
                 continue
             site["same_line_groups"] += 1
-            ties = [_tie(nodes.get(str(o["id"]), {})) for o in group]
+            ties = [tie(i) for i in group]
             for a, b in itertools.combinations(ties, 2):
                 if a == b:
-                    site["pairs_sharing_tie"] += 1
-            id_order = [o["id"] for o in sorted(group, key=lambda o: o["id"])]
-            tie_order = [
-                o["id"]
-                for o in sorted(group, key=lambda o: (_tie(nodes.get(str(o["id"]), {})), o["id"]))
-            ]
-            if id_order != tie_order:
-                site["groups_tie_order_differs_from_id_order"] += 1
+                    site["distinct_node_pairs_sharing_tie"] += 1
+            if mode == "asc":
+                old = sorted(group)
+                new = sorted(group, key=lambda i: (tie(i), i))
+            else:
+                old = sorted(group, key=lambda i: -i)
+                new = sorted(
+                    group,
+                    key=functools.cmp_to_key(
+                        lambda x, y: (tie(x)[0] > tie(y)[0]) - (tie(x)[0] < tie(y)[0])
+                        or _decl_cmp(tie(x)[2], tie(y)[2])
+                        or (x > y) - (x < y)
+                    ),
+                )
+            if old != new:
+                site["groups_new_order_differs"] += 1
     return {k: dict(v) for k, v in sites.items()}
 
 
@@ -208,7 +250,12 @@ def compare(args: argparse.Namespace) -> None:
         distinct = {str(i) for i in ids_a}
         tie_counts = Counter(_tie(nodes_a[i]) for i in distinct if i in nodes_a)
         colliding_nodes = sum(c for c in tie_counts.values() if c > 1)
-        no_file = sum(1 for i in distinct if nodes_a.get(i, {}).get("file", "<unknown>") == "<unknown>")
+        via_type = Counter(_tie(nodes_a[i], "file_via_type") for i in distinct if i in nodes_a)
+        colliding_via_type = sum(c for c in via_type.values() if c > 1)
+        no_file = sum(1 for i in distinct if nodes_a.get(i, {}).get("file", "<unknown>") in NO_FILE)
+        no_file_via_type = sum(
+            1 for i in distinct if nodes_a.get(i, {}).get("file_via_type", "<unknown>") in NO_FILE
+        )
         no_parent = sum(1 for i in distinct if not nodes_a.get(i, {}).get("parent", False))
         missing = sum(1 for i in distinct if nodes_a.get(i, {}).get("missing"))
         lombok = _lombok_files(entry["parse_root"])
@@ -221,7 +268,9 @@ def compare(args: argparse.Namespace) -> None:
             "cpg_node_count": [na.get("node_count"), nb.get("node_count")],
             "referenced_nodes": len(distinct),
             "nodes_sharing_a_tie": colliding_nodes,
+            "nodes_sharing_a_tie_file_from_type": colliding_via_type,
             "nodes_without_file": no_file,
+            "nodes_without_file_from_type": no_file_via_type,
             "nodes_without_parent": no_parent,
             "nodes_missing_from_cpg": missing,
             "lombok_files": len(lombok),
@@ -229,7 +278,7 @@ def compare(args: argparse.Namespace) -> None:
             "nodes_in_lombok_files_with_column": sum(1 for n in in_lombok if "column" in n),
             "nodes_with_column": sum(1 for i in distinct if "column" in nodes_a.get(i, {})),
         }
-        sites = _site_analysis(ea, nodes_a)
+        sites = _site_analysis(ea, nodes_a, "file")
         for site, counts in sites.items():
             sites_total[site].update(counts)
         report["services"][name] = svc
@@ -239,7 +288,9 @@ def compare(args: argparse.Namespace) -> None:
         for key in (
             "referenced_nodes",
             "nodes_sharing_a_tie",
+            "nodes_sharing_a_tie_file_from_type",
             "nodes_without_file",
+            "nodes_without_file_from_type",
             "nodes_without_parent",
             "nodes_missing_from_cpg",
             "nodes_in_lombok_files",

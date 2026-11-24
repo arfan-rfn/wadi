@@ -110,7 +110,8 @@ object TieProbe {
             "label"  -> n.label,
             "kind"   -> (id >>> 32),
             "seq"    -> (id & 0xffffffffL),
-            "file"   -> fileOf(n).getOrElse("<unknown>"),
+            "file"   -> fileOf(n, skipEmptyMethod = false).getOrElse("<unknown>"),
+            "file_via_type" -> fileOf(n, skipEmptyMethod = true).getOrElse("<unknown>"),
             "path"   -> ujson.Arr.from(path.map(ujson.Num(_))),
             "parent" -> rooted
           )
@@ -147,12 +148,17 @@ object TieProbe {
     (path, hasParent)
   }
 
-  private def fileOf(n: StoredNode): Option[String] = {
+  /** The file of the nearest enclosing method, type or namespace block. With
+    * `skipEmptyMethod`, a method whose filename is `<empty>` (javasrc2cpg gives
+    * that to static initializers) is passed over for its enclosing type.
+    */
+  private def fileOf(n: StoredNode, skipEmptyMethod: Boolean): Option[String] = {
     var current: StoredNode = n
     var guard               = 0
     while (guard < 10000) {
       current match {
-        case m: Method         => return Some(m.filename)
+        case m: Method if !(skipEmptyMethod && (m.filename == "<empty>" || m.filename.isEmpty)) =>
+          return Some(m.filename)
         case t: TypeDecl       => return Some(t.filename)
         case b: NamespaceBlock => return Some(b.filename)
         case _                 => ()
