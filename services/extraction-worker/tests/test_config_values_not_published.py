@@ -72,6 +72,7 @@ SPACE_PASSWORD = "wadi-sentinel-properties-space-password"
 COMMA_QUERY = "wadi-sentinel-comma-in-query"
 COMMA_DEFAULT = "wadi-sentinel-comma-in-placeholder-default"
 COMMA_ROUTE = "wadi-sentinel-comma-in-route-query"
+URL_IN_QUERY = "wadi-sentinel-url-list-in-query"
 
 #: place -> the value seeded there, so a failure names where the leak entered.
 SENTINELS = {
@@ -102,6 +103,7 @@ SENTINELS = {
     "application.yml URL query holding a comma": COMMA_QUERY,
     "application.yml placeholder default whose query holds a comma": COMMA_DEFAULT,
     "application.yml gateway route uri whose query holds a comma": COMMA_ROUTE,
+    "application.yml query holding a list of URLs": URL_IN_QUERY,
 }
 
 _APPLICATION_YML = f"""
@@ -156,6 +158,8 @@ defaulted:
   url: "${{X:http://defaulted:9000/api?k=a,{COMMA_DEFAULT}}}"
 users:
   url: http://users:8080/users/{{id}}
+authorize:
+  url: http://auth:9000/authorize?cb=http://app/cb,https://hooks.example.test/{URL_IN_QUERY}
 """
 
 _PROFILE_PROPERTIES = f"""
