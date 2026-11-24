@@ -33,7 +33,9 @@ jobs:
       - name: Build the probe
         working-directory: joern-platform
         run: |
-          sbt -batch "Test/compile" "export Test/fullClasspath" | tail -1 > "$RUNNER_TEMP/cp.txt"
+          sbt -batch -Dsbt.supershell=false -Dsbt.color=false "Test/compile" "export Test/fullClasspath" \
+            | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep 'test-classes' | tail -1 > "$RUNNER_TEMP/cp.txt"
+          test -s "$RUNNER_TEMP/cp.txt"
           head -c 200 "$RUNNER_TEMP/cp.txt"
       - name: Prepare
         run: |
