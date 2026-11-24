@@ -25,6 +25,10 @@ class TestStripCredentials:
             "http://${inventory.host}:${inventory.port}/api",
             "${INVENTORY_URL:http://inventory:8081}",
             "http://a:8080,http://b:8080",
+            # A path variable is not a placeholder, and the route keeps it.
+            "http://users:8080/users/{id}",
+            "${base}/users/{id}",
+            "http://${host}/users/{id}/orders",
         ],
     )
     def test_a_value_without_credentials_is_published_as_written(self, value: str) -> None:
@@ -64,10 +68,12 @@ class TestStripCredentials:
             ("https://h/api?password=abc#def", "https://h/api"),
             ("http://a/x?page=2&sort=asc", "http://a/x"),
             ("https://u:p@h/api?token=abc", "https://h/api"),
-            # Each element of a comma list loses its own query.
-            ("http://a/x?t=abc,http://b/y?t=def", "http://a/x,http://b/y"),
             # A placeholder keeps its closing brace.
             ("${API_URL:http://h/api?token=abc}", "${API_URL:http://h/api}"),
+            ("${A:${B:http://h/api?token=abc}}", "${A:${B:http://h/api}}"),
+            # A placeholder inside the query goes with it.
+            ("http://h/api?apiKey=${API_KEY}", "http://h/api"),
+            ("http://h/api?apiKey=${API_KEY}&page=2", "http://h/api"),
         ],
     )
     def test_the_query_fragment_and_matrix_parameters_are_dropped(
@@ -93,6 +99,32 @@ class TestStripCredentials:
             # A value that runs past the query: a space or a comma inside it.
             "https://h/api?password=abc def",
             "https://h/api?ids=1,2&token=abc",
+            # What follows the comma is not a new address, so the query runs
+            # on past it and the value cannot be cut at a safe place.
+            "https://api/v1?scope=read,abc",
+            "${X:http://h?k=a,abc}",
+            "http://x/?k=a,abc",
+            "http://h/x#a,abc",
+            "http://h/x;a=1,abc",
+            # A comma after a query may open the next address of a list or sit
+            # inside the query, and text alone cannot tell which.
+            "http://a/x?t=abc,http://b/y?t=def",
+            "http://a/x?t=abc, https://b/y",
+            "http://auth?cb=https://a/x,https://hooks.example/T0/SECRET",
+            "http://h?scope=read,s3cret://x",
+            "http://h#frag,abc://SECRET",
+            "http://h;jsessionid=X,ab://SECRET",
+            "host:8080?x=1,host2:8080",
+            # Spring joins text after a placeholder's default onto its query.
+            "${A:http://h?token=ab}cd",
+            "${A:http://h?token=ab},cd",
+            "{http://h?token=ab}cd",
+            "${A:http://h?x=1}/path",
+            "http://h?x={a,b}",
+            # A closing brace that closes nothing, or an opening one left open.
+            "http://h?t=a}b${c",
+            "http://h/}x",
+            "${A:{b}",
             # Text that is no address at all.
             "{'name': 'a', 'password': 'abc'}",
             # Nothing left once the user-info is gone.

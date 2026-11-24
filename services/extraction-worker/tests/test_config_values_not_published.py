@@ -69,6 +69,10 @@ LIST_PASSWORD = "wadi-sentinel-list-of-maps-password"
 CONNECTION_PASSWORD = "wadi-sentinel-connection-string-password"
 COLON_PASSWORD = "wadi-sentinel-properties-colon-password"
 SPACE_PASSWORD = "wadi-sentinel-properties-space-password"
+COMMA_QUERY = "wadi-sentinel-comma-in-query"
+COMMA_DEFAULT = "wadi-sentinel-comma-in-placeholder-default"
+COMMA_ROUTE = "wadi-sentinel-comma-in-route-query"
+URL_IN_QUERY = "wadi-sentinel-url-list-in-query"
 
 #: place -> the value seeded there, so a failure names where the leak entered.
 SENTINELS = {
@@ -96,6 +100,10 @@ SENTINELS = {
     "application.yml connection string under a routing key": CONNECTION_PASSWORD,
     "profile properties colon-separated security value": COLON_PASSWORD,
     "profile properties space-separated security value": SPACE_PASSWORD,
+    "application.yml URL query holding a comma": COMMA_QUERY,
+    "application.yml placeholder default whose query holds a comma": COMMA_DEFAULT,
+    "application.yml gateway route uri whose query holds a comma": COMMA_ROUTE,
+    "application.yml query holding a list of URLs": URL_IN_QUERY,
 }
 
 _APPLICATION_YML = f"""
@@ -124,6 +132,10 @@ spring:
           uri: http://gateway-user:{ROUTE_PASSWORD}@legacy:8000
           predicates:
             - Path=/legacy/**
+        - id: scoped
+          uri: http://scoped:8000/?k=a,{COMMA_ROUTE}
+          predicates:
+            - Path=/scoped/**
 server:
   port: 8080
 billing:
@@ -140,6 +152,14 @@ partners:
       password: {LIST_PASSWORD}
 legacydb:
   url: "Server=db; Password={CONNECTION_PASSWORD}"
+scopes:
+  url: https://api.example.test/v1?scope=read,{COMMA_QUERY}
+defaulted:
+  url: "${{X:http://defaulted:9000/api?k=a,{COMMA_DEFAULT}}}"
+users:
+  url: http://users:8080/users/{{id}}
+authorize:
+  url: http://auth:9000/authorize?cb=http://app/cb,https://hooks.example.test/{URL_IN_QUERY}
 """
 
 _PROFILE_PROPERTIES = f"""
@@ -229,6 +249,7 @@ class TestBoundaryRecord:
             "partner.host": "partner.example.test",
             "server.port": "8080",
             "spring.application.name": "shop",
+            "users.url": "http://users:8080/users/{id}",
             "zuul.routes.old.url": "http://old:8000",
         }
         # Withheld whole, and counted: the credentials of `reports.url` could
@@ -236,6 +257,10 @@ class TestBoundaryRecord:
         assert "config-value-withheld:reports.url" in network.config_notes
         # A connection string is not an address, so it is withheld the same way.
         assert "config-value-withheld:legacydb.url" in network.config_notes
+        # A query that runs past a comma has no safe place to be cut.
+        assert "config-value-withheld:scopes.url" in network.config_notes
+        assert "config-value-withheld:defaulted.url" in network.config_notes
+        assert "gateway-route-target-withheld:scoped" in network.config_notes
         assert sorted((r.path_prefix, r.target_uri) for r in network.gateway_routes) == [
             ("/legacy/**", "http://legacy:8000"),
             ("/old/**", "http://old:8000"),
