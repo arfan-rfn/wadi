@@ -1,0 +1,313 @@
+{
+ "a": "Mac A",
+ "b": "Mac B",
+ "services": {
+  "fixtures/control-flow-matrix/control-flow-matrix": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    2705,
+    2705
+   ],
+   "referenced_nodes": 324,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 324,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 316
+  },
+  "fixtures/lombok-mini/lombok-mini": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    263,
+    263
+   ],
+   "referenced_nodes": 9,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 9,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 3,
+   "nodes_in_lombok_files": 8,
+   "nodes_in_lombok_files_with_column": 8,
+   "nodes_with_column": 9
+  },
+  "fixtures/petstore-system/inventory": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    415,
+    415
+   ],
+   "referenced_nodes": 27,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 27,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 27
+  },
+  "fixtures/petstore-system/petstore": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    4373,
+    4371
+   ],
+   "referenced_nodes": 275,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 5,
+   "nodes_without_file_from_type": 275,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 1,
+   "nodes_in_lombok_files": 1,
+   "nodes_in_lombok_files_with_column": 1,
+   "nodes_with_column": 271
+  },
+  "fixtures/petstore-system/sweeper": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    174,
+    174
+   ],
+   "referenced_nodes": 4,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 4,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 4
+  },
+  "fixtures/response-shape-mini/response-shape-mini": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    2472,
+    2472
+   ],
+   "referenced_nodes": 90,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 2,
+   "nodes_without_file_from_type": 90,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 85
+  },
+  "fixtures/save-origin-mini/save-origin-mini": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    2265,
+    2265
+   ],
+   "referenced_nodes": 229,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 229,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 222
+  },
+  "fixtures/spring-auth-matrix/spring-auth-matrix": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    3772,
+    3772
+   ],
+   "referenced_nodes": 224,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 224,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 220
+  },
+  "fixtures/spring-data-crud-matrix/spring-data-crud-matrix": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    5175,
+    5175
+   ],
+   "referenced_nodes": 378,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 378,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 371
+  },
+  "fixtures/spring-petstore-mini/petstore-mini": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    587,
+    587
+   ],
+   "referenced_nodes": 28,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 28,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 28
+  },
+  "fixtures/token-propagation-mini/token-propagation-mini": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    511,
+    511
+   ],
+   "referenced_nodes": 49,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 49,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 0,
+   "nodes_in_lombok_files": 0,
+   "nodes_in_lombok_files_with_column": 0,
+   "nodes_with_column": 40
+  },
+  "fixtures/unbound-reasons-mini/unbound-reasons-mini": {
+   "export_bytes_equal": true,
+   "export_equal_after_renumbering_ids": true,
+   "id_sequence_equal": true,
+   "tie_sequence_equal": true,
+   "cpg_node_count": [
+    609,
+    609
+   ],
+   "referenced_nodes": 35,
+   "nodes_sharing_a_tie": 0,
+   "nodes_sharing_a_tie_file_from_type": 0,
+   "nodes_without_file": 0,
+   "nodes_without_file_from_type": 35,
+   "nodes_without_parent": 0,
+   "nodes_missing_from_cpg": 0,
+   "lombok_files": 3,
+   "nodes_in_lombok_files": 6,
+   "nodes_in_lombok_files_with_column": 6,
+   "nodes_with_column": 30
+  }
+ },
+ "totals": {
+  "services": 12,
+  "export_bytes_equal": 12,
+  "export_equal_after_renumbering_ids": 12,
+  "id_sequence_equal": 12,
+  "tie_sequence_equal": 12,
+  "referenced_nodes": 1672,
+  "nodes_sharing_a_tie": 0,
+  "nodes_sharing_a_tie_file_from_type": 0,
+  "nodes_without_file": 7,
+  "nodes_without_file_from_type": 1672,
+  "nodes_without_parent": 0,
+  "nodes_missing_from_cpg": 0,
+  "nodes_in_lombok_files": 15,
+  "nodes_in_lombok_files_with_column": 15,
+  "nodes_with_column": 1623
+ },
+ "sites": {
+  ".cfgs[].nodes": {
+   "lists": 395,
+   "sorted_line_id": 395,
+   "same_line_groups": 61,
+   "groups_new_order_differs": 2
+  },
+  ".methods": {
+   "lists": 12,
+   "other_order": 12
+  },
+  ".security_rules": {
+   "lists": 2,
+   "sorted_line_minus_id": 2,
+   "same_line_groups": 3,
+   "groups_new_order_differs": 1
+  },
+  ".unreachable_sinks": {
+   "lists": 1,
+   "sorted_line_id": 1
+  }
+ },
+ "a_run": {
+  "jvm": "OpenJDK 64-Bit Server VM",
+  "jvm_version": "21.0.13",
+  "os": "Mac OS X aarch64",
+  "processors": 8,
+  "max_heap_mb": "5120",
+  "seconds": 62.469
+ },
+ "b_run": {
+  "jvm": "OpenJDK 64-Bit Server VM",
+  "jvm_version": "21.0.13",
+  "os": "Mac OS X aarch64",
+  "processors": 2,
+  "max_heap_mb": "5120",
+  "seconds": 62.704
+ }
+}

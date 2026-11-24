@@ -38,6 +38,16 @@ export format is still 2.15.0.
   a canonical-map diff on the three pinned corpora, and map-changing pull
   requests merge one at a time. This replaces the four-release order of the
   entry above.
+- **Release 1b is recorded.** A record of 2026-11-24 in
+  `docs/architecture.md` §11, "Release 1b, determinism and the read guard",
+  fixes how 0.11.0 is built: a typed refusal (`Problem`, eight codes) on REST,
+  MCP and the CLI, a version check on every snapshot read, tolerant reads of
+  system, snapshot and job records, an identity key so two checkouts of one
+  repository get the same ids, the slicer's clock removed, and a determinism
+  gate. A probe found node ids and export order equal across JVMs and
+  machines on the three pinned corpora
+  (`docs/measurements/base-migration/release-1b-probe.md`), so the exporter
+  only gains `ast_path`. Nothing is built yet.
 - **A shape spike tests the record shapes first.** Three throwaway readers
   and an import probe run on real artifacts for at most eight working days.
   After their report the owner decides whether items 3 to 9 go ahead as
