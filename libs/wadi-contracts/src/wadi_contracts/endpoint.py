@@ -330,7 +330,7 @@ class AuthEvidence(_ActiveFlagged):
         description=(
             "e.g. '@PreAuthorize(\"hasRole('ADMIN')\")'. For kind 'config' it is "
             "the setting's KEY only, never its value (§5.2.18); records written "
-            "by wadi 0.9.1 or earlier hold 'key=value', and a re-analysis writes "
+            "before contracts 1.28.0 hold 'key=value', and a re-analysis writes "
             "a snapshot without them"
         ),
     )

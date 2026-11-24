@@ -5,7 +5,7 @@ unless a reader routes by it, and then without credentials. Everything the
 worker stores is served by the REST API, the MCP server, the web UI and the
 snapshot export, so "stored" and "published" are the same thing here.
 
-Three things follow, and this module is the one place they are decided:
+Four things follow, and this module is the one place they are decided:
 
 * ``spring.security.*`` settings publish their KEY only (auth evidence). The
   namespace holds client secrets and passwords beside harmless settings, and
@@ -14,12 +14,15 @@ Three things follow, and this module is the one place they are decided:
   credentials have a spelling per vendor.
 * A value the stitcher may route by (a URL, a host) is published as its
   address only: scheme, host, port and path. Its user-info goes, and so does
-  everything from the first ``?``, ``#`` or ``;``, because no reader routes by
-  a query, a fragment or a matrix parameter, and a list of secret parameter
-  names is never complete. When what is left still holds an ``@``, an ``=`` or
-  a space, it is not an address this module can read, and the value is
-  withheld whole: a host built from half a password is a wrong route, and an
-  honest gap is better than either that or a leak.
+  everything from the first ``?``, ``#`` or ``;`` to the end of that address,
+  because no reader routes by a query, a fragment or a matrix parameter, and
+  a list of secret parameter names is never complete. That part ends at a
+  space, at the ``}`` of a placeholder, or at a comma that opens the next
+  ``scheme://`` address of a list. When it runs past any other comma, or what
+  is left still holds an ``@``, an ``=``, a space inside one element of a
+  comma list, or a brace that closes nothing, it is not an address this module
+  can read, and the value is withheld whole: a host built from half a password
+  is a wrong route, and an honest gap is better than either that or a leak.
 * A key is published only when it reads as a key. A line the properties
   parser split in the wrong place can carry a value inside its "key".
 
@@ -31,9 +34,12 @@ import re
 from collections.abc import Iterable
 
 #: Everything after the address: a query, a fragment or a matrix parameter, up
-#: to the next element of a comma list. A closing brace is left alone so a
-#: ``${KEY:default}`` placeholder keeps its shape.
-_AFTER_ADDRESS = re.compile(r"[?#;][^,\s}]*")
+#: to a space, a closing brace or a comma that opens the next ``scheme://``
+#: address of a list. A closing brace is left alone so a ``${KEY:default}``
+#: placeholder keeps its shape. Any other comma stays inside the match, and a
+#: match that holds one withholds the value: what follows such a comma is
+#: still part of the query, not a new address.
+_AFTER_ADDRESS = re.compile(r"[?#;](?:(?!,\s*[A-Za-z][A-Za-z0-9+.\-]*://)[^\s}])*")
 
 #: ``user:password@`` ahead of a host: after ``scheme://``, or opening a bare
 #: ``host``-shaped value. Greedy to the LAST ``@`` of the authority, so a
@@ -72,14 +78,33 @@ def strip_credentials(value: str) -> str | None:
         # password ends the authority early, and cutting at the `?` would
         # publish `https://user:pa`.
         return None
+    if any("," in after.group() for after in _AFTER_ADDRESS.finditer(without_user)):
+        return None
     address = _AFTER_ADDRESS.sub("", without_user)
     if not address.strip() or "=" in address:
         return None
     if any(len(element.split()) > 1 for element in address.split(",")):
         return None
-    if address.count("${") != address.count("}"):
+    if not _braces_balanced(address):
         return None
     return address
+
+
+def _braces_balanced(text: str) -> bool:
+    """Every brace closes one opened before it, and none is left open.
+
+    A ``${KEY}`` placeholder and a ``{id}`` path variable both count, so a
+    route template keeps routing while a cut that split a placeholder is caught.
+    """
+    depth = 0
+    for char in text:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
 
 
 def publishable_entries(entries: Iterable[tuple[str, str]]) -> tuple[dict[str, str], list[str]]:
