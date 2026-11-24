@@ -1,0 +1,71 @@
+name: probe-p3
+
+# Release 1b P3 probe. Throwaway: this branch is never merged.
+# One run of the tie-break probe on a GitHub-hosted runner, to compare with
+# the two runs on the owner's machine.
+
+on:
+  push:
+    branches: [probe/p3-tie-break]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-packages
+      - name: Pinned corpora
+        run: |
+          mkdir -p "$HOME/wadi-corpora"
+          clone() { git clone -q "$1" "$HOME/wadi-corpora/$2" && git -C "$HOME/wadi-corpora/$2" checkout -q "$3"; }
+          clone https://github.com/cloudhubs/train-ticket-aitest.git train-ticket-aitest a84716f160b8
+          clone https://github.com/cloudhubs/yas.git yas 2b09247d5d36
+          clone https://github.com/sqshq/piggymetrics.git piggymetrics 6bb2cf9ddbca
+          for d in train-ticket-aitest yas piggymetrics; do echo "$d $(git -C "$HOME/wadi-corpora/$d" rev-parse HEAD)"; done
+      - name: Build the probe
+        working-directory: joern-platform
+        run: |
+          sbt -batch "Test/compile" "export Test/fullClasspath" | tail -1 > "$RUNNER_TEMP/cp.txt"
+          head -c 200 "$RUNNER_TEMP/cp.txt"
+      - name: Prepare
+        run: |
+          W="$RUNNER_TEMP/probe"
+          uv run python probe/p3_tie_probe.py prepare --fixtures joern-platform/fixtures --work "$W/work" --manifest "$W/manifest-fixtures.json"
+          for c in train-ticket-aitest yas piggymetrics; do
+            uv run python probe/p3_tie_probe.py prepare --name "$c" --checkout "$HOME/wadi-corpora/$c" --work "$W/work" --manifest "$W/manifest-$c.json"
+          done
+          python3 - "$W" <<'EOF'
+          import json, sys
+          w = sys.argv[1]
+          m = []
+          for c in ["train-ticket-aitest", "yas", "piggymetrics"]:
+              m += json.load(open(f"{w}/manifest-{c}.json"))
+          json.dump(m, open(f"{w}/manifest-corpora.json", "w"), indent=1)
+          print(len(m), "corpus services")
+          EOF
+      - name: Run the probe
+        run: |
+          W="$RUNNER_TEMP/probe"
+          free -g
+          uv run python probe/p3_tie_probe.py run --manifest "$W/manifest-fixtures.json" --out "$W/runner/fixtures" --classpath "$RUNNER_TEMP/cp.txt" --heap 10g
+          uv run python probe/p3_tie_probe.py run --manifest "$W/manifest-corpora.json" --out "$W/runner/corpora" --classpath "$RUNNER_TEMP/cp.txt" --heap 10g
+      - name: Keep only what the comparison reads
+        if: always()
+        run: |
+          cd "$RUNNER_TEMP/probe"
+          tar czf "$RUNNER_TEMP/probe-runner.tgz" manifest-*.json runner
+          ls -la "$RUNNER_TEMP/probe-runner.tgz"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-runner
+          path: ${{ runner.temp }}/probe-runner.tgz
+          retention-days: 30
